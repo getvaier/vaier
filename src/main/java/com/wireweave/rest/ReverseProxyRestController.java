@@ -1,6 +1,9 @@
 package com.wireweave.rest;
 
 import com.wireweave.application.AddReverseProxyRouteUseCase;
+import com.wireweave.application.DeleteReverseProxyRouteUseCase;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -11,14 +14,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class ReverseProxyRestController {
 
     private final AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
+    private final DeleteReverseProxyRouteUseCase deleteReverseProxyRouteUseCase;
 
-    public ReverseProxyRestController(AddReverseProxyRouteUseCase addReverseProxyRouteUseCase) {
+    public ReverseProxyRestController(
+            AddReverseProxyRouteUseCase addReverseProxyRouteUseCase,
+            DeleteReverseProxyRouteUseCase deleteReverseProxyRouteUseCase) {
         this.addReverseProxyRouteUseCase = addReverseProxyRouteUseCase;
+        this.deleteReverseProxyRouteUseCase = deleteReverseProxyRouteUseCase;
     }
 
     @PostMapping("/routes")
     public void addRoute(@RequestBody AddRouteRequest request) {
-        AddReverseProxyRouteUseCase.ReverseProxyRouteUco route = 
+        AddReverseProxyRouteUseCase.ReverseProxyRouteUco route =
             new AddReverseProxyRouteUseCase.ReverseProxyRouteUco(
                 request.dnsName(),
                 request.address(),
@@ -26,6 +33,11 @@ public class ReverseProxyRestController {
                 request.requiresAuth()
             );
         addReverseProxyRouteUseCase.addReverseProxyRoute(route);
+    }
+
+    @DeleteMapping("/routes/{dnsName}")
+    public void deleteRoute(@PathVariable String dnsName) {
+        deleteReverseProxyRouteUseCase.deleteReverseProxyRoute(dnsName);
     }
 
     public record AddRouteRequest(

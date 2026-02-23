@@ -8,4 +8,5 @@ public interface ForPersistingReverseProxyRoutes {
     List<ReverseProxyRoute> getReverseProxyRoutes();
     void updateReverseProxyRoute(String routeName, ReverseProxyRoute updatedRoute);
     void deleteReverseProxyRoute(String routeName);
+    void deleteReverseProxyRouteByDnsName(String dnsName);
 }

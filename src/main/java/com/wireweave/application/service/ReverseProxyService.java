@@ -1,11 +1,12 @@
 package com.wireweave.application.service;
 
 import com.wireweave.application.AddReverseProxyRouteUseCase;
+import com.wireweave.application.DeleteReverseProxyRouteUseCase;
 import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
 import org.springframework.stereotype.Service;
 
 @Service
-public class ReverseProxyService implements AddReverseProxyRouteUseCase {
+public class ReverseProxyService implements AddReverseProxyRouteUseCase, DeleteReverseProxyRouteUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
 
@@ -21,5 +22,10 @@ public class ReverseProxyService implements AddReverseProxyRouteUseCase {
             route.port(),
             route.requiresAuth()
         );
+    }
+
+    @Override
+    public void deleteReverseProxyRoute(String dnsName) {
+        forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(dnsName);
     }
 }

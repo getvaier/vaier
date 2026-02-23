@@ -4,6 +4,7 @@ import com.wireweave.domain.ReverseProxyRoute;
 import com.wireweave.domain.port.ForGettingReverseProxyRoutes;
 import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
 import java.io.File;
+import java.util.LinkedHashMap;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.DumperOptions;
@@ -455,20 +456,22 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
         loadConfig();
 
         if (config == null) {
-            config = new HashMap<>();
+            config = new LinkedHashMap<>();
         }
 
         // Generate router name and service name from DNS name
         String routerName = generateRouterName(dnsName);
         String serviceName = generateServiceName(dnsName);
 
-        // Create HTTP section if it doesn't exist
+        // Create HTTP section if it doesn't exist (using LinkedHashMap to preserve order)
         Map<String, Object> http = getOrCreateNestedMap(config, "http");
-        Map<String, Object> routers = getOrCreateNestedMap(http, "routers");
-        Map<String, Object> services = getOrCreateNestedMap(http, "services");
+
+        // Ensure sections are created in the correct order: routers, services, middlewares
+        Map<String, Object> routers = getOrCreateNestedMapOrdered(http, "routers");
+        Map<String, Object> services = getOrCreateNestedMapOrdered(http, "services");
 
         // Add router configuration with standard defaults
-        Map<String, Object> routerConfig = new HashMap<>();
+        Map<String, Object> routerConfig = new LinkedHashMap<>();
         routerConfig.put("rule", "Host(`" + dnsName + "`)");
 
         // Standard entryPoints
@@ -479,12 +482,13 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
         routerConfig.put("service", serviceName);
 
         // Standard TLS configuration with letsencrypt
-        Map<String, Object> tlsMap = new HashMap<>();
+        Map<String, Object> tlsMap = new LinkedHashMap<>();
         tlsMap.put("certResolver", "letsencrypt");
         routerConfig.put("tls", tlsMap);
 
-        // Add auth middleware if required
-        if (requiresAuth) {
+        // Add auth middleware reference if required
+        boolean authRequired = requiresAuth;
+        if (authRequired) {
             List<String> middlewares = new ArrayList<>();
             middlewares.add("auth-middleware");
             routerConfig.put("middlewares", middlewares);
@@ -493,11 +497,11 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
         routers.put(routerName, routerConfig);
 
         // Add service configuration
-        Map<String, Object> serviceConfig = new HashMap<>();
-        Map<String, Object> loadBalancer = new HashMap<>();
+        Map<String, Object> serviceConfig = new LinkedHashMap<>();
+        Map<String, Object> loadBalancer = new LinkedHashMap<>();
         List<Map<String, Object>> servers = new ArrayList<>();
 
-        Map<String, Object> server = new HashMap<>();
+        Map<String, Object> server = new LinkedHashMap<>();
         String url = "http://" + address + ":" + port;
         server.put("url", url);
         servers.add(server);
@@ -505,6 +509,11 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
         loadBalancer.put("servers", servers);
         serviceConfig.put("loadBalancer", loadBalancer);
         services.put(serviceName, serviceConfig);
+
+        // Ensure auth-middleware exists AFTER routers and services to maintain order
+        if (authRequired) {
+            ensureAuthMiddlewareExists(http);
+        }
 
         saveConfig();
     }
@@ -670,6 +679,18 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
     }
 
     /**
+     * Delete a reverse proxy route by DNS name.
+     * Generates the router name from the DNS name and deletes it.
+     *
+     * @param dnsName The full DNS name (e.g., "portainer.eilertsen.family")
+     */
+    @Override
+    public void deleteReverseProxyRouteByDnsName(String dnsName) {
+        String routerName = generateRouterName(dnsName);
+        deleteReverseProxyRoute(routerName);
+    }
+
+    /**
      * Load configuration from file.
      */
     private void loadConfig() {
@@ -701,10 +722,50 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
     private Map<String, Object> getOrCreateNestedMap(Map<String, Object> map, String key) {
         Map<String, Object> nested = getNestedMap(map, key);
         if (nested == null) {
-            nested = new HashMap<>();
+            nested = new LinkedHashMap<>();
             map.put(key, nested);
         }
         return nested;
+    }
+
+    /**
+     * Get or create a nested map with LinkedHashMap to preserve insertion order.
+     */
+    private Map<String, Object> getOrCreateNestedMapOrdered(Map<String, Object> map, String key) {
+        Map<String, Object> nested = getNestedMap(map, key);
+        if (nested == null) {
+            nested = new LinkedHashMap<>();
+            map.put(key, nested);
+        }
+        return nested;
+    }
+
+    /**
+     * Ensure the auth-middleware exists in the middlewares section.
+     * Creates it with standard forwardAuth configuration if it doesn't exist.
+     * Must be called AFTER routers and services are created to maintain order.
+     */
+    private void ensureAuthMiddlewareExists(Map<String, Object> http) {
+        Map<String, Object> middlewares = getOrCreateNestedMapOrdered(http, "middlewares");
+
+        // Check if auth-middleware already exists
+        if (!middlewares.containsKey("auth-middleware")) {
+            // Create standard auth-middleware with forwardAuth to Authelia
+            Map<String, Object> authMiddleware = new LinkedHashMap<>();
+            Map<String, Object> forwardAuth = new LinkedHashMap<>();
+
+            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://auth.eilertsen.family/");
+            forwardAuth.put("trustForwardHeader", true);
+
+            List<String> authResponseHeaders = new ArrayList<>();
+            authResponseHeaders.add("X-Forwarded-User");
+            authResponseHeaders.add("X-Forwarded-Groups");
+            authResponseHeaders.add("X-Forwarded-Email");
+            forwardAuth.put("authResponseHeaders", authResponseHeaders);
+
+            authMiddleware.put("forwardAuth", forwardAuth);
+            middlewares.put("auth-middleware", authMiddleware);
+        }
     }
 
     public static void main(String[] args) {
