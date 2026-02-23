@@ -218,6 +218,36 @@ public class WireguardAdapter implements ForManagingWireguardConfig {
      */
     public record WireguardKeyPair(String privateKey, String publicKey) {}
 
+    @Override
+    public String getServerPublicKey(String interfaceName) {
+        try {
+            // Get private key path from config
+            WireguardConfig config = getConfig(interfaceName);
+            String privateKeyPath = config.getInterfaceConfig().getPrivateKeyPath();
+            
+            if (privateKeyPath == null) {
+                throw new IllegalStateException("No private key configured for interface: " + interfaceName);
+            }
+            
+            // Replace %i with interface name in path
+            privateKeyPath = privateKeyPath.replace("%i", interfaceName);
+            
+            // Read private key from file
+            Path keyPath = Paths.get(privateKeyPath);
+            if (!Files.exists(keyPath)) {
+                throw new IllegalStateException("Private key file not found: " + privateKeyPath);
+            }
+            
+            String privateKey = Files.readString(keyPath).trim();
+            
+            // Derive public key from private key
+            return derivePublicKey(privateKey).trim();
+            
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to get server public key for interface: " + interfaceName, e);
+        }
+    }
+
     /**
      * Save WireGuard configuration to file.
      */
@@ -309,6 +339,7 @@ public class WireguardAdapter implements ForManagingWireguardConfig {
             String allowedIPs = null;
             String endpoint = null;
             Integer persistentKeepalive = null;
+            String pendingComment = null;
 
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
@@ -318,9 +349,19 @@ public class WireguardAdapter implements ForManagingWireguardConfig {
                     continue;
                 }
 
+                // Handle comments (peer names) - must come before section check
+                if (line.startsWith("#")) {
+                    String comment = line.substring(1).trim();
+                    if (!comment.isEmpty()) {
+                        pendingComment = comment;
+                    }
+                    continue;
+                }
+
                 // Check for section headers
                 if (line.equals("[Interface]")) {
                     currentSection = "Interface";
+                    pendingComment = null; // Clear any pending comment
                     continue;
                 } else if (line.equals("[Peer]")) {
                     // Save previous peer if exists
@@ -334,22 +375,14 @@ public class WireguardAdapter implements ForManagingWireguardConfig {
                         ));
                     }
 
-                    // Start new peer
+                    // Start new peer and use pending comment if available
                     currentSection = "Peer";
-                    peerComment = null;
+                    peerComment = pendingComment;
+                    pendingComment = null;
                     publicKey = null;
                     allowedIPs = null;
                     endpoint = null;
                     persistentKeepalive = null;
-                    continue;
-                }
-
-                // Handle comments (peer names)
-                if (line.startsWith("#")) {
-                    String comment = line.substring(1).trim();
-                    if (currentSection != null && currentSection.equals("Peer") && !comment.isEmpty()) {
-                        peerComment = comment;
-                    }
                     continue;
                 }
 

@@ -53,4 +53,12 @@ public interface ForManagingWireguardConfig {
      * @param interfaceName Name of the WireGuard interface
      */
     void applyConfig(String interfaceName);
+
+    /**
+     * Get the server's public key for the specified interface.
+     *
+     * @param interfaceName Name of the WireGuard interface
+     * @return The server's public key
+     */
+    String getServerPublicKey(String interfaceName);
 }

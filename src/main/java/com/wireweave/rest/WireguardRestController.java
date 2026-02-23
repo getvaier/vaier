@@ -42,6 +42,7 @@ public class WireguardRestController {
                         config.interfaceConfig().address(),
                         config.interfaceConfig().listenPort(),
                         config.interfaceConfig().privateKeyPath(),
+                        config.interfaceConfig().publicKey(),
                         config.interfaceConfig().postUpCommands(),
                         config.interfaceConfig().postDownCommands()
                 ),
@@ -110,6 +111,7 @@ public class WireguardRestController {
             String address,
             Integer listenPort,
             String privateKeyPath,
+            String publicKey,
             List<String> postUpCommands,
             List<String> postDownCommands
     ) {}

@@ -16,6 +16,7 @@ public interface GetWireguardConfigUseCase {
         String address,
         Integer listenPort,
         String privateKeyPath,
+        String publicKey,
         List<String> postUpCommands,
         List<String> postDownCommands
     ) {}

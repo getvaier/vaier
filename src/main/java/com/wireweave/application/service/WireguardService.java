@@ -47,7 +47,8 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
     @Override
     public WireguardConfigUco getConfig(String interfaceName) {
         WireguardConfig config = forManagingWireguardConfig.getConfig(interfaceName);
-        return toUco(config);
+        String serverPublicKey = forManagingWireguardConfig.getServerPublicKey(interfaceName);
+        return toUco(config, serverPublicKey);
     }
 
     @Override
@@ -192,18 +193,19 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
         }
     }
 
-    private WireguardConfigUco toUco(WireguardConfig config) {
+    private WireguardConfigUco toUco(WireguardConfig config, String serverPublicKey) {
         return new WireguardConfigUco(
-                toUco(config.getInterfaceConfig()),
+                toUco(config.getInterfaceConfig(), serverPublicKey),
                 config.getPeers().stream().map(this::toUco).toList()
         );
     }
 
-    private WireguardInterfaceUco toUco(WireguardConfig.WireguardInterface iface) {
+    private WireguardInterfaceUco toUco(WireguardConfig.WireguardInterface iface, String serverPublicKey) {
         return new WireguardInterfaceUco(
                 iface.getAddress(),
                 iface.getListenPort(),
                 iface.getPrivateKeyPath(),
+                serverPublicKey,
                 iface.getPostUpCommands(),
                 iface.getPostDownCommands()
         );
