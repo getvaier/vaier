@@ -32,7 +32,39 @@ public class Route53Adapter implements ForPersistingDnsRecords {
 
     @Override
     public void addDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+        String hostedZoneId = findHostedZoneId(dnsZone.name());
+        if (hostedZoneId == null) {
+            throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
+        }
 
+        ResourceRecordSet recordSet = ResourceRecordSet.builder()
+                .name(dnsRecord.name())
+                .type(RRType.fromValue(dnsRecord.type().getValue()))
+                .ttl(dnsRecord.ttl())
+                .resourceRecords(dnsRecord.values().stream()
+                        .map(value -> ResourceRecord.builder().value(value).build())
+                        .toList())
+                .build();
+
+        Change change = Change.builder()
+                .action(ChangeAction.CREATE)
+                .resourceRecordSet(recordSet)
+                .build();
+
+        ChangeBatch changeBatch = ChangeBatch.builder()
+                .changes(change)
+                .build();
+
+        ChangeResourceRecordSetsRequest request = ChangeResourceRecordSetsRequest.builder()
+                .hostedZoneId(hostedZoneId)
+                .changeBatch(changeBatch)
+                .build();
+
+        try {
+            route53Client.changeResourceRecordSets(request);
+        } catch (Route53Exception e) {
+            throw new RuntimeException("Failed to update DNS record", e);
+        }
     }
 
     @Override
@@ -81,17 +113,90 @@ public class Route53Adapter implements ForPersistingDnsRecords {
 
     @Override
     public void updateDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+        String hostedZoneId = findHostedZoneId(dnsZone.name());
+        if (hostedZoneId == null) {
+            throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
+        }
 
+        ResourceRecordSet recordSet = ResourceRecordSet.builder()
+                .name(dnsRecord.name())
+                .type(RRType.fromValue(dnsRecord.type().getValue()))
+                .ttl(dnsRecord.ttl())
+                .resourceRecords(dnsRecord.values().stream()
+                        .map(value -> ResourceRecord.builder().value(value).build())
+                        .toList())
+                .build();
+
+        Change change = Change.builder()
+                .action(ChangeAction.UPSERT)
+                .resourceRecordSet(recordSet)
+                .build();
+
+        ChangeBatch changeBatch = ChangeBatch.builder()
+                .changes(change)
+                .build();
+
+        ChangeResourceRecordSetsRequest request = ChangeResourceRecordSetsRequest.builder()
+                .hostedZoneId(hostedZoneId)
+                .changeBatch(changeBatch)
+                .build();
+
+        try {
+            route53Client.changeResourceRecordSets(request);
+        } catch (Route53Exception e) {
+            throw new RuntimeException("Failed to update DNS record", e);
+        }
     }
 
     @Override
     public void deleteDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+        String hostedZoneId = findHostedZoneId(dnsZone.name());
+        if (hostedZoneId == null) {
+            throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
+        }
 
+        ResourceRecordSet recordSet = ResourceRecordSet.builder()
+                .name(dnsRecord.name())
+                .type(RRType.fromValue(dnsRecord.type().getValue()))
+                .ttl(dnsRecord.ttl())
+                .resourceRecords(dnsRecord.values().stream()
+                        .map(value -> ResourceRecord.builder().value(value).build())
+                        .toList())
+                .build();
+
+        Change change = Change.builder()
+                .action(ChangeAction.DELETE)
+                .resourceRecordSet(recordSet)
+                .build();
+
+        ChangeBatch changeBatch = ChangeBatch.builder()
+                .changes(change)
+                .build();
+
+        ChangeResourceRecordSetsRequest request = ChangeResourceRecordSetsRequest.builder()
+                .hostedZoneId(hostedZoneId)
+                .changeBatch(changeBatch)
+                .build();
+
+        try {
+            route53Client.changeResourceRecordSets(request);
+        } catch (Route53Exception e) {
+            throw new RuntimeException("Failed to delete DNS record", e);
+        }
     }
 
     @Override
     public void addDnsZone(DnsZone dnsZone) {
+        CreateHostedZoneRequest request = CreateHostedZoneRequest.builder()
+                .name(dnsZone.name())
+                .callerReference(String.valueOf(System.currentTimeMillis()))
+                .build();
 
+        try {
+            route53Client.createHostedZone(request);
+        } catch (Route53Exception e) {
+            throw new RuntimeException("Failed to create hosted zone", e);
+        }
     }
 
     @Override
@@ -103,12 +208,27 @@ public class Route53Adapter implements ForPersistingDnsRecords {
 
     @Override
     public void updateDnsZone(DnsZone dnsZone) {
-
+        // Route53 hosted zones don't support direct updates to the zone name
+        // This would require deleting and recreating the zone, which is destructive
+        throw new UnsupportedOperationException("Updating DNS zones is not supported in Route53");
     }
 
     @Override
     public void deleteDnsZone(DnsZone dnsZone) {
+        String hostedZoneId = findHostedZoneId(dnsZone.name());
+        if (hostedZoneId == null) {
+            throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
+        }
 
+        DeleteHostedZoneRequest request = DeleteHostedZoneRequest.builder()
+                .id(hostedZoneId)
+                .build();
+
+        try {
+            route53Client.deleteHostedZone(request);
+        } catch (Route53Exception e) {
+            throw new RuntimeException("Failed to delete hosted zone", e);
+        }
     }
 
     private String findHostedZoneId(String domainName) {
