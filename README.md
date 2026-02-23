@@ -15,7 +15,10 @@
 - 🔍 **Service Discovery** - Automatically discover Docker containers via Portainer with exposed port mapping
 - 🌐 **DNS Management** - View and manage AWS Route53 hosted zones and CNAME records via REST API
 - 🔀 **Reverse Proxy Integration** - Parse Traefik configurations to discover routes with authentication middleware
-- 🛡️ **WireGuard Config Parsing** - Read and parse WireGuard interface and peer configurations
+- 🛡️ **WireGuard Management** - Full WireGuard server management with peer creation, key generation, and configuration retrieval
+- 🔑 **Automatic Key Generation** - Generate WireGuard public/private keypairs for new peers
+- 📡 **IP Allocation** - Automatic IP address assignment for new peers
+- 📝 **Client Config Generation** - Generate ready-to-use WireGuard client configurations with optional split-tunneling
 - 🏗️ **Clean Architecture** - Built with hexagonal architecture principles for maintainability
 - 🐳 **Docker Ready** - Containerized deployment with docker-compose
 - 📚 **OpenAPI Documentation** - Interactive API documentation with Swagger UI
@@ -85,9 +88,26 @@
 
 ### API Endpoints
 
+**DNS Management:**
 - `GET /dns/zones` - List all DNS zones
-- `GET /dns/zones/{zoneName}/records` - List CNAME records for a zone
+- `POST /dns/zones` - Create a new DNS zone
+- `DELETE /dns/zones/{zoneName}` - Delete a DNS zone
+- `GET /dns/zones/{zoneName}/records` - List DNS records for a zone
+- `POST /dns/zones/{zoneName}/records` - Add a DNS record to a zone
+- `DELETE /dns/zones/{zoneName}/records` - Delete a DNS record from a zone
+
+**Service Discovery:**
 - `GET /hosted-services/discover` - Discover hosted services from Docker, Traefik, and WireGuard configurations
+
+**Reverse Proxy Management:**
+- `POST /reverse-proxy/routes` - Add a reverse proxy route to Traefik
+- `DELETE /reverse-proxy/routes/{dnsName}` - Delete a reverse proxy route
+
+**WireGuard Management:**
+- `GET /wireguard/{interfaceName}/config` - Get WireGuard interface configuration details
+- `GET /wireguard/{interfaceName}/peers` - List all configured peers for an interface
+- `POST /wireguard/{interfaceName}/peers` - Create a new peer with automatic key generation and IP allocation
+- `GET /wireguard/{interfaceName}/peers/{peerName}/config` - Download client configuration file for a peer
 
 ## 🏗️ Architecture
 
@@ -118,6 +138,10 @@ WireWeave is built using hexagonal architecture with clear separation between:
 - [x] Docker container discovery via Portainer
 - [x] WireGuard configuration file parsing
 - [x] Hosted service discovery with unified REST API
+- [x] WireGuard peer management (create, list, configure)
+- [x] Automatic key generation and IP allocation
+- [x] Client configuration generation with split-tunneling support
+- [ ] Peer deletion and modification
 - [ ] WireGuard mesh topology generator
 - [ ] Automated DNS record management
 - [ ] Site-to-site routing configuration
