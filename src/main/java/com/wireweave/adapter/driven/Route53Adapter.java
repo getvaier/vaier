@@ -3,7 +3,7 @@ package com.wireweave.adapter.driven;
 import com.wireweave.domain.DnsRecord;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
 import com.wireweave.domain.DnsZone;
-import com.wireweave.domain.port.ForGettingDnsInfo;
+import com.wireweave.domain.port.ForPersistingDnsRecords;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-public class Route53Adapter implements ForGettingDnsInfo {
+public class Route53Adapter implements ForPersistingDnsRecords {
 
     private final Route53Client route53Client;
 
@@ -28,6 +28,11 @@ public class Route53Adapter implements ForGettingDnsInfo {
             .credentialsProvider(StaticCredentialsProvider.create(credentials))
             .region(Region.AWS_GLOBAL)
             .build();
+    }
+
+    @Override
+    public void addDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+
     }
 
     @Override
@@ -75,10 +80,35 @@ public class Route53Adapter implements ForGettingDnsInfo {
     }
 
     @Override
+    public void updateDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+
+    }
+
+    @Override
+    public void deleteDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+
+    }
+
+    @Override
+    public void addDnsZone(DnsZone dnsZone) {
+
+    }
+
+    @Override
     public List<DnsZone> getDnsZones() {
         return route53Client.listHostedZones().hostedZones().stream()
                 .map(zone -> new DnsZone(zone.name()))
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public void updateDnsZone(DnsZone dnsZone) {
+
+    }
+
+    @Override
+    public void deleteDnsZone(DnsZone dnsZone) {
+
     }
 
     private String findHostedZoneId(String domainName) {
