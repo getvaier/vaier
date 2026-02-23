@@ -3,6 +3,7 @@ package com.wireweave.rest;
 import com.wireweave.application.AddDnsRecordUseCase;
 import com.wireweave.application.AddDnsZoneUseCase;
 import com.wireweave.application.DeleteDnsRecordUseCase;
+import com.wireweave.application.DeleteDnsZoneUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.application.GetDnsInfoUseCase.DnsRecordUco;
 import com.wireweave.application.GetDnsInfoUseCase.DnsZoneUco;
@@ -23,12 +24,14 @@ public class DnsRestController {
     private final AddDnsRecordUseCase addDnsRecordUseCase;
     private final AddDnsZoneUseCase addDnsZoneUseCase;
     private final DeleteDnsRecordUseCase deleteDnsRecordUseCase;
+    private final DeleteDnsZoneUseCase deleteDnsZoneUseCase;
 
-    public DnsRestController(GetDnsInfoUseCase getDnsInfoUseCase, AddDnsRecordUseCase addDnsRecordUseCase, AddDnsZoneUseCase addDnsZoneUseCase, DeleteDnsRecordUseCase deleteDnsRecordUseCase) {
+    public DnsRestController(GetDnsInfoUseCase getDnsInfoUseCase, AddDnsRecordUseCase addDnsRecordUseCase, AddDnsZoneUseCase addDnsZoneUseCase, DeleteDnsRecordUseCase deleteDnsRecordUseCase, DeleteDnsZoneUseCase deleteDnsZoneUseCase) {
         this.getDnsInfoUseCase = getDnsInfoUseCase;
         this.addDnsRecordUseCase = addDnsRecordUseCase;
         this.addDnsZoneUseCase = addDnsZoneUseCase;
         this.deleteDnsRecordUseCase = deleteDnsRecordUseCase;
+        this.deleteDnsZoneUseCase = deleteDnsZoneUseCase;
     }
 
     @GetMapping("/zones")
@@ -40,6 +43,11 @@ public class DnsRestController {
     public void addDnsZone(@RequestBody AddDnsZoneRequest request) {
         AddDnsZoneUseCase.DnsZoneUco dnsZone = new AddDnsZoneUseCase.DnsZoneUco(request.name());
         addDnsZoneUseCase.addDnsZone(dnsZone);
+    }
+
+    @DeleteMapping("/zones/{zoneName}")
+    public void deleteDnsZone(@PathVariable String zoneName) {
+        deleteDnsZoneUseCase.deleteDnsZone(zoneName);
     }
 
     @GetMapping("/zones/{zoneName}/records")

@@ -3,6 +3,7 @@ package com.wireweave.application.service;
 import com.wireweave.application.AddDnsRecordUseCase;
 import com.wireweave.application.AddDnsZoneUseCase;
 import com.wireweave.application.DeleteDnsRecordUseCase;
+import com.wireweave.application.DeleteDnsZoneUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.domain.DnsRecord;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
@@ -12,7 +13,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDnsZoneUseCase, DeleteDnsRecordUseCase {
+public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDnsZoneUseCase, DeleteDnsRecordUseCase, DeleteDnsZoneUseCase {
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
 
@@ -70,5 +71,11 @@ public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDn
         DnsZone dnsZone = new DnsZone(zoneName);
         DnsRecordType dnsRecordType = DnsRecordType.valueOf(recordType);
         forPersistingDnsRecords.deleteDnsRecord(recordName, dnsRecordType, dnsZone);
+    }
+
+    @Override
+    public void deleteDnsZone(String zoneName) {
+        DnsZone dnsZone = new DnsZone(zoneName);
+        forPersistingDnsRecords.deleteDnsZone(dnsZone);
     }
 }
