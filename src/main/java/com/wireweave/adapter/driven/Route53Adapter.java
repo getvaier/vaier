@@ -37,14 +37,7 @@ public class Route53Adapter implements ForPersistingDnsRecords {
             throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
         }
 
-        ResourceRecordSet recordSet = ResourceRecordSet.builder()
-                .name(dnsRecord.name())
-                .type(RRType.fromValue(dnsRecord.type().getValue()))
-                .ttl(dnsRecord.ttl())
-                .resourceRecords(dnsRecord.values().stream()
-                        .map(value -> ResourceRecord.builder().value(value).build())
-                        .toList())
-                .build();
+        ResourceRecordSet recordSet = toResourceRecordSet(dnsRecord);
 
         Change change = Change.builder()
                 .action(ChangeAction.CREATE)
@@ -91,7 +84,7 @@ public class Route53Adapter implements ForPersistingDnsRecords {
                 ListResourceRecordSetsResponse response = route53Client.listResourceRecordSets(requestBuilder.build());
 
                 for (ResourceRecordSet recordSet : response.resourceRecordSets()) {
-                    DnsRecord dnsRecord = mapToDnsRecord(recordSet);
+                    DnsRecord dnsRecord = toDomain(recordSet);
                     dnsRecords.add(dnsRecord);
                 }
 
@@ -118,14 +111,7 @@ public class Route53Adapter implements ForPersistingDnsRecords {
             throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
         }
 
-        ResourceRecordSet recordSet = ResourceRecordSet.builder()
-                .name(dnsRecord.name())
-                .type(RRType.fromValue(dnsRecord.type().getValue()))
-                .ttl(dnsRecord.ttl())
-                .resourceRecords(dnsRecord.values().stream()
-                        .map(value -> ResourceRecord.builder().value(value).build())
-                        .toList())
-                .build();
+        ResourceRecordSet recordSet = toResourceRecordSet(dnsRecord);
 
         Change change = Change.builder()
                 .action(ChangeAction.UPSERT)
@@ -155,14 +141,7 @@ public class Route53Adapter implements ForPersistingDnsRecords {
             throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
         }
 
-        ResourceRecordSet recordSet = ResourceRecordSet.builder()
-                .name(dnsRecord.name())
-                .type(RRType.fromValue(dnsRecord.type().getValue()))
-                .ttl(dnsRecord.ttl())
-                .resourceRecords(dnsRecord.values().stream()
-                        .map(value -> ResourceRecord.builder().value(value).build())
-                        .toList())
-                .build();
+        ResourceRecordSet recordSet = toResourceRecordSet(dnsRecord);
 
         Change change = Change.builder()
                 .action(ChangeAction.DELETE)
@@ -254,7 +233,18 @@ public class Route53Adapter implements ForPersistingDnsRecords {
         }
     }
 
-    private DnsRecord mapToDnsRecord(ResourceRecordSet recordSet) {
+    private ResourceRecordSet toResourceRecordSet(DnsRecord dnsRecord) {
+        return ResourceRecordSet.builder()
+                .name(dnsRecord.name())
+                .type(RRType.fromValue(dnsRecord.type().getValue()))
+                .ttl(dnsRecord.ttl())
+                .resourceRecords(dnsRecord.values().stream()
+                        .map(value -> ResourceRecord.builder().value(value).build())
+                        .toList())
+                .build();
+    }
+
+    private DnsRecord toDomain(ResourceRecordSet recordSet) {
         return new DnsRecord(
             recordSet.name(),
             DnsRecordType.valueOf(recordSet.type().name()),
