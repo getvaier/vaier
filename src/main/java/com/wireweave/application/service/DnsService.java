@@ -2,6 +2,7 @@ package com.wireweave.application.service;
 
 import com.wireweave.application.AddDnsRecordUseCase;
 import com.wireweave.application.AddDnsZoneUseCase;
+import com.wireweave.application.DeleteDnsRecordUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.domain.DnsRecord;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
@@ -11,7 +12,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDnsZoneUseCase {
+public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDnsZoneUseCase, DeleteDnsRecordUseCase {
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
 
@@ -62,5 +63,18 @@ public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDn
     public void addDnsZone(AddDnsZoneUseCase.DnsZoneUco dnsZone) {
         DnsZone domainZone = new DnsZone(dnsZone.name());
         forPersistingDnsRecords.addDnsZone(domainZone);
+    }
+
+    @Override
+    public void deleteDnsRecord(String recordName, String recordType, String zoneName) {
+        DnsZone dnsZone = new DnsZone(zoneName);
+        
+        // Fetch the existing record to get TTL and values
+        DnsRecord existingRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
+            .filter(record -> record.name().equals(recordName) && record.type().name().equals(recordType))
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("DNS record not found: " + recordName + " (" + recordType + ")"));
+        
+        forPersistingDnsRecords.deleteDnsRecord(existingRecord, dnsZone);
     }
 }

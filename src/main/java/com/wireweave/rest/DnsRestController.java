@@ -2,10 +2,12 @@ package com.wireweave.rest;
 
 import com.wireweave.application.AddDnsRecordUseCase;
 import com.wireweave.application.AddDnsZoneUseCase;
+import com.wireweave.application.DeleteDnsRecordUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.application.GetDnsInfoUseCase.DnsRecordUco;
 import com.wireweave.application.GetDnsInfoUseCase.DnsZoneUco;
 import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,11 +22,13 @@ public class DnsRestController {
     private final GetDnsInfoUseCase getDnsInfoUseCase;
     private final AddDnsRecordUseCase addDnsRecordUseCase;
     private final AddDnsZoneUseCase addDnsZoneUseCase;
+    private final DeleteDnsRecordUseCase deleteDnsRecordUseCase;
 
-    public DnsRestController(GetDnsInfoUseCase getDnsInfoUseCase, AddDnsRecordUseCase addDnsRecordUseCase, AddDnsZoneUseCase addDnsZoneUseCase) {
+    public DnsRestController(GetDnsInfoUseCase getDnsInfoUseCase, AddDnsRecordUseCase addDnsRecordUseCase, AddDnsZoneUseCase addDnsZoneUseCase, DeleteDnsRecordUseCase deleteDnsRecordUseCase) {
         this.getDnsInfoUseCase = getDnsInfoUseCase;
         this.addDnsRecordUseCase = addDnsRecordUseCase;
         this.addDnsZoneUseCase = addDnsZoneUseCase;
+        this.deleteDnsRecordUseCase = deleteDnsRecordUseCase;
     }
 
     @GetMapping("/zones")
@@ -54,6 +58,11 @@ public class DnsRestController {
         addDnsRecordUseCase.addDnsRecord(dnsRecord, zoneName);
     }
 
+    @DeleteMapping("/zones/{zoneName}/records")
+    public void deleteDnsRecord(@PathVariable String zoneName, @RequestBody DeleteDnsRecordRequest request) {
+        deleteDnsRecordUseCase.deleteDnsRecord(request.name(), request.type(), zoneName);
+    }
+
     public record AddDnsRecordRequest(
         String name,
         String type,
@@ -63,5 +72,10 @@ public class DnsRestController {
 
     public record AddDnsZoneRequest(
         String name
+    ) {}
+
+    public record DeleteDnsRecordRequest(
+        String name,
+        String type
     ) {}
 }
