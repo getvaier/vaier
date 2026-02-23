@@ -441,49 +441,56 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
     private record AddressPort(String address, int port) {}
 
     /**
-     * Add a new reverse proxy route to the Traefik configuration.
+     * Add a new reverse proxy route to the Traefik configuration with sensible defaults.
+     * Generates router name and service name from DNS name.
+     * Automatically configures standard settings: websecure entrypoint, letsencrypt cert resolver.
+     *
+     * @param dnsName The full DNS name (e.g., "portainer.eilertsen.family")
+     * @param address The backend address (e.g., "10.10.10.4")
+     * @param port The backend port (e.g., 9000)
+     * @param requiresAuth Whether to add the auth-middleware
      */
     @Override
-    public void addReverseProxyRoute(ReverseProxyRoute route) {
+    public void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth) {
         loadConfig();
 
         if (config == null) {
             config = new HashMap<>();
         }
 
+        // Generate router name and service name from DNS name
+        String routerName = generateRouterName(dnsName);
+        String serviceName = generateServiceName(dnsName);
+
         // Create HTTP section if it doesn't exist
         Map<String, Object> http = getOrCreateNestedMap(config, "http");
         Map<String, Object> routers = getOrCreateNestedMap(http, "routers");
         Map<String, Object> services = getOrCreateNestedMap(http, "services");
 
-        // Add router configuration
+        // Add router configuration with standard defaults
         Map<String, Object> routerConfig = new HashMap<>();
-        routerConfig.put("rule", "Host(`" + route.getDomainName() + "`)");
-        routerConfig.put("service", route.getService());
+        routerConfig.put("rule", "Host(`" + dnsName + "`)");
 
-        // Add entryPoints if provided
-        if (route.getEntryPoints() != null && !route.getEntryPoints().isEmpty()) {
-            routerConfig.put("entryPoints", new ArrayList<>(route.getEntryPoints()));
+        // Standard entryPoints
+        List<String> entryPoints = new ArrayList<>();
+        entryPoints.add("websecure");
+        routerConfig.put("entryPoints", entryPoints);
+
+        routerConfig.put("service", serviceName);
+
+        // Standard TLS configuration with letsencrypt
+        Map<String, Object> tlsMap = new HashMap<>();
+        tlsMap.put("certResolver", "letsencrypt");
+        routerConfig.put("tls", tlsMap);
+
+        // Add auth middleware if required
+        if (requiresAuth) {
+            List<String> middlewares = new ArrayList<>();
+            middlewares.add("auth-middleware");
+            routerConfig.put("middlewares", middlewares);
         }
 
-        // Add TLS configuration if provided
-        if (route.getTlsConfig() != null) {
-            Map<String, Object> tlsMap = new HashMap<>();
-            if (route.getTlsConfig().getCertResolver() != null) {
-                tlsMap.put("certResolver", route.getTlsConfig().getCertResolver());
-            }
-            if (route.getTlsConfig().getAdditionalConfig() != null) {
-                tlsMap.putAll(route.getTlsConfig().getAdditionalConfig());
-            }
-            routerConfig.put("tls", tlsMap);
-        }
-
-        // Add middlewares if provided (use the route's middleware list directly)
-        if (route.getMiddlewares() != null && !route.getMiddlewares().isEmpty()) {
-            routerConfig.put("middlewares", new ArrayList<>(route.getMiddlewares()));
-        }
-
-        routers.put(route.getName(), routerConfig);
+        routers.put(routerName, routerConfig);
 
         // Add service configuration
         Map<String, Object> serviceConfig = new HashMap<>();
@@ -491,15 +498,39 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
         List<Map<String, Object>> servers = new ArrayList<>();
 
         Map<String, Object> server = new HashMap<>();
-        String url = "http://" + route.getAddress() + ":" + route.getPort();
+        String url = "http://" + address + ":" + port;
         server.put("url", url);
         servers.add(server);
 
         loadBalancer.put("servers", servers);
         serviceConfig.put("loadBalancer", loadBalancer);
-        services.put(route.getService(), serviceConfig);
+        services.put(serviceName, serviceConfig);
 
         saveConfig();
+    }
+
+    /**
+     * Generate router name from DNS name.
+     * Example: "portainer.eilertsen.family" -> "portainer-router"
+     * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-router"
+     */
+    private String generateRouterName(String dnsName) {
+        // Remove the base domain and keep the subdomain parts
+        String nameWithoutDomain = dnsName.replace(".eilertsen.family", "");
+        String routerName = nameWithoutDomain.replace(".", "-") + "-router";
+        return routerName;
+    }
+
+    /**
+     * Generate service name from DNS name.
+     * Example: "portainer.eilertsen.family" -> "portainer-service"
+     * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-service"
+     */
+    private String generateServiceName(String dnsName) {
+        // Remove the base domain and keep the subdomain parts
+        String nameWithoutDomain = dnsName.replace(".eilertsen.family", "");
+        String serviceName = nameWithoutDomain.replace(".", "-") + "-service";
+        return serviceName;
     }
 
     /**
