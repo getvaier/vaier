@@ -79,12 +79,16 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
         // Add peer to server config
         forManagingWireguardConfig.createPeer(interfaceName, newPeer);
 
+        // Get server's public key
+        String serverPublicKey = forManagingWireguardConfig.getServerPublicKey(interfaceName);
+
         // Generate and save client config file
         String clientConfig = generateClientConfigFile(
                 peerName,
                 nextAvailableIp,
                 keyPair.privateKey(),
-                config.getInterfaceConfig()
+                config.getInterfaceConfig(),
+                serverPublicKey
         );
         String clientConfigPath = saveClientConfigFile(peerName, clientConfig);
 
@@ -141,7 +145,8 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
      * Generate client configuration file content.
      */
     private String generateClientConfigFile(String peerName, String ipAddress, 
-                                           String privateKey, WireguardConfig.WireguardInterface serverInterface) {
+                                           String privateKey, WireguardConfig.WireguardInterface serverInterface,
+                                           String serverPublicKey) {
         StringBuilder config = new StringBuilder();
         
         config.append("# WireGuard Client Configuration for: ").append(peerName).append("\n\n");
