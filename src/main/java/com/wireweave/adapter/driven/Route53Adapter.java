@@ -135,13 +135,19 @@ public class Route53Adapter implements ForPersistingDnsRecords {
     }
 
     @Override
-    public void deleteDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
+    public void deleteDnsRecord(String recordName, String recordType, DnsZone dnsZone) {
         String hostedZoneId = findHostedZoneId(dnsZone.name());
         if (hostedZoneId == null) {
             throw new RuntimeException("Hosted zone not found: " + dnsZone.name());
         }
 
-        ResourceRecordSet recordSet = toResourceRecordSet(dnsRecord);
+        // Fetch the existing record to get TTL and values
+        DnsRecord existingRecord = getDnsRecords(dnsZone).stream()
+                .filter(record -> record.name().equals(recordName) && record.type().name().equals(recordType))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("DNS record not found: " + recordName + " (" + recordType + ")"));
+
+        ResourceRecordSet recordSet = toResourceRecordSet(existingRecord);
 
         Change change = Change.builder()
                 .action(ChangeAction.DELETE)

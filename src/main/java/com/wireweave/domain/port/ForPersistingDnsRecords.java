@@ -8,7 +8,7 @@ public interface ForPersistingDnsRecords {
     void addDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone);
     List<DnsRecord> getDnsRecords(DnsZone dnsZone);
     void updateDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone);
-    void deleteDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone);
+    void deleteDnsRecord(String recordName, String recordType, DnsZone dnsZone);
     void addDnsZone(DnsZone dnsZone);
     List<DnsZone> getDnsZones();
     void updateDnsZone(DnsZone dnsZone);

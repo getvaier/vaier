@@ -68,13 +68,6 @@ public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDn
     @Override
     public void deleteDnsRecord(String recordName, String recordType, String zoneName) {
         DnsZone dnsZone = new DnsZone(zoneName);
-        
-        // Fetch the existing record to get TTL and values
-        DnsRecord existingRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
-            .filter(record -> record.name().equals(recordName) && record.type().name().equals(recordType))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException("DNS record not found: " + recordName + " (" + recordType + ")"));
-        
-        forPersistingDnsRecords.deleteDnsRecord(existingRecord, dnsZone);
+        forPersistingDnsRecords.deleteDnsRecord(recordName, recordType, dnsZone);
     }
 }
