@@ -1,6 +1,7 @@
 package com.wireweave.application.service;
 
 import com.wireweave.application.AddDnsRecordUseCase;
+import com.wireweave.application.AddDnsZoneUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.domain.DnsRecord;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
@@ -10,7 +11,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase {
+public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDnsZoneUseCase {
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
 
@@ -55,5 +56,11 @@ public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase {
         );
         DnsZone dnsZone = new DnsZone(zoneName);
         forPersistingDnsRecords.addDnsRecord(domainRecord, dnsZone);
+    }
+
+    @Override
+    public void addDnsZone(AddDnsZoneUseCase.DnsZoneUco dnsZone) {
+        DnsZone domainZone = new DnsZone(dnsZone.name());
+        forPersistingDnsRecords.addDnsZone(domainZone);
     }
 }

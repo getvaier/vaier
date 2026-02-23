@@ -1,6 +1,7 @@
 package com.wireweave.rest;
 
 import com.wireweave.application.AddDnsRecordUseCase;
+import com.wireweave.application.AddDnsZoneUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.application.GetDnsInfoUseCase.DnsRecordUco;
 import com.wireweave.application.GetDnsInfoUseCase.DnsZoneUco;
@@ -18,15 +19,23 @@ public class DnsRestController {
 
     private final GetDnsInfoUseCase getDnsInfoUseCase;
     private final AddDnsRecordUseCase addDnsRecordUseCase;
+    private final AddDnsZoneUseCase addDnsZoneUseCase;
 
-    public DnsRestController(GetDnsInfoUseCase getDnsInfoUseCase, AddDnsRecordUseCase addDnsRecordUseCase) {
+    public DnsRestController(GetDnsInfoUseCase getDnsInfoUseCase, AddDnsRecordUseCase addDnsRecordUseCase, AddDnsZoneUseCase addDnsZoneUseCase) {
         this.getDnsInfoUseCase = getDnsInfoUseCase;
         this.addDnsRecordUseCase = addDnsRecordUseCase;
+        this.addDnsZoneUseCase = addDnsZoneUseCase;
     }
 
     @GetMapping("/zones")
     public List<String> getDnsZones() {
         return getDnsInfoUseCase.getDnsZones().stream().map(DnsZoneUco::name).toList();
+    }
+
+    @PostMapping("/zones")
+    public void addDnsZone(@RequestBody AddDnsZoneRequest request) {
+        AddDnsZoneUseCase.DnsZoneUco dnsZone = new AddDnsZoneUseCase.DnsZoneUco(request.name());
+        addDnsZoneUseCase.addDnsZone(dnsZone);
     }
 
     @GetMapping("/zones/{zoneName}/records")
@@ -50,5 +59,9 @@ public class DnsRestController {
         String type,
         Long ttl,
         List<String> values
+    ) {}
+
+    public record AddDnsZoneRequest(
+        String name
     ) {}
 }
