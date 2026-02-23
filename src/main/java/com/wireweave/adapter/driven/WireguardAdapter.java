@@ -1,19 +1,198 @@
 package com.wireweave.adapter.driven;
 
 import com.wireweave.domain.WireguardConfig;
+import com.wireweave.domain.port.ForManagingWireguardConfig;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Component
-public class WireguardAdapter {
+public class WireguardAdapter implements ForManagingWireguardConfig {
+
+    @Value("${wireguard.config.path:c:/tmp/wireguard}")
+    private String configBasePath;
+
+    @Value("${wireguard.wg.executable:C:/Program Files/WireGuard/wg.exe}")
+    private String wgExecutable;
+
+    @Override
+    public WireguardConfig getConfig(String interfaceName) {
+        String configPath = getConfigFilePath(interfaceName);
+        return parseConfig(configPath);
+    }
+
+    @Override
+    public void createPeer(String interfaceName, WireguardConfig.WireguardPeer peer) {
+        WireguardConfig config = getConfig(interfaceName);
+        List<WireguardConfig.WireguardPeer> peers = new ArrayList<>(config.getPeers());
+
+        // Check if peer already exists
+        if (peers.stream().anyMatch(p -> p.getPublicKey().equals(peer.getPublicKey()))) {
+            throw new IllegalArgumentException("Peer with public key " + peer.getPublicKey() + " already exists");
+        }
+
+        peers.add(peer);
+        WireguardConfig updatedConfig = new WireguardConfig(config.getInterfaceConfig(), peers);
+        saveConfig(interfaceName, updatedConfig);
+    }
+
+    @Override
+    public void updatePeer(String interfaceName, String publicKey, WireguardConfig.WireguardPeer updatedPeer) {
+        WireguardConfig config = getConfig(interfaceName);
+        List<WireguardConfig.WireguardPeer> peers = new ArrayList<>(config.getPeers());
+
+        boolean found = false;
+        for (int i = 0; i < peers.size(); i++) {
+            if (peers.get(i).getPublicKey().equals(publicKey)) {
+                peers.set(i, updatedPeer);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            throw new IllegalArgumentException("Peer with public key " + publicKey + " not found");
+        }
+
+        WireguardConfig updatedConfig = new WireguardConfig(config.getInterfaceConfig(), peers);
+        saveConfig(interfaceName, updatedConfig);
+    }
+
+    @Override
+    public void deletePeer(String interfaceName, String publicKey) {
+        WireguardConfig config = getConfig(interfaceName);
+        List<WireguardConfig.WireguardPeer> peers = config.getPeers().stream()
+                .filter(p -> !p.getPublicKey().equals(publicKey))
+                .collect(Collectors.toList());
+
+        if (peers.size() == config.getPeers().size()) {
+            throw new IllegalArgumentException("Peer with public key " + publicKey + " not found");
+        }
+
+        WireguardConfig updatedConfig = new WireguardConfig(config.getInterfaceConfig(), peers);
+        saveConfig(interfaceName, updatedConfig);
+    }
+
+    @Override
+    public List<WireguardConfig.WireguardPeer> getPeers(String interfaceName) {
+        return getConfig(interfaceName).getPeers();
+    }
+
+    @Override
+    public void applyConfig(String interfaceName) {
+        try {
+            String configPath = getConfigFilePath(interfaceName);
+
+            // Check if wg.exe exists
+            File wgFile = new File(wgExecutable);
+            if (!wgFile.exists()) {
+                throw new RuntimeException("WireGuard executable not found at: " + wgExecutable);
+            }
+
+            // Execute: wg syncconf <interface> <config-file>
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    wgExecutable,
+                    "syncconf",
+                    interfaceName,
+                    configPath
+            );
+            processBuilder.redirectErrorStream(true);
+
+            Process process = processBuilder.start();
+
+            // Read output
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new RuntimeException("Failed to apply WireGuard config. Exit code: " + exitCode + ", Output: " + output);
+            }
+
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to apply WireGuard configuration", e);
+        }
+    }
+
+    /**
+     * Save WireGuard configuration to file.
+     */
+    private void saveConfig(String interfaceName, WireguardConfig config) {
+        String configPath = getConfigFilePath(interfaceName);
+        Path path = Paths.get(configPath);
+
+        // Create backup
+        try {
+            if (Files.exists(path)) {
+                Path backup = Paths.get(configPath + ".backup");
+                Files.copy(path, backup, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create backup of config file", e);
+        }
+
+        // Write new config
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(configPath))) {
+            // Write [Interface] section
+            WireguardConfig.WireguardInterface iface = config.getInterfaceConfig();
+            writer.write("[Interface]\n");
+            if (iface.getAddress() != null) {
+                writer.write("Address = " + iface.getAddress() + "\n");
+            }
+            if (iface.getListenPort() != null) {
+                writer.write("ListenPort = " + iface.getListenPort() + "\n");
+            }
+            for (String postUp : iface.getPostUpCommands()) {
+                writer.write("PostUp = " + postUp + "\n");
+            }
+            for (String postDown : iface.getPostDownCommands()) {
+                writer.write("PostDown = " + postDown + "\n");
+            }
+            writer.write("\n");
+
+            // Write [Peer] sections
+            for (WireguardConfig.WireguardPeer peer : config.getPeers()) {
+                writer.write("# " + peer.getName() + "\n");
+                writer.write("[Peer]\n");
+                writer.write("PublicKey = " + peer.getPublicKey() + "\n");
+                if (peer.getAllowedIPs() != null) {
+                    writer.write("AllowedIPs = " + peer.getAllowedIPs() + "\n");
+                }
+                if (peer.getEndpoint() != null) {
+                    writer.write("Endpoint = " + peer.getEndpoint() + "\n");
+                }
+                if (peer.getPersistentKeepalive() != null) {
+                    writer.write("PersistentKeepalive = " + peer.getPersistentKeepalive() + "\n");
+                }
+                writer.write("\n");
+            }
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write WireGuard configuration file: " + configPath, e);
+        }
+    }
+
+    /**
+     * Get the full path to a WireGuard configuration file.
+     */
+    private String getConfigFilePath(String interfaceName) {
+        return configBasePath + "/" + interfaceName + ".conf";
+    }
 
     /**
      * Parse a WireGuard configuration file.
