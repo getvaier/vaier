@@ -10,3 +10,7 @@ logging:
   level:
     com.wireweave: DEBUG
     org.springframework: INFO
+
+wireguard:
+  server:
+    endpoint: wireguard.eilertsen.family:51820

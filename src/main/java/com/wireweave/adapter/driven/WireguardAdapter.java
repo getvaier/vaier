@@ -130,6 +130,95 @@ public class WireguardAdapter implements ForManagingWireguardConfig {
     }
 
     /**
+     * Generate a new WireGuard key pair (private key + public key).
+     *
+     * @return WireguardKeyPair containing both private and public keys
+     */
+    public WireguardKeyPair generateKeyPair() {
+        try {
+            // Check if wg.exe exists
+            File wgFile = new File(wgExecutable);
+            if (!wgFile.exists()) {
+                throw new RuntimeException("WireGuard executable not found at: " + wgExecutable);
+            }
+
+            // Generate private key using: wg genkey
+            String privateKey = executeWgCommand("genkey");
+
+            // Derive public key from private key using: wg pubkey
+            String publicKey = derivePublicKey(privateKey);
+
+            return new WireguardKeyPair(privateKey.trim(), publicKey.trim());
+
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to generate WireGuard key pair", e);
+        }
+    }
+
+    /**
+     * Derive public key from private key.
+     *
+     * @param privateKey The private key
+     * @return The corresponding public key
+     */
+    private String derivePublicKey(String privateKey) throws IOException, InterruptedException {
+        ProcessBuilder processBuilder = new ProcessBuilder(wgExecutable, "pubkey");
+        processBuilder.redirectErrorStream(true);
+
+        Process process = processBuilder.start();
+
+        // Write private key to stdin
+        try (OutputStream os = process.getOutputStream()) {
+            os.write(privateKey.getBytes());
+            os.flush();
+        }
+
+        // Read public key from stdout
+        String output;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            output = reader.lines().collect(Collectors.joining("\n"));
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new RuntimeException("Failed to derive public key. Exit code: " + exitCode + ", Output: " + output);
+        }
+
+        return output;
+    }
+
+    /**
+     * Execute a WireGuard command and return its output.
+     *
+     * @param command The wg subcommand to execute
+     * @return The command output
+     */
+    private String executeWgCommand(String command) throws IOException, InterruptedException {
+        ProcessBuilder processBuilder = new ProcessBuilder(wgExecutable, command);
+        processBuilder.redirectErrorStream(true);
+
+        Process process = processBuilder.start();
+
+        // Read output
+        String output;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            output = reader.lines().collect(Collectors.joining("\n"));
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new RuntimeException("Failed to execute wg " + command + ". Exit code: " + exitCode + ", Output: " + output);
+        }
+
+        return output;
+    }
+
+    /**
+     * Record representing a WireGuard key pair.
+     */
+    public record WireguardKeyPair(String privateKey, String publicKey) {}
+
+    /**
      * Save WireGuard configuration to file.
      */
     private void saveConfig(String interfaceName, WireguardConfig config) {
