@@ -3,6 +3,7 @@ package com.wireweave.application;
 public interface CreatePeerUseCase {
 
     CreatedPeerUco createPeer(String interfaceName, String peerName);
+    CreatedPeerUco createPeer(String interfaceName, String peerName, boolean routeAllTraffic);
 
     record CreatedPeerUco(
         String name,

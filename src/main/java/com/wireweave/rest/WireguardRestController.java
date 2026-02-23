@@ -60,7 +60,8 @@ public class WireguardRestController {
     @PostMapping("/{interfaceName}/peers")
     public CreatePeerResponse createPeer(@PathVariable String interfaceName,
                                          @RequestBody CreatePeerRequest request) {
-        CreatedPeerUco peer = createPeerUseCase.createPeer(interfaceName, request.name());
+        boolean routeAllTraffic = request.routeAllTraffic() != null && request.routeAllTraffic();
+        CreatedPeerUco peer = createPeerUseCase.createPeer(interfaceName, request.name(), routeAllTraffic);
         return new CreatePeerResponse(
                 peer.name(),
                 peer.ipAddress(),
@@ -125,7 +126,8 @@ public class WireguardRestController {
     ) {}
 
     public record CreatePeerRequest(
-            String name
+            String name,
+            Boolean routeAllTraffic
     ) {}
 
     public record CreatePeerResponse(

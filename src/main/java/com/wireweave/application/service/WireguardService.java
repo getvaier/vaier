@@ -60,6 +60,11 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
 
     @Override
     public CreatedPeerUco createPeer(String interfaceName, String peerName) {
+        return createPeer(interfaceName, peerName, false);
+    }
+
+    @Override
+    public CreatedPeerUco createPeer(String interfaceName, String peerName, boolean routeAllTraffic) {
         // Generate key pair for the new peer
         WireguardAdapter.WireguardKeyPair keyPair = wireguardAdapter.generateKeyPair();
 
@@ -82,13 +87,17 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
         // Get server's public key
         String serverPublicKey = forManagingWireguardConfig.getServerPublicKey(interfaceName);
 
+        // Determine AllowedIPs based on routeAllTraffic flag
+        String allowedIPs = routeAllTraffic ? defaultAllowedIPs : getVpnSubnetForClient(config);
+
         // Generate and save client config file
         String clientConfig = generateClientConfigFile(
                 peerName,
                 nextAvailableIp,
                 keyPair.privateKey(),
                 config.getInterfaceConfig(),
-                serverPublicKey
+                serverPublicKey,
+                allowedIPs
         );
         String clientConfigPath = saveClientConfigFile(peerName, clientConfig);
 
@@ -99,6 +108,24 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
                 keyPair.privateKey(),
                 clientConfigPath
         );
+    }
+
+    /**
+     * Get the VPN subnet for split-tunneling clients.
+     * Returns just the VPN subnet so only VPN traffic is routed through the tunnel.
+     */
+    private String getVpnSubnetForClient(WireguardConfig config) {
+        String serverAddress = config.getInterfaceConfig().getAddress();
+        if (serverAddress == null) {
+            throw new IllegalStateException("Server interface has no address configured");
+        }
+        // Return the full subnet (e.g., "10.10.10.0/24")
+        String[] parts = serverAddress.split("/");
+        if (parts.length != 2) {
+            throw new IllegalStateException("Invalid server address format: " + serverAddress);
+        }
+        String[] octets = parts[0].split("\\.");
+        return octets[0] + "." + octets[1] + "." + octets[2] + ".0/" + parts[1];
     }
 
     /**
@@ -146,7 +173,7 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
      */
     private String generateClientConfigFile(String peerName, String ipAddress, 
                                            String privateKey, WireguardConfig.WireguardInterface serverInterface,
-                                           String serverPublicKey) {
+                                           String serverPublicKey, String allowedIPs) {
         StringBuilder config = new StringBuilder();
         
         config.append("# WireGuard Client Configuration for: ").append(peerName).append("\n\n");
@@ -158,7 +185,7 @@ public class WireguardService implements GetWireguardConfigUseCase, CreatePeerUs
         config.append("[Peer]\n");
         config.append("# Server\n");
         config.append("PublicKey = ").append(serverPublicKey).append("\n");
-        config.append("AllowedIPs = ").append(defaultAllowedIPs).append("\n");
+        config.append("AllowedIPs = ").append(allowedIPs).append("\n");
         config.append("Endpoint = ").append(serverEndpoint);
         if (!serverEndpoint.contains(":") && serverInterface.getListenPort() != null) {
             config.append(":").append(serverInterface.getListenPort());
