@@ -1,5 +1,6 @@
 package com.wireweave.application.service;
 
+import com.wireweave.application.AddDnsRecordUseCase;
 import com.wireweave.application.GetDnsInfoUseCase;
 import com.wireweave.domain.DnsRecord;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
@@ -9,7 +10,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class DnsService implements GetDnsInfoUseCase {
+public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase {
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
 
@@ -18,13 +19,13 @@ public class DnsService implements GetDnsInfoUseCase {
     }
 
     @Override
-    public List<DnsZoneUco> getDnsZones() {
+    public List<GetDnsInfoUseCase.DnsZoneUco> getDnsZones() {
         return forPersistingDnsRecords.getDnsZones().stream()
             .map(this::toUco).toList();
     }
 
     @Override
-    public List<DnsRecordUco> getDnsRecords(DnsZoneUco dnsZone) {
+    public List<GetDnsInfoUseCase.DnsRecordUco> getDnsRecords(GetDnsInfoUseCase.DnsZoneUco dnsZone) {
         return forPersistingDnsRecords.getDnsRecords(toDomain(dnsZone))
             .stream()
             .filter(dnsRecord -> dnsRecord.type() == DnsRecordType.CNAME)
@@ -32,15 +33,27 @@ public class DnsService implements GetDnsInfoUseCase {
             .toList();
     }
 
-    private DnsZone toDomain(DnsZoneUco dnsZoneUco) {
+    private DnsZone toDomain(GetDnsInfoUseCase.DnsZoneUco dnsZoneUco) {
         return new DnsZone(dnsZoneUco.name());
     }
 
-    private DnsZoneUco toUco(DnsZone dnsZone) {
-        return new DnsZoneUco(dnsZone.name());
+    private GetDnsInfoUseCase.DnsZoneUco toUco(DnsZone dnsZone) {
+        return new GetDnsInfoUseCase.DnsZoneUco(dnsZone.name());
     }
 
-    private DnsRecordUco toUco(DnsRecord dnsRecord) {
-        return new DnsRecordUco(dnsRecord.name());
+    private GetDnsInfoUseCase.DnsRecordUco toUco(DnsRecord dnsRecord) {
+        return new GetDnsInfoUseCase.DnsRecordUco(dnsRecord.name());
+    }
+
+    @Override
+    public void addDnsRecord(AddDnsRecordUseCase.DnsRecordUco dnsRecord, String zoneName) {
+        DnsRecord domainRecord = new DnsRecord(
+            dnsRecord.name(),
+            DnsRecordType.valueOf(dnsRecord.type()),
+            dnsRecord.ttl(),
+            dnsRecord.values()
+        );
+        DnsZone dnsZone = new DnsZone(zoneName);
+        forPersistingDnsRecords.addDnsRecord(domainRecord, dnsZone);
     }
 }
