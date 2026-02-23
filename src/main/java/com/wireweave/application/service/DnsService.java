@@ -68,6 +68,7 @@ public class DnsService implements GetDnsInfoUseCase, AddDnsRecordUseCase, AddDn
     @Override
     public void deleteDnsRecord(String recordName, String recordType, String zoneName) {
         DnsZone dnsZone = new DnsZone(zoneName);
-        forPersistingDnsRecords.deleteDnsRecord(recordName, recordType, dnsZone);
+        DnsRecordType dnsRecordType = DnsRecordType.valueOf(recordType);
+        forPersistingDnsRecords.deleteDnsRecord(recordName, dnsRecordType, dnsZone);
     }
 }
