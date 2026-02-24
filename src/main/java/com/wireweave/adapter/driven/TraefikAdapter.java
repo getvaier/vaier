@@ -42,6 +42,14 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
             configFolder.mkdirs();
             log.info("Created Traefik config folder: {}", configFolder.getAbsolutePath());
         }
+        if (!configFile.exists()) {
+            try {
+                configFile.createNewFile();
+                log.info("Created Traefik config file: {}", configFile.getAbsolutePath());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     /**
@@ -704,10 +712,6 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
      */
     private void loadConfig() {
         File configFile = new File(CONFIG_FILE_PATH);
-        if (!configFile.exists()) {
-            config = new LinkedHashMap<>();
-            return;
-        }
 
         try (FileInputStream inputStream = new FileInputStream(configFile)) {
             this.config = yaml.load(inputStream);
