@@ -132,6 +132,15 @@
             background: #fff3cd;
             color: #856404;
         }
+
+        .dns-link {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .dns-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -185,6 +194,9 @@
                 const authBadge = service.authenticated
                     ? '<span class="badge badge-success">Authenticated</span>'
                     : '<span class="badge badge-warning">Not Authenticated</span>';
+                const dnsDisplay = dnsOk
+                    ? `<a href="http://${service.dnsAddress}" target="_blank" class="dns-link">${service.dnsAddress}</a>`
+                    : service.dnsAddress;
 
                 return `
                     <div class="service-card">
@@ -192,7 +204,7 @@
                         <div class="service-details">
                             <div class="detail-row">
                                 <span class="detail-label">DNS:</span>
-                                <span class="detail-value">${service.dnsAddress}</span>
+                                <span class="detail-value">${dnsDisplay}</span>
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">DNS Status:</span>
