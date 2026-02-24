@@ -5,6 +5,7 @@ import com.wireweave.domain.port.ForGettingReverseProxyRoutes;
 import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
 import java.io.File;
 import java.util.LinkedHashMap;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.DumperOptions;
@@ -18,12 +19,13 @@ import java.util.List;
 import java.util.Map;
 
 @Component
+@Slf4j
 public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersistingReverseProxyRoutes {
 
     private final Yaml yaml;
     private final Yaml dumper;
     private Map<String, Object> config;
-    private static final String CONFIG_FILE_PATH = "c:/tmp/traefik/remote-apps.yml";
+    private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/dynamic_conf/remote-apps.yml";
 
     public TraefikAdapter() {
         this.yaml = new Yaml();
@@ -33,6 +35,13 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
         options.setPrettyFlow(true);
         options.setIndent(2);
         this.dumper = new Yaml(options);
+
+        File configFile = new File(CONFIG_FILE_PATH);
+        File configFolder = configFile.getParentFile();
+        if (!configFolder.exists()) {
+            configFolder.mkdirs();
+            log.info("Created Traefik config folder: {}", configFolder.getAbsolutePath());
+        }
     }
 
     /**
@@ -695,6 +704,10 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
      */
     private void loadConfig() {
         File configFile = new File(CONFIG_FILE_PATH);
+        if (!configFile.exists()) {
+            config = new LinkedHashMap<>();
+            return;
+        }
 
         try (FileInputStream inputStream = new FileInputStream(configFile)) {
             this.config = yaml.load(inputStream);
