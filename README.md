@@ -86,6 +86,94 @@
    - API: http://localhost:8080
    - Swagger UI: http://localhost:8080/swagger-ui.html
 
+# Server Setup Guide
+
+## Prerequisites
+
+- Ubuntu EC2 t3.small (or larger)
+- Port 9443 open in AWS Security Group
+- Elastic IP assigned to the instance
+
+---
+
+## 1. System Update
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+---
+
+## 2. Install Docker
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker ubuntu
+newgrp docker
+```
+
+Verify the installation:
+```bash
+docker --version
+docker compose version
+```
+
+---
+
+## 3. Add Swap Space
+
+Recommended for small instances to prevent memory pressure:
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+```
+
+---
+
+## 4. Install Portainer
+
+Portainer provides a web UI for managing Docker containers and Compose stacks.
+```bash
+docker volume create portainer_data
+
+docker run -d \
+  --name portainer \
+  --restart=always \
+  -p 9443:9443 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portainer_data:/data \
+  portainer/portainer-ce:latest
+```
+
+Access Portainer at `https://<your-ec2-ip>:9443` and create your admin user on first login.
+
+> **Note:** Portainer uses a self-signed certificate by default. Your browser will show a security warning — this is expected. Accept and proceed.
+
+---
+
+## 5. Deploy WireWeave
+
+In Portainer, navigate to **Stacks → Add Stack**, paste the contents of `docker-compose.yml`, and click **Deploy**.
+
+Alternatively, deploy from the command line:
+```bash
+git clone https://github.com/your-org/wireweave.git
+cd wireweave
+docker compose up -d
+```
+
+---
+
+## AWS Security Group — Required Ports
+
+| Port | Protocol | Description          |
+|------|----------|----------------------|
+| 22   | TCP      | SSH                  |
+| 9443 | TCP      | Portainer UI (HTTPS) |
+| 51820| UDP      | WireGuard            |
+| 80   | TCP      | HTTP (optional)      |
+| 443  | TCP      | HTTPS (optional)     |
 ### API Endpoints
 
 **DNS Management:**

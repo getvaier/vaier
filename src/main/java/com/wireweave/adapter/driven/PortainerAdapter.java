@@ -54,9 +54,10 @@ public class PortainerAdapter implements ForGettingDockerInfo {
 
             List<DockerService> services = new ArrayList<>();
             for (PortainerContainer container : containers) {
-                if (container.ports != null && container.ports.length > 0) {
-                    List<DockerService.PortMapping> portMappings = new ArrayList<>();
+                List<DockerService.PortMapping> portMappings = new ArrayList<>();
 
+                // Handle regular port mappings
+                if (container.ports != null && container.ports.length > 0) {
                     for (PortainerPort port : container.ports) {
                         portMappings.add(new DockerService.PortMapping(
                                 port.privatePort,
@@ -65,7 +66,14 @@ public class PortainerAdapter implements ForGettingDockerInfo {
                                 port.ip
                         ));
                     }
+                }
+                // Handle host network mode - need to inspect container for exposed ports
+                else if (container.hostConfig != null && "host".equals(container.hostConfig.networkMode)) {
+                    portMappings = getExposedPortsForHostMode(dockerHost, endpointId, container.id);
+                }
 
+                // Only add services that have ports
+                if (!portMappings.isEmpty()) {
                     String containerName = extractContainerName(container.names);
 
                     services.add(new DockerService(
@@ -81,6 +89,59 @@ public class PortainerAdapter implements ForGettingDockerInfo {
 
         } catch (IOException | InterruptedException e) {
             throw new RuntimeException("Failed to get Docker services from Portainer at " + dockerHost, e);
+        }
+    }
+
+    private List<DockerService.PortMapping> getExposedPortsForHostMode(DockerHost dockerHost, int endpointId, String containerId) {
+        try {
+            String inspectUrl = dockerHost.endpointsUrl() + "/" + endpointId + "/docker/containers/" + containerId + "/json";
+
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(inspectUrl))
+                    .GET();
+
+            requestBuilder.header("X-API-Key", dockerHost.getApiToken());
+
+            HttpRequest request = requestBuilder.build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                return List.of(); // Return empty list if inspection fails
+            }
+
+            ContainerInspect containerDetails = objectMapper.readValue(response.body(), ContainerInspect.class);
+
+            List<DockerService.PortMapping> portMappings = new ArrayList<>();
+
+            // Get exposed ports from container config
+            if (containerDetails.config != null && containerDetails.config.exposedPorts != null) {
+                for (String portSpec : containerDetails.config.exposedPorts.keySet()) {
+                    // Port spec format is like "51820/udp" or "80/tcp"
+                    String[] parts = portSpec.split("/");
+                    if (parts.length >= 1) {
+                        try {
+                            int port = Integer.parseInt(parts[0]);
+                            String protocol = parts.length > 1 ? parts[1] : "tcp";
+
+                            // For host mode, publicPort and privatePort are the same
+                            // and they're accessible on all host interfaces (0.0.0.0)
+                            portMappings.add(new DockerService.PortMapping(
+                                    port,
+                                    port,
+                                    protocol,
+                                    "0.0.0.0"
+                            ));
+                        } catch (NumberFormatException e) {
+                            // Skip invalid port numbers
+                        }
+                    }
+                }
+            }
+
+            return portMappings;
+
+        } catch (IOException | InterruptedException e) {
+            return List.of(); // Return empty list on error
         }
     }
 
@@ -129,6 +190,26 @@ public class PortainerAdapter implements ForGettingDockerInfo {
         public String image;
         @JsonProperty("Ports")
         public PortainerPort[] ports;
+        @JsonProperty("HostConfig")
+        public HostConfig hostConfig;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class HostConfig {
+        @JsonProperty("NetworkMode")
+        public String networkMode;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class ContainerInspect {
+        @JsonProperty("Config")
+        public ContainerConfig config;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class ContainerConfig {
+        @JsonProperty("ExposedPorts")
+        public java.util.Map<String, Object> exposedPorts;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

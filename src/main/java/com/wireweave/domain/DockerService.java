@@ -9,6 +9,12 @@ public record DockerService(
         List<PortMapping> ports
 ) {
 
+    public boolean listensOnPort(int port) {
+        return ports.stream()
+            .filter(mapping -> mapping.publicPort() != null)
+            .anyMatch(mapping -> mapping.publicPort() == port);
+    }
+
     public record PortMapping(
             int privatePort,
             Integer publicPort,

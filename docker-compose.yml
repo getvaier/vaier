@@ -1,4 +1,29 @@
 services:
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Oslo
+      - SERVERURL=wireweave.eilertsen.family
+      - SERVERPORT=51820
+      - PEERS=1
+      - PEERDNS=auto
+      - INTERNAL_SUBNET=10.13.13.0
+      - ALLOWEDIPS=0.0.0.0/0
+    volumes:
+      - ./wireguard/config:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - 51820:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
   wireweave:
     image: geireilertsen/wireweave:latest
     container_name: wireweave
@@ -7,4 +32,9 @@ services:
     environment:
       WIREWEAVE_AWS_KEY: ${WIREWEAVE_AWS_KEY}
       WIREWEAVE_AWS_SECRET: ${WIREWEAVE_AWS_SECRET}
+      WIREGUARD_CONFIG_PATH: /wireguard/config
+    depends_on:
+      - wireguard
+    volumes:
+      - ./wireguard/config:/wireguard/config:ro
     restart: unless-stopped
