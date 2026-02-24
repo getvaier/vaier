@@ -38,16 +38,17 @@ public class HostedService {
     }
 
     public HostState hostState() {
-        DockerHost dockerHost = new DockerHost(
-            "wireguard.home",
-            System.getenv("WIREWEAVE_PORTAINER_TOKEN")
-        );
-        Optional<DockerService> dockerService = forGettingDockerInfo.getServicesWithExposedPorts(dockerHost).stream()
-            .filter(service -> service.listensOnPort(hostPort))
-            .findFirst();
-        if(dockerService.isEmpty()) {
-            return HostState.UNREACHABLE;
-        }
-        return HostState.OK;
+//        DockerHost dockerHost = new DockerHost(
+//            "wireguard.home",
+//            System.getenv("WIREWEAVE_PORTAINER_TOKEN")
+//        );
+//        Optional<DockerService> dockerService = forGettingDockerInfo.getServicesWithExposedPorts(dockerHost).stream()
+//            .filter(service -> service.listensOnPort(hostPort))
+//            .findFirst();
+//        if(dockerService.isEmpty()) {
+//            return HostState.UNREACHABLE;
+//        }
+//        return HostState.OK;
+        return HostState.UNREACHABLE;
     }
 }
