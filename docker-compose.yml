@@ -20,9 +20,32 @@ services:
       - /lib/modules:/lib/modules:ro
     ports:
       - 51820:51820/udp
-      - 8888:8080
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.directory=/traefik/config
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/config:/traefik/config
+      - ./traefik/acme:/traefik/acme
     restart: unless-stopped
 
   wireweave:
@@ -34,9 +57,12 @@ services:
       WIREWEAVE_AWS_KEY: ${WIREWEAVE_AWS_KEY}
       WIREWEAVE_AWS_SECRET: ${WIREWEAVE_AWS_SECRET}
       WIREGUARD_CONFIG_PATH: /wireguard/config
+      WIREGUARD_CONTAINER_NAME: wireguard
     depends_on:
       - wireguard
     volumes:
       - ./wireguard/config:/wireguard/config:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
-    network_mode: "service:wireguard"
+    ports:
+      - 8888:8080
