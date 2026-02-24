@@ -4,6 +4,9 @@ import com.wireweave.application.GetHostedServicesUseCase.HostedServiceUco.DnsSt
 import com.wireweave.application.GetHostedServicesUseCase.HostedServiceUco.HostState;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
 import com.wireweave.domain.port.ForGettingDockerInfo;
+import com.wireweave.domain.port.ForGettingReverseProxyRoutes;
+import com.wireweave.domain.port.ForGettingWireGuardInterfaces;
+import com.wireweave.domain.port.ForGettingWireGuardPeers;
 import com.wireweave.domain.port.ForPersistingDnsRecords;
 import java.beans.ConstructorProperties;
 import java.util.List;
@@ -24,6 +27,8 @@ public class HostedService {
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForGettingDockerInfo forGettingDockerInfo;
+    private final ForGettingWireGuardInterfaces forGettingWireGuardInterfaces;
+    private final ForGettingWireGuardPeers forGettingWireGuardPeers;
 
     public DnsState dnsState() {
         Optional<DnsRecord> dnsRecord = forPersistingDnsRecords.getDnsZones().stream()
@@ -38,17 +43,13 @@ public class HostedService {
     }
 
     public HostState hostState() {
-//        DockerHost dockerHost = new DockerHost(
-//            "wireguard.home",
-//            System.getenv("WIREWEAVE_PORTAINER_TOKEN")
-//        );
-//        Optional<DockerService> dockerService = forGettingDockerInfo.getServicesWithExposedPorts(dockerHost).stream()
-//            .filter(service -> service.listensOnPort(hostPort))
-//            .findFirst();
-//        if(dockerService.isEmpty()) {
-//            return HostState.UNREACHABLE;
-//        }
-//        return HostState.OK;
+        Optional<WireGuardPeer> wireGuardPeer = forGettingWireGuardInterfaces.getInterfaces().stream()
+            .flatMap(interfaceName -> forGettingWireGuardPeers.getPeers(interfaceName).stream())
+            .filter(peer -> peer.endpointIp().equals(hostAddress))
+            .findFirst();
+        if(wireGuardPeer.isPresent()) {
+            return HostState.OK;
+        }
         return HostState.UNREACHABLE;
     }
 }

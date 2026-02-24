@@ -4,6 +4,8 @@ import com.wireweave.application.GetHostedServicesUseCase;
 import com.wireweave.domain.HostedService;
 import com.wireweave.domain.port.ForGettingDockerInfo;
 import com.wireweave.domain.port.ForGettingReverseProxyRoutes;
+import com.wireweave.domain.port.ForGettingWireGuardInterfaces;
+import com.wireweave.domain.port.ForGettingWireGuardPeers;
 import com.wireweave.domain.port.ForPersistingDnsRecords;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -14,12 +16,17 @@ public class HostingService implements GetHostedServicesUseCase {
     private final ForGettingReverseProxyRoutes forGettingReverseProxyRoutes;
     private final ForGettingDockerInfo forGettingDockerInfo;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
+    private final ForGettingWireGuardPeers forGettingWireGuardPeers;
+    private final ForGettingWireGuardInterfaces forGettingWireGuardInterfaces;
 
     public HostingService(ForGettingReverseProxyRoutes forGettingReverseProxyRoutes,
-        ForGettingDockerInfo forGettingDockerInfo, ForPersistingDnsRecords forPersistingDnsRecords) {
+        ForGettingDockerInfo forGettingDockerInfo, ForPersistingDnsRecords forPersistingDnsRecords,
+        ForGettingWireGuardPeers forGettingWireGuardPeers, ForGettingWireGuardInterfaces forGettingWireGuardInterfaces) {
         this.forGettingReverseProxyRoutes = forGettingReverseProxyRoutes;
         this.forGettingDockerInfo = forGettingDockerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
+        this.forGettingWireGuardPeers = forGettingWireGuardPeers;
+        this.forGettingWireGuardInterfaces = forGettingWireGuardInterfaces;
     }
 
     @Override
@@ -32,7 +39,9 @@ public class HostingService implements GetHostedServicesUseCase {
                 r.getPort(),
                 r.getAuthInfo() != null,
                 forPersistingDnsRecords,
-                forGettingDockerInfo
+                forGettingDockerInfo,
+                forGettingWireGuardInterfaces,
+                forGettingWireGuardPeers
                 )
             )
             .map(this::toUco)
