@@ -39,20 +39,40 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
         isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         if (!isWindows) {
-            // Initialize Docker client for Linux/container environment
-            DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                .withDockerHost("unix:///var/run/docker.sock")
-                .build();
+            try {
+                // Check if Docker socket exists
+                java.nio.file.Path socketPath = java.nio.file.Paths.get("/var/run/docker.sock");
+                if (!java.nio.file.Files.exists(socketPath)) {
+                    log.error("Docker socket not found at /var/run/docker.sock");
+                    log.error("Make sure Docker socket is mounted in docker-compose.yml");
+                    throw new RuntimeException("Docker socket not accessible");
+                }
+                log.info("Docker socket found at /var/run/docker.sock");
 
-            DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
-                .dockerHost(config.getDockerHost())
-                .maxConnections(100)
-                .connectionTimeout(Duration.ofSeconds(30))
-                .responseTimeout(Duration.ofSeconds(45))
-                .build();
+                // Initialize Docker client for Linux/container environment
+                DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                    .withDockerHost("unix:///var/run/docker.sock")
+                    .build();
 
-            dockerClient = DockerClientImpl.getInstance(config, httpClient);
-            log.info("Docker client initialized for WireGuard container access");
+                log.info("Docker host configured as: {}", config.getDockerHost());
+
+                DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
+                    .dockerHost(config.getDockerHost())
+                    .maxConnections(100)
+                    .connectionTimeout(Duration.ofSeconds(30))
+                    .responseTimeout(Duration.ofSeconds(45))
+                    .build();
+
+                dockerClient = DockerClientImpl.getInstance(config, httpClient);
+                log.info("Docker client initialized for WireGuard container access");
+
+                // Test the connection
+                dockerClient.pingCmd().exec();
+                log.info("Successfully connected to Docker daemon");
+            } catch (Exception e) {
+                log.error("Failed to initialize Docker client: {}", e.getMessage(), e);
+                throw new RuntimeException("Failed to connect to Docker daemon", e);
+            }
         }
     }
 
