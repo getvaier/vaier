@@ -56,6 +56,7 @@
 4. **Access the application**
    - API: http://localhost:8888
    - Swagger UI: http://localhost:8888/swagger-ui.html
+   - Hosted Services Dashboard: http://localhost:8888/hosted-services.html
 
 ### Running Locally (Development)
 
@@ -85,6 +86,7 @@
 4. **Access the application**
    - API: http://localhost:8080
    - Swagger UI: http://localhost:8080/swagger-ui.html
+   - Hosted Services Dashboard: http://localhost:8080/hosted-services.html
 
 # Server Setup Guide
 
