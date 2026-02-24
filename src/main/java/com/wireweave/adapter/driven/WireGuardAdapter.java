@@ -8,19 +8,45 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWireGuardInterfaces {
 
+    @Value("${wireguard.container.name:wireguard}")
+    private String wireguardContainerName;
+
+    private ProcessBuilder createWgProcessBuilder(String... wgArgs) {
+        String containerName = System.getenv("WIREGUARD_CONTAINER_NAME");
+        if (containerName == null) {
+            containerName = wireguardContainerName;
+        }
+
+        // Check if running on Windows (for local development)
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+
+        List<String> command = new ArrayList<>();
+        if (isWindows) {
+            // Windows local development - run wg.exe directly
+            command.add("wg");
+            command.addAll(List.of(wgArgs));
+        } else {
+            // Docker environment - use docker exec
+            command.add("docker");
+            command.add("exec");
+            command.add(containerName);
+            command.add("wg");
+            command.addAll(List.of(wgArgs));
+        }
+
+        return new ProcessBuilder(command);
+    }
+
     @Override
     public List<String> getInterfaces() {
         try {
-            String wgCommand = System.getProperty("os.name").toLowerCase().contains("win")
-                ? "C:\\Program Files\\WireGuard\\wg.exe"
-                : "wg";
-
-            ProcessBuilder processBuilder = new ProcessBuilder(wgCommand, "show", "interfaces");
+            ProcessBuilder processBuilder = createWgProcessBuilder("show", "interfaces");
             Process process = processBuilder.start();
 
             List<String> interfaces = new ArrayList<>();
@@ -67,12 +93,7 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
     @Override
     public List<WireGuardPeer> getPeers(String interfaceName) {
         try {
-            // Use full path to wg.exe on Windows
-            String wgCommand = System.getProperty("os.name").toLowerCase().contains("win")
-                ? "C:\\Program Files\\WireGuard\\wg.exe"
-                : "wg";
-
-            ProcessBuilder processBuilder = new ProcessBuilder(wgCommand, "show", interfaceName, "dump");
+            ProcessBuilder processBuilder = createWgProcessBuilder("show", interfaceName, "dump");
             Process process = processBuilder.start();
 
             List<WireGuardPeer> peers = new ArrayList<>();
