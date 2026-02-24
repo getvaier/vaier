@@ -20,6 +20,7 @@ services:
       - /lib/modules:/lib/modules:ro
     ports:
       - 51820:51820/udp
+      - 8888:8080
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     restart: unless-stopped
@@ -27,8 +28,8 @@ services:
   wireweave:
     image: geireilertsen/wireweave:latest
     container_name: wireweave
-    ports:
-      - "8888:8080"
+    cap_add:
+      - NET_ADMIN
     environment:
       WIREWEAVE_AWS_KEY: ${WIREWEAVE_AWS_KEY}
       WIREWEAVE_AWS_SECRET: ${WIREWEAVE_AWS_SECRET}
@@ -38,3 +39,4 @@ services:
     volumes:
       - ./wireguard/config:/wireguard/config:ro
     restart: unless-stopped
+    network_mode: "service:wireguard"
