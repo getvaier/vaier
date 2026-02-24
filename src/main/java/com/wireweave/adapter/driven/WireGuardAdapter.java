@@ -1,6 +1,7 @@
 package com.wireweave.adapter.driven;
 
 import com.wireweave.domain.WireGuardPeer;
+import com.wireweave.domain.port.ForGettingWireGuardInterfaces;
 import com.wireweave.domain.port.ForGettingWireGuardPeers;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -10,7 +11,58 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
-public class WireGuardAdapter implements ForGettingWireGuardPeers {
+public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWireGuardInterfaces {
+
+    @Override
+    public List<String> getInterfaces() {
+        try {
+            String wgCommand = System.getProperty("os.name").toLowerCase().contains("win")
+                ? "C:\\Program Files\\WireGuard\\wg.exe"
+                : "wg";
+
+            ProcessBuilder processBuilder = new ProcessBuilder(wgCommand, "show", "interfaces");
+            Process process = processBuilder.start();
+
+            List<String> interfaces = new ArrayList<>();
+            StringBuilder stdout = new StringBuilder();
+            StringBuilder stderr = new StringBuilder();
+
+            // Read stdout
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    stdout.append(line).append("\n");
+                    // Interface names are space-separated on a single line
+                    String[] interfaceNames = line.trim().split("\\s+");
+                    for (String interfaceName : interfaceNames) {
+                        if (!interfaceName.isEmpty()) {
+                            interfaces.add(interfaceName);
+                        }
+                    }
+                }
+            }
+
+            // Read stderr
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    stderr.append(line).append("\n");
+                }
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new RuntimeException("wg command failed with exit code: " + exitCode +
+                    "\nSTDOUT: " + stdout.toString() +
+                    "\nSTDERR: " + stderr.toString());
+            }
+
+            return interfaces;
+
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to execute wg command to list interfaces", e);
+        }
+    }
 
     @Override
     public List<WireGuardPeer> getPeers(String interfaceName) {
@@ -99,17 +151,21 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers {
     public static void main(String[] args) {
         WireGuardAdapter adapter = new WireGuardAdapter();
 
-        // Use first argument as interface name, or default to "wg0"
-        String interfaceName = args.length > 0 ? args[0] : "Frankfurt";
+        List<String> interfaces = adapter.getInterfaces();
+
+        if(interfaces.isEmpty()) {
+            System.out.println("No WireGuard interfaces found.");
+            return;
+        }
 
         System.out.println("=== WireGuard Peer Query Tool ===");
         System.out.println("NOTE: This may require administrator/root privileges");
         System.out.println("      On Windows, run IntelliJ as Administrator\n");
-        System.out.println("Querying WireGuard interface: " + interfaceName);
-        System.out.println("Running command: wg show " + interfaceName + " dump\n");
+        System.out.println("Querying WireGuard interface: " + interfaces.get(0) + "\n");
+        System.out.println("Running command: wg show " + interfaces.get(0) + " dump\n");
 
         try {
-            List<WireGuardPeer> peers = adapter.getPeers(interfaceName);
+            List<WireGuardPeer> peers = adapter.getPeers(interfaces.get(0));
 
             System.out.println("Found " + peers.size() + " peer(s):\n");
 
