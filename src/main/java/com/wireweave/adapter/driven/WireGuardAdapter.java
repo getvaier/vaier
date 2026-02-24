@@ -1,11 +1,23 @@
 package com.wireweave.adapter.driven;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.core.DefaultDockerClientConfig;
+import com.github.dockerjava.core.DockerClientConfig;
+import com.github.dockerjava.core.DockerClientImpl;
+import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.transport.DockerHttpClient;
 import com.wireweave.domain.WireGuardPeer;
 import com.wireweave.domain.port.ForGettingWireGuardInterfaces;
 import com.wireweave.domain.port.ForGettingWireGuardPeers;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.StringReader;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
@@ -19,47 +31,159 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
 
-    private ProcessBuilder createWgProcessBuilder(String... wgArgs) {
+    private DockerClient dockerClient;
+    private boolean isWindows;
+
+    @PostConstruct
+    public void init() {
+        isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+
+        if (!isWindows) {
+            // Initialize Docker client for Linux/container environment
+            DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                .withDockerHost("unix:///var/run/docker.sock")
+                .build();
+
+            DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
+                .dockerHost(config.getDockerHost())
+                .maxConnections(100)
+                .connectionTimeout(Duration.ofSeconds(30))
+                .responseTimeout(Duration.ofSeconds(45))
+                .build();
+
+            dockerClient = DockerClientImpl.getInstance(config, httpClient);
+            log.info("Docker client initialized for WireGuard container access");
+        }
+    }
+
+    @PreDestroy
+    public void cleanup() {
+        if (dockerClient != null) {
+            try {
+                dockerClient.close();
+            } catch (Exception e) {
+                log.error("Error closing Docker client", e);
+            }
+        }
+    }
+
+    private String executeWgCommand(String... wgArgs) throws IOException, InterruptedException {
+        if (isWindows) {
+            // Windows local development - run wg.exe directly
+            return executeLocalCommand(wgArgs);
+        } else {
+            // Docker environment - use Docker API
+            return executeDockerExec(wgArgs);
+        }
+    }
+
+    private String executeLocalCommand(String... wgArgs) throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add("wg");
+        command.addAll(List.of(wgArgs));
+
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        Process process = processBuilder.start();
+
+        StringBuilder stdout = new StringBuilder();
+        StringBuilder stderr = new StringBuilder();
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                stdout.append(line).append("\n");
+            }
+        }
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                stderr.append(line).append("\n");
+            }
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new RuntimeException("wg command failed with exit code: " + exitCode +
+                "\nSTDOUT: " + stdout.toString() +
+                "\nSTDERR: " + stderr.toString());
+        }
+
+        return stdout.toString();
+    }
+
+    private String executeDockerExec(String... wgArgs) throws IOException {
         String containerName = System.getenv("WIREGUARD_CONTAINER_NAME");
         if (containerName == null) {
             containerName = wireguardContainerName;
         }
 
-        // Check if running on Windows (for local development)
-        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
-
         List<String> command = new ArrayList<>();
-        if (isWindows) {
-            // Windows local development - run wg.exe directly
-            command.add("wg");
-            command.addAll(List.of(wgArgs));
-        } else {
-            // Docker environment - use docker exec
-            command.add("docker");
-            command.add("exec");
-            command.add(containerName);
-            command.add("wg");
-            command.addAll(List.of(wgArgs));
+        command.add("wg");
+        command.addAll(List.of(wgArgs));
+
+        ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(containerName)
+            .withCmd(command.toArray(new String[0]))
+            .withAttachStdout(true)
+            .withAttachStderr(true)
+            .exec();
+
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+
+        try {
+            dockerClient.execStartCmd(execCreateCmdResponse.getId())
+                .exec(new DockerExecCallback(stdout, stderr))
+                .awaitCompletion();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Docker exec interrupted", e);
         }
 
-        return new ProcessBuilder(command);
+        String stderrStr = stderr.toString();
+        if (!stderrStr.isEmpty()) {
+            log.warn("WireGuard command stderr: {}", stderrStr);
+        }
+
+        return stdout.toString();
+    }
+
+    private static class DockerExecCallback extends com.github.dockerjava.api.async.ResultCallbackTemplate<DockerExecCallback, com.github.dockerjava.api.model.Frame> {
+        private final ByteArrayOutputStream stdout;
+        private final ByteArrayOutputStream stderr;
+
+        public DockerExecCallback(ByteArrayOutputStream stdout, ByteArrayOutputStream stderr) {
+            this.stdout = stdout;
+            this.stderr = stderr;
+        }
+
+        @Override
+        public void onNext(com.github.dockerjava.api.model.Frame frame) {
+            try {
+                switch (frame.getStreamType()) {
+                    case STDOUT:
+                    case RAW:
+                        stdout.write(frame.getPayload());
+                        break;
+                    case STDERR:
+                        stderr.write(frame.getPayload());
+                        break;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to process Docker exec output", e);
+            }
+        }
     }
 
     @Override
     public List<String> getInterfaces() {
         try {
-            ProcessBuilder processBuilder = createWgProcessBuilder("show", "interfaces");
-            Process process = processBuilder.start();
+            String output = executeWgCommand("show", "interfaces");
 
             List<String> interfaces = new ArrayList<>();
-            StringBuilder stdout = new StringBuilder();
-            StringBuilder stderr = new StringBuilder();
-
-            // Read stdout
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            try (BufferedReader reader = new BufferedReader(new StringReader(output))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    stdout.append(line).append("\n");
                     // Interface names are space-separated on a single line
                     String[] interfaceNames = line.trim().split("\\s+");
                     for (String interfaceName : interfaceNames) {
@@ -68,21 +192,6 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
                         }
                     }
                 }
-            }
-
-            // Read stderr
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    stderr.append(line).append("\n");
-                }
-            }
-
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                throw new RuntimeException("wg command failed with exit code: " + exitCode +
-                    "\nSTDOUT: " + stdout.toString() +
-                    "\nSTDERR: " + stderr.toString());
             }
 
             return interfaces;
@@ -95,21 +204,15 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
     @Override
     public List<WireGuardPeer> getPeers(String interfaceName) {
         try {
-            ProcessBuilder processBuilder = createWgProcessBuilder("show", interfaceName, "dump");
-            Process process = processBuilder.start();
+            String output = executeWgCommand("show", interfaceName, "dump");
 
             List<WireGuardPeer> peers = new ArrayList<>();
-            StringBuilder stdout = new StringBuilder();
-            StringBuilder stderr = new StringBuilder();
 
-            // Read stdout
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            try (BufferedReader reader = new BufferedReader(new StringReader(output))) {
                 String line;
                 boolean firstLine = true;
 
                 while ((line = reader.readLine()) != null) {
-                    stdout.append(line).append("\n");
-
                     // Skip the first line (interface info)
                     if (firstLine) {
                         firstLine = false;
@@ -149,21 +252,6 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
                 }
             }
 
-            // Read stderr
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    stderr.append(line).append("\n");
-                }
-            }
-
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                throw new RuntimeException("wg command failed with exit code: " + exitCode +
-                    "\nSTDOUT: " + stdout.toString() +
-                    "\nSTDERR: " + stderr.toString());
-            }
-
             return peers;
 
         } catch (IOException | InterruptedException e) {
@@ -173,6 +261,8 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
 
     public static void main(String[] args) {
         WireGuardAdapter adapter = new WireGuardAdapter();
+        // Manually call init since we're not in Spring context
+        adapter.init();
 
         List<String> interfaces = adapter.getInterfaces();
 
