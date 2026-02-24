@@ -57,10 +57,11 @@ services:
       WIREWEAVE_AWS_KEY: ${WIREWEAVE_AWS_KEY}
       WIREWEAVE_AWS_SECRET: ${WIREWEAVE_AWS_SECRET}
       WIREGUARD_CONFIG_PATH: /wireguard/config
-      WIREGUARD_CONTAINER_NAME: wireguard
+      TRAEFIK_CONFIG_PATH: /traefik/config
     depends_on:
       - wireguard
     volumes:
+      - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
