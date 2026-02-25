@@ -1,5 +1,7 @@
 package com.wireweave.application;
 
+import com.wireweave.domain.DnsState;
+import com.wireweave.domain.Server.State;
 import java.util.List;
 
 public interface GetHostedServicesUseCase {
@@ -12,15 +14,9 @@ public interface GetHostedServicesUseCase {
         DnsState dnsState,
         String hostAddress,
         int hostPort,
-        HostState hostState,
+        State state,
         boolean authenticated
     ){
-        public enum DnsState {
-            OK, NON_EXISTING
-        }
 
-        public enum HostState {
-            OK, UNREACHABLE, AUTH_FAILED
-        }
     }
 }

@@ -12,19 +12,10 @@ public class Server {
     private final String address;
 
     @Getter
-    @ToString.Exclude
-    private final String apiToken;
-
-    @Getter
     private final Integer port;
 
     @Getter
     private final boolean tlsEnabled;
-
-    // Legacy constructor for backward compatibility with Portainer API
-    public Server(String address, String apiToken) {
-        this(address, apiToken, 2375, false);
-    }
 
     public String dockerHostUrl() {
         String protocol = tlsEnabled ? "https" : "tcp";
@@ -37,5 +28,9 @@ public class Server {
     @Deprecated
     public String endpointsUrl() {
         return "http://" + address + ":9000/api/endpoints";
+    }
+
+    public enum State {
+        OK, UNREACHABLE
     }
 }

@@ -1,8 +1,7 @@
 package com.wireweave.domain;
 
-import com.wireweave.application.GetHostedServicesUseCase.HostedServiceUco.DnsState;
-import com.wireweave.application.GetHostedServicesUseCase.HostedServiceUco.HostState;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
+import com.wireweave.domain.Server.State;
 import com.wireweave.domain.port.ForGettingServerInfo;
 import com.wireweave.domain.port.ForGettingVpnClients;
 import com.wireweave.domain.port.ForPersistingDnsRecords;
@@ -35,14 +34,14 @@ public class HostedService {
         return DnsState.OK;
     }
 
-    public HostState hostState() {
+    public State hostState() {
         Optional<VpnClient> wireGuardPeer = forGettingVpnClients.getClients().stream()
             .peek(peer -> System.out.println("Processing peer: " + peer))
             .filter(peer -> peer.endpointIp().equals(hostAddress))
             .findFirst();
         if(wireGuardPeer.isPresent()) {
-            return HostState.OK;
+            return State.OK;
         }
-        return HostState.UNREACHABLE;
+        return State.UNREACHABLE;
     }
 }
