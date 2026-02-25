@@ -70,3 +70,9 @@ services:
     restart: unless-stopped
     ports:
       - 8888:8080
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wireweave.rule=Host(`wireweave.eilertsen.family`)
+      - traefik.http.routers.wireweave.entrypoints=websecure
+      - traefik.http.routers.wireweave.tls.certresolver=letsencrypt
+      - traefik.http.services.wireweave.loadbalancer.server.port=8080

@@ -72,32 +72,88 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
         try {
-            // Fetch HTTP routers from API
-            JsonNode routersData = fetchFromTraefikApi("/api/http/routers");
-            JsonNode servicesData = fetchFromTraefikApi("/api/http/services");
+            // First, try to fetch from Traefik API (gets all active routes including Docker labels)
+            try {
+                // Fetch HTTP routers from API
+                JsonNode routersData = fetchFromTraefikApi("/api/http/routers");
+                JsonNode servicesData = fetchFromTraefikApi("/api/http/services");
 
-            // Convert JsonNode to Map - Traefik API returns arrays, so we need to convert them
-            Map<String, Object> routers = convertTraefikArrayToMap(routersData);
-            Map<String, Object> services = convertTraefikArrayToMap(servicesData);
+                // Convert JsonNode to Map - Traefik API returns arrays, so we need to convert them
+                Map<String, Object> routers = convertTraefikArrayToMap(routersData);
+                Map<String, Object> services = convertTraefikArrayToMap(servicesData);
 
-            if (routers != null && services != null) {
-                routes.addAll(extractHttpRoutesFromApi(routers, services));
-            }
+                if (routers != null && services != null) {
+                    routes.addAll(extractHttpRoutesFromApi(routers, services));
+                }
 
-            // Fetch TCP routers from API
-            JsonNode tcpRoutersData = fetchFromTraefikApi("/api/tcp/routers");
-            JsonNode tcpServicesData = fetchFromTraefikApi("/api/tcp/services");
+                // Fetch TCP routers from API
+                JsonNode tcpRoutersData = fetchFromTraefikApi("/api/tcp/routers");
+                JsonNode tcpServicesData = fetchFromTraefikApi("/api/tcp/services");
 
-            Map<String, Object> tcpRouters = convertTraefikArrayToMap(tcpRoutersData);
-            Map<String, Object> tcpServices = convertTraefikArrayToMap(tcpServicesData);
+                Map<String, Object> tcpRouters = convertTraefikArrayToMap(tcpRoutersData);
+                Map<String, Object> tcpServices = convertTraefikArrayToMap(tcpServicesData);
 
-            if (tcpRouters != null && tcpServices != null) {
-                routes.addAll(extractTcpRoutesFromApi(tcpRouters, tcpServices));
+                if (tcpRouters != null && tcpServices != null) {
+                    routes.addAll(extractTcpRoutesFromApi(tcpRouters, tcpServices));
+                }
+
+                log.info("Fetched {} routes from Traefik API", routes.size());
+            } catch (Exception apiException) {
+                log.warn("Failed to fetch from Traefik API, falling back to file reading", apiException);
+
+                // Fallback: Read directly from configuration file
+                routes.addAll(getReverseProxyRoutesFromFile());
             }
 
         } catch (Exception e) {
-            log.error("Failed to fetch routes from Traefik API", e);
-            throw new RuntimeException("Failed to fetch routes from Traefik API: " + TRAEFIK_API_URL, e);
+            log.error("Failed to fetch routes", e);
+            throw new RuntimeException("Failed to fetch routes from Traefik", e);
+        }
+
+        return routes;
+    }
+
+    /**
+     * Read routes directly from the configuration file.
+     * This is a fallback when the API is not available.
+     */
+    private List<ReverseProxyRoute> getReverseProxyRoutesFromFile() {
+        List<ReverseProxyRoute> routes = new ArrayList<>();
+        File configFile = new File(CONFIG_FILE_PATH);
+
+        try (FileInputStream inputStream = new FileInputStream(configFile)) {
+            Map<String, Object> config = yaml.load(inputStream);
+
+            if (config == null) {
+                return routes;
+            }
+
+            // Extract HTTP routers
+            Map<String, Object> http = getNestedMap(config, "http");
+            if (http != null) {
+                Map<String, Object> routers = getNestedMap(http, "routers");
+                Map<String, Object> services = getNestedMap(http, "services");
+
+                if (routers != null && services != null) {
+                    routes.addAll(extractHttpRoutes(routers, services));
+                }
+            }
+
+            // Extract TCP routers
+            Map<String, Object> tcp = getNestedMap(config, "tcp");
+            if (tcp != null) {
+                Map<String, Object> routers = getNestedMap(tcp, "routers");
+                Map<String, Object> services = getNestedMap(tcp, "services");
+
+                if (routers != null && services != null) {
+                    routes.addAll(extractTcpRoutes(routers, services));
+                }
+            }
+
+            log.info("Read {} routes from configuration file", routes.size());
+
+        } catch (IOException e) {
+            log.error("Failed to read Traefik configuration file: " + configFile, e);
         }
 
         return routes;
