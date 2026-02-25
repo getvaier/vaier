@@ -76,9 +76,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             JsonNode routersData = fetchFromTraefikApi("/api/http/routers");
             JsonNode servicesData = fetchFromTraefikApi("/api/http/services");
 
-            // Convert JsonNode to Map for compatibility with existing extraction methods
-            Map<String, Object> routers = objectMapper.convertValue(routersData, Map.class);
-            Map<String, Object> services = objectMapper.convertValue(servicesData, Map.class);
+            // Convert JsonNode to Map - Traefik API returns arrays, so we need to convert them
+            Map<String, Object> routers = convertTraefikArrayToMap(routersData);
+            Map<String, Object> services = convertTraefikArrayToMap(servicesData);
 
             if (routers != null && services != null) {
                 routes.addAll(extractHttpRoutesFromApi(routers, services));
@@ -88,8 +88,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             JsonNode tcpRoutersData = fetchFromTraefikApi("/api/tcp/routers");
             JsonNode tcpServicesData = fetchFromTraefikApi("/api/tcp/services");
 
-            Map<String, Object> tcpRouters = objectMapper.convertValue(tcpRoutersData, Map.class);
-            Map<String, Object> tcpServices = objectMapper.convertValue(tcpServicesData, Map.class);
+            Map<String, Object> tcpRouters = convertTraefikArrayToMap(tcpRoutersData);
+            Map<String, Object> tcpServices = convertTraefikArrayToMap(tcpServicesData);
 
             if (tcpRouters != null && tcpServices != null) {
                 routes.addAll(extractTcpRoutesFromApi(tcpRouters, tcpServices));
@@ -119,6 +119,34 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         }
 
         return objectMapper.readTree(response.body());
+    }
+
+    /**
+     * Convert Traefik API array response to a map keyed by name.
+     * Traefik API returns arrays like: [{"name": "router1", ...}, {"name": "router2", ...}]
+     * We convert to: {"router1": {...}, "router2": {...}}
+     */
+    private Map<String, Object> convertTraefikArrayToMap(JsonNode arrayNode) {
+        Map<String, Object> resultMap = new HashMap<>();
+
+        if (arrayNode == null) {
+            return resultMap;
+        }
+
+        if (arrayNode.isArray()) {
+            for (JsonNode item : arrayNode) {
+                String name = item.has("name") ? item.get("name").asText() : null;
+                if (name != null) {
+                    Map<String, Object> itemMap = objectMapper.convertValue(item, Map.class);
+                    resultMap.put(name, itemMap);
+                }
+            }
+        } else if (arrayNode.isObject()) {
+            // If it's already an object, convert it directly
+            resultMap = objectMapper.convertValue(arrayNode, Map.class);
+        }
+
+        return resultMap;
     }
 
     /**
