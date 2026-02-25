@@ -2,35 +2,35 @@ package com.wireweave.application.service;
 
 import com.wireweave.application.GetHostedServicesUseCase;
 import com.wireweave.domain.HostedService;
-import com.wireweave.domain.port.ForGettingDockerInfo;
-import com.wireweave.domain.port.ForGettingReverseProxyRoutes;
+import com.wireweave.domain.port.ForGettingServerInfo;
 import com.wireweave.domain.port.ForGettingVpnClients;
 import com.wireweave.domain.port.ForPersistingDnsRecords;
+import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
 public class HostingService implements GetHostedServicesUseCase {
 
-    private final ForGettingReverseProxyRoutes forGettingReverseProxyRoutes;
-    private final ForGettingDockerInfo forGettingDockerInfo;
+    private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+    private final ForGettingServerInfo forGettingServerInfo;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForGettingVpnClients forGettingVpnClients;
 
-    public HostingService(ForGettingReverseProxyRoutes forGettingReverseProxyRoutes,
-        ForGettingDockerInfo forGettingDockerInfo,
+    public HostingService(ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
+        ForGettingServerInfo forGettingServerInfo,
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForGettingVpnClients forGettingVpnClients
     ) {
-        this.forGettingReverseProxyRoutes = forGettingReverseProxyRoutes;
-        this.forGettingDockerInfo = forGettingDockerInfo;
+        this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
+        this.forGettingServerInfo = forGettingServerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.forGettingVpnClients = forGettingVpnClients;
     }
 
     @Override
     public List<HostedServiceUco> getHostedServices() {
-        return forGettingReverseProxyRoutes.getReverseProxyRoutes().stream()
+        return forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
             .map(r -> new HostedService(
                 r.getName(),
                 r.getDomainName(),
@@ -38,7 +38,7 @@ public class HostingService implements GetHostedServicesUseCase {
                 r.getPort(),
                 r.getAuthInfo() != null,
                 forPersistingDnsRecords,
-                forGettingDockerInfo,
+                forGettingServerInfo,
                 forGettingVpnClients
                 )
             )

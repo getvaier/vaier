@@ -1,7 +1,6 @@
 package com.wireweave.adapter.driven;
 
 import com.wireweave.domain.ReverseProxyRoute;
-import com.wireweave.domain.port.ForGettingReverseProxyRoutes;
 import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
 import java.io.File;
 import java.util.LinkedHashMap;
@@ -20,14 +19,14 @@ import java.util.Map;
 
 @Component
 @Slf4j
-public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersistingReverseProxyRoutes {
+public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRoutes {
 
     private final Yaml yaml;
     private final Yaml dumper;
     private Map<String, Object> config;
     private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/dynamic_conf/remote-apps.yml";
 
-    public TraefikAdapter() {
+    public TraefikReverseProxyAdapter() {
         this.yaml = new Yaml();
 
         DumperOptions options = new DumperOptions();
@@ -786,7 +785,7 @@ public class TraefikAdapter implements ForGettingReverseProxyRoutes, ForPersisti
     }
 
     public static void main(String[] args) {
-        TraefikAdapter adapter = new TraefikAdapter();
+        TraefikReverseProxyAdapter adapter = new TraefikReverseProxyAdapter();
 
         List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
 

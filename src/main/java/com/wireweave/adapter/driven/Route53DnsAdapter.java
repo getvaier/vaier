@@ -16,11 +16,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-public class Route53Adapter implements ForPersistingDnsRecords {
+public class Route53DnsAdapter implements ForPersistingDnsRecords {
 
     private final Route53Client route53Client;
 
-    public Route53Adapter() {
+    public Route53DnsAdapter() {
         String accessKeyId = System.getenv("WIREWEAVE_AWS_KEY");
         String secretAccessKey = System.getenv("WIREWEAVE_AWS_SECRET");
         AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
@@ -262,7 +262,7 @@ public class Route53Adapter implements ForPersistingDnsRecords {
     }
 
     public static void main(String[] args) {
-        Route53Adapter adapter = new Route53Adapter();
+        Route53DnsAdapter adapter = new Route53DnsAdapter();
 
         List<DnsZone> dnsZones = adapter.getDnsZones();
         dnsZones.forEach(System.out::println);

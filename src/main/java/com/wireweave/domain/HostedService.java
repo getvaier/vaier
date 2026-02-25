@@ -3,7 +3,7 @@ package com.wireweave.domain;
 import com.wireweave.application.GetHostedServicesUseCase.HostedServiceUco.DnsState;
 import com.wireweave.application.GetHostedServicesUseCase.HostedServiceUco.HostState;
 import com.wireweave.domain.DnsRecord.DnsRecordType;
-import com.wireweave.domain.port.ForGettingDockerInfo;
+import com.wireweave.domain.port.ForGettingServerInfo;
 import com.wireweave.domain.port.ForGettingVpnClients;
 import com.wireweave.domain.port.ForPersistingDnsRecords;
 import java.util.Optional;
@@ -20,7 +20,7 @@ public class HostedService {
     private final boolean authenticated;
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
-    private final ForGettingDockerInfo forGettingDockerInfo;
+    private final ForGettingServerInfo forGettingServerInfo;
     private final ForGettingVpnClients forGettingVpnClients;
 
     public DnsState dnsState() {
