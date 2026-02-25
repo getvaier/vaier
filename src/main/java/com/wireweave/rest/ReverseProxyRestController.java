@@ -17,7 +17,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/reverse-proxy")
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class ReverseProxyRestController {
 
     private final AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
