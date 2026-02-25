@@ -12,15 +12,11 @@
 
 ## ✨ Features
 
-- 🔍 **Service Discovery** - Automatically discover Docker containers via Portainer with exposed port mapping
-- 🌐 **DNS Management** - View and manage AWS Route53 hosted zones and CNAME records via REST API
-- 🔀 **Reverse Proxy Integration** - Parse Traefik configurations to discover routes with authentication middleware
-- 🛡️ **WireGuard Management** - Full WireGuard server management with peer creation, key generation, and configuration retrieval
-- 🔑 **Automatic Key Generation** - Generate WireGuard public/private keypairs for new peers
-- 📡 **IP Allocation** - Automatic IP address assignment for new peers
-- 📝 **Client Config Generation** - Generate ready-to-use WireGuard client configurations with optional split-tunneling
+- 🔍 **Service Discovery** - Automatically discover Docker containers with exposed port mapping
+- 🌐 **DNS Management** - Full AWS Route53 management including zones and records via REST API
+- 🔀 **Reverse Proxy Integration** - Manage Traefik routes with dynamic configuration file generation
 - 🏗️ **Clean Architecture** - Built with hexagonal architecture principles for maintainability
-- 🐳 **Docker Ready** - Containerized deployment with docker-compose
+- 🐳 **Docker Ready** - Complete containerized deployment with WireGuard, Traefik, and the management application
 - 📚 **OpenAPI Documentation** - Interactive API documentation with Swagger UI
 
 ## 🚀 Getting Started
@@ -30,7 +26,8 @@
 - Docker and Docker Compose
 - Java 21 (for local development)
 - Maven 3.9+ (for local development)
-- AWS credentials with Route53 access (optional, for DNS features)
+- AWS credentials with Route53 access (for DNS features)
+- Domain name for WireGuard and HTTPS access (recommended)
 
 ### Running with Docker (Recommended)
 
@@ -46,6 +43,7 @@
    ```bash
    WIREWEAVE_AWS_KEY=your_aws_access_key
    WIREWEAVE_AWS_SECRET=your_aws_secret_key
+   ACME_EMAIL=your_email@example.com
    ```
 
 3. **Start the application**
@@ -57,6 +55,21 @@
    - API: http://localhost:8888
    - Swagger UI: http://localhost:8888/swagger-ui.html
    - Hosted Services Dashboard: http://localhost:8888/hosted-services.html
+   - Traefik Dashboard: http://localhost:8080
+
+### Environment Variables
+
+The application uses the following environment variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `WIREWEAVE_AWS_KEY` | Yes | AWS access key for Route53 operations |
+| `WIREWEAVE_AWS_SECRET` | Yes | AWS secret key for Route53 operations |
+| `ACME_EMAIL` | Yes | Email for Let's Encrypt certificate notifications |
+| `WIREGUARD_CONFIG_PATH` | No | Path to WireGuard config directory (default: `/wireguard/config`) |
+| `WIREGUARD_CONTAINER_NAME` | No | Name of WireGuard container (default: `wireguard`) |
+| `TRAEFIK_CONFIG_PATH` | No | Path to Traefik config directory (default: `/traefik/config`) |
+| `TRAEFIK_API_URL` | No | Traefik API URL (default: `http://traefik:8080`) |
 
 ### Running Locally (Development)
 
@@ -87,6 +100,8 @@
    - API: http://localhost:8080
    - Swagger UI: http://localhost:8080/swagger-ui.html
    - Hosted Services Dashboard: http://localhost:8080/hosted-services.html
+
+> **Note:** When running locally, you'll need to adjust the paths for accessing WireGuard and Traefik configurations, or run the full docker-compose stack for complete functionality.
 
 # Server Setup Guide
 
@@ -156,12 +171,13 @@ Access Portainer at `https://<your-ec2-ip>:9443` and create your admin user on f
 
 ## 5. Deploy WireWeave
 
-In Portainer, navigate to **Stacks → Add Stack**, paste the contents of `docker-compose.yml`, and click **Deploy**.
+In Portainer, navigate to **Stacks → Add Stack**, paste the contents of `docker-compose.yml`, configure environment variables (AWS credentials and ACME email), and click **Deploy**.
 
 Alternatively, deploy from the command line:
 ```bash
-git clone https://github.com/your-org/wireweave.git
+git clone https://github.com/geireilertsen/wireweave.git
 cd wireweave
+# Create .env file with your credentials
 docker compose up -d
 ```
 
@@ -174,11 +190,15 @@ docker compose up -d
 | 22   | TCP      | SSH                  |
 | 9443 | TCP      | Portainer UI (HTTPS) |
 | 51820| UDP      | WireGuard            |
-| 80   | TCP      | HTTP (optional)      |
-| 443  | TCP      | HTTPS (optional)     |
-### API Endpoints
+| 80   | TCP      | HTTP (Traefik)       |
+| 443  | TCP      | HTTPS (Traefik)      |
+| 8888 | TCP      | WireWeave API (optional, if not using Traefik) |
 
-**DNS Management:**
+---
+
+## 📡 API Endpoints
+
+### DNS Management
 - `GET /dns/zones` - List all DNS zones
 - `POST /dns/zones` - Create a new DNS zone
 - `DELETE /dns/zones/{zoneName}` - Delete a DNS zone
@@ -186,56 +206,78 @@ docker compose up -d
 - `POST /dns/zones/{zoneName}/records` - Add a DNS record to a zone
 - `DELETE /dns/zones/{zoneName}/records` - Delete a DNS record from a zone
 
-**Service Discovery:**
-- `GET /hosted-services/discover` - Discover hosted services from Docker, Traefik, and WireGuard configurations
+### Service Discovery
+- `GET /hosted-services/discover` - Discover hosted services from Docker containers and Traefik routes
+- `GET /docker-services?address={address}&port={port}&tlsEnabled={true|false}` - Query Docker services from a specific server
 
-**Reverse Proxy Management:**
+### Reverse Proxy Management
+- `GET /reverse-proxy/routes` - List all configured reverse proxy routes
 - `POST /reverse-proxy/routes` - Add a reverse proxy route to Traefik
 - `DELETE /reverse-proxy/routes/{dnsName}` - Delete a reverse proxy route
 
-**WireGuard Management:**
-- `GET /wireguard/{interfaceName}/config` - Get WireGuard interface configuration details
-- `GET /wireguard/{interfaceName}/peers` - List all configured peers for an interface
-- `POST /wireguard/{interfaceName}/peers` - Create a new peer with automatic key generation and IP allocation
-- `GET /wireguard/{interfaceName}/peers/{peerName}/config` - Download client configuration file for a peer
-
 ## 🏗️ Architecture
 
+### Application Architecture
 WireWeave is built using hexagonal architecture with clear separation between:
 - **Domain Layer** - Core business logic and entities
 - **Application Layer** - Use cases and orchestration
-- **Infrastructure Layer** - Adapters for AWS Route53, Docker/Portainer, Traefik, and WireGuard
+- **Infrastructure Layer** - Adapters for AWS Route53, Docker, Traefik, and WireGuard
 - **Web Layer** - REST API with OpenAPI documentation
+
+### Docker Stack Components
+The `docker-compose.yml` file deploys three interconnected services:
+
+1. **WireGuard** - VPN server using linuxserver/wireguard
+   - Listens on UDP port 51820
+   - Configuration stored in `./wireguard/config`
+   - Provides secure network access to hosted services
+
+2. **Traefik** - Reverse proxy with automatic HTTPS
+   - HTTP (port 80) and HTTPS (port 443) entry points
+   - Dashboard on port 8080
+   - Let's Encrypt integration for automatic SSL certificates
+   - Dynamic configuration from `./traefik/config`
+
+3. **WireWeave** - Management application
+   - REST API on port 8888 (8080 internally)
+   - Accesses WireGuard config directory (read-only)
+   - Manages Traefik configuration files
+   - Connects to Docker socket for service discovery
+   - Accessible via HTTPS at configured domain
 
 ## 🛠️ Technology Stack
 
 **Backend:**
-- Java 21 + Spring Boot 3.5
-- AWS SDK for Route53
-- Docker Java Client
-- Springdoc OpenAPI
+- Java 21 + Spring Boot 3.5.5
+- AWS SDK for Route53 (2.23.9)
+- Docker Java Client (3.3.4)
+- Springdoc OpenAPI (2.7.0)
 - SnakeYAML for configuration parsing
+- Project Lombok for code generation
 
 **Infrastructure:**
 - Docker Compose
-- Maven
+- Maven 3.9+
+- WireGuard container (linuxserver/wireguard)
+- Traefik reverse proxy with Let's Encrypt
 
 ## 📋 Roadmap
 
 - [x] Project setup and Docker containerization
-- [x] AWS Route53 DNS zone listing and CNAME record filtering
-- [x] Traefik reverse proxy configuration parsing
-- [x] Docker container discovery via Portainer
-- [x] WireGuard configuration file parsing
+- [x] AWS Route53 DNS zone and record management
+- [x] Traefik reverse proxy route management
+- [x] Docker container discovery
 - [x] Hosted service discovery with unified REST API
-- [x] WireGuard peer management (create, list, configure)
-- [x] Automatic key generation and IP allocation
-- [x] Client configuration generation with split-tunneling support
+- [x] Reverse proxy route persistence via Traefik file provider
+- [x] Web dashboard for hosted services
+- [ ] WireGuard peer management (create, list, configure)
+- [ ] Automatic key generation and IP allocation
+- [ ] Client configuration generation with split-tunneling support
 - [ ] Peer deletion and modification
 - [ ] WireGuard mesh topology generator
-- [ ] Automated DNS record management
+- [ ] Automated DNS record creation for new services
 - [ ] Site-to-site routing configuration
-- [ ] Monitoring and management dashboard
+- [ ] Enhanced monitoring and management dashboard
 
 ## 📄 License
 
@@ -250,4 +292,3 @@ Created by [Geir Eilertsen](https://github.com/geireilertsen)
 <p align="center">
   Made with ❤️ for the self-hosted community
 </p>
-```
