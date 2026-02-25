@@ -7,9 +7,8 @@ import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
-import com.wireweave.domain.WireGuardPeer;
-import com.wireweave.domain.port.ForGettingWireGuardInterfaces;
-import com.wireweave.domain.port.ForGettingWireGuardPeers;
+import com.wireweave.domain.VpnClient;
+import com.wireweave.domain.port.ForGettingVpnClients;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
@@ -26,7 +25,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWireGuardInterfaces {
+public class WireGuardVpnAdapter implements ForGettingVpnClients {
 
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
@@ -200,8 +199,7 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
         }
     }
 
-    @Override
-    public List<String> getInterfaces() {
+    private List<String> getInterfaces() {
         try {
             String output = executeWgCommand("show", "interfaces");
 
@@ -227,11 +225,17 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
     }
 
     @Override
-    public List<WireGuardPeer> getPeers(String interfaceName) {
+    public List<VpnClient> getClients() {
+        return getInterfaces().stream()
+            .flatMap(interfaceName -> getClients(interfaceName).stream())
+            .toList();
+    }
+
+    private List<VpnClient> getClients(String interfaceName) {
         try {
             String output = executeWgCommand("show", interfaceName, "dump");
 
-            List<WireGuardPeer> peers = new ArrayList<>();
+            List<VpnClient> clients = new ArrayList<>();
 
             try (BufferedReader reader = new BufferedReader(new StringReader(output))) {
                 String line;
@@ -264,7 +268,7 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
                             }
                         }
 
-                        peers.add(new WireGuardPeer(
+                        clients.add(new VpnClient(
                             parts[0], // publicKey
                             parts[3], // allowedIps
                             endpointIp, // endpointIp
@@ -277,7 +281,7 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
                 }
             }
 
-            return peers;
+            return clients;
 
         } catch (IOException | InterruptedException e) {
             throw new RuntimeException("Failed to execute wg command for interface: " + interfaceName, e);
@@ -285,7 +289,7 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
     }
 
     public static void main(String[] args) {
-        WireGuardAdapter adapter = new WireGuardAdapter();
+        WireGuardVpnAdapter adapter = new WireGuardVpnAdapter();
         // Manually call init since we're not in Spring context
         adapter.init();
 
@@ -303,12 +307,12 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
         System.out.println("Running command: wg show " + interfaces.get(0) + " dump\n");
 
         try {
-            List<WireGuardPeer> peers = adapter.getPeers(interfaces.get(0));
+            List<VpnClient> peers = adapter.getClients(interfaces.get(0));
 
             System.out.println("Found " + peers.size() + " peer(s):\n");
 
             for (int i = 0; i < peers.size(); i++) {
-                WireGuardPeer peer = peers.get(i);
+                VpnClient peer = peers.get(i);
                 System.out.println("Peer #" + (i + 1) + ":");
                 System.out.println("  Public Key:      " + peer.publicKey());
                 System.out.println("  Allowed IPs:     " + peer.allowedIps());

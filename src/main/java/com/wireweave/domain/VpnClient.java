@@ -1,6 +1,6 @@
 package com.wireweave.domain;
 
-public record WireGuardPeer(
+public record VpnClient(
     String publicKey,
     String allowedIps,
     String endpointIp,
