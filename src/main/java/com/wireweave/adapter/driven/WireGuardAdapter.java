@@ -5,7 +5,7 @@ import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
-import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import com.wireweave.domain.WireGuardPeer;
 import com.wireweave.domain.port.ForGettingWireGuardInterfaces;
@@ -61,7 +61,7 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
 
                 log.info("Docker host configured as: {}", config.getDockerHost());
 
-                DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
+                DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
                     .dockerHost(config.getDockerHost())
                     .maxConnections(100)
                     .connectionTimeout(Duration.ofSeconds(30))
