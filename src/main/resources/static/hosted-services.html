@@ -190,7 +190,7 @@
 
             const html = services.map(service => {
                 const dnsOk = service.dnsState === 'OK';
-                const hostOk = service.hostState === 'OK';
+                const hostOk = service.state === 'OK';
                 const authBadge = service.authenticated
                     ? '<span class="badge badge-success">Authenticated</span>'
                     : '<span class="badge badge-warning">Not Authenticated</span>';
@@ -216,7 +216,7 @@
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Host Status:</span>
-                                ${getStatusHtml(service.hostState, hostOk)}
+                                ${getStatusHtml(service.state, hostOk)}
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Authentication:</span>
