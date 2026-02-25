@@ -49,9 +49,14 @@ public class WireGuardAdapter implements ForGettingWireGuardPeers, ForGettingWir
                 }
                 log.info("Docker socket found at /var/run/docker.sock");
 
+                // Clear any environment variables that might override our config
+                String dockerHostEnv = System.getenv("DOCKER_HOST");
+                log.info("DOCKER_HOST environment variable: {}", dockerHostEnv);
+
                 // Initialize Docker client for Linux/container environment
                 DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
                     .withDockerHost("unix:///var/run/docker.sock")
+                    .withDockerTlsVerify(false)
                     .build();
 
                 log.info("Docker host configured as: {}", config.getDockerHost());
