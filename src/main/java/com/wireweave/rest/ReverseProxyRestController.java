@@ -4,6 +4,7 @@ import com.wireweave.application.AddReverseProxyRouteUseCase;
 import com.wireweave.application.DeleteReverseProxyRouteUseCase;
 import com.wireweave.domain.ReverseProxyRoute;
 import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,6 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/reverse-proxy")
+@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class ReverseProxyRestController {
 
     private final AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
