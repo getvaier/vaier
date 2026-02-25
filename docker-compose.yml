@@ -72,6 +72,13 @@ services:
       - 8888:8080
     labels:
       - traefik.enable=true
+      # HTTP router with redirect to HTTPS
+      - traefik.http.routers.wireweave-http.rule=Host(`wireweave.eilertsen.family`)
+      - traefik.http.routers.wireweave-http.entrypoints=web
+      - traefik.http.routers.wireweave-http.middlewares=wireweave-redirect
+      - traefik.http.middlewares.wireweave-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.wireweave-redirect.redirectscheme.permanent=true
+      # HTTPS router
       - traefik.http.routers.wireweave.rule=Host(`wireweave.eilertsen.family`)
       - traefik.http.routers.wireweave.entrypoints=websecure
       - traefik.http.routers.wireweave.tls.certresolver=letsencrypt
