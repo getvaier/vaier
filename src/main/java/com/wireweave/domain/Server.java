@@ -38,4 +38,8 @@ public class Server {
     public enum State {
         OK, UNREACHABLE
     }
+
+    public static Server local() {
+        return new Server("/var/run/docker.sock", 0, false);
+    }
 }

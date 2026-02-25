@@ -35,6 +35,13 @@ public class HostedService {
     }
 
     public State hostState() {
+        Optional<DockerService> dockerService = forGettingServerInfo.getServicesWithExposedPorts(Server.local())
+            .stream()
+            .filter(service -> service.listensOnPort(hostPort))
+            .findFirst();
+        if(dockerService.isPresent()) {
+            return State.OK;
+        }
         Optional<VpnClient> wireGuardPeer = forGettingVpnClients.getClients().stream()
             .peek(peer -> System.out.println("Processing peer: " + peer))
             .filter(peer -> peer.endpointIp().equals(hostAddress))

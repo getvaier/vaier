@@ -17,6 +17,6 @@ public class OpenApiConfig {
                         .description("Effortless WireGuard mesh networking")
                         .version("1.0.0"))
                 .addServersItem(new Server().url("https://wireweave.eilertsen.family").description("Production server"))
-                .addServersItem(new Server().url("http://localhost:8888").description("Local server"));
+                .addServersItem(new Server().url("http://localhost:8080").description("Local server"));
     }
 }
