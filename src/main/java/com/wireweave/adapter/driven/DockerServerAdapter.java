@@ -150,7 +150,6 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         // Example: Connect to remote Docker host via TCP
         Server server = new Server(
             "localhost",  // hostname or IP
-            null,               // API token not needed for direct Docker connection
             2375,               // Docker daemon port (2375 for HTTP, 2376 for HTTPS)
             false               // TLS enabled?
         );
