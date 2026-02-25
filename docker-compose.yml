@@ -59,8 +59,10 @@ services:
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
+      TRAEFIK_API_URL: http://traefik:8080
     depends_on:
       - wireguard
+      - traefik
     volumes:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config:ro

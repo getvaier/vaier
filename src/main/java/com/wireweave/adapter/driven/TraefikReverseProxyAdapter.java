@@ -1,8 +1,14 @@
 package com.wireweave.adapter.driven;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wireweave.domain.ReverseProxyRoute;
 import com.wireweave.domain.port.ForPersistingReverseProxyRoutes;
 import java.io.File;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.LinkedHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -23,11 +29,16 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
     private final Yaml yaml;
     private final Yaml dumper;
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
     private Map<String, Object> config;
     private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/dynamic_conf/remote-apps.yml";
+    private static final String TRAEFIK_API_URL = System.getenv().getOrDefault("TRAEFIK_API_URL", "http://localhost:8080");
 
     public TraefikReverseProxyAdapter() {
         this.yaml = new Yaml();
+        this.httpClient = HttpClient.newHttpClient();
+        this.objectMapper = new ObjectMapper();
 
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
@@ -52,47 +63,94 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
-     * Extract routes from a Traefik YAML configuration file.
-     * Parses the dynamic configuration and extracts router-service mappings with addresses and ports.
+     * Fetch routes from Traefik API.
+     * Queries the /api/http/routers and /api/http/services endpoints to extract all routes.
      *
-     * @return List of TraefikRoute objects containing route information
+     * @return List of ReverseProxyRoute objects containing route information
      */
     public List<ReverseProxyRoute> getReverseProxyRoutes() {
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
-        File configFile = new File(CONFIG_FILE_PATH);
+        try {
+            // Fetch HTTP routers from API
+            JsonNode routersData = fetchFromTraefikApi("/api/http/routers");
+            JsonNode servicesData = fetchFromTraefikApi("/api/http/services");
 
-        try (FileInputStream inputStream = new FileInputStream(configFile)) {
-            this.config = yaml.load(inputStream);
+            // Convert JsonNode to Map for compatibility with existing extraction methods
+            Map<String, Object> routers = objectMapper.convertValue(routersData, Map.class);
+            Map<String, Object> services = objectMapper.convertValue(servicesData, Map.class);
 
-            if (config == null) {
-                return routes;
+            if (routers != null && services != null) {
+                routes.addAll(extractHttpRoutesFromApi(routers, services));
             }
 
-            // Extract HTTP routers
-            Map<String, Object> http = getNestedMap(config, "http");
-            if (http != null) {
-                Map<String, Object> routers = getNestedMap(http, "routers");
-                Map<String, Object> services = getNestedMap(http, "services");
+            // Fetch TCP routers from API
+            JsonNode tcpRoutersData = fetchFromTraefikApi("/api/tcp/routers");
+            JsonNode tcpServicesData = fetchFromTraefikApi("/api/tcp/services");
 
-                if (routers != null && services != null) {
-                    routes.addAll(extractHttpRoutes(routers, services));
+            Map<String, Object> tcpRouters = objectMapper.convertValue(tcpRoutersData, Map.class);
+            Map<String, Object> tcpServices = objectMapper.convertValue(tcpServicesData, Map.class);
+
+            if (tcpRouters != null && tcpServices != null) {
+                routes.addAll(extractTcpRoutesFromApi(tcpRouters, tcpServices));
+            }
+
+        } catch (Exception e) {
+            log.error("Failed to fetch routes from Traefik API", e);
+            throw new RuntimeException("Failed to fetch routes from Traefik API: " + TRAEFIK_API_URL, e);
+        }
+
+        return routes;
+    }
+
+    /**
+     * Fetch data from Traefik API endpoint.
+     */
+    private JsonNode fetchFromTraefikApi(String endpoint) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(TRAEFIK_API_URL + endpoint))
+            .GET()
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Traefik API returned status " + response.statusCode() + " for " + endpoint);
+        }
+
+        return objectMapper.readTree(response.body());
+    }
+
+    /**
+     * Extract HTTP routes from API response.
+     * API returns routers as a flat map with provider info.
+     */
+    private List<ReverseProxyRoute> extractHttpRoutesFromApi(Map<String, Object> routers, Map<String, Object> services) {
+        List<ReverseProxyRoute> routes = new ArrayList<>();
+
+        for (Map.Entry<String, Object> routerEntry : routers.entrySet()) {
+            String routerName = routerEntry.getKey();
+            Map<String, Object> routerConfig = castToMap(routerEntry.getValue());
+
+            if (routerConfig != null) {
+                String serviceName = (String) routerConfig.get("service");
+                String domainName = extractDomainFromRule(routerConfig);
+                List<String> entryPoints = extractEntryPoints(routerConfig);
+                ReverseProxyRoute.TlsConfig tlsConfig = extractTlsConfig(routerConfig);
+                List<String> routerMiddlewares = extractMiddlewareList(routerConfig);
+
+                // Note: Auth middleware resolution from API requires fetching /api/http/middlewares
+                // For now, we'll pass null and rely on middleware names only
+                ReverseProxyRoute.AuthInfo authInfo = null;
+
+                if (serviceName != null && services.containsKey(serviceName)) {
+                    Map<String, Object> serviceConfig = castToMap(services.get(serviceName));
+
+                    if (serviceConfig != null) {
+                        routes.addAll(extractServiceUrlsFromApi(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig));
+                    }
                 }
             }
-
-            // Extract TCP routers
-            Map<String, Object> tcp = getNestedMap(config, "tcp");
-            if (tcp != null) {
-                Map<String, Object> routers = getNestedMap(tcp, "routers");
-                Map<String, Object> services = getNestedMap(tcp, "services");
-
-                if (routers != null && services != null) {
-                    routes.addAll(extractTcpRoutes(routers, services));
-                }
-            }
-
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read Traefik configuration file: " + configFile, e);
         }
 
         return routes;
@@ -129,6 +187,33 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return routes;
     }
 
+    /**
+     * Extract TCP routes from API response.
+     */
+    private List<ReverseProxyRoute> extractTcpRoutesFromApi(Map<String, Object> routers, Map<String, Object> services) {
+        List<ReverseProxyRoute> routes = new ArrayList<>();
+
+        for (Map.Entry<String, Object> routerEntry : routers.entrySet()) {
+            String routerName = routerEntry.getKey();
+            Map<String, Object> routerConfig = castToMap(routerEntry.getValue());
+
+            if (routerConfig != null) {
+                String serviceName = (String) routerConfig.get("service");
+                String domainName = extractDomainFromRule(routerConfig);
+
+                if (serviceName != null && services.containsKey(serviceName)) {
+                    Map<String, Object> serviceConfig = castToMap(services.get(serviceName));
+
+                    if (serviceConfig != null) {
+                        routes.addAll(extractTcpServiceAddressesFromApi(routerName, domainName, serviceName, null, serviceConfig));
+                    }
+                }
+            }
+        }
+
+        return routes;
+    }
+
     private List<ReverseProxyRoute> extractTcpRoutes(Map<String, Object> routers, Map<String, Object> services) {
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
@@ -145,6 +230,37 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
                     if (serviceConfig != null) {
                         routes.addAll(extractTcpServiceAddresses(routerName, domainName, serviceName, null, serviceConfig));
+                    }
+                }
+            }
+        }
+
+        return routes;
+    }
+
+    /**
+     * Extract service URLs from API response.
+     * API service format includes serverStatus and other metadata.
+     */
+    private List<ReverseProxyRoute> extractServiceUrlsFromApi(String routerName, String domainName, String serviceName,
+                                                               ReverseProxyRoute.AuthInfo authInfo, List<String> entryPoints,
+                                                               ReverseProxyRoute.TlsConfig tlsConfig, List<String> middlewares,
+                                                               Map<String, Object> serviceConfig) {
+        List<ReverseProxyRoute> routes = new ArrayList<>();
+
+        // Handle loadBalancer configuration from API
+        Map<String, Object> loadBalancer = getNestedMap(serviceConfig, "loadBalancer");
+        if (loadBalancer != null) {
+            List<Map<String, Object>> servers = getNestedList(loadBalancer, "servers");
+
+            if (servers != null) {
+                for (Map<String, Object> server : servers) {
+                    String url = (String) server.get("url");
+
+                    if (url != null) {
+                        AddressPort addressPort = parseUrl(url);
+                        routes.add(new ReverseProxyRoute(routerName, domainName, addressPort.address,
+                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares));
                     }
                 }
             }
@@ -172,6 +288,32 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                         AddressPort addressPort = parseUrl(url);
                         routes.add(new ReverseProxyRoute(routerName, domainName, addressPort.address,
                             addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares));
+                    }
+                }
+            }
+        }
+
+        return routes;
+    }
+
+    /**
+     * Extract TCP service addresses from API response.
+     */
+    private List<ReverseProxyRoute> extractTcpServiceAddressesFromApi(String routerName, String domainName, String serviceName, ReverseProxyRoute.AuthInfo authInfo, Map<String, Object> serviceConfig) {
+        List<ReverseProxyRoute> routes = new ArrayList<>();
+
+        // Handle loadBalancer configuration from API
+        Map<String, Object> loadBalancer = getNestedMap(serviceConfig, "loadBalancer");
+        if (loadBalancer != null) {
+            List<Map<String, Object>> servers = getNestedList(loadBalancer, "servers");
+
+            if (servers != null) {
+                for (Map<String, Object> server : servers) {
+                    String address = (String) server.get("address");
+
+                    if (address != null) {
+                        AddressPort addressPort = parseAddress(address);
+                        routes.add(new ReverseProxyRoute(routerName, domainName, addressPort.address, addressPort.port, serviceName, authInfo));
                     }
                 }
             }
