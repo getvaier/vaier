@@ -45,6 +45,7 @@ public class HostedService {
     public HostState hostState() {
         Optional<WireGuardPeer> wireGuardPeer = forGettingWireGuardInterfaces.getInterfaces().stream()
             .flatMap(interfaceName -> forGettingWireGuardPeers.getPeers(interfaceName).stream())
+            .peek(peer -> System.out.println("Processing peer: " + peer))
             .filter(peer -> peer.endpointIp().equals(hostAddress))
             .findFirst();
         if(wireGuardPeer.isPresent()) {
