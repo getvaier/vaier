@@ -227,8 +227,18 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                 // For now, we'll pass null and rely on middleware names only
                 ReverseProxyRoute.AuthInfo authInfo = null;
 
-                if (serviceName != null && services.containsKey(serviceName)) {
+                if (serviceName != null) {
+                    // Try to find service with exact name first
                     Map<String, Object> serviceConfig = castToMap(services.get(serviceName));
+
+                    // If not found and service name doesn't contain @, try appending provider suffix
+                    if (serviceConfig == null && !serviceName.contains("@")) {
+                        String provider = (String) routerConfig.get("provider");
+                        if (provider != null) {
+                            String serviceNameWithProvider = serviceName + "@" + provider;
+                            serviceConfig = castToMap(services.get(serviceNameWithProvider));
+                        }
+                    }
 
                     if (serviceConfig != null) {
                         routes.addAll(extractServiceUrlsFromApi(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig));
