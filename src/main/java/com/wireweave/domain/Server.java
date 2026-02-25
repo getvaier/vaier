@@ -18,6 +18,11 @@ public class Server {
     private final boolean tlsEnabled;
 
     public String dockerHostUrl() {
+        // Support unix socket
+        if (address.startsWith("unix://") || address.startsWith("/")) {
+            return address.startsWith("unix://") ? address : "unix://" + address;
+        }
+
         String protocol = tlsEnabled ? "https" : "tcp";
         int defaultPort = tlsEnabled ? 2376 : 2375;
         int actualPort = port != null ? port : defaultPort;
