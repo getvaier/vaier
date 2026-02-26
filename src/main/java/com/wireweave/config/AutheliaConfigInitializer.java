@@ -1,5 +1,6 @@
 package com.wireweave.config;
 
+import com.wireweave.domain.port.ForRestartingContainers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -15,6 +16,13 @@ public class AutheliaConfigInitializer {
 
     private static final String AUTHELIA_CONFIG_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config");
     private static final String CONFIGURATION_FILE = AUTHELIA_CONFIG_PATH + "/configuration.yml";
+    private static final String AUTHELIA_CONTAINER_NAME = "authelia";
+
+    private final ForRestartingContainers containerRestarter;
+
+    public AutheliaConfigInitializer(ForRestartingContainers containerRestarter) {
+        this.containerRestarter = containerRestarter;
+    }
 
     @EventListener(ApplicationReadyEvent.class)
     public void initializeAutheliaConfig() {
@@ -35,30 +43,10 @@ public class AutheliaConfigInitializer {
         try (FileWriter writer = new FileWriter(configFile)) {
             writer.write(configContent);
             log.info("Successfully wrote Authelia configuration file");
-            restartAutheliaContainer();
+            containerRestarter.restartContainer(AUTHELIA_CONTAINER_NAME);
         } catch (IOException e) {
             log.error("Failed to write Authelia configuration file", e);
             throw new RuntimeException("Failed to initialize Authelia configuration", e);
-        }
-    }
-
-    private void restartAutheliaContainer() {
-        try {
-            log.info("Restarting Authelia container...");
-            ProcessBuilder processBuilder = new ProcessBuilder("docker", "restart", "authelia");
-            Process process = processBuilder.start();
-            int exitCode = process.waitFor();
-
-            if (exitCode == 0) {
-                log.info("Successfully restarted Authelia container");
-            } else {
-                log.error("Failed to restart Authelia container. Exit code: {}", exitCode);
-            }
-        } catch (IOException | InterruptedException e) {
-            log.error("Error restarting Authelia container", e);
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
         }
     }
 
