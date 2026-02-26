@@ -223,9 +223,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                 ReverseProxyRoute.TlsConfig tlsConfig = extractTlsConfig(routerConfig);
                 List<String> routerMiddlewares = extractMiddlewareList(routerConfig);
 
-                // Note: Auth middleware resolution from API requires fetching /api/http/middlewares
-                // For now, we'll pass null and rely on middleware names only
-                ReverseProxyRoute.AuthInfo authInfo = null;
+                // Check if any middleware indicates authentication (forwardAuth, basicAuth, digestAuth)
+                ReverseProxyRoute.AuthInfo authInfo = extractAuthInfoFromMiddlewareNames(routerMiddlewares);
 
                 if (serviceName != null) {
                     // Try to find service with exact name first
@@ -576,6 +575,31 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             List<String> list = new ArrayList<>();
             list.add((String) middlewareObj);
             return list;
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract authentication info from middleware names when fetching from API.
+     * Checks if any middleware name suggests authentication (contains auth-related keywords).
+     */
+    private ReverseProxyRoute.AuthInfo extractAuthInfoFromMiddlewareNames(List<String> middlewareNames) {
+        if (middlewareNames == null || middlewareNames.isEmpty()) {
+            return null;
+        }
+
+        // Check for common auth middleware patterns
+        for (String middlewareName : middlewareNames) {
+            String lowerName = middlewareName.toLowerCase();
+            if (lowerName.contains("auth") || lowerName.contains("authelia") ||
+                lowerName.contains("oauth") || lowerName.contains("sso")) {
+                // Extract provider name from middleware name if possible
+                String provider = middlewareName.contains("@")
+                    ? middlewareName.substring(0, middlewareName.indexOf("@"))
+                    : "middleware";
+                return new ReverseProxyRoute.AuthInfo("forwardAuth", provider, null);
+            }
         }
 
         return null;
