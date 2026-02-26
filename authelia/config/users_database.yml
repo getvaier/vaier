@@ -1,0 +1,7 @@
+users:
+  geir:
+    password: "$argon2id$v=19$m=65536,t=3,p=4$uWeBTaYUt8ngiM4wHnZLiA$jU2gKmIgvjgBtNzd3VbnzjCmZdEy8UEXLrIcmQndPi0"
+    displayname: "Geir"
+    email: "geir.eilertsen@gmail.com"
+    groups:
+      - admins
