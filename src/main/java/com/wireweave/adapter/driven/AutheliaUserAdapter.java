@@ -48,7 +48,9 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         this.argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id);
 
         // Initialize Docker client
-        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+            .withDockerHost("unix:///var/run/docker.sock")
+            .build();
         DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
             .dockerHost(config.getDockerHost())
             .build();
@@ -136,7 +138,11 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         userEntry.put("password", hashedPassword);
         userEntry.put("displayname", displayname != null ? displayname : username);
         userEntry.put("email", email);
-        userEntry.put("groups", new ArrayList<>());
+
+        // Add user to admins group by default
+        List<String> groups = new ArrayList<>();
+        groups.add("admins");
+        userEntry.put("groups", groups);
 
         usersMap.put(username, userEntry);
 
