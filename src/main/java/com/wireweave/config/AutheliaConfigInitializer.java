@@ -51,7 +51,11 @@ public class AutheliaConfigInitializer {
     }
 
     private String generateDefaultConfig() {
-        String domain = System.getenv().getOrDefault("WIREWEAVE_DOMAIN", "example.com");
+        String wireweaveFullDomain = System.getenv().getOrDefault("WIREWEAVE_DOMAIN", "wireweave.example.com");
+        // Extract base domain from wireweave domain (e.g., "wireweave.eilertsen.family" -> "eilertsen.family")
+        String baseDomain = wireweaveFullDomain.contains(".")
+            ? wireweaveFullDomain.substring(wireweaveFullDomain.indexOf('.') + 1)
+            : wireweaveFullDomain;
 
         return String.format("""
                 ###############################################################
@@ -81,18 +85,18 @@ public class AutheliaConfigInitializer {
                 access_control:
                   default_policy: bypass
                   rules:
-                    - domain: "wireweave.%s"
+                    - domain: "%s"
                       policy: one_factor
                 notifier:
                   filesystem:
                     filename: /config/emails.txt
                 """,
             generateSecureSecret(32),  // jwt_secret
-            domain,                     // totp issuer
+            baseDomain,                 // totp issuer
             generateSecureSecret(32),  // session secret
-            domain,                     // session domain
+            baseDomain,                 // session domain
             generateSecureSecret(64),  // storage encryption_key
-            domain                      // wireweave subdomain
+            wireweaveFullDomain         // wireweave full domain for access control
         );
     }
 
