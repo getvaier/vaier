@@ -1,11 +1,10 @@
 package com.wireweave.adapter.driven;
 
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.RestartContainerCmd;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
-import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import com.wireweave.domain.User;
 import com.wireweave.domain.port.ForPersistingUsers;
@@ -51,7 +50,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
             .withDockerHost("unix:///var/run/docker.sock")
             .build();
-        DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
+        DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
             .dockerHost(config.getDockerHost())
             .build();
         this.dockerClient = DockerClientImpl.getInstance(config, httpClient);
