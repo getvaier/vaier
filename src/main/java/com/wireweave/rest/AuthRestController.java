@@ -25,8 +25,8 @@ public class AuthRestController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public void addUser(@RequestBody AddUserRequest request) {
-        forPersistingUsers.addUser(request.username(), request.password(), request.email());
+        forPersistingUsers.addUser(request.username(), request.password(), request.email(), request.displayname());
     }
 
-    public record AddUserRequest(String username, String password, String email) {}
+    public record AddUserRequest(String username, String password, String email, String displayname) {}
 }

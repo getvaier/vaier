@@ -5,5 +5,5 @@ import java.util.List;
 
 public interface ForPersistingUsers {
     List<User> getUsers();
-    void addUser(String username, String password, String email);
+    void addUser(String username, String password, String email, String displayname);
 }

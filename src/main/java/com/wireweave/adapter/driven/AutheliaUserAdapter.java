@@ -74,7 +74,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     }
 
     @Override
-    public void addUser(String username, String password, String email) {
+    public void addUser(String username, String password, String email, String displayname) {
         File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
         Map<String, Object> config;
 
@@ -118,6 +118,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         // Create user entry
         Map<String, Object> userEntry = new LinkedHashMap<>();
         userEntry.put("password", hashedPassword);
+        userEntry.put("displayname", displayname != null ? displayname : username);
         userEntry.put("email", email);
         userEntry.put("groups", new ArrayList<>());
 
