@@ -1,6 +1,11 @@
 spring:
   application:
     name: wireweave
+  web:
+    resources:
+      static-locations: classpath:/static/
+  mvc:
+    static-path-pattern: /**
 
 server:
   port: 8080
