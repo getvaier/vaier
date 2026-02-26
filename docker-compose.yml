@@ -47,6 +47,33 @@ services:
       - ./traefik/config:/traefik/config
       - ./traefik/acme:/traefik/acme
     restart: unless-stopped
+    depends_on:
+      - authelia
+
+  redis:
+    image: redis:alpine
+    container_name: authelia-redis
+    restart: unless-stopped
+    volumes:
+      - ./authelia/redis:/data
+
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    environment:
+      - TZ=Europe/Oslo
+    volumes:
+      - ./authelia/config:/config
+    depends_on:
+      - redis
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      # HTTPS router for Authelia
+      - traefik.http.routers.authelia.rule=Host(`auth.${WIREWEAVE_DOMAIN}`)
+      - traefik.http.routers.authelia.entrypoints=websecure
+      - traefik.http.routers.authelia.tls.certresolver=letsencrypt
+      - traefik.http.services.authelia.loadbalancer.server.port=9091
 
   wireweave:
     image: geireilertsen/wireweave:latest
@@ -63,6 +90,7 @@ services:
     depends_on:
       - wireguard
       - traefik
+      - authelia
     volumes:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config:ro
@@ -76,4 +104,9 @@ services:
       - traefik.http.routers.wireweave.rule=Host(`${WIREWEAVE_DOMAIN}`)
       - traefik.http.routers.wireweave.entrypoints=websecure
       - traefik.http.routers.wireweave.tls.certresolver=letsencrypt
+      - traefik.http.routers.wireweave.middlewares=wireweave-auth
+      # Authelia middleware
+      - traefik.http.middlewares.wireweave-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.${WIREWEAVE_DOMAIN}
+      - traefik.http.middlewares.wireweave-auth.forwardauth.trustForwardHeader=true
+      - traefik.http.middlewares.wireweave-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
       - traefik.http.services.wireweave.loadbalancer.server.port=8080
