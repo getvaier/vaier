@@ -1,0 +1,46 @@
+###############################################################
+#                Authelia minimal configuration               #
+###############################################################
+server:
+  address: tcp://0.0.0.0:9091
+logs_level: info
+jwt_secret: sdfkjfhsdksfdh
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+totp:
+  issuer: example.com
+session:
+  secret: sdfkjfhsdksfdh
+  domain: eilertsen.family
+  expiration: 3600 # 1 hour
+  inactivity: 300 # 5 minutes
+  redis:
+    host: redis
+    port: 6379
+storage:
+  encryption_key: sdfkjfhsdksfdhsdfkjhsdfjhdsfklhsdfjhsfdlkjhakjhsdfjhsdfjhsdfjh
+  local:
+    path: /config/db.sqlite
+access_control:
+  default_policy: bypass
+  rules:
+    - domain: "public.example.com"
+      policy: bypass
+    - domain: "traefik.eilertsen.family"
+      policy: one_factor
+    - domain: "code.apalveien5.eilertsen.family"
+      policy: one_factor
+    - domain: "openhab.apalveien5.eilertsen.family"
+      policy: one_factor
+    - domain: "openhab.colina27.eilertsen.family"
+      policy: one_factor
+    - domain: "opensprinkler.colina27.eilertsen.family"
+      policy: one_factor
+    - domain: "portainer.eilertsen.family"
+      policy: one_factor
+    - domain: "uptime.eilertsen.family"
+      policy: one_factor
+notifier:
+  filesystem:
+    filename: /config/emails.txt
