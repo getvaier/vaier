@@ -2,9 +2,8 @@ package com.wireweave.rest;
 
 import com.wireweave.domain.User;
 import com.wireweave.domain.port.ForPersistingUsers;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
@@ -22,4 +21,12 @@ public class AuthRestController {
     public List<User> getUsers() {
         return forPersistingUsers.getUsers();
     }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public void addUser(@RequestBody AddUserRequest request) {
+        forPersistingUsers.addUser(request.username(), request.password(), request.email());
+    }
+
+    public record AddUserRequest(String username, String password, String email) {}
 }

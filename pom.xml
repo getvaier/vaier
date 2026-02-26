@@ -85,6 +85,13 @@
             <artifactId>snakeyaml</artifactId>
         </dependency>
 
+        <!-- Password Hashing -->
+        <dependency>
+            <groupId>de.mkammerer</groupId>
+            <artifactId>argon2-jvm</artifactId>
+            <version>2.11</version>
+        </dependency>
+
         <!-- Utilities -->
         <dependency>
             <groupId>org.projectlombok</groupId>
