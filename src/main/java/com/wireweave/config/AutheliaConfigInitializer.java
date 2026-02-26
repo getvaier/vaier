@@ -6,9 +6,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
+import java.util.Properties;
 
 @Component
 @Slf4j
@@ -16,6 +15,7 @@ public class AutheliaConfigInitializer {
 
     private static final String AUTHELIA_CONFIG_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config");
     private static final String CONFIGURATION_FILE = AUTHELIA_CONFIG_PATH + "/configuration.yml";
+    private static final String SECRETS_FILE = AUTHELIA_CONFIG_PATH + "/secrets.properties";
     private static final String AUTHELIA_CONTAINER_NAME = "authelia";
 
     private final ForRestartingContainers containerRestarter;
@@ -57,6 +57,12 @@ public class AutheliaConfigInitializer {
             ? wireweaveFullDomain.substring(wireweaveFullDomain.indexOf('.') + 1)
             : wireweaveFullDomain;
 
+        // Load or generate secrets
+        Properties secrets = loadOrGenerateSecrets();
+        String jwtSecret = secrets.getProperty("jwt_secret");
+        String sessionSecret = secrets.getProperty("session_secret");
+        String encryptionKey = secrets.getProperty("encryption_key");
+
         return String.format("""
                 ###############################################################
                 #                Authelia minimal configuration               #
@@ -91,13 +97,45 @@ public class AutheliaConfigInitializer {
                   filesystem:
                     filename: /config/emails.txt
                 """,
-            generateSecureSecret(32),  // jwt_secret
+            jwtSecret,                  // jwt_secret
             baseDomain,                 // totp issuer
-            generateSecureSecret(32),  // session secret
+            sessionSecret,              // session secret
             baseDomain,                 // session domain
-            generateSecureSecret(64),  // storage encryption_key
+            encryptionKey,              // storage encryption_key
             wireweaveFullDomain         // wireweave full domain for access control
         );
+    }
+
+    private Properties loadOrGenerateSecrets() {
+        File secretsFile = new File(SECRETS_FILE);
+        Properties secrets = new Properties();
+
+        if (secretsFile.exists()) {
+            try (FileInputStream fis = new FileInputStream(secretsFile)) {
+                secrets.load(fis);
+                log.info("Loaded existing secrets from: {}", secretsFile.getAbsolutePath());
+                return secrets;
+            } catch (IOException e) {
+                log.warn("Failed to load secrets file, generating new secrets", e);
+            }
+        }
+
+        // Generate new secrets
+        log.info("Generating new secrets and saving to: {}", secretsFile.getAbsolutePath());
+        secrets.setProperty("jwt_secret", generateSecureSecret(32));
+        secrets.setProperty("session_secret", generateSecureSecret(32));
+        secrets.setProperty("encryption_key", generateSecureSecret(64));
+
+        // Save secrets
+        try (FileOutputStream fos = new FileOutputStream(secretsFile)) {
+            secrets.store(fos, "Authelia secrets - DO NOT MODIFY OR DELETE");
+            log.info("Successfully saved secrets to file");
+        } catch (IOException e) {
+            log.error("Failed to save secrets file", e);
+            throw new RuntimeException("Failed to save secrets", e);
+        }
+
+        return secrets;
     }
 
     private String generateSecureSecret(int length) {
