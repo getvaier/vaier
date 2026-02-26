@@ -83,6 +83,7 @@ services:
     environment:
       WIREWEAVE_AWS_KEY: ${WIREWEAVE_AWS_KEY}
       WIREWEAVE_AWS_SECRET: ${WIREWEAVE_AWS_SECRET}
+      WIREWEAVE_DOMAIN: ${WIREWEAVE_DOMAIN}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
