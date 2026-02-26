@@ -20,12 +20,7 @@ public class AutheliaConfigInitializer {
     public void initializeAutheliaConfig() {
         File configFile = new File(CONFIGURATION_FILE);
 
-        if (configFile.exists()) {
-            log.info("Authelia configuration file already exists at: {}", configFile.getAbsolutePath());
-            return;
-        }
-
-        log.info("Creating Authelia configuration file at: {}", configFile.getAbsolutePath());
+        log.info("Overwriting Authelia configuration file at: {}", configFile.getAbsolutePath());
 
         // Create parent directories if they don't exist
         File parentDir = configFile.getParentFile();
@@ -39,10 +34,31 @@ public class AutheliaConfigInitializer {
 
         try (FileWriter writer = new FileWriter(configFile)) {
             writer.write(configContent);
-            log.info("Successfully created Authelia configuration file");
+            log.info("Successfully wrote Authelia configuration file");
+            restartAutheliaContainer();
         } catch (IOException e) {
-            log.error("Failed to create Authelia configuration file", e);
+            log.error("Failed to write Authelia configuration file", e);
             throw new RuntimeException("Failed to initialize Authelia configuration", e);
+        }
+    }
+
+    private void restartAutheliaContainer() {
+        try {
+            log.info("Restarting Authelia container...");
+            ProcessBuilder processBuilder = new ProcessBuilder("docker", "restart", "authelia");
+            Process process = processBuilder.start();
+            int exitCode = process.waitFor();
+
+            if (exitCode == 0) {
+                log.info("Successfully restarted Authelia container");
+            } else {
+                log.error("Failed to restart Authelia container. Exit code: {}", exitCode);
+            }
+        } catch (IOException | InterruptedException e) {
+            log.error("Error restarting Authelia container", e);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -50,44 +66,45 @@ public class AutheliaConfigInitializer {
         String domain = System.getenv().getOrDefault("WIREWEAVE_DOMAIN", "example.com");
 
         return String.format("""
-###############################################################
-#                Authelia minimal configuration               #
-###############################################################
-server:
-  address: tcp://0.0.0.0:9091
-logs_level: info
-jwt_secret: %s
-authentication_backend:
-  file:
-    path: /config/users_database.yml
-totp:
-  issuer: %s
-session:
-  secret: %s
-  domain: %s
-  expiration: 3600 # 1 hour
-  inactivity: 300 # 5 minutes
-  redis:
-    host: redis
-    port: 6379
-storage:
-  encryption_key: %s
-  local:
-    path: /config/db.sqlite
-access_control:
-  default_policy: bypass
-  rules:
-    - domain: "public.example.com"
-      policy: bypass
-notifier:
-  filesystem:
-    filename: /config/emails.txt
-""",
+                ###############################################################
+                #                Authelia minimal configuration               #
+                ###############################################################
+                server:
+                  address: tcp://0.0.0.0:9091
+                logs_level: info
+                jwt_secret: %s
+                authentication_backend:
+                  file:
+                    path: /config/users_database.yml
+                totp:
+                  issuer: %s
+                session:
+                  secret: %s
+                  domain: %s
+                  expiration: 3600 # 1 hour
+                  inactivity: 300 # 5 minutes
+                  redis:
+                    host: redis
+                    port: 6379
+                storage:
+                  encryption_key: %s
+                  local:
+                    path: /config/db.sqlite
+                access_control:
+                  default_policy: bypass
+                  rules:
+                    - domain: "wireweave.%s"
+                      policy: one_factor
+                notifier:
+                  filesystem:
+                    filename: /config/emails.txt
+                """,
             generateSecureSecret(32),  // jwt_secret
             domain,                     // totp issuer
             generateSecureSecret(32),  // session secret
             domain,                     // session domain
-            generateSecureSecret(64)   // storage encryption_key
+            generateSecureSecret(64),  // storage encryption_key
+            domain                      // wireweave subdomain
         );
     }
 
