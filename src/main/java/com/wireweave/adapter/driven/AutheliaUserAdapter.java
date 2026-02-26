@@ -1,5 +1,12 @@
 package com.wireweave.adapter.driven;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.RestartContainerCmd;
+import com.github.dockerjava.core.DefaultDockerClientConfig;
+import com.github.dockerjava.core.DockerClientConfig;
+import com.github.dockerjava.core.DockerClientImpl;
+import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.transport.DockerHttpClient;
 import com.wireweave.domain.User;
 import com.wireweave.domain.port.ForPersistingUsers;
 import de.mkammerer.argon2.Argon2;
@@ -25,7 +32,9 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     private final Yaml yaml;
     private final Yaml dumper;
     private final Argon2 argon2;
+    private final DockerClient dockerClient;
     private static final String AUTHELIA_USERS_DB_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config") + "/users_database.yml";
+    private static final String AUTHELIA_CONTAINER_NAME = "authelia";
 
     public AutheliaUserAdapter() {
         this.yaml = new Yaml();
@@ -37,6 +46,13 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         this.dumper = new Yaml(options);
 
         this.argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id);
+
+        // Initialize Docker client
+        DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder().build();
+        DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
+            .dockerHost(config.getDockerHost())
+            .build();
+        this.dockerClient = DockerClientImpl.getInstance(config, httpClient);
     }
 
     @Override
@@ -134,6 +150,20 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         } finally {
             // Clear password from memory
             argon2.wipeArray(password.toCharArray());
+        }
+
+        // Restart Authelia container to reload users
+        restartAutheliaContainer();
+    }
+
+    private void restartAutheliaContainer() {
+        try {
+            log.info("Restarting Authelia container '{}'", AUTHELIA_CONTAINER_NAME);
+            dockerClient.restartContainerCmd(AUTHELIA_CONTAINER_NAME).exec();
+            log.info("Authelia container restarted successfully");
+        } catch (Exception e) {
+            log.error("Failed to restart Authelia container", e);
+            throw new RuntimeException("Failed to restart Authelia container", e);
         }
     }
 
