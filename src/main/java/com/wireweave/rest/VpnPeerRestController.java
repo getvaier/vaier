@@ -23,7 +23,7 @@ public class VpnPeerRestController {
 
     private final ForGettingVpnClients vpnClientService;
     private final CreatePeerUseCase createPeerUseCase;
-    private ForRestartingContainers containerRestarter;
+    private final ForRestartingContainers containerRestarter;
 
     @org.springframework.beans.factory.annotation.Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
