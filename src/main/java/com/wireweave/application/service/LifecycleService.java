@@ -33,7 +33,8 @@ public class LifecycleService {
 
         new Lifecycle(
             forInitialisingUserService,
-            forPersistingUsers
+            forPersistingUsers,
+            containerRestarter
         ).start();
     }
 }
