@@ -114,12 +114,26 @@ public class VpnPeerRestController {
         return ResponseEntity.ok(response);
     }
 
-    @DeleteMapping("/{peerName}")
-    public ResponseEntity<Void> deletePeer(@PathVariable String peerName) {
-        log.info("Deleting VPN peer: {}", peerName);
+    @DeleteMapping("/{peerIdentifier}")
+    public ResponseEntity<Void> deletePeer(@PathVariable String peerIdentifier) {
+        log.info("Deleting VPN peer: {}", peerIdentifier);
 
         try {
             String interfaceName = "wg0"; // Default WireGuard interface
+
+            // Resolve peer name if IP address was provided
+            String peerName = peerIdentifier;
+            if (peerIdentifier.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) {
+                // It's an IP address, find the peer name
+                String foundName = findPeerNameByIp(peerIdentifier);
+                if (foundName.equals(peerIdentifier)) {
+                    // Name not found, fallback failed
+                    log.error("Could not find peer name for IP: {}", peerIdentifier);
+                    return ResponseEntity.notFound().build();
+                }
+                peerName = foundName;
+                log.info("Resolved IP {} to peer name: {}", peerIdentifier, peerName);
+            }
 
             // Cast to VpnService to access deletePeer method
             if (createPeerUseCase instanceof com.wireweave.application.service.VpnService vpnService) {
