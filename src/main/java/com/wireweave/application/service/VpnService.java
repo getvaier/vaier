@@ -316,6 +316,69 @@ public class VpnService implements CreatePeerUseCase {
         log.info("NAT rules are active");
     }
 
+    public void deletePeer(String interfaceName, String peerName) {
+        log.info("Deleting peer {} from interface {}", peerName, interfaceName);
+
+        try {
+            // Step 1: Read the peer config to get the public key
+            Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
+            if (!Files.exists(peerConfigPath)) {
+                log.warn("Peer config not found: {}", peerConfigPath);
+                throw new RuntimeException("Peer not found: " + peerName);
+            }
+
+            String configContent = Files.readString(peerConfigPath);
+            String publicKey = "";
+            for (String line : configContent.split("\n")) {
+                if (line.trim().startsWith("PublicKey")) {
+                    publicKey = line.substring(line.indexOf('=') + 1).trim();
+                    break;
+                }
+            }
+
+            if (publicKey.isEmpty()) {
+                log.error("Could not find public key in peer config");
+                throw new RuntimeException("Invalid peer configuration");
+            }
+
+            log.info("Removing peer with public key: {}", publicKey);
+
+            // Step 2: Remove peer from running WireGuard interface
+            String removePeerCommand = String.format("wg set %s peer %s remove", interfaceName, publicKey);
+            log.info("Executing: {}", removePeerCommand);
+            String output = executeInContainer("sh", "-c", removePeerCommand);
+            log.info("Remove peer output: {}", output);
+
+            // Step 3: Save configuration to make it persistent
+            String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
+            log.info("Save config output: {}", saveOutput);
+
+            // Step 4: Delete peer directory and config files
+            deleteDirectory(Paths.get(wireguardConfigPath, peerName));
+            log.info("Deleted peer directory: {}", peerName);
+
+            log.info("Peer deleted successfully: {}", peerName);
+
+        } catch (IOException | InterruptedException e) {
+            log.error("Error deleting peer", e);
+            throw new RuntimeException("Failed to delete peer: " + e.getMessage(), e);
+        }
+    }
+
+    private void deleteDirectory(Path directory) throws IOException {
+        if (Files.exists(directory)) {
+            Files.walk(directory)
+                    .sorted((a, b) -> -a.compareTo(b)) // Reverse order to delete files before directories
+                    .forEach(path -> {
+                        try {
+                            Files.delete(path);
+                        } catch (IOException e) {
+                            log.warn("Failed to delete: {}", path, e);
+                        }
+                    });
+        }
+    }
+
     private String extractValue(String configContent, String key) {
         for (String line : configContent.split("\n")) {
             String trimmed = line.trim();

@@ -170,6 +170,19 @@
         </div>
     </div>
 
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteConfirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Delete Peer</div>
+            <p>Are you sure you want to delete the peer "<strong id="deletePeerName"></strong>"?</p>
+            <p style="color: #dc3545; margin-top: 1rem;">This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideDeleteConfirmModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="deletePeer()">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let peers = [];
 
@@ -245,6 +258,9 @@
                                 </button>
                                 <button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.name}')">
                                     ⬇️ Docker Compose
+                                </button>
+                                <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.name}')">
+                                    🗑️ Delete
                                 </button>
                             </div>
                         </div>
@@ -424,6 +440,42 @@
 
         function downloadDockerCompose(peerName) {
             downloadDockerComposeForPeer(peerName);
+        }
+
+        let peerToDelete = null;
+
+        function confirmDeletePeer(peerName) {
+            peerToDelete = peerName;
+            document.getElementById('deletePeerName').textContent = peerName;
+            document.getElementById('deleteConfirmModal').classList.add('active');
+        }
+
+        function hideDeleteConfirmModal() {
+            document.getElementById('deleteConfirmModal').classList.remove('active');
+            peerToDelete = null;
+        }
+
+        async function deletePeer() {
+            if (!peerToDelete) return;
+
+            try {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerToDelete)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                hideDeleteConfirmModal();
+                displaySuccess(`Peer "${peerToDelete}" deleted successfully!`);
+                peerToDelete = null;
+
+                // Refresh peer list
+                setTimeout(() => fetchPeers(), 500);
+            } catch (error) {
+                displayError(`Failed to delete peer: ${error.message}`);
+            }
         }
 
         // Close modals on outside click

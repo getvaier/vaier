@@ -114,6 +114,27 @@ public class VpnPeerRestController {
         return ResponseEntity.ok(response);
     }
 
+    @DeleteMapping("/{peerName}")
+    public ResponseEntity<Void> deletePeer(@PathVariable String peerName) {
+        log.info("Deleting VPN peer: {}", peerName);
+
+        try {
+            String interfaceName = "wg0"; // Default WireGuard interface
+
+            // Cast to VpnService to access deletePeer method
+            if (createPeerUseCase instanceof com.wireweave.application.service.VpnService vpnService) {
+                vpnService.deletePeer(interfaceName, peerName);
+                return ResponseEntity.noContent().build();
+            } else {
+                log.error("CreatePeerUseCase is not an instance of VpnService");
+                return ResponseEntity.internalServerError().build();
+            }
+        } catch (Exception e) {
+            log.error("Failed to delete peer: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     @GetMapping("/{peerIdentifier}/config")
     public ResponseEntity<PeerConfigResponse> getPeerConfig(@PathVariable String peerIdentifier) {
         log.info("Fetching config for peer: {}", peerIdentifier);
