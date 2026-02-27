@@ -81,6 +81,7 @@ public class VpnService implements CreatePeerUseCase {
                     peerName,
                     ipAddress,
                     publicKey,
+                    privateKey,
                     configContent
             );
 
