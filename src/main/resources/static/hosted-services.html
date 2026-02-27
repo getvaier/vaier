@@ -4,34 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosted Services</title>
+    <link rel="stylesheet" href="styles.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            padding: 2rem;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        h1 {
-            color: #333;
-            margin-bottom: 2rem;
-        }
-
-        .services-list {
-            display: grid;
-            gap: 1rem;
-        }
-
         .service-card {
             background: white;
             border-radius: 8px;
@@ -65,81 +39,6 @@
 
         .detail-value {
             color: #333;
-        }
-
-        .status {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: 4px;
-            font-weight: 500;
-            font-size: 0.875rem;
-        }
-
-        .status-ok {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-error {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .status-ok .status-indicator {
-            background: #28a745;
-        }
-
-        .status-error .status-indicator {
-            background: #dc3545;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 3rem;
-            color: #666;
-        }
-
-        .error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .badge-success {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .badge-warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .dns-link {
-            color: #007bff;
-            text-decoration: none;
-        }
-
-        .dns-link:hover {
-            text-decoration: underline;
         }
     </style>
 </head>
@@ -195,7 +94,7 @@
                     ? '<span class="badge badge-success">Authenticated</span>'
                     : '<span class="badge badge-warning">Not Authenticated</span>';
                 const dnsDisplay = dnsOk
-                    ? `<a href="http://${service.dnsAddress}" target="_blank" class="dns-link">${service.dnsAddress}</a>`
+                    ? `<a href="http://${service.dnsAddress}" target="_blank">${service.dnsAddress}</a>`
                     : service.dnsAddress;
 
                 return `
@@ -227,7 +126,7 @@
                 `;
             }).join('');
 
-            container.innerHTML = `<div class="services-list">${html}</div>`;
+            container.innerHTML = `<div class="card-grid">${html}</div>`;
         }
 
         // Load services on page load
