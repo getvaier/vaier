@@ -3,6 +3,7 @@ package com.wireweave.rest;
 import com.wireweave.application.CreatePeerUseCase;
 import com.wireweave.domain.VpnClient;
 import com.wireweave.domain.port.ForGettingVpnClients;
+import com.wireweave.domain.port.ForRestartingContainers;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ByteArrayResource;
@@ -22,6 +23,7 @@ public class VpnPeerRestController {
 
     private final ForGettingVpnClients vpnClientService;
     private final CreatePeerUseCase createPeerUseCase;
+    private ForRestartingContainers containerRestarter;
 
     @org.springframework.beans.factory.annotation.Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -120,6 +122,7 @@ public class VpnPeerRestController {
         try {
             if (createPeerUseCase instanceof com.wireweave.application.service.VpnService vpnService) {
                 vpnService.ensureNatRulesActive();
+                containerRestarter.restartContainer("wireguard");
                 return ResponseEntity.ok("NAT rules configured successfully");
             } else {
                 return ResponseEntity.internalServerError().body("VpnService not available");
