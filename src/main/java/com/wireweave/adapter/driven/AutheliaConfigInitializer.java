@@ -1,31 +1,25 @@
-package com.wireweave.config;
+package com.wireweave.adapter.driven;
 
-import com.wireweave.domain.port.ForRestartingContainers;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.stereotype.Component;
-
-import java.io.*;
+import com.wireweave.domain.port.ForInitialisingUserService;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.Properties;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class AutheliaConfigInitializer {
+public class AutheliaConfigInitializer implements ForInitialisingUserService {
 
     private static final String AUTHELIA_CONFIG_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config");
     private static final String CONFIGURATION_FILE = AUTHELIA_CONFIG_PATH + "/configuration.yml";
     private static final String SECRETS_FILE = AUTHELIA_CONFIG_PATH + "/secrets.properties";
-    private static final String AUTHELIA_CONTAINER_NAME = "authelia";
 
-    private final ForRestartingContainers containerRestarter;
-
-    public AutheliaConfigInitializer(ForRestartingContainers containerRestarter) {
-        this.containerRestarter = containerRestarter;
-    }
-
-    @EventListener(ApplicationReadyEvent.class)
-    public void initializeAutheliaConfig() {
+    @Override
+    public void initialiseConfiguration() {
         File configFile = new File(CONFIGURATION_FILE);
 
         log.info("Overwriting Authelia configuration file at: {}", configFile.getAbsolutePath());
@@ -43,7 +37,6 @@ public class AutheliaConfigInitializer {
         try (FileWriter writer = new FileWriter(configFile)) {
             writer.write(configContent);
             log.info("Successfully wrote Authelia configuration file");
-            containerRestarter.restartContainer(AUTHELIA_CONTAINER_NAME);
         } catch (IOException e) {
             log.error("Failed to write Authelia configuration file", e);
             throw new RuntimeException("Failed to initialize Authelia configuration", e);

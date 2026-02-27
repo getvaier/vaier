@@ -26,11 +26,9 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     private final Yaml yaml;
     private final Yaml dumper;
     private final Argon2 argon2;
-    private final ForRestartingContainers containerRestarter;
     private static final String AUTHELIA_USERS_DB_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config") + "/users_database.yml";
-    private static final String AUTHELIA_CONTAINER_NAME = "authelia";
 
-    public AutheliaUserAdapter(ForRestartingContainers containerRestarter) {
+    public AutheliaUserAdapter() {
         this.yaml = new Yaml();
 
         DumperOptions options = new DumperOptions();
@@ -40,7 +38,6 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         this.dumper = new Yaml(options);
 
         this.argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id);
-        this.containerRestarter = containerRestarter;
     }
 
     @Override
@@ -144,8 +141,6 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
             argon2.wipeArray(password.toCharArray());
         }
 
-        // Restart Authelia container to reload users
-        containerRestarter.restartContainer(AUTHELIA_CONTAINER_NAME);
     }
 
     @SuppressWarnings("unchecked")
@@ -159,7 +154,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
 
     public static void main(String[] args) {
         ForRestartingContainers containerRestarter = new DockerContainerAdapter();
-        AutheliaUserAdapter adapter = new AutheliaUserAdapter(containerRestarter);
+        AutheliaUserAdapter adapter = new AutheliaUserAdapter();
 
         List<User> users = adapter.getUsers();
 
