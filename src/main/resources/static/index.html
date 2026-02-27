@@ -238,12 +238,6 @@
             const navItem = document.querySelector(`.nav-item[href="#${hash}"]`);
             if (navItem) {
                 navItem.click();
-            } else if (!hash) {
-                // Load Services page by default
-                const servicesItem = document.querySelector('.nav-item[href="#services"]');
-                if (servicesItem) {
-                    servicesItem.click();
-                }
             }
         }
 
