@@ -273,9 +273,47 @@ public class VpnService implements CreatePeerUseCase {
         // Clean up temp file
         executeInContainer("rm", "-f", pskFile);
 
+        // Ensure NAT/forwarding rules are active for this peer
+        ensureNatRulesActive();
+
         // Save configuration to make it persistent
         String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
         log.info("Save config output: {}", saveOutput);
+    }
+
+    private void ensureNatRulesActive() throws IOException, InterruptedException {
+        log.info("Ensuring NAT rules are active");
+
+        // Enable IP forwarding
+        executeInContainer("sh", "-c", "sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true");
+
+        // Get the default network interface
+        String defaultIface = executeInContainer("sh", "-c",
+                "ip route | grep default | awk '{print $5}' | head -n1").trim();
+        if (defaultIface.isEmpty()) {
+            defaultIface = "eth0";
+        }
+        log.info("Default interface: {}", defaultIface);
+
+        // Check if masquerade rule exists
+        String natCheck = executeInContainer("sh", "-c",
+                "iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -o " + defaultIface + " -j MASQUERADE 2>&1");
+
+        if (natCheck.contains("No chain/target/match")) {
+            log.info("NAT rule not found, adding it");
+            executeInContainer("sh", "-c",
+                    "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o " + defaultIface + " -j MASQUERADE");
+        } else {
+            log.info("NAT rule already exists");
+        }
+
+        // Ensure FORWARD rules exist
+        executeInContainer("sh", "-c",
+                "iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT");
+        executeInContainer("sh", "-c",
+                "iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -j ACCEPT");
+
+        log.info("NAT rules are active");
     }
 
     private String extractValue(String configContent, String key) {
