@@ -1,18 +1,25 @@
 package com.wireweave.application.service;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.core.DefaultDockerClientConfig;
+import com.github.dockerjava.core.DockerClientConfig;
+import com.github.dockerjava.core.DockerClientImpl;
+import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
+import com.github.dockerjava.transport.DockerHttpClient;
 import com.wireweave.application.CreatePeerUseCase;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
+import java.time.Duration;
 
 @Service
 @Slf4j
@@ -24,6 +31,45 @@ public class VpnService implements CreatePeerUseCase {
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
 
+    private DockerClient dockerClient;
+
+    @PostConstruct
+    public void init() {
+        try {
+            log.info("Initializing Docker client for VpnService");
+
+            DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
+                    .withDockerHost("unix:///var/run/docker.sock")
+                    .withDockerTlsVerify(false)
+                    .build();
+
+            DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
+                    .dockerHost(config.getDockerHost())
+                    .maxConnections(100)
+                    .connectionTimeout(Duration.ofSeconds(30))
+                    .responseTimeout(Duration.ofSeconds(45))
+                    .build();
+
+            dockerClient = DockerClientImpl.getInstance(config, httpClient);
+            dockerClient.pingCmd().exec();
+            log.info("Docker client initialized successfully for VpnService");
+        } catch (Exception e) {
+            log.error("Failed to initialize Docker client: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to connect to Docker daemon", e);
+        }
+    }
+
+    @PreDestroy
+    public void cleanup() {
+        if (dockerClient != null) {
+            try {
+                dockerClient.close();
+            } catch (Exception e) {
+                log.error("Error closing Docker client", e);
+            }
+        }
+    }
+
     @Override
     public CreatedPeerUco createPeer(String interfaceName, String peerName) {
         return createPeer(interfaceName, peerName, true);
@@ -34,48 +80,49 @@ public class VpnService implements CreatePeerUseCase {
         log.info("Creating peer {} on interface {} (routeAllTraffic: {})", peerName, interfaceName, routeAllTraffic);
 
         try {
-            // Execute docker exec to add peer inside the WireGuard container
-            List<String> command = new ArrayList<>();
-            command.add("docker");
-            command.add("exec");
-            command.add(wireguardContainerName);
-            command.add("/app/add-peer");
-            command.add(peerName);
+            // Execute command in WireGuard container to add peer
+            String[] command = {"/app/add-peer", peerName};
 
-            ProcessBuilder pb = new ProcessBuilder(command);
-            Process process = pb.start();
+            ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(wireguardContainerName)
+                    .withCmd(command)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .exec();
 
-            StringBuilder output = new StringBuilder();
-            StringBuilder errorOutput = new StringBuilder();
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                 BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
-                while ((line = errorReader.readLine()) != null) {
-                    errorOutput.append(line).append("\n");
-                }
+            try {
+                dockerClient.execStartCmd(execCreateCmdResponse.getId())
+                        .exec(new DockerExecCallback(stdout, stderr))
+                        .awaitCompletion();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Docker exec interrupted", e);
             }
 
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                log.error("Failed to create peer. Exit code: {}, Error: {}", exitCode, errorOutput);
-                throw new RuntimeException("Failed to create peer: " + errorOutput);
+            String stderrStr = stderr.toString();
+            if (!stderrStr.isEmpty()) {
+                log.warn("Peer creation stderr: {}", stderrStr);
             }
 
-            log.info("Peer creation output: {}", output);
+            log.info("Peer creation output: {}", stdout.toString());
 
             // Read the generated peer configuration
             Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
+            if (!Files.exists(peerConfigPath)) {
+                log.error("Peer config file not found at: {}", peerConfigPath);
+                throw new RuntimeException("Peer config file not found after creation");
+            }
+
             String configContent = Files.readString(peerConfigPath);
 
             // Parse the config to extract details
             String ipAddress = extractValue(configContent, "Address");
             String privateKey = extractValue(configContent, "PrivateKey");
             String publicKey = extractValue(configContent, "PublicKey");
+
+            log.info("Peer created successfully: {} with IP {}", peerName, ipAddress);
 
             return new CreatedPeerUco(
                     peerName,
@@ -85,7 +132,7 @@ public class VpnService implements CreatePeerUseCase {
                     configContent
             );
 
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             log.error("Error creating peer", e);
             throw new RuntimeException("Failed to create peer: " + e.getMessage(), e);
         }
@@ -99,5 +146,32 @@ public class VpnService implements CreatePeerUseCase {
             }
         }
         return "";
+    }
+
+    private static class DockerExecCallback extends com.github.dockerjava.api.async.ResultCallbackTemplate<DockerExecCallback, com.github.dockerjava.api.model.Frame> {
+        private final ByteArrayOutputStream stdout;
+        private final ByteArrayOutputStream stderr;
+
+        public DockerExecCallback(ByteArrayOutputStream stdout, ByteArrayOutputStream stderr) {
+            this.stdout = stdout;
+            this.stderr = stderr;
+        }
+
+        @Override
+        public void onNext(com.github.dockerjava.api.model.Frame frame) {
+            try {
+                switch (frame.getStreamType()) {
+                    case STDOUT:
+                    case RAW:
+                        stdout.write(frame.getPayload());
+                        break;
+                    case STDERR:
+                        stderr.write(frame.getPayload());
+                        break;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to process Docker exec output", e);
+            }
+        }
     }
 }
