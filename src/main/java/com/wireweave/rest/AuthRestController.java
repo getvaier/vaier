@@ -29,7 +29,7 @@ public class AuthRestController {
     public ResponseEntity<String> addUser(@RequestBody AddUserRequest request) {
         try {
             forPersistingUsers.addUser(request.username(), request.password(), request.email(), request.displayname());
-            containerRestarter.restartContainer("authelia");
+            restartAutheliaAsync();
             return ResponseEntity.ok("User added successfully");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -40,7 +40,7 @@ public class AuthRestController {
     public ResponseEntity<String> deleteUser(@PathVariable String username) {
         try {
             forPersistingUsers.deleteUser(username);
-            containerRestarter.restartContainer("authelia");
+            restartAutheliaAsync();
             return ResponseEntity.ok("User deleted successfully");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -54,11 +54,22 @@ public class AuthRestController {
     ) {
         try {
             forPersistingUsers.changePassword(username, request.newPassword());
-            containerRestarter.restartContainer("authelia");
+            restartAutheliaAsync();
             return ResponseEntity.ok("Password changed successfully");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
+    }
+
+    private void restartAutheliaAsync() {
+        new Thread(() -> {
+            try {
+                containerRestarter.restartContainer("authelia");
+            } catch (Exception e) {
+                // Log but don't fail the request
+                System.err.println("Failed to restart Authelia container: " + e.getMessage());
+            }
+        }).start();
     }
 
     public record AddUserRequest(String username, String password, String email, String displayname) {}
