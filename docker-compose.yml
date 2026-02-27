@@ -11,7 +11,7 @@ services:
       - TZ=Europe/Oslo
       - SERVERURL=wireweave.eilertsen.family
       - SERVERPORT=51820
-      - PEERS=1
+      - PEERS=0
       - PEERDNS=auto
       - INTERNAL_SUBNET=10.13.13.0
       - ALLOWEDIPS=0.0.0.0/0

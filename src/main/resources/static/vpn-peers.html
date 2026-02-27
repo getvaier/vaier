@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Peers</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .peer-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 1rem;
+        }
+
+        .peer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+
+        .peer-name {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .peer-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .peer-details {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .detail-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .detail-label {
+            font-weight: 500;
+            color: #666;
+            min-width: 140px;
+        }
+
+        .detail-value {
+            color: #333;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            word-break: break-all;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .status-connected {
+            background: #28a745;
+        }
+
+        .status-disconnected {
+            background: #dc3545;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+
+        .form-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .form-checkbox input {
+            width: auto;
+        }
+
+        .config-preview {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 1rem;
+            margin-top: 1rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .config-preview pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-section">
+            <h1>VPN Peers</h1>
+            <button class="btn btn-primary" onclick="showCreatePeerModal()">+ Add Peer</button>
+        </div>
+
+        <div id="error-message"></div>
+        <div id="success-message"></div>
+
+        <div id="peers-container">
+            <div class="loading">Loading peers...</div>
+        </div>
+    </div>
+
+    <!-- Create Peer Modal -->
+    <div id="createPeerModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Add New Peer</div>
+            <div class="form-group">
+                <label class="form-label" for="peerName">Peer Name</label>
+                <input type="text" id="peerName" class="form-input" placeholder="e.g., laptop, phone, tablet">
+            </div>
+            <div class="form-checkbox">
+                <input type="checkbox" id="routeAllTraffic" checked>
+                <label for="routeAllTraffic">Route all traffic through VPN</label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideCreatePeerModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="createPeer()">Create Peer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peer Details Modal -->
+    <div id="peerDetailsModal" class="modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">Peer Configuration</div>
+            <div id="peerDetailsContent"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hidePeerDetailsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let peers = [];
+
+        async function fetchPeers() {
+            try {
+                const response = await fetch('/vpn/peers');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                peers = await response.json();
+                displayPeers(peers);
+            } catch (error) {
+                displayError(`Failed to load peers: ${error.message}`);
+            }
+        }
+
+        function displayError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.innerHTML = `<div class="error">${message}</div>`;
+            setTimeout(() => errorDiv.innerHTML = '', 5000);
+        }
+
+        function displaySuccess(message) {
+            const successDiv = document.getElementById('success-message');
+            successDiv.innerHTML = `<div class="success">${message}</div>`;
+            setTimeout(() => successDiv.innerHTML = '', 5000);
+        }
+
+        function displayPeers(peers) {
+            const container = document.getElementById('peers-container');
+
+            if (peers.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔌</div>
+                        <h2>No VPN Peers</h2>
+                        <p>Get started by adding your first VPN peer</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const html = peers.map(peer => {
+                const isConnected = peer.latestHandshake !== '0';
+                const statusClass = isConnected ? 'status-connected' : 'status-disconnected';
+                const statusText = isConnected ? 'Connected' : 'Disconnected';
+
+                // Format bytes
+                const formatBytes = (bytes) => {
+                    const b = parseInt(bytes);
+                    if (isNaN(b) || b === 0) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    const i = Math.floor(Math.log(b) / Math.log(k));
+                    return Math.round((b / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+                };
+
+                return `
+                    <div class="peer-card">
+                        <div class="peer-header">
+                            <div class="peer-name">${peer.allowedIps.split('/')[0]}</div>
+                            <div class="peer-actions">
+                                <button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.publicKey}')">
+                                    ⬇️ Docker Compose
+                                </button>
+                            </div>
+                        </div>
+                        <div class="peer-details">
+                            <div class="detail-row">
+                                <span class="detail-label">Status:</span>
+                                <div class="connection-status">
+                                    <span class="status-dot ${statusClass}"></span>
+                                    <span>${statusText}</span>
+                                </div>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Public Key:</span>
+                                <span class="detail-value">${peer.publicKey}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Allowed IPs:</span>
+                                <span class="detail-value">${peer.allowedIps}</span>
+                            </div>
+                            ${peer.endpointIp ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Endpoint:</span>
+                                    <span class="detail-value">${peer.endpointIp}:${peer.endpointPort}</span>
+                                </div>
+                            ` : ''}
+                            <div class="detail-row">
+                                <span class="detail-label">Data Received:</span>
+                                <span class="detail-value">${formatBytes(peer.transferRx)}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Data Sent:</span>
+                                <span class="detail-value">${formatBytes(peer.transferTx)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function showCreatePeerModal() {
+            document.getElementById('createPeerModal').classList.add('active');
+            document.getElementById('peerName').value = '';
+            document.getElementById('routeAllTraffic').checked = true;
+        }
+
+        function hideCreatePeerModal() {
+            document.getElementById('createPeerModal').classList.remove('active');
+        }
+
+        async function createPeer() {
+            const name = document.getElementById('peerName').value.trim();
+            const routeAllTraffic = document.getElementById('routeAllTraffic').checked;
+
+            if (!name) {
+                displayError('Please enter a peer name');
+                return;
+            }
+
+            try {
+                const response = await fetch('/vpn/peers', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        routeAllTraffic: routeAllTraffic
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const createdPeer = await response.json();
+                hideCreatePeerModal();
+                displaySuccess(`Peer "${createdPeer.name}" created successfully!`);
+
+                // Show peer details
+                showPeerDetails(createdPeer);
+
+                // Refresh peer list
+                setTimeout(() => fetchPeers(), 1000);
+            } catch (error) {
+                displayError(`Failed to create peer: ${error.message}`);
+            }
+        }
+
+        function showPeerDetails(peer) {
+            const content = `
+                <div class="peer-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Name:</span>
+                        <span class="detail-value">${peer.name}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">IP Address:</span>
+                        <span class="detail-value">${peer.ipAddress}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Public Key:</span>
+                        <span class="detail-value">${peer.publicKey}</span>
+                    </div>
+                </div>
+                <div class="config-preview">
+                    <strong>Client Configuration:</strong>
+                    <pre>${peer.configFile}</pre>
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peer.name}')">
+                        ⬇️ Download Docker Compose
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('peerDetailsContent').innerHTML = content;
+            document.getElementById('peerDetailsModal').classList.add('active');
+        }
+
+        function hidePeerDetailsModal() {
+            document.getElementById('peerDetailsModal').classList.remove('active');
+        }
+
+        function downloadDockerComposeForPeer(peerName) {
+            window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/docker-compose`;
+        }
+
+        function downloadDockerCompose(publicKey) {
+            // Extract peer name from allowed IPs or use public key
+            const peer = peers.find(p => p.publicKey === publicKey);
+            if (peer) {
+                // Try to derive peer name from IP address (last octet typically matches peer number)
+                const ip = peer.allowedIps.split('/')[0];
+                const lastOctet = ip.split('.').pop();
+                const peerName = `peer${lastOctet}`;
+                downloadDockerComposeForPeer(peerName);
+            }
+        }
+
+        // Close modals on outside click
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.classList.remove('active');
+            }
+        };
+
+        // Load peers on page load
+        fetchPeers();
+
+        // Refresh peers every 10 seconds
+        setInterval(fetchPeers, 10000);
+    </script>
+</body>
+</html>
