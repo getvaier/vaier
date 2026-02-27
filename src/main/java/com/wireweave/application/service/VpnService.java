@@ -281,7 +281,7 @@ public class VpnService implements CreatePeerUseCase {
         log.info("Save config output: {}", saveOutput);
     }
 
-    private void ensureNatRulesActive() throws IOException, InterruptedException {
+    public void ensureNatRulesActive() throws IOException, InterruptedException {
         log.info("Ensuring NAT rules are active");
 
         // Enable IP forwarding

@@ -129,7 +129,10 @@
     <div class="container">
         <div class="header-section">
             <h1>VPN Peers</h1>
-            <button class="btn btn-primary" onclick="showCreatePeerModal()">+ Add Peer</button>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-secondary" onclick="setupNat()">🔧 Setup NAT</button>
+                <button class="btn btn-primary" onclick="showCreatePeerModal()">+ Add Peer</button>
+            </div>
         </div>
 
         <div id="error-message"></div>
@@ -440,6 +443,23 @@
 
         function downloadDockerCompose(peerName) {
             downloadDockerComposeForPeer(peerName);
+        }
+
+        async function setupNat() {
+            try {
+                const response = await fetch('/vpn/peers/setup-nat', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const message = await response.text();
+                displaySuccess(message);
+            } catch (error) {
+                displayError(`Failed to setup NAT: ${error.message}`);
+            }
         }
 
         let peerToDelete = null;

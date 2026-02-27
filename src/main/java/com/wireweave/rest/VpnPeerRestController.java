@@ -114,6 +114,22 @@ public class VpnPeerRestController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/setup-nat")
+    public ResponseEntity<String> setupNat() {
+        log.info("Manually setting up NAT rules");
+        try {
+            if (createPeerUseCase instanceof com.wireweave.application.service.VpnService vpnService) {
+                vpnService.ensureNatRulesActive();
+                return ResponseEntity.ok("NAT rules configured successfully");
+            } else {
+                return ResponseEntity.internalServerError().body("VpnService not available");
+            }
+        } catch (Exception e) {
+            log.error("Failed to setup NAT: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body("Failed to setup NAT: " + e.getMessage());
+        }
+    }
+
     @DeleteMapping("/{peerIdentifier}")
     public ResponseEntity<Void> deletePeer(@PathVariable String peerIdentifier) {
         log.info("Deleting VPN peer: {}", peerIdentifier);
