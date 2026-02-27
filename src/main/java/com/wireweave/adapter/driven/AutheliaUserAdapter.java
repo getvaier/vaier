@@ -152,6 +152,88 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         return null;
     }
 
+    @Override
+    public void deleteUser(String username) {
+        File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
+
+        if (!usersDbFile.exists()) {
+            throw new RuntimeException("Users database file not found: " + usersDbFile.getAbsolutePath());
+        }
+
+        Map<String, Object> config;
+        try (FileInputStream inputStream = new FileInputStream(usersDbFile)) {
+            config = yaml.load(inputStream);
+            if (config == null) {
+                throw new RuntimeException("Users database is empty");
+            }
+        } catch (IOException e) {
+            log.error("Failed to read Authelia users database file: " + usersDbFile, e);
+            throw new RuntimeException("Failed to read users database", e);
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> usersMap = (Map<String, Object>) config.get("users");
+        if (usersMap == null || !usersMap.containsKey(username)) {
+            throw new RuntimeException("User not found: " + username);
+        }
+
+        usersMap.remove(username);
+
+        // Save config
+        try (FileWriter writer = new FileWriter(usersDbFile)) {
+            dumper.dump(config, writer);
+            log.info("Deleted user '{}' from Authelia users database", username);
+        } catch (IOException e) {
+            log.error("Failed to write Authelia users database file: " + usersDbFile, e);
+            throw new RuntimeException("Failed to write users database", e);
+        }
+    }
+
+    @Override
+    public void changePassword(String username, String newPassword) {
+        File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
+
+        if (!usersDbFile.exists()) {
+            throw new RuntimeException("Users database file not found: " + usersDbFile.getAbsolutePath());
+        }
+
+        Map<String, Object> config;
+        try (FileInputStream inputStream = new FileInputStream(usersDbFile)) {
+            config = yaml.load(inputStream);
+            if (config == null) {
+                throw new RuntimeException("Users database is empty");
+            }
+        } catch (IOException e) {
+            log.error("Failed to read Authelia users database file: " + usersDbFile, e);
+            throw new RuntimeException("Failed to read users database", e);
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> usersMap = (Map<String, Object>) config.get("users");
+        if (usersMap == null || !usersMap.containsKey(username)) {
+            throw new RuntimeException("User not found: " + username);
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> userEntry = (Map<String, Object>) usersMap.get(username);
+
+        // Hash password with Argon2id
+        String hashedPassword = argon2.hash(3, 65536, 4, newPassword.toCharArray());
+        userEntry.put("password", hashedPassword);
+
+        // Save config
+        try (FileWriter writer = new FileWriter(usersDbFile)) {
+            dumper.dump(config, writer);
+            log.info("Changed password for user '{}' in Authelia users database", username);
+        } catch (IOException e) {
+            log.error("Failed to write Authelia users database file: " + usersDbFile, e);
+            throw new RuntimeException("Failed to write users database", e);
+        } finally {
+            // Clear password from memory
+            argon2.wipeArray(newPassword.toCharArray());
+        }
+    }
+
     public static void main(String[] args) {
         ForRestartingContainers containerRestarter = new DockerContainerAdapter();
         AutheliaUserAdapter adapter = new AutheliaUserAdapter();

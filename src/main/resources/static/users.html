@@ -27,40 +27,411 @@
             margin-bottom: 2rem;
         }
 
-        .placeholder {
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            margin-right: 0.5rem;
+        }
+
+        .users-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .user-card {
             background: white;
             border-radius: 8px;
-            padding: 3rem;
+            padding: 1.5rem;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
-        .placeholder-icon {
-            font-size: 4rem;
-            margin-bottom: 1rem;
-            opacity: 0.5;
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
         }
 
-        .placeholder-text {
-            color: #666;
+        .user-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: #007bff;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 1.25rem;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name {
             font-size: 1.125rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .user-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-weight: 500;
+            color: #333;
             margin-bottom: 0.5rem;
         }
 
-        .placeholder-subtext {
-            color: #999;
+        .form-input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
             font-size: 0.875rem;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+
+        .error, .success {
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Users</h1>
-        <div class="placeholder">
-            <div class="placeholder-icon">👥</div>
-            <div class="placeholder-text">User Management</div>
-            <div class="placeholder-subtext">This feature will be implemented soon</div>
+        <div class="header-actions">
+            <h1>Users</h1>
+            <button class="btn btn-primary" onclick="showAddUserModal()">Add User</button>
+        </div>
+        <div id="message"></div>
+        <div id="users-container">
+            <div class="loading">Loading users...</div>
         </div>
     </div>
+
+    <!-- Add User Modal -->
+    <div id="addUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Add New User</div>
+            <form id="addUserForm">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-input" id="newUsername" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Display Name</label>
+                    <input type="text" class="form-input" id="newDisplayname" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" class="form-input" id="newEmail" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-input" id="newPassword" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addUserModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Change Password</div>
+            <form id="changePasswordForm">
+                <input type="hidden" id="changePasswordUsername">
+                <div class="form-group">
+                    <label class="form-label">New Password</label>
+                    <input type="password" class="form-input" id="changePassword" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('changePasswordModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Change Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let users = [];
+
+        async function fetchUsers() {
+            try {
+                const response = await fetch('/users');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                users = await response.json();
+                displayUsers();
+            } catch (error) {
+                displayMessage(`Failed to load users: ${error.message}`, 'error');
+            }
+        }
+
+        function displayUsers() {
+            const container = document.getElementById('users-container');
+
+            if (users.length === 0) {
+                container.innerHTML = '<div class="loading">No users found</div>';
+                return;
+            }
+
+            const html = users.map(user => {
+                const initials = user.name.charAt(0).toUpperCase();
+                return `
+                    <div class="user-card">
+                        <div class="user-info">
+                            <div class="user-avatar">${initials}</div>
+                            <div class="user-details">
+                                <div class="user-name">${user.name}</div>
+                            </div>
+                        </div>
+                        <div class="user-actions">
+                            <button class="btn btn-small btn-secondary" onclick="showChangePasswordModal('${user.name}')">Change Password</button>
+                            <button class="btn btn-small btn-danger" onclick="deleteUser('${user.name}')">Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = `<div class="users-list">${html}</div>`;
+        }
+
+        function displayMessage(message, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.innerHTML = `<div class="${type}">${message}</div>`;
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        function showAddUserModal() {
+            document.getElementById('addUserModal').classList.add('active');
+        }
+
+        function showChangePasswordModal(username) {
+            document.getElementById('changePasswordUsername').value = username;
+            document.getElementById('changePasswordModal').classList.add('active');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('newUsername').value;
+            const displayname = document.getElementById('newDisplayname').value;
+            const email = document.getElementById('newEmail').value;
+            const password = document.getElementById('newPassword').value;
+
+            try {
+                const response = await fetch('/users', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, displayname, email, password })
+                });
+
+                const message = await response.text();
+
+                if (response.ok) {
+                    displayMessage(message, 'success');
+                    closeModal('addUserModal');
+                    document.getElementById('addUserForm').reset();
+                    fetchUsers();
+                } else {
+                    displayMessage(message, 'error');
+                }
+            } catch (error) {
+                displayMessage(`Failed to add user: ${error.message}`, 'error');
+            }
+        });
+
+        document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('changePasswordUsername').value;
+            const newPassword = document.getElementById('changePassword').value;
+
+            try {
+                const response = await fetch(`/users/${username}/password`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ newPassword })
+                });
+
+                const message = await response.text();
+
+                if (response.ok) {
+                    displayMessage(message, 'success');
+                    closeModal('changePasswordModal');
+                    document.getElementById('changePasswordForm').reset();
+                } else {
+                    displayMessage(message, 'error');
+                }
+            } catch (error) {
+                displayMessage(`Failed to change password: ${error.message}`, 'error');
+            }
+        });
+
+        async function deleteUser(username) {
+            if (!confirm(`Are you sure you want to delete user '${username}'?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/users/${username}`, {
+                    method: 'DELETE'
+                });
+
+                const message = await response.text();
+
+                if (response.ok) {
+                    displayMessage(message, 'success');
+                    fetchUsers();
+                } else {
+                    displayMessage(message, 'error');
+                }
+            } catch (error) {
+                displayMessage(`Failed to delete user: ${error.message}`, 'error');
+            }
+        }
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) {
+                e.target.classList.remove('active');
+            }
+        });
+
+        // Load users on page load
+        fetchUsers();
+    </script>
 </body>
 </html>
