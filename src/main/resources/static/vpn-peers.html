@@ -238,17 +238,21 @@
                 return `
                     <div class="peer-card">
                         <div class="peer-header">
-                            <div class="peer-name">${peer.allowedIps.split('/')[0]}</div>
+                            <div class="peer-name">${peer.name}</div>
                             <div class="peer-actions">
-                                <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.allowedIps.split('/')[0]}')">
+                                <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.name}')">
                                     👁️ View Config
                                 </button>
-                                <button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.publicKey}')">
+                                <button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.name}')">
                                     ⬇️ Docker Compose
                                 </button>
                             </div>
                         </div>
                         <div class="peer-details">
+                            <div class="detail-row">
+                                <span class="detail-label">IP Address:</span>
+                                <span class="detail-value">${peer.allowedIps.split('/')[0]}</span>
+                            </div>
                             <div class="detail-row">
                                 <span class="detail-label">Status:</span>
                                 <div class="connection-status">
@@ -418,16 +422,8 @@
             document.getElementById('peerDetailsModal').classList.add('active');
         }
 
-        function downloadDockerCompose(publicKey) {
-            // Extract peer name from allowed IPs or use public key
-            const peer = peers.find(p => p.publicKey === publicKey);
-            if (peer) {
-                // Try to derive peer name from IP address (last octet typically matches peer number)
-                const ip = peer.allowedIps.split('/')[0];
-                const lastOctet = ip.split('.').pop();
-                const peerName = `peer${lastOctet}`;
-                downloadDockerComposeForPeer(peerName);
-            }
+        function downloadDockerCompose(peerName) {
+            downloadDockerComposeForPeer(peerName);
         }
 
         // Close modals on outside click

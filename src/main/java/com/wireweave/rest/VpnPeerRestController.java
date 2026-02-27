@@ -23,27 +23,71 @@ public class VpnPeerRestController {
     private final ForGettingVpnClients vpnClientService;
     private final CreatePeerUseCase createPeerUseCase;
 
+    @org.springframework.beans.factory.annotation.Value("${wireguard.config.path:/wireguard/config}")
+    private String wireguardConfigPath;
+
     @GetMapping
     public ResponseEntity<List<VpnPeerResponse>> listPeers() {
         log.info("Fetching all VPN peers");
         try {
             List<VpnClient> clients = vpnClientService.getClients();
             List<VpnPeerResponse> response = clients.stream()
-                    .map(client -> new VpnPeerResponse(
-                            client.publicKey(),
-                            client.allowedIps(),
-                            client.endpointIp(),
-                            client.endpointPort(),
-                            client.latestHandshake(),
-                            client.transferRx(),
-                            client.transferTx()
-                    ))
+                    .map(client -> {
+                        String peerName = findPeerNameByIp(client.allowedIps().split("/")[0]);
+                        return new VpnPeerResponse(
+                                peerName,
+                                client.publicKey(),
+                                client.allowedIps(),
+                                client.endpointIp(),
+                                client.endpointPort(),
+                                client.latestHandshake(),
+                                client.transferRx(),
+                                client.transferTx()
+                        );
+                    })
                     .toList();
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Failed to fetch VPN peers: {}", e.getMessage(), e);
             // Return empty list instead of error to prevent constant error messages
             return ResponseEntity.ok(List.of());
+        }
+    }
+
+    private String findPeerNameByIp(String ipAddress) {
+        try {
+            java.nio.file.Path configDir = java.nio.file.Paths.get(wireguardConfigPath);
+            try (var stream = java.nio.file.Files.list(configDir)) {
+                return stream
+                        .filter(java.nio.file.Files::isDirectory)
+                        .filter(dir -> {
+                            try {
+                                String dirName = dir.getFileName().toString();
+                                java.nio.file.Path confFile = dir.resolve(dirName + ".conf");
+                                if (java.nio.file.Files.exists(confFile)) {
+                                    String content = java.nio.file.Files.readString(confFile);
+                                    for (String line : content.split("\n")) {
+                                        if (line.trim().startsWith("Address")) {
+                                            String address = line.substring(line.indexOf('=') + 1).trim();
+                                            String ip = address.split("/")[0];
+                                            if (ip.equals(ipAddress)) {
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                log.debug("Error checking peer dir {}: {}", dir, e.getMessage());
+                            }
+                            return false;
+                        })
+                        .map(path -> path.getFileName().toString())
+                        .findFirst()
+                        .orElse(ipAddress); // Fallback to IP if name not found
+            }
+        } catch (Exception e) {
+            log.warn("Error finding peer name for IP {}: {}", ipAddress, e.getMessage());
+            return ipAddress; // Fallback to IP
         }
     }
 
@@ -70,15 +114,70 @@ public class VpnPeerRestController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/{peerName}/config")
-    public ResponseEntity<PeerConfigResponse> getPeerConfig(@PathVariable String peerName) {
-        log.info("Fetching config for peer: {}", peerName);
+    @GetMapping("/{peerIdentifier}/config")
+    public ResponseEntity<PeerConfigResponse> getPeerConfig(@PathVariable String peerIdentifier) {
+        log.info("Fetching config for peer: {}", peerIdentifier);
 
         try {
-            String configPath = System.getenv().getOrDefault("WIREGUARD_CONFIG_PATH", "/wireguard/config");
-            java.nio.file.Path peerConfigPath = java.nio.file.Paths.get(configPath, peerName, peerName + ".conf");
+            java.nio.file.Path configDir = java.nio.file.Paths.get(wireguardConfigPath);
+            log.info("Searching for peer config in: {}", configDir.toAbsolutePath());
 
-            if (!java.nio.file.Files.exists(peerConfigPath)) {
+            // Search for peer by name or IP address
+            java.nio.file.Path peerConfigPath = null;
+            String peerName = null;
+
+            // First try as a peer name directly
+            java.nio.file.Path directPath = configDir.resolve(peerIdentifier).resolve(peerIdentifier + ".conf");
+            if (java.nio.file.Files.exists(directPath)) {
+                peerConfigPath = directPath;
+                peerName = peerIdentifier;
+            } else {
+                // Search all peer directories for matching IP
+                log.info("Searching by IP address: {}", peerIdentifier);
+                try (var stream = java.nio.file.Files.list(configDir)) {
+                    var found = stream
+                            .filter(java.nio.file.Files::isDirectory)
+                            .filter(dir -> {
+                                try {
+                                    String dirName = dir.getFileName().toString();
+                                    java.nio.file.Path confFile = dir.resolve(dirName + ".conf");
+                                    log.debug("Checking directory: {} for config file: {}", dirName, confFile);
+
+                                    if (java.nio.file.Files.exists(confFile)) {
+                                        String content = java.nio.file.Files.readString(confFile);
+                                        for (String line : content.split("\n")) {
+                                            if (line.trim().startsWith("Address")) {
+                                                String address = line.substring(line.indexOf('=') + 1).trim();
+                                                String ip = address.split("/")[0];
+                                                log.debug("Found IP {} in {}, comparing with {}", ip, dirName, peerIdentifier);
+                                                if (ip.equals(peerIdentifier)) {
+                                                    log.info("Match found in directory: {}", dirName);
+                                                    return true;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        log.debug("Config file does not exist: {}", confFile);
+                                    }
+                                } catch (Exception e) {
+                                    log.warn("Error reading peer config in {}: {}", dir, e.getMessage());
+                                }
+                                return false;
+                            })
+                            .findFirst();
+
+                    if (found.isPresent()) {
+                        peerName = found.get().getFileName().toString();
+                        peerConfigPath = found.get().resolve(peerName + ".conf");
+                        log.info("Found peer: {} at path: {}", peerName, peerConfigPath);
+                    } else {
+                        log.warn("No matching peer found for IP: {}", peerIdentifier);
+                    }
+                }
+            }
+
+            if (peerConfigPath == null || !java.nio.file.Files.exists(peerConfigPath)) {
+                log.warn("Peer config not found for identifier: {}", peerIdentifier);
                 return ResponseEntity.notFound().build();
             }
 
@@ -92,6 +191,8 @@ public class VpnPeerRestController {
                     break;
                 }
             }
+
+            log.info("Found peer config: {} with IP {}", peerName, ipAddress);
 
             PeerConfigResponse response = new PeerConfigResponse(
                     peerName,
@@ -158,6 +259,7 @@ public class VpnPeerRestController {
     }
 
     public record VpnPeerResponse(
+            String name,
             String publicKey,
             String allowedIps,
             String endpointIp,
