@@ -97,10 +97,8 @@ public class VpnService implements CreatePeerUseCase {
             String ipAddress = findNextAvailableIp();
             log.info("Assigned IP address {} to peer {}", ipAddress, peerName);
 
-            // Step 5: Read server configuration to get server public key
-            Path serverConfigPath = Paths.get(wireguardConfigPath, interfaceName + ".conf");
-            String serverConfig = Files.readString(serverConfigPath);
-            String serverPublicKey = extractValue(serverConfig, "PublicKey");
+            // Step 5: Get server public key
+            String serverPublicKey = getServerPublicKey(interfaceName);
             String serverEndpoint = extractServerEndpoint();
             String allowedIps = routeAllTraffic ? "0.0.0.0/0" : "10.13.13.0/24";
 
@@ -205,6 +203,34 @@ public class VpnService implements CreatePeerUseCase {
         // Return next available IP (start from .2, server is .1)
         int nextOctet = Math.max(maxLastOctet.get() + 1, 2);
         return "10.13.13." + nextOctet;
+    }
+
+    private String getServerPublicKey(String interfaceName) throws IOException, InterruptedException {
+        // Try to read from config file first - linuxserver/wireguard stores at /config/wg_confs/wg0.conf
+        Path serverConfigPath = Paths.get(wireguardConfigPath, "wg_confs", interfaceName + ".conf");
+        if (!Files.exists(serverConfigPath)) {
+            serverConfigPath = Paths.get(wireguardConfigPath, interfaceName, interfaceName + ".conf");
+        }
+        if (!Files.exists(serverConfigPath)) {
+            serverConfigPath = Paths.get(wireguardConfigPath, interfaceName + ".conf");
+        }
+
+        if (Files.exists(serverConfigPath)) {
+            log.info("Reading server config from: {}", serverConfigPath);
+            String serverConfig = Files.readString(serverConfigPath);
+            String publicKey = extractValue(serverConfig, "PublicKey");
+            if (!publicKey.isEmpty()) {
+                log.info("Found server public key in config file: {}", publicKey);
+                return publicKey;
+            }
+        }
+
+        // If config file not found or doesn't contain public key, get it from running interface
+        log.info("Config file not found, getting public key from running interface");
+        String output = executeInContainer("wg", "show", interfaceName, "public-key");
+        String publicKey = output.trim();
+        log.info("Got server public key from interface: {}", publicKey);
+        return publicKey;
     }
 
     private String extractServerEndpoint() {
