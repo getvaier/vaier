@@ -173,6 +173,8 @@
     <script>
         let peers = [];
 
+        let lastFetchSuccessful = false;
+
         async function fetchPeers() {
             try {
                 const response = await fetch('/vpn/peers');
@@ -181,15 +183,21 @@
                 }
                 peers = await response.json();
                 displayPeers(peers);
+                lastFetchSuccessful = true;
+                // Clear any previous errors on success
+                document.getElementById('error-message').innerHTML = '';
             } catch (error) {
-                displayError(`Failed to load peers: ${error.message}`);
+                console.error('Failed to load peers:', error);
+                // Only show persistent error if we've never successfully loaded
+                if (!lastFetchSuccessful && peers.length === 0) {
+                    displayError(`Failed to load peers: ${error.message}`);
+                }
             }
         }
 
         function displayError(message) {
             const errorDiv = document.getElementById('error-message');
             errorDiv.innerHTML = `<div class="error">${message}</div>`;
-            setTimeout(() => errorDiv.innerHTML = '', 5000);
         }
 
         function displaySuccess(message) {
@@ -232,6 +240,9 @@
                         <div class="peer-header">
                             <div class="peer-name">${peer.allowedIps.split('/')[0]}</div>
                             <div class="peer-actions">
+                                <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.allowedIps.split('/')[0]}')">
+                                    👁️ View Config
+                                </button>
                                 <button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.publicKey}')">
                                     ⬇️ Docker Compose
                                 </button>
@@ -361,6 +372,50 @@
 
         function downloadDockerComposeForPeer(peerName) {
             window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/docker-compose`;
+        }
+
+        async function viewPeerConfig(peerIp) {
+            try {
+                // Try to find the peer name by looking for config files
+                // The peer IP is the identifier, we need to map it to a peer name
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerIp)}/config`);
+                if (!response.ok) {
+                    displayError('Peer configuration not found');
+                    return;
+                }
+
+                const peerConfig = await response.json();
+                showPeerConfigModal(peerConfig);
+            } catch (error) {
+                displayError(`Failed to load peer configuration: ${error.message}`);
+            }
+        }
+
+        function showPeerConfigModal(peerConfig) {
+            const content = `
+                <div class="peer-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Name:</span>
+                        <span class="detail-value">${peerConfig.name}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">IP Address:</span>
+                        <span class="detail-value">${peerConfig.ipAddress}</span>
+                    </div>
+                </div>
+                <div class="config-preview">
+                    <strong>Client Configuration:</strong>
+                    <pre>${peerConfig.configFile}</pre>
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peerConfig.name}')">
+                        ⬇️ Download Docker Compose
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('peerDetailsContent').innerHTML = content;
+            document.getElementById('peerDetailsModal').classList.add('active');
         }
 
         function downloadDockerCompose(publicKey) {

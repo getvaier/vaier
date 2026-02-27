@@ -26,19 +26,25 @@ public class VpnPeerRestController {
     @GetMapping
     public ResponseEntity<List<VpnPeerResponse>> listPeers() {
         log.info("Fetching all VPN peers");
-        List<VpnClient> clients = vpnClientService.getClients();
-        List<VpnPeerResponse> response = clients.stream()
-                .map(client -> new VpnPeerResponse(
-                        client.publicKey(),
-                        client.allowedIps(),
-                        client.endpointIp(),
-                        client.endpointPort(),
-                        client.latestHandshake(),
-                        client.transferRx(),
-                        client.transferTx()
-                ))
-                .toList();
-        return ResponseEntity.ok(response);
+        try {
+            List<VpnClient> clients = vpnClientService.getClients();
+            List<VpnPeerResponse> response = clients.stream()
+                    .map(client -> new VpnPeerResponse(
+                            client.publicKey(),
+                            client.allowedIps(),
+                            client.endpointIp(),
+                            client.endpointPort(),
+                            client.latestHandshake(),
+                            client.transferRx(),
+                            client.transferTx()
+                    ))
+                    .toList();
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Failed to fetch VPN peers: {}", e.getMessage(), e);
+            // Return empty list instead of error to prevent constant error messages
+            return ResponseEntity.ok(List.of());
+        }
     }
 
     @PostMapping
@@ -62,6 +68,42 @@ public class VpnPeerRestController {
         );
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{peerName}/config")
+    public ResponseEntity<PeerConfigResponse> getPeerConfig(@PathVariable String peerName) {
+        log.info("Fetching config for peer: {}", peerName);
+
+        try {
+            String configPath = System.getenv().getOrDefault("WIREGUARD_CONFIG_PATH", "/wireguard/config");
+            java.nio.file.Path peerConfigPath = java.nio.file.Paths.get(configPath, peerName, peerName + ".conf");
+
+            if (!java.nio.file.Files.exists(peerConfigPath)) {
+                return ResponseEntity.notFound().build();
+            }
+
+            String configContent = java.nio.file.Files.readString(peerConfigPath);
+
+            // Extract IP address from config
+            String ipAddress = "";
+            for (String line : configContent.split("\n")) {
+                if (line.trim().startsWith("Address")) {
+                    ipAddress = line.substring(line.indexOf('=') + 1).trim();
+                    break;
+                }
+            }
+
+            PeerConfigResponse response = new PeerConfigResponse(
+                    peerName,
+                    ipAddress,
+                    configContent
+            );
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Failed to read peer config: {}", e.getMessage(), e);
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @GetMapping("/{peerName}/docker-compose")
@@ -134,6 +176,12 @@ public class VpnPeerRestController {
             String name,
             String ipAddress,
             String publicKey,
+            String configFile
+    ) {}
+
+    public record PeerConfigResponse(
+            String name,
+            String ipAddress,
             String configFile
     ) {}
 }
