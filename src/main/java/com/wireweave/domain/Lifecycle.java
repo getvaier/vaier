@@ -22,6 +22,7 @@ public class Lifecycle {
 
     public void start() {
         forInitialisingUserService.initialiseConfiguration();
+        forPersistingUsers.addUser("admin", "admin", "", "Admin");
         containerRestarter.restartContainer("authelia");
     }
 }
