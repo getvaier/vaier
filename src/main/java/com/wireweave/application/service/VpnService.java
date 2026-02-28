@@ -284,36 +284,53 @@ public class VpnService implements CreatePeerUseCase {
     public void ensureNatRulesActive() throws IOException, InterruptedException {
         log.info("Ensuring NAT rules are active");
 
-        // Enable IP forwarding
-        executeInContainer("sh", "-c", "sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true");
+        try {
+            // Enable IP forwarding
+            String ipForwardOutput = executeInContainer("sh", "-c", "sysctl -w net.ipv4.ip_forward=1 2>&1");
+            log.info("IP forwarding output: {}", ipForwardOutput.trim());
 
-        // Get the default network interface
-        String defaultIface = executeInContainer("sh", "-c",
-                "ip route | grep default | awk '{print $5}' | head -n1").trim();
-        if (defaultIface.isEmpty()) {
-            defaultIface = "eth0";
+            // Get the default network interface
+            String defaultIface = executeInContainer("sh", "-c",
+                    "ip route | grep default | awk '{print $5}' | head -n1").trim();
+            if (defaultIface.isEmpty()) {
+                defaultIface = "eth0";
+            }
+            log.info("Default interface: {}", defaultIface);
+
+            // Add MASQUERADE rule (using -A to append, command will fail if it already exists but we catch that)
+            try {
+                String masqOutput = executeInContainer("sh", "-c",
+                        "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o " + defaultIface + " -j MASQUERADE 2>&1");
+                log.info("MASQUERADE rule output: {}", masqOutput.trim());
+            } catch (Exception e) {
+                log.info("MASQUERADE rule might already exist: {}", e.getMessage());
+            }
+
+            // Add FORWARD rules
+            try {
+                String forward1 = executeInContainer("sh", "-c", "iptables -A FORWARD -i wg0 -j ACCEPT 2>&1");
+                log.info("FORWARD -i wg0 output: {}", forward1.trim());
+            } catch (Exception e) {
+                log.info("FORWARD -i wg0 might already exist: {}", e.getMessage());
+            }
+
+            try {
+                String forward2 = executeInContainer("sh", "-c", "iptables -A FORWARD -o wg0 -j ACCEPT 2>&1");
+                log.info("FORWARD -o wg0 output: {}", forward2.trim());
+            } catch (Exception e) {
+                log.info("FORWARD -o wg0 might already exist: {}", e.getMessage());
+            }
+
+            // Verify rules are in place
+            String natRules = executeInContainer("sh", "-c", "iptables -t nat -L POSTROUTING -n | grep -c MASQUERADE || echo 0");
+            String forwardRules = executeInContainer("sh", "-c", "iptables -L FORWARD -n | grep -c wg0 || echo 0");
+            log.info("NAT rules count: {}, FORWARD rules count: {}", natRules.trim(), forwardRules.trim());
+
+            log.info("NAT rules configuration completed");
+        } catch (Exception e) {
+            log.error("Error ensuring NAT rules: {}", e.getMessage(), e);
+            throw e;
         }
-        log.info("Default interface: {}", defaultIface);
-
-        // Check if masquerade rule exists
-        String natCheck = executeInContainer("sh", "-c",
-                "iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -o " + defaultIface + " -j MASQUERADE 2>&1");
-
-        if (natCheck.contains("No chain/target/match")) {
-            log.info("NAT rule not found, adding it");
-            executeInContainer("sh", "-c",
-                    "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o " + defaultIface + " -j MASQUERADE");
-        } else {
-            log.info("NAT rule already exists");
-        }
-
-        // Ensure FORWARD rules exist
-        executeInContainer("sh", "-c",
-                "iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT");
-        executeInContainer("sh", "-c",
-                "iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -j ACCEPT");
-
-        log.info("NAT rules are active");
     }
 
     public void deletePeer(String interfaceName, String peerName) {
