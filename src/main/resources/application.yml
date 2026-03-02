@@ -18,4 +18,4 @@ logging:
 
 wireguard:
   server:
-    endpoint: vaier.net:51820
+    endpoint: vaier.vaier.net:51820

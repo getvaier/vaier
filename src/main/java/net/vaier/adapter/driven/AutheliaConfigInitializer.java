@@ -44,7 +44,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
     }
 
     private String generateDefaultConfig() {
-        String vaierFullDomain = System.getenv().getOrDefault("VAIER_DOMAIN", "vaier.example.com");
+        String vaierFullDomain = "vaier." + System.getenv().get("VAIER_DOMAIN");
         // Extract base domain from vaier domain (e.g., "vaier.eilertsen.family" -> "eilertsen.family")
         String baseDomain = vaierFullDomain.contains(".")
             ? vaierFullDomain.substring(vaierFullDomain.indexOf('.') + 1)
