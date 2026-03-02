@@ -187,7 +187,7 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords {
     @Override
     public List<DnsZone> getDnsZones() {
         return route53Client.listHostedZones().hostedZones().stream()
-                .map(zone -> new DnsZone(zone.name()))
+                .map(zone -> new DnsZone(stripTrailingDot(zone.name())))
                 .collect(Collectors.toList());
     }
 
@@ -252,13 +252,17 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords {
 
     private DnsRecord toDomain(ResourceRecordSet recordSet) {
         return new DnsRecord(
-            recordSet.name(),
+            stripTrailingDot(recordSet.name()),
             DnsRecordType.valueOf(recordSet.type().name()),
             recordSet.ttl(),
             recordSet.resourceRecords().stream()
                 .map(ResourceRecord::value)
                 .toList()
         );
+    }
+
+    private String stripTrailingDot(String name) {
+        return name != null && name.endsWith(".") ? name.substring(0, name.length() - 1) : name;
     }
 
     public static void main(String[] args) {

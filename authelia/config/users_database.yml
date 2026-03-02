@@ -1,7 +1,13 @@
 users:
   geir:
-    password: "$argon2id$v=19$m=65536,t=3,p=4$uWeBTaYUt8ngiM4wHnZLiA$jU2gKmIgvjgBtNzd3VbnzjCmZdEy8UEXLrIcmQndPi0"
-    displayname: "Geir"
-    email: "geir.eilertsen@gmail.com"
+    password: $argon2id$v=19$m=65536,t=3,p=4$uWeBTaYUt8ngiM4wHnZLiA$jU2gKmIgvjgBtNzd3VbnzjCmZdEy8UEXLrIcmQndPi0
+    displayname: Geir
+    email: geir.eilertsen@gmail.com
     groups:
-      - admins
+    - admins
+  admin:
+    password: $argon2id$v=19$m=65536,t=3,p=4$Yv2vnUT2Epkje7W51PTwOA$Ju7N1ER6EOyLsIqTJwGSX90strVIfzcBqtuJuOpHIVc
+    displayname: Admin
+    email: ''
+    groups:
+    - admins
