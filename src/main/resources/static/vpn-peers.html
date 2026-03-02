@@ -481,6 +481,8 @@
         async function deletePeer() {
             if (!peerToDelete) return;
 
+            const peerName = peerToDelete; // Save the name before clearing
+
             try {
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerToDelete)}`, {
                     method: 'DELETE'
@@ -491,8 +493,7 @@
                 }
 
                 hideDeleteConfirmModal();
-                displaySuccess(`Peer "${peerToDelete}" deleted successfully!`);
-                peerToDelete = null;
+                displaySuccess(`Peer "${peerName}" deleted successfully!`);
 
                 // Refresh peer list
                 setTimeout(() => fetchPeers(), 500);
