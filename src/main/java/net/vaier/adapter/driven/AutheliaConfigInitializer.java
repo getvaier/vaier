@@ -71,7 +71,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                   issuer: %s
                 session:
                   secret: %s
-                  domain: .%s
+                  domain: %s
                   expiration: 3600 # 1 hour
                   inactivity: 300 # 5 minutes
                   redis:
