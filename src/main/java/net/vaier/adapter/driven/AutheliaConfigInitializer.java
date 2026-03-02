@@ -62,8 +62,11 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                 ###############################################################
                 server:
                   address: tcp://0.0.0.0:9091
-                logs_level: info
-                jwt_secret: %s
+                log:
+                  level: info
+                identity_validation:
+                  reset_password:
+                    jwt_secret: %s
                 authentication_backend:
                   file:
                     path: /config/users_database.yml
@@ -71,7 +74,9 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                   issuer: %s
                 session:
                   secret: %s
-                  domain: %s
+                  cookies:
+                    - domain: %s
+                      authelia_url: https://%s
                   expiration: 3600 # 1 hour
                   inactivity: 300 # 5 minutes
                   redis:
@@ -82,7 +87,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                   local:
                     path: /config/db.sqlite
                 access_control:
-                  default_policy: bypass
+                  default_policy: one_factor
                   rules:
                     - domain: "%s"
                       policy: one_factor
@@ -93,9 +98,10 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
             jwtSecret,                  // jwt_secret
             baseDomain,                 // totp issuer
             sessionSecret,              // session secret
-            baseDomain,                 // session domain
+            baseDomain,                 // session cookie domain
+            vaierFullDomain,            // authelia_url
             encryptionKey,              // storage encryption_key
-            vaierFullDomain         // vaier full domain for access control
+            vaierFullDomain             // vaier full domain for access control
         );
     }
 
