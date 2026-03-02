@@ -298,12 +298,34 @@ public class VpnService implements CreatePeerUseCase {
         // Clean up temp file
         executeInContainer("rm", "-f", pskFile);
 
-        // Ensure NAT/forwarding rules are active for this peer
-        ensureNatRulesActive();
-
         // Save configuration to make it persistent
         String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
         log.info("Save config output: {}", saveOutput);
+
+        // Restart WireGuard service to ensure NAT rules are effective
+        restartWireGuardService();
+        log.info("WireGuard service restarted to apply NAT rules");
+    }
+
+    private void restartWireGuardService() {
+        try {
+            log.info("Restarting WireGuard container: {}", wireguardContainerName);
+            dockerClient.restartContainerCmd(wireguardContainerName)
+                    .withTimeout(30)
+                    .exec();
+
+            // Wait a moment for the container to fully restart
+            Thread.sleep(2000);
+
+            log.info("WireGuard container restarted successfully");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Interrupted while restarting WireGuard container", e);
+            throw new RuntimeException("Failed to restart WireGuard service", e);
+        } catch (Exception e) {
+            log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to restart WireGuard service", e);
+        }
     }
 
     public void ensureNatRulesActive() throws IOException, InterruptedException {
