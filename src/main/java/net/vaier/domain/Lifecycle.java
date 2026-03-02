@@ -1,6 +1,7 @@
 package net.vaier.domain;
 
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -8,6 +9,7 @@ import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
 import java.util.Optional;
 
+@Slf4j
 public class Lifecycle {
 
     private final ForInitialisingUserService forInitialisingUserService;
@@ -56,22 +58,28 @@ public class Lifecycle {
             .findFirst()
             .orElseThrow(() -> new RuntimeException("DNS zone not found for " + VAIER_DOMAIN));
 
-        Optional<DnsRecord> vaierDnsRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
-            .filter(record -> record.name().equals("vaier." + VAIER_DOMAIN))
-            .findFirst();
+        log.info("DNS zone found: " + dnsZone.name());
+
+        String vaierHost = "vaier." + VAIER_DOMAIN;
+        String authHost = "auth." + VAIER_DOMAIN;
+
+        DnsRecord dnsRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
+            .filter(record -> record.name().equals(vaierHost))
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("DNS record not found for " + vaierHost));
+
+        log.info("DNS record found: " + dnsRecord.name());
 
         Optional<DnsRecord> authRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
-            .filter(record -> record.name().equals("auth." + VAIER_DOMAIN))
+            .filter(record -> record.name().equals(authHost))
             .findFirst();
 
-        if(vaierDnsRecord.isEmpty()) {
-            forPersistingDnsRecords.addDnsRecord(new DnsRecord("vaier." + VAIER_DOMAIN, DnsRecordType.CNAME, 300L, List.of(
-                VAIER_DOMAIN)), dnsZone);
-        }
-
         if(authRecord.isEmpty()) {
-            forPersistingDnsRecords.addDnsRecord(new DnsRecord("auth." + VAIER_DOMAIN, DnsRecordType.CNAME, 300L, List.of(
-                VAIER_DOMAIN)), dnsZone);
+            forPersistingDnsRecords.addDnsRecord(new DnsRecord(authHost, DnsRecordType.CNAME, 300L, List.of(
+                vaierHost)), dnsZone);
+            log.info("Added " + authHost + " CNAME record");
+        } else {
+            log.info("Found " + authHost + " CNAME record");
         }
     }
 }
