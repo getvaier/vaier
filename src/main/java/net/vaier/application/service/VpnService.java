@@ -390,11 +390,46 @@ public class VpnService implements CreatePeerUseCase {
         }
     }
 
+    private String findPeerPublicKeyByIp(String interfaceName, String ipAddress) throws IOException, InterruptedException {
+        // Query WireGuard to get all peers and find the one with matching IP
+        String output = executeInContainer("wg", "show", interfaceName, "dump");
+
+        try (var reader = new java.io.BufferedReader(new java.io.StringReader(output))) {
+            String line;
+            boolean firstLine = true;
+
+            while ((line = reader.readLine()) != null) {
+                // Skip the first line (interface info)
+                if (firstLine) {
+                    firstLine = false;
+                    continue;
+                }
+
+                // Parse peer line
+                // Format: public-key\tpreshared-key\tendpoint\tallowed-ips\tlatest-handshake\ttransfer-rx\ttransfer-tx\tpersistent-keepalive
+                String[] parts = line.split("\t");
+                if (parts.length >= 4) {
+                    String publicKey = parts[0];
+                    String allowedIps = parts[3];
+
+                    // Check if this peer has the matching IP
+                    if (allowedIps.startsWith(ipAddress + "/") || allowedIps.equals(ipAddress)) {
+                        log.info("Found peer with public key {} for IP {}", publicKey, ipAddress);
+                        return publicKey;
+                    }
+                }
+            }
+        }
+
+        log.warn("No peer found with IP address: {}", ipAddress);
+        return "";
+    }
+
     public void deletePeer(String interfaceName, String peerName) {
         log.info("Deleting peer {} from interface {}", peerName, interfaceName);
 
         try {
-            // Step 1: Read the peer config to get the public key
+            // Step 1: Read the peer config to get the IP address
             Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
             if (!Files.exists(peerConfigPath)) {
                 log.warn("Peer config not found: {}", peerConfigPath);
@@ -402,32 +437,42 @@ public class VpnService implements CreatePeerUseCase {
             }
 
             String configContent = Files.readString(peerConfigPath);
-            String publicKey = "";
+            String ipAddress = "";
             for (String line : configContent.split("\n")) {
-                if (line.trim().startsWith("PublicKey")) {
-                    publicKey = line.substring(line.indexOf('=') + 1).trim();
+                if (line.trim().startsWith("Address")) {
+                    String address = line.substring(line.indexOf('=') + 1).trim();
+                    ipAddress = address.split("/")[0]; // Extract IP without CIDR
                     break;
                 }
             }
 
-            if (publicKey.isEmpty()) {
-                log.error("Could not find public key in peer config");
+            if (ipAddress.isEmpty()) {
+                log.error("Could not find IP address in peer config");
                 throw new RuntimeException("Invalid peer configuration");
+            }
+
+            log.info("Found peer IP address: {}", ipAddress);
+
+            // Step 2: Find the peer's public key by querying WireGuard for peers with this IP
+            String publicKey = findPeerPublicKeyByIp(interfaceName, ipAddress);
+            if (publicKey.isEmpty()) {
+                log.error("Could not find peer with IP {} in WireGuard interface", ipAddress);
+                throw new RuntimeException("Peer not found in WireGuard interface");
             }
 
             log.info("Removing peer with public key: {}", publicKey);
 
-            // Step 2: Remove peer from running WireGuard interface
+            // Step 3: Remove peer from running WireGuard interface
             String removePeerCommand = String.format("wg set %s peer %s remove", interfaceName, publicKey);
             log.info("Executing: {}", removePeerCommand);
             String output = executeInContainer("sh", "-c", removePeerCommand);
             log.info("Remove peer output: {}", output);
 
-            // Step 3: Save configuration to make it persistent
+            // Step 4: Save configuration to make it persistent
             String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
             log.info("Save config output: {}", saveOutput);
 
-            // Step 4: Delete peer directory and config files
+            // Step 5: Delete peer directory and config files
             deleteDirectory(Paths.get(wireguardConfigPath, peerName));
             log.info("Deleted peer directory: {}", peerName);
 
