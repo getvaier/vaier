@@ -9,7 +9,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Oslo
-      - SERVERURL=vaier.eilertsen.family
+      - SERVERURL=${VAIER_DOMAIN}
       - SERVERPORT=51820
       - PEERS=0
       - PEERDNS=auto
@@ -76,7 +76,7 @@ services:
       - traefik.http.services.authelia.loadbalancer.server.port=9091
 
   vaier:
-    image: geireilertsen/vaier:latest
+    image: getvaier/vaier:latest
     container_name: vaier
     cap_add:
       - NET_ADMIN
