@@ -25,8 +25,8 @@ public class HostedService {
     public DnsState dnsState() {
         Optional<DnsRecord> dnsRecord = forPersistingDnsRecords.getDnsZones().stream()
             .flatMap(zone -> forPersistingDnsRecords.getDnsRecords(zone).stream())
-            .filter(record -> record.name().equals(dnsAddress + "."))
-            .filter(record -> record.type() == DnsRecordType.CNAME)
+            .filter(record -> record.name().equals(dnsAddress))
+            .filter(record -> record.type() == DnsRecordType.CNAME || record.type() == DnsRecordType.A)
             .findFirst();
         if(dnsRecord.isEmpty()) {
             return DnsState.NON_EXISTING;
