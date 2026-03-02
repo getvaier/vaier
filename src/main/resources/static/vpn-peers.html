@@ -237,7 +237,10 @@
             }
 
             const html = peers.map(peer => {
-                const isConnected = peer.latestHandshake !== '0';
+                // Check if handshake is within the last 3 minutes (180 seconds)
+                const handshakeTime = parseInt(peer.latestHandshake);
+                const currentTime = Math.floor(Date.now() / 1000);
+                const isConnected = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
                 const statusClass = isConnected ? 'status-connected' : 'status-disconnected';
                 const statusText = isConnected ? 'Connected' : 'Disconnected';
 

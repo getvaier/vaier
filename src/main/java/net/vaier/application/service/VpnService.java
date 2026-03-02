@@ -259,8 +259,18 @@ public class VpnService implements CreatePeerUseCase {
     }
 
     private String extractServerEndpoint() {
-        return System.getenv().getOrDefault("SERVERURL", "vaier.eilertsen.family") + ":" +
-               System.getenv().getOrDefault("SERVERPORT", "51820");
+        String vaierDomain = System.getenv("VAIER_DOMAIN");
+        String serverUrl;
+
+        if (vaierDomain != null && !vaierDomain.isEmpty()) {
+            serverUrl = "vaier." + vaierDomain;
+        } else {
+            // Fallback to SERVERURL if VAIER_DOMAIN is not set
+            serverUrl = System.getenv().getOrDefault("SERVERURL", "vaier.eilertsen.family");
+        }
+
+        String serverPort = System.getenv().getOrDefault("SERVERPORT", "51820");
+        return serverUrl + ":" + serverPort;
     }
 
     private String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
