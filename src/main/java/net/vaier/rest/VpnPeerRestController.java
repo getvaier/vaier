@@ -60,36 +60,57 @@ public class VpnPeerRestController {
     private String findPeerNameByIp(String ipAddress) {
         try {
             java.nio.file.Path configDir = java.nio.file.Paths.get(wireguardConfigPath);
+            log.debug("Searching for peer with IP {} in directory: {}", ipAddress, configDir.toAbsolutePath());
+
+            if (!java.nio.file.Files.exists(configDir)) {
+                log.warn("Config directory does not exist: {}", configDir.toAbsolutePath());
+                return ipAddress;
+            }
+
             try (var stream = java.nio.file.Files.list(configDir)) {
                 return stream
                         .filter(java.nio.file.Files::isDirectory)
                         .filter(dir -> {
                             try {
                                 String dirName = dir.getFileName().toString();
+                                // Skip non-peer directories (like wg_confs)
+                                if (dirName.equals("wg_confs") || dirName.startsWith(".")) {
+                                    return false;
+                                }
+
                                 java.nio.file.Path confFile = dir.resolve(dirName + ".conf");
+                                log.debug("Checking config file: {}", confFile);
+
                                 if (java.nio.file.Files.exists(confFile)) {
                                     String content = java.nio.file.Files.readString(confFile);
                                     for (String line : content.split("\n")) {
                                         if (line.trim().startsWith("Address")) {
                                             String address = line.substring(line.indexOf('=') + 1).trim();
                                             String ip = address.split("/")[0];
+                                            log.debug("Found IP {} in peer {}", ip, dirName);
                                             if (ip.equals(ipAddress)) {
+                                                log.info("Matched peer {} for IP {}", dirName, ipAddress);
                                                 return true;
                                             }
                                         }
                                     }
+                                } else {
+                                    log.debug("Config file does not exist: {}", confFile);
                                 }
                             } catch (Exception e) {
-                                log.debug("Error checking peer dir {}: {}", dir, e.getMessage());
+                                log.warn("Error checking peer dir {}: {}", dir, e.getMessage());
                             }
                             return false;
                         })
                         .map(path -> path.getFileName().toString())
                         .findFirst()
-                        .orElse(ipAddress); // Fallback to IP if name not found
+                        .orElseGet(() -> {
+                            log.warn("No peer directory found for IP: {}", ipAddress);
+                            return ipAddress;
+                        });
             }
         } catch (Exception e) {
-            log.warn("Error finding peer name for IP {}: {}", ipAddress, e.getMessage());
+            log.error("Error finding peer name for IP {}: {}", ipAddress, e.getMessage(), e);
             return ipAddress; // Fallback to IP
         }
     }
