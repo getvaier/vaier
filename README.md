@@ -1,4 +1,4 @@
-# WireWeave
+# Vaier
 
 <p align="center">
   <strong>Effortless WireGuard mesh networking</strong>
@@ -33,16 +33,16 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/geireilertsen/wireweave
-   cd wireweave
+   git clone https://github.com/geireilertsen/vaier
+   cd vaier
    ```
 
 2. **Configure environment variables**
 
    Create a `.env` file with your configuration:
    ```bash
-   WIREWEAVE_AWS_KEY=your_aws_access_key
-   WIREWEAVE_AWS_SECRET=your_aws_secret_key
+   VAIER_AWS_KEY=your_aws_access_key
+   VAIER_AWS_SECRET=your_aws_secret_key
    ACME_EMAIL=your_email@example.com
    ```
 
@@ -63,8 +63,8 @@ The application uses the following environment variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `WIREWEAVE_AWS_KEY` | Yes | AWS access key for Route53 operations |
-| `WIREWEAVE_AWS_SECRET` | Yes | AWS secret key for Route53 operations |
+| `VAIER_AWS_KEY` | Yes | AWS access key for Route53 operations |
+| `VAIER_AWS_SECRET` | Yes | AWS secret key for Route53 operations |
 | `ACME_EMAIL` | Yes | Email for Let's Encrypt certificate notifications |
 | `WIREGUARD_CONFIG_PATH` | No | Path to WireGuard config directory (default: `/wireguard/config`) |
 | `WIREGUARD_CONTAINER_NAME` | No | Name of WireGuard container (default: `wireguard`) |
@@ -75,20 +75,20 @@ The application uses the following environment variables:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/geireilertsen/wireweave
-   cd wireweave
+   git clone https://github.com/geireilertsen/vaier
+   cd vaier
    ```
 
 2. **Set environment variables**
    ```bash
-   export WIREWEAVE_AWS_KEY=your_aws_access_key
-   export WIREWEAVE_AWS_SECRET=your_aws_secret_key
+   export VAIER_AWS_KEY=your_aws_access_key
+   export VAIER_AWS_SECRET=your_aws_secret_key
    ```
 
 3. **Build and run**
    ```bash
    mvn clean package
-   java -jar target/wireweave-1.0.0-SNAPSHOT.jar
+   java -jar target/vaier-1.0.0-SNAPSHOT.jar
    ```
 
    Or run directly with Maven:
@@ -169,14 +169,14 @@ Access Portainer at `https://<your-ec2-ip>:9443` and create your admin user on f
 
 ---
 
-## 5. Deploy WireWeave
+## 5. Deploy Vaier
 
 In Portainer, navigate to **Stacks → Add Stack**, paste the contents of `docker-compose.yml`, configure environment variables (AWS credentials and ACME email), and click **Deploy**.
 
 Alternatively, deploy from the command line:
 ```bash
-git clone https://github.com/geireilertsen/wireweave.git
-cd wireweave
+git clone https://github.com/geireilertsen/vaier.git
+cd vaier
 # Create .env file with your credentials
 docker compose up -d
 ```
@@ -192,7 +192,7 @@ docker compose up -d
 | 51820| UDP      | WireGuard            |
 | 80   | TCP      | HTTP (Traefik)       |
 | 443  | TCP      | HTTPS (Traefik)      |
-| 8888 | TCP      | WireWeave API (optional, if not using Traefik) |
+| 8888 | TCP      | Vaier API (optional, if not using Traefik) |
 
 ---
 
@@ -218,7 +218,7 @@ docker compose up -d
 ## 🏗️ Architecture
 
 ### Application Architecture
-WireWeave is built using hexagonal architecture with clear separation between:
+Vaier is built using hexagonal architecture with clear separation between:
 - **Domain Layer** - Core business logic and entities
 - **Application Layer** - Use cases and orchestration
 - **Infrastructure Layer** - Adapters for AWS Route53, Docker, Traefik, and WireGuard
@@ -238,7 +238,7 @@ The `docker-compose.yml` file deploys three interconnected services:
    - Let's Encrypt integration for automatic SSL certificates
    - Dynamic configuration from `./traefik/config`
 
-3. **WireWeave** - Management application
+3. **Vaier** - Management application
    - REST API on port 8888 (8080 internally)
    - Accesses WireGuard config directory (read-only)
    - Manages Traefik configuration files

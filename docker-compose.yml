@@ -9,7 +9,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Oslo
-      - SERVERURL=wireweave.eilertsen.family
+      - SERVERURL=vaier.eilertsen.family
       - SERVERPORT=51820
       - PEERS=0
       - PEERDNS=auto
@@ -70,20 +70,20 @@ services:
     labels:
       - traefik.enable=true
       # HTTPS router for Authelia
-      - traefik.http.routers.authelia.rule=Host(`auth.${WIREWEAVE_DOMAIN}`)
+      - traefik.http.routers.authelia.rule=Host(`auth.${VAIER_DOMAIN}`)
       - traefik.http.routers.authelia.entrypoints=websecure
       - traefik.http.routers.authelia.tls.certresolver=letsencrypt
       - traefik.http.services.authelia.loadbalancer.server.port=9091
 
-  wireweave:
-    image: geireilertsen/wireweave:latest
-    container_name: wireweave
+  vaier:
+    image: geireilertsen/vaier:latest
+    container_name: vaier
     cap_add:
       - NET_ADMIN
     environment:
-      WIREWEAVE_AWS_KEY: ${WIREWEAVE_AWS_KEY}
-      WIREWEAVE_AWS_SECRET: ${WIREWEAVE_AWS_SECRET}
-      WIREWEAVE_DOMAIN: ${WIREWEAVE_DOMAIN}
+      VAIER_AWS_KEY: ${VAIER_AWS_KEY}
+      VAIER_AWS_SECRET: ${VAIER_AWS_SECRET}
+      VAIER_DOMAIN: ${VAIER_DOMAIN}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
@@ -102,12 +102,12 @@ services:
     labels:
       - traefik.enable=true
       # HTTPS router
-      - traefik.http.routers.wireweave.rule=Host(`${WIREWEAVE_DOMAIN}`)
-      - traefik.http.routers.wireweave.entrypoints=websecure
-      - traefik.http.routers.wireweave.tls.certresolver=letsencrypt
-      - traefik.http.routers.wireweave.middlewares=wireweave-auth
+      - traefik.http.routers.vaier.rule=Host(`${VAIER_DOMAIN}`)
+      - traefik.http.routers.vaier.entrypoints=websecure
+      - traefik.http.routers.vaier.tls.certresolver=letsencrypt
+      - traefik.http.routers.vaier.middlewares=vaier-auth
       # Authelia middleware
-      - traefik.http.middlewares.wireweave-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.${WIREWEAVE_DOMAIN}
-      - traefik.http.middlewares.wireweave-auth.forwardauth.trustForwardHeader=true
-      - traefik.http.middlewares.wireweave-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
-      - traefik.http.services.wireweave.loadbalancer.server.port=8080
+      - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.${VAIER_DOMAIN}
+      - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
+      - traefik.http.middlewares.vaier-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
+      - traefik.http.services.vaier.loadbalancer.server.port=8080

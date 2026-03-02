@@ -28,8 +28,8 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t wireweave:${{ github.sha }} .
-        docker tag wireweave:${{ github.sha }} wireweave:latest
+        docker build -t vaier:${{ github.sha }} .
+        docker tag vaier:${{ github.sha }} vaier:latest
 
     - name: Log in to Docker Hub
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -41,7 +41,7 @@ jobs:
     - name: Push Docker image
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       run: |
-        docker tag wireweave:latest ${{ secrets.DOCKER_USERNAME }}/wireweave:latest
-        docker tag wireweave:latest ${{ secrets.DOCKER_USERNAME }}/wireweave:${{ github.sha }}
-        docker push ${{ secrets.DOCKER_USERNAME }}/wireweave:latest
-        docker push ${{ secrets.DOCKER_USERNAME }}/wireweave:${{ github.sha }}
+        docker tag vaier:latest ${{ secrets.DOCKER_USERNAME }}/vaier:latest
+        docker tag vaier:latest ${{ secrets.DOCKER_USERNAME }}/vaier:${{ github.sha }}
+        docker push ${{ secrets.DOCKER_USERNAME }}/vaier:latest
+        docker push ${{ secrets.DOCKER_USERNAME }}/vaier:${{ github.sha }}

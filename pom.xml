@@ -12,13 +12,13 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.wireweave</groupId>
-    <artifactId>wireweave</artifactId>
+    <groupId>net.vaier</groupId>
+    <artifactId>vaier</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>WireWeave</name>
-    <description>Effortless WireGuard mesh networking</description>
+    <name>Vaier</name>
+    <description>Effortless WireGuard networking</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

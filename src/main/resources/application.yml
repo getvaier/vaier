@@ -1,6 +1,6 @@
 spring:
   application:
-    name: wireweave
+    name: vaier
   web:
     resources:
       static-locations: classpath:/static/
@@ -13,9 +13,9 @@ server:
 
 logging:
   level:
-    com.wireweave: DEBUG
+    net.vaier: DEBUG
     org.springframework: INFO
 
 wireguard:
   server:
-    endpoint: wireguard.eilertsen.family:51820
+    endpoint: vaier.net:51820
