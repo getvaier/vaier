@@ -8,6 +8,8 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.application.CreatePeerUseCase;
+import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForManagingVpnNetwork;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @Slf4j
-public class VpnService implements CreatePeerUseCase {
+public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForManagingVpnNetwork {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -338,7 +340,17 @@ public class VpnService implements CreatePeerUseCase {
         }
     }
 
-    public void ensureNatRulesActive() throws IOException, InterruptedException {
+    @Override
+    public void ensureNatRulesActive() {
+        try {
+            ensureNatRulesActiveInternal();
+        } catch (IOException | InterruptedException e) {
+            log.error("Failed to ensure NAT rules: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to setup NAT rules", e);
+        }
+    }
+
+    private void ensureNatRulesActiveInternal() throws IOException, InterruptedException {
         log.info("Ensuring NAT rules are active");
 
         try {
@@ -425,6 +437,7 @@ public class VpnService implements CreatePeerUseCase {
         return "";
     }
 
+    @Override
     public void deletePeer(String interfaceName, String peerName) {
         log.info("Deleting peer {} from interface {}", peerName, interfaceName);
 
