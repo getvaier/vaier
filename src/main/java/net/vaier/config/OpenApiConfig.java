@@ -16,7 +16,7 @@ public class OpenApiConfig {
                         .title("Vaier API")
                         .description("Effortless WireGuard mesh networking")
                         .version("1.0.0"))
-                .addServersItem(new Server().url("https://vaier.eilertsen.family").description("Production server"))
+                .addServersItem(new Server().url("https://vaier." + System.getenv("VAIER_DOMAIN")).description("Production server"))
                 .addServersItem(new Server().url("http://localhost:8080").description("Local server"));
     }
 }
