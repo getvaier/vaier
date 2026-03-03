@@ -1,3 +1,10 @@
+networks:
+  vaier-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
 services:
   wireguard:
     image: lscr.io/linuxserver/wireguard:latest
@@ -9,7 +16,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Oslo
-      - SERVERURL=${VAIER_DOMAIN}
+      - SERVERURL=vaier.${VAIER_DOMAIN}
       - SERVERPORT=51820
       - PEERS=0
       - PEERDNS=auto
@@ -23,6 +30,8 @@ services:
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     restart: unless-stopped
+    networks:
+      - vaier-network
 
   traefik:
     image: traefik:latest
@@ -49,6 +58,8 @@ services:
     restart: unless-stopped
     depends_on:
       - authelia
+    networks:
+      - vaier-network
 
   redis:
     image: redis:alpine
@@ -56,6 +67,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./authelia/redis:/data
+    networks:
+      - vaier-network
 
   authelia:
     image: authelia/authelia:latest
@@ -74,6 +87,8 @@ services:
       - traefik.http.routers.authelia.entrypoints=websecure
       - traefik.http.routers.authelia.tls.certresolver=letsencrypt
       - traefik.http.services.authelia.loadbalancer.server.port=9091
+    networks:
+      - vaier-network
 
   vaier:
     image: getvaier/vaier:latest
@@ -102,7 +117,7 @@ services:
     labels:
       - traefik.enable=true
       # HTTPS router
-      - traefik.http.routers.vaier.rule=Host(`${VAIER_DOMAIN}`)
+      - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier.middlewares=vaier-auth
@@ -111,3 +126,5 @@ services:
       - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
       - traefik.http.middlewares.vaier-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
       - traefik.http.services.vaier.loadbalancer.server.port=8080
+    networks:
+      - vaier-network
