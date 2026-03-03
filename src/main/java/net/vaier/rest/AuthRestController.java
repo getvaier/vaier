@@ -13,11 +13,9 @@ import java.util.List;
 public class AuthRestController {
 
     private final ForPersistingUsers forPersistingUsers;
-    private final ForRestartingContainers containerRestarter;
 
-    public AuthRestController(ForPersistingUsers forPersistingUsers, ForRestartingContainers containerRestarter) {
+    public AuthRestController(ForPersistingUsers forPersistingUsers) {
         this.forPersistingUsers = forPersistingUsers;
-        this.containerRestarter = containerRestarter;
     }
 
     @GetMapping
