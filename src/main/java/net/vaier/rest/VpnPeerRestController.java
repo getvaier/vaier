@@ -3,6 +3,7 @@ package net.vaier.rest;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
+import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.SetupVpnNetworkUseCase;
 import net.vaier.domain.VpnClient;
@@ -32,6 +33,7 @@ public class VpnPeerRestController {
     private final GetPeerConfigUseCase getPeerConfigUseCase;
     private final SetupVpnNetworkUseCase setupVpnNetworkUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
+    private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
 
     @GetMapping
     public ResponseEntity<List<VpnPeerResponse>> listPeers() {
@@ -151,6 +153,30 @@ public class VpnPeerRestController {
                 .contentType(MediaType.parseMediaType("application/x-yaml"))
                 .contentLength(content.length)
                 .body(resource);
+    }
+
+    @GetMapping("/{peerName}/setup-script")
+    public ResponseEntity<Resource> downloadSetupScript(
+            @PathVariable String peerName,
+            @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
+            @RequestParam(required = false, defaultValue = "51820") String serverPort
+    ) {
+        log.info("Generating setup script for peer: {}", peerName);
+
+        return generatePeerSetupScriptUseCase.generateSetupScript(peerName, serverUrl, serverPort)
+                .map(script -> {
+                    byte[] content = script.getBytes();
+                    ByteArrayResource resource = new ByteArrayResource(content);
+                    return ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=setup-" + peerName + ".sh")
+                            .contentType(MediaType.parseMediaType("application/x-sh"))
+                            .contentLength(content.length)
+                            .<Resource>body(resource);
+                })
+                .orElseGet(() -> {
+                    log.warn("Peer not found for setup script: {}", peerName);
+                    return ResponseEntity.notFound().build();
+                });
     }
 
     public record VpnPeerResponse(

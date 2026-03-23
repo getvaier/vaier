@@ -265,6 +265,9 @@
                                 <button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.name}')">
                                     ⬇️ Docker Compose
                                 </button>
+                                <button class="btn btn-small btn-secondary" onclick="downloadSetupScript('${peer.name}')">
+                                    ⬇️ Setup Script
+                                </button>
                                 <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.name}')">
                                     🗑️ Delete
                                 </button>
@@ -381,9 +384,12 @@
                     <strong>Client Configuration:</strong>
                     <pre>${peer.configFile}</pre>
                 </div>
-                <div style="margin-top: 1rem;">
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
                     <button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peer.name}')">
                         ⬇️ Download Docker Compose
+                    </button>
+                    <button class="btn btn-primary" onclick="downloadSetupScript('${peer.name}')">
+                        ⬇️ Download Setup Script
                     </button>
                 </div>
             `;
@@ -446,6 +452,10 @@
 
         function downloadDockerCompose(peerName) {
             downloadDockerComposeForPeer(peerName);
+        }
+
+        function downloadSetupScript(peerName) {
+            window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/setup-script`;
         }
 
         async function setupNat() {
