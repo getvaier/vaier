@@ -83,6 +83,10 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("\n");
         sb.append("echo \"Created WireGuard config\"\n");
         sb.append("\n");
+        sb.append("# --- Set sysctl on host (cannot use container sysctls with host network mode) ---\n");
+        sb.append("sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1\n");
+        sb.append("echo 'net.ipv4.conf.all.src_valid_mark=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
+        sb.append("\n");
         sb.append("# --- Write docker-compose.yml ---\n");
         sb.append("cat > \"$INSTALL_DIR/docker-compose.yml\" << 'COMPOSE'\n");
         sb.append("services:\n");
@@ -99,8 +103,6 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("    volumes:\n");
         sb.append("      - ./wireguard-client/config:/config\n");
         sb.append("      - /lib/modules:/lib/modules:ro\n");
-        sb.append("    sysctls:\n");
-        sb.append("      - net.ipv4.conf.all.src_valid_mark=1\n");
         sb.append("    restart: unless-stopped\n");
         sb.append("    network_mode: host\n");
         sb.append("COMPOSE\n");
