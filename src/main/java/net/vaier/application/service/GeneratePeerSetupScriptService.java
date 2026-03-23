@@ -149,8 +149,8 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("echo \"Configuring firewall to restrict Docker API to VPN network...\"\n");
         sb.append("sudo iptables -D INPUT -p tcp --dport 2375 -j DROP 2>/dev/null || true\n");
         sb.append("sudo iptables -D INPUT -p tcp --dport 2375 -s 10.13.13.0/24 -j ACCEPT 2>/dev/null || true\n");
-        sb.append("sudo iptables -I INPUT -p tcp --dport 2375 -s 10.13.13.0/24 -j ACCEPT\n");
-        sb.append("sudo iptables -I INPUT -p tcp --dport 2375 -j DROP\n");
+        sb.append("sudo iptables -A INPUT -p tcp --dport 2375 -s 10.13.13.0/24 -j ACCEPT\n");
+        sb.append("sudo iptables -A INPUT -p tcp --dport 2375 -j DROP\n");
         sb.append("\n");
         sb.append("# Persist iptables rules across reboots\n");
         sb.append("if command -v netfilter-persistent &> /dev/null; then\n");

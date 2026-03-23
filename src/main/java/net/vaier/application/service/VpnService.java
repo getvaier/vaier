@@ -233,27 +233,10 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForMa
     }
 
     private String getServerPublicKey(String interfaceName) throws IOException, InterruptedException {
-        // Try to read from config file first - linuxserver/wireguard stores at /config/wg_confs/wg0.conf
-        Path serverConfigPath = Paths.get(wireguardConfigPath, "wg_confs", interfaceName + ".conf");
-        if (!Files.exists(serverConfigPath)) {
-            serverConfigPath = Paths.get(wireguardConfigPath, interfaceName, interfaceName + ".conf");
-        }
-        if (!Files.exists(serverConfigPath)) {
-            serverConfigPath = Paths.get(wireguardConfigPath, interfaceName + ".conf");
-        }
-
-        if (Files.exists(serverConfigPath)) {
-            log.info("Reading server config from: {}", serverConfigPath);
-            String serverConfig = Files.readString(serverConfigPath);
-            String publicKey = extractValue(serverConfig, "PublicKey");
-            if (!publicKey.isEmpty()) {
-                log.info("Found server public key in config file: {}", publicKey);
-                return publicKey;
-            }
-        }
-
-        // If config file not found or doesn't contain public key, get it from running interface
-        log.info("Config file not found, getting public key from running interface");
+        // Get the server's public key from the running WireGuard interface
+        // Note: the config file only contains PrivateKey for the server, and PublicKey entries
+        // belong to peers - so we must derive the server's public key from the running interface.
+        log.info("Getting server public key from running interface {}", interfaceName);
         String output = executeInContainer("wg", "show", interfaceName, "public-key");
         String publicKey = output.trim();
         log.info("Got server public key from interface: {}", publicKey);
