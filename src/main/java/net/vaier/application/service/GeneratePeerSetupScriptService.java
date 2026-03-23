@@ -81,7 +81,11 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append(wgConfig).append("\n");
         sb.append("WG_CONF\n");
         sb.append("\n");
-        sb.append("echo \"Created WireGuard config\"\n");
+        sb.append("# Force split tunneling: only route VPN subnet through the tunnel\n");
+        sb.append("# This prevents SSH and other external traffic from breaking\n");
+        sb.append("sed -i 's|AllowedIPs.*=.*0\\.0\\.0\\.0/0.*|AllowedIPs = 10.13.13.0/24|' \"$INSTALL_DIR/wireguard-client/config/wg0.conf\"\n");
+        sb.append("\n");
+        sb.append("echo \"Created WireGuard config (split tunneling enabled)\"\n");
         sb.append("\n");
         sb.append("# --- Set sysctl on host (cannot use container sysctls with host network mode) ---\n");
         sb.append("sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1\n");
