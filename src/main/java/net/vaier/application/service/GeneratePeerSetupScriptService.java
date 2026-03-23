@@ -28,128 +28,120 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
     }
 
     private String generateScript(String peerName, String vpnIp, String serverUrl, String serverPort, String wgConfig) {
-        return """
-                #!/bin/bash
-                set -euo pipefail
-
-                # Vaier peer setup script for: %s
-                # VPN IP: %s
-                # Server: %s:%s
-
-                PEER_NAME="%s"
-                VPN_IP="%s"
-                INSTALL_DIR="$HOME/vaier"
-
-                echo "=== Vaier Peer Setup: $PEER_NAME ==="
-                echo ""
-
-                # --- Install Docker ---
-                if ! command -v docker &> /dev/null; then
-                    echo "Installing Docker..."
-                    curl -fsSL https://get.docker.com | sudo sh
-                    sudo usermod -aG docker "$USER"
-                    echo "Docker installed. You may need to log out and back in for group membership."
-                else
-                    echo "Docker already installed."
-                fi
-
-                # --- Configure Docker remote API on VPN interface ---
-                echo "Configuring Docker daemon for remote access on VPN network..."
-                sudo mkdir -p /etc/docker
-
-                # Preserve existing config and add/update the hosts entry
-                if [ -f /etc/docker/daemon.json ] && [ -s /etc/docker/daemon.json ]; then
-                    # Backup existing config
-                    sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
-                fi
-
-                sudo tee /etc/docker/daemon.json > /dev/null << 'DAEMON_JSON'
-                {
-                    "hosts": ["unix:///var/run/docker.sock", "tcp://%s:2375"],
-                    "iptables": true
-                }
-                DAEMON_JSON
-
-                # Override systemd to not pass -H flag (conflicts with daemon.json hosts)
-                sudo mkdir -p /etc/systemd/system/docker.service.d
-                sudo tee /etc/systemd/system/docker.service.d/override.conf > /dev/null << 'OVERRIDE'
-                [Service]
-                ExecStart=
-                ExecStart=/usr/bin/dockerd
-                OVERRIDE
-
-                echo "Docker daemon will listen on tcp://$VPN_IP:2375 (VPN only)"
-
-                # --- Create directory structure ---
-                echo "Setting up $INSTALL_DIR..."
-                mkdir -p "$INSTALL_DIR/wireguard-client/config"
-
-                # --- Write .env file ---
-                cat > "$INSTALL_DIR/.env" << ENV_FILE
-                PEER_NAME=%s
-                VPN_IP=%s
-                SERVER_URL=%s
-                SERVER_PORT=%s
-                TZ=Europe/Oslo
-                ENV_FILE
-
-                echo "Created .env file"
-
-                # --- Write WireGuard config ---
-                cat > "$INSTALL_DIR/wireguard-client/config/wg0.conf" << 'WG_CONF'
-                %s
-                WG_CONF
-
-                echo "Created WireGuard config"
-
-                # --- Write docker-compose.yml ---
-                cat > "$INSTALL_DIR/docker-compose.yml" << 'COMPOSE'
-                services:
-                  wireguard-client:
-                    image: lscr.io/linuxserver/wireguard:latest
-                    container_name: wireguard-client
-                    cap_add:
-                      - NET_ADMIN
-                      - SYS_MODULE
-                    environment:
-                      - PUID=1000
-                      - PGID=1000
-                      - TZ=${TZ:-Europe/Oslo}
-                    volumes:
-                      - ./wireguard-client/config:/config
-                      - /lib/modules:/lib/modules:ro
-                    sysctls:
-                      - net.ipv4.conf.all.src_valid_mark=1
-                    restart: unless-stopped
-                    network_mode: host
-                COMPOSE
-
-                echo "Created docker-compose.yml"
-
-                # --- Reload Docker and start services ---
-                echo ""
-                echo "Reloading Docker daemon..."
-                sudo systemctl daemon-reload
-                sudo systemctl restart docker
-
-                echo "Starting WireGuard client..."
-                cd "$INSTALL_DIR"
-                docker compose up -d
-
-                echo ""
-                echo "=== Setup complete ==="
-                echo "  Install dir:  $INSTALL_DIR"
-                echo "  VPN IP:       $VPN_IP"
-                echo "  Docker API:   tcp://$VPN_IP:2375 (accessible from VPN)"
-                echo ""
-                echo "Verify VPN connection:"
-                echo "  docker exec wireguard-client wg show"
-                """.formatted(
-                peerName, vpnIp, serverUrl, serverPort,
-                peerName, vpnIp,
-                vpnIp,
-                peerName, vpnIp, serverUrl, serverPort,
-                wgConfig
-        );
+        var sb = new StringBuilder();
+        sb.append("#!/bin/bash\n");
+        sb.append("set -euo pipefail\n");
+        sb.append("\n");
+        sb.append("# Vaier peer setup script for: ").append(peerName).append("\n");
+        sb.append("# VPN IP: ").append(vpnIp).append("\n");
+        sb.append("# Server: ").append(serverUrl).append(":").append(serverPort).append("\n");
+        sb.append("\n");
+        sb.append("PEER_NAME=\"").append(peerName).append("\"\n");
+        sb.append("VPN_IP=\"").append(vpnIp).append("\"\n");
+        sb.append("INSTALL_DIR=\"$HOME/vaier\"\n");
+        sb.append("\n");
+        sb.append("echo \"=== Vaier Peer Setup: $PEER_NAME ===\"\n");
+        sb.append("echo \"\"\n");
+        sb.append("\n");
+        sb.append("# --- Install Docker ---\n");
+        sb.append("if ! command -v docker &> /dev/null; then\n");
+        sb.append("    echo \"Installing Docker...\"\n");
+        sb.append("    curl -fsSL https://get.docker.com | sudo sh\n");
+        sb.append("    sudo usermod -aG docker \"$USER\"\n");
+        sb.append("    echo \"Docker installed. You may need to log out and back in for group membership.\"\n");
+        sb.append("else\n");
+        sb.append("    echo \"Docker already installed.\"\n");
+        sb.append("fi\n");
+        sb.append("\n");
+        sb.append("# --- Configure Docker remote API on VPN interface ---\n");
+        sb.append("echo \"Configuring Docker daemon for remote access on VPN network...\"\n");
+        sb.append("sudo mkdir -p /etc/docker\n");
+        sb.append("\n");
+        sb.append("if [ -f /etc/docker/daemon.json ] && [ -s /etc/docker/daemon.json ]; then\n");
+        sb.append("    sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak\n");
+        sb.append("fi\n");
+        sb.append("\n");
+        sb.append("sudo tee /etc/docker/daemon.json > /dev/null << 'DAEMON_JSON'\n");
+        sb.append("{\n");
+        sb.append("    \"hosts\": [\"unix:///var/run/docker.sock\", \"tcp://").append(vpnIp).append(":2375\"],\n");
+        sb.append("    \"iptables\": true\n");
+        sb.append("}\n");
+        sb.append("DAEMON_JSON\n");
+        sb.append("\n");
+        sb.append("# Override systemd to not pass -H flag (conflicts with daemon.json hosts)\n");
+        sb.append("sudo mkdir -p /etc/systemd/system/docker.service.d\n");
+        sb.append("sudo tee /etc/systemd/system/docker.service.d/override.conf > /dev/null << 'OVERRIDE'\n");
+        sb.append("[Service]\n");
+        sb.append("ExecStart=\n");
+        sb.append("ExecStart=/usr/bin/dockerd\n");
+        sb.append("OVERRIDE\n");
+        sb.append("\n");
+        sb.append("echo \"Docker daemon will listen on tcp://$VPN_IP:2375 (VPN only)\"\n");
+        sb.append("\n");
+        sb.append("# --- Create directory structure ---\n");
+        sb.append("echo \"Setting up $INSTALL_DIR...\"\n");
+        sb.append("mkdir -p \"$INSTALL_DIR/wireguard-client/config\"\n");
+        sb.append("\n");
+        sb.append("# --- Write .env file ---\n");
+        sb.append("cat > \"$INSTALL_DIR/.env\" << ENV_FILE\n");
+        sb.append("PEER_NAME=").append(peerName).append("\n");
+        sb.append("VPN_IP=").append(vpnIp).append("\n");
+        sb.append("SERVER_URL=").append(serverUrl).append("\n");
+        sb.append("SERVER_PORT=").append(serverPort).append("\n");
+        sb.append("TZ=Europe/Oslo\n");
+        sb.append("ENV_FILE\n");
+        sb.append("\n");
+        sb.append("echo \"Created .env file\"\n");
+        sb.append("\n");
+        sb.append("# --- Write WireGuard config ---\n");
+        sb.append("cat > \"$INSTALL_DIR/wireguard-client/config/wg0.conf\" << 'WG_CONF'\n");
+        sb.append(wgConfig).append("\n");
+        sb.append("WG_CONF\n");
+        sb.append("\n");
+        sb.append("echo \"Created WireGuard config\"\n");
+        sb.append("\n");
+        sb.append("# --- Write docker-compose.yml ---\n");
+        sb.append("cat > \"$INSTALL_DIR/docker-compose.yml\" << 'COMPOSE'\n");
+        sb.append("services:\n");
+        sb.append("  wireguard-client:\n");
+        sb.append("    image: lscr.io/linuxserver/wireguard:latest\n");
+        sb.append("    container_name: wireguard-client\n");
+        sb.append("    cap_add:\n");
+        sb.append("      - NET_ADMIN\n");
+        sb.append("      - SYS_MODULE\n");
+        sb.append("    environment:\n");
+        sb.append("      - PUID=1000\n");
+        sb.append("      - PGID=1000\n");
+        sb.append("      - TZ=${TZ:-Europe/Oslo}\n");
+        sb.append("    volumes:\n");
+        sb.append("      - ./wireguard-client/config:/config\n");
+        sb.append("      - /lib/modules:/lib/modules:ro\n");
+        sb.append("    sysctls:\n");
+        sb.append("      - net.ipv4.conf.all.src_valid_mark=1\n");
+        sb.append("    restart: unless-stopped\n");
+        sb.append("    network_mode: host\n");
+        sb.append("COMPOSE\n");
+        sb.append("\n");
+        sb.append("echo \"Created docker-compose.yml\"\n");
+        sb.append("\n");
+        sb.append("# --- Reload Docker and start services ---\n");
+        sb.append("echo \"\"\n");
+        sb.append("echo \"Reloading Docker daemon...\"\n");
+        sb.append("sudo systemctl daemon-reload\n");
+        sb.append("sudo systemctl restart docker\n");
+        sb.append("\n");
+        sb.append("echo \"Starting WireGuard client...\"\n");
+        sb.append("cd \"$INSTALL_DIR\"\n");
+        sb.append("docker compose up -d\n");
+        sb.append("\n");
+        sb.append("echo \"\"\n");
+        sb.append("echo \"=== Setup complete ===\"\n");
+        sb.append("echo \"  Install dir:  $INSTALL_DIR\"\n");
+        sb.append("echo \"  VPN IP:       $VPN_IP\"\n");
+        sb.append("echo \"  Docker API:   tcp://$VPN_IP:2375 (accessible from VPN)\"\n");
+        sb.append("echo \"\"\n");
+        sb.append("echo \"Verify VPN connection:\"\n");
+        sb.append("echo \"  docker exec wireguard-client wg show\"\n");
+        return sb.toString();
     }
 }
