@@ -84,3 +84,7 @@ The `docker-compose.yml` runs five services on a custom bridge network (`172.20.
 | `VAIER_AWS_SECRET` | AWS secret key for Route53 |
 | `VAIER_DOMAIN` | Base domain name |
 | `ACME_EMAIL` | Let's Encrypt email |
+
+## Server development
+
+When developing on a server, you can use the `docker-compose.yml` file to run the full stack locally. This is useful for testing and debugging changes before deploying to production.
