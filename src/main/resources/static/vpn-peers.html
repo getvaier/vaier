@@ -642,13 +642,9 @@
 
             container.innerHTML = html;
 
-            // Re-render cached metrics for expanded peers
+            // Refresh metrics for expanded peers (always re-fetch for live data)
             for (const peerName of expandedPeers) {
-                if (peerMetricsCache[peerName]) {
-                    renderMetrics(peerName);
-                } else {
-                    loadPeerMetrics(peerName);
-                }
+                loadPeerMetrics(peerName);
             }
         }
 
