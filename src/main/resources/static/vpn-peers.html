@@ -188,23 +188,31 @@
 
     <script>
         let peers = [];
+        let peerServices = {};
 
         let lastFetchSuccessful = false;
 
         async function fetchPeers() {
             try {
-                const response = await fetch('/vpn/peers');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                const [peersResponse, servicesResponse] = await Promise.all([
+                    fetch('/vpn/peers'),
+                    fetch('/docker-services/peers')
+                ]);
+
+                if (!peersResponse.ok) throw new Error(`HTTP error! status: ${peersResponse.status}`);
+
+                peers = await peersResponse.json();
+
+                if (servicesResponse.ok) {
+                    const services = await servicesResponse.json();
+                    peerServices = Object.fromEntries(services.map(s => [s.peerName, s]));
                 }
-                peers = await response.json();
+
                 displayPeers(peers);
                 lastFetchSuccessful = true;
-                // Clear any previous errors on success
                 document.getElementById('error-message').innerHTML = '';
             } catch (error) {
                 console.error('Failed to load peers:', error);
-                // Only show persistent error if we've never successfully loaded
                 if (!lastFetchSuccessful && peers.length === 0) {
                     displayError(`Failed to load peers: ${error.message}`);
                 }
@@ -253,6 +261,26 @@
                     const i = Math.floor(Math.log(b) / Math.log(k));
                     return Math.round((b / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
                 };
+
+                const services = peerServices[peer.name];
+                const servicesHtml = (() => {
+                    if (!isConnected) return '';
+                    if (!services || services.status === 'UNREACHABLE') {
+                        return `<div class="detail-row"><span class="detail-label">Services:</span><span class="detail-value" style="color:#999">Unreachable</span></div>`;
+                    }
+                    if (!services.containers || services.containers.length === 0) {
+                        return `<div class="detail-row"><span class="detail-label">Services:</span><span class="detail-value" style="color:#999">None discovered</span></div>`;
+                    }
+                    const items = services.containers.map(c => {
+                        const port = c.ports[0]?.publicPort;
+                        const vpnIp = services.vpnIp;
+                        const url = port ? `http://${vpnIp}:${port}` : null;
+                        return url
+                            ? `<a href="${url}" target="_blank" style="margin-right:0.75rem">${c.containerName} :${port}</a>`
+                            : `<span style="margin-right:0.75rem">${c.containerName}</span>`;
+                    }).join('');
+                    return `<div class="detail-row"><span class="detail-label">Services:</span><span class="detail-value">${items}</span></div>`;
+                })();
 
                 return `
                     <div class="peer-card">
@@ -307,6 +335,7 @@
                                 <span class="detail-label">Data Sent:</span>
                                 <span class="detail-value">${formatBytes(peer.transferTx)}</span>
                             </div>
+                            ${servicesHtml}
                         </div>
                     </div>
                 `;

@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerPort;
+import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -39,7 +40,7 @@ public class DockerServerAdapter implements ForGettingServerInfo {
             List<DockerService> services = new ArrayList<>();
 
             for (Container container : containers) {
-                List<DockerService.PortMapping> portMappings = extractPortMappings(container);
+                List<DockerService.PortMapping> portMappings = extractPortMappings(container, dockerClient);
 
                 // Only add services that have ports
                 if (!portMappings.isEmpty()) {
@@ -96,30 +97,48 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         });
     }
 
-    private List<DockerService.PortMapping> extractPortMappings(Container container) {
+    private List<DockerService.PortMapping> extractPortMappings(Container container, DockerClient dockerClient) {
+        boolean isHostNetwork = container.getHostConfig() != null
+            && "host".equals(container.getHostConfig().getNetworkMode());
+
+        if (isHostNetwork) {
+            return extractHostNetworkPortMappings(container, dockerClient);
+        }
+
         List<DockerService.PortMapping> portMappings = new ArrayList<>();
-
         ContainerPort[] ports = container.getPorts();
-        if (ports != null && ports.length > 0) {
+        if (ports != null) {
             for (ContainerPort port : ports) {
-                Integer publicPort = port.getPublicPort();
                 Integer privatePort = port.getPrivatePort();
-                String type = port.getType() != null ? port.getType() : "tcp";
-                String ip = port.getIp() != null ? port.getIp() : "0.0.0.0";
-
-                // Only add if we have a private port
                 if (privatePort != null) {
-                    portMappings.add(new DockerService.PortMapping(
-                        privatePort,
-                        publicPort != null ? publicPort : privatePort, // For host mode, use private port as public
-                        type,
-                        ip
-                    ));
+                    Integer publicPort = port.getPublicPort();
+                    String type = port.getType() != null ? port.getType() : "tcp";
+                    String ip = port.getIp() != null ? port.getIp() : "0.0.0.0";
+                    portMappings.add(new DockerService.PortMapping(privatePort, publicPort != null ? publicPort : privatePort, type, ip));
                 }
             }
         }
-
         return portMappings;
+    }
+
+    private List<DockerService.PortMapping> extractHostNetworkPortMappings(Container container, DockerClient dockerClient) {
+        try {
+            ExposedPort[] exposedPorts = dockerClient.inspectContainerCmd(container.getId())
+                .exec()
+                .getConfig()
+                .getExposedPorts();
+
+            if (exposedPorts == null) return List.of();
+
+            List<DockerService.PortMapping> portMappings = new ArrayList<>();
+            for (ExposedPort ep : exposedPorts) {
+                portMappings.add(new DockerService.PortMapping(ep.getPort(), ep.getPort(), ep.getProtocol().name().toLowerCase(), "0.0.0.0"));
+            }
+            return portMappings;
+        } catch (Exception e) {
+            log.warn("Failed to inspect host-network container {}: {}", container.getNames()[0], e.getMessage());
+            return List.of();
+        }
     }
 
     private String extractContainerName(String[] names) {
