@@ -194,20 +194,9 @@
 
         async function fetchPeers() {
             try {
-                const [peersResponse, servicesResponse] = await Promise.all([
-                    fetch('/vpn/peers'),
-                    fetch('/docker-services/peers')
-                ]);
-
-                if (!peersResponse.ok) throw new Error(`HTTP error! status: ${peersResponse.status}`);
-
-                peers = await peersResponse.json();
-
-                if (servicesResponse.ok) {
-                    const services = await servicesResponse.json();
-                    peerServices = Object.fromEntries(services.map(s => [s.peerName, s]));
-                }
-
+                const response = await fetch('/vpn/peers');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                peers = await response.json();
                 displayPeers(peers);
                 lastFetchSuccessful = true;
                 document.getElementById('error-message').innerHTML = '';
@@ -216,6 +205,17 @@
                 if (!lastFetchSuccessful && peers.length === 0) {
                     displayError(`Failed to load peers: ${error.message}`);
                 }
+            }
+
+            try {
+                const response = await fetch('/docker-services/peers');
+                if (response.ok) {
+                    const services = await response.json();
+                    peerServices = Object.fromEntries(services.map(s => [s.peerName, s]));
+                    displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load peer services:', error);
             }
         }
 
