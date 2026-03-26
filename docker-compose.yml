@@ -34,6 +34,25 @@ services:
     networks:
       - vaier-network
 
+  wireguard-masquerade:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: wireguard-masquerade
+    network_mode: "service:wireguard"
+    cap_add:
+      - NET_ADMIN
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        until ip link show wg0 2>/dev/null; do sleep 2; done
+        iptables -t nat -C POSTROUTING -s 172.20.0.0/16 -o wg0 -j MASQUERADE 2>/dev/null || \
+          iptables -t nat -A POSTROUTING -s 172.20.0.0/16 -o wg0 -j MASQUERADE
+        echo "WireGuard masquerade configured"
+        sleep infinity
+    depends_on:
+      - wireguard
+    restart: unless-stopped
+
   traefik:
     image: traefik:latest
     container_name: traefik

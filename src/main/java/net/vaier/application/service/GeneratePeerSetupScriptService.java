@@ -63,7 +63,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("\n");
         sb.append("# --- Create directory structure ---\n");
         sb.append("echo \"Setting up $INSTALL_DIR...\"\n");
-        sb.append("mkdir -p \"$INSTALL_DIR/wireguard-client/config\"\n");
+        sb.append("mkdir -p \"$INSTALL_DIR/wireguard-client/config/wg_confs\"\n");
         sb.append("\n");
         sb.append("# --- Write .env file ---\n");
         sb.append("cat > \"$INSTALL_DIR/.env\" << ENV_FILE\n");
@@ -77,13 +77,13 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("echo \"Created .env file\"\n");
         sb.append("\n");
         sb.append("# --- Write WireGuard config ---\n");
-        sb.append("cat > \"$INSTALL_DIR/wireguard-client/config/wg0.conf\" << 'WG_CONF'\n");
+        sb.append("cat > \"$INSTALL_DIR/wireguard-client/config/wg_confs/wg0.conf\" << 'WG_CONF'\n");
         sb.append(wgConfig).append("\n");
         sb.append("WG_CONF\n");
         sb.append("\n");
         sb.append("# Force split tunneling: only route VPN subnet through the tunnel\n");
         sb.append("# This prevents SSH and other external traffic from breaking\n");
-        sb.append("sed -i 's|AllowedIPs.*=.*0\\.0\\.0\\.0/0.*|AllowedIPs = 10.13.13.0/24|' \"$INSTALL_DIR/wireguard-client/config/wg0.conf\"\n");
+        sb.append("sed -i 's|AllowedIPs.*=.*0\\.0\\.0\\.0/0.*|AllowedIPs = 10.13.13.0/24|' \"$INSTALL_DIR/wireguard-client/config/wg_confs/wg0.conf\"\n");
         sb.append("\n");
         sb.append("echo \"Created WireGuard config (split tunneling enabled)\"\n");
         sb.append("\n");
@@ -105,7 +105,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("      - PGID=1000\n");
         sb.append("      - TZ=${TZ:-Europe/Oslo}\n");
         sb.append("    volumes:\n");
-        sb.append("      - ./wireguard-client/config:/config\n");
+        sb.append("      - ./wireguard-client/config/wg_confs:/config/wg_confs\n");
         sb.append("      - /lib/modules:/lib/modules:ro\n");
         sb.append("    restart: unless-stopped\n");
         sb.append("    network_mode: host\n");
