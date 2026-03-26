@@ -3,16 +3,21 @@
 ###############################################################
 server:
   address: tcp://0.0.0.0:9091
-logs_level: info
-jwt_secret: S63MhsofZZflEGE8xHYGPs2isikM100W
+log:
+  level: info
+identity_validation:
+  reset_password:
+    jwt_secret: S63MhsofZZflEGE8xHYGPs2isikM100W
 authentication_backend:
   file:
     path: /config/users_database.yml
 totp:
-  issuer: net
+  issuer: vaier.net
 session:
   secret: UBOhMRS7LJMrJLCe1kea5potPQsacMNS
-  domain: .net
+  cookies:
+    - domain: vaier.net
+      authelia_url: https://vaier.vaier.net
   expiration: 3600 # 1 hour
   inactivity: 300 # 5 minutes
   redis:
@@ -23,9 +28,9 @@ storage:
   local:
     path: /config/db.sqlite
 access_control:
-  default_policy: bypass
+  default_policy: one_factor
   rules:
-    - domain: "vaier.net"
+    - domain: "vaier.vaier.net"
       policy: one_factor
 notifier:
   filesystem:
