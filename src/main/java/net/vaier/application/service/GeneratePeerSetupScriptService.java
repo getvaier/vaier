@@ -59,7 +59,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("sudo rm -f /etc/systemd/system/docker.service.d/override.conf\n");
         sb.append("sudo systemctl daemon-reload\n");
         sb.append("sudo systemctl restart docker\n");
-        sb.append("sleep 2\n");
+        sb.append("until docker info > /dev/null 2>&1; do echo 'Waiting for Docker...'; sleep 1; done\n");
         sb.append("\n");
         sb.append("# --- Create directory structure ---\n");
         sb.append("echo \"Setting up $INSTALL_DIR...\"\n");
@@ -186,7 +186,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("echo \"Reloading Docker daemon...\"\n");
         sb.append("sudo systemctl daemon-reload\n");
         sb.append("sudo systemctl restart docker\n");
-        sb.append("sleep 3\n");
+        sb.append("until docker info > /dev/null 2>&1; do echo 'Waiting for Docker...'; sleep 1; done\n");
         sb.append("\n");
         sb.append("# --- Start all services ---\n");
         sb.append("echo \"Starting all services...\"\n");
