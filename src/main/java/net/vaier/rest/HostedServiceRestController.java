@@ -64,10 +64,10 @@ public class HostedServiceRestController {
         return new PublishStatusResponse(status.dnsPropagated(), status.traefikActive());
     }
 
-    @DeleteMapping("/{subdomain}")
-    public ResponseEntity<Void> deleteService(@PathVariable String subdomain) {
-        log.info("Deleting hosted service: {}", subdomain);
-        deleteHostedServiceUseCase.deleteService(subdomain);
+    @DeleteMapping("/{dnsName:.+}")
+    public ResponseEntity<Void> deleteService(@PathVariable String dnsName) {
+        log.info("Deleting hosted service: {}", dnsName);
+        deleteHostedServiceUseCase.deleteService(dnsName);
         return ResponseEntity.ok().build();
     }
 

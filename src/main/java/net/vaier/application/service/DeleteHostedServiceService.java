@@ -22,9 +22,7 @@ public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
     private String vaierDomain;
 
     @Override
-    public void deleteService(String subdomain) {
-        String fqdn = subdomain + "." + vaierDomain;
-
+    public void deleteService(String fqdn) {
         log.info("Deleting service: {}", fqdn);
 
         forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);

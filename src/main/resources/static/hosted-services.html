@@ -529,7 +529,7 @@
         let serviceToDelete = null;
 
         function showDeleteModal(dnsAddress) {
-            serviceToDelete = dnsAddress.split('.')[0];
+            serviceToDelete = dnsAddress;
             document.getElementById('deleteServiceName').textContent = dnsAddress;
             document.getElementById('deleteModal').classList.add('active');
         }
