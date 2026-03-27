@@ -4,6 +4,9 @@ spring:
   web:
     resources:
       static-locations: classpath:/static/
+      cache:
+        cachecontrol:
+          no-cache: true
   mvc:
     static-path-pattern: /**
 

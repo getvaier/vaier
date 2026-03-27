@@ -526,28 +526,26 @@
             container.insertBefore(card, container.firstChild);
         }
 
-        let serviceToDelete = null;
-
         function showDeleteModal(dnsAddress) {
-            serviceToDelete = dnsAddress;
             document.getElementById('deleteServiceName').textContent = dnsAddress;
+            document.getElementById('deleteConfirmBtn').dataset.dns = dnsAddress;
             document.getElementById('deleteModal').classList.add('active');
         }
 
         function hideDeleteModal() {
             document.getElementById('deleteModal').classList.remove('active');
-            serviceToDelete = null;
         }
 
         async function confirmDelete() {
-            if (!serviceToDelete) return;
+            const dnsAddress = document.getElementById('deleteConfirmBtn').dataset.dns;
+            if (!dnsAddress) return;
             const deleteBtn = document.getElementById('deleteConfirmBtn');
             const cancelBtn = document.getElementById('deleteCancelBtn');
             deleteBtn.disabled = true;
             cancelBtn.disabled = true;
             deleteBtn.textContent = 'Deleting…';
             try {
-                const response = await fetch(`/hosted-services/${encodeURIComponent(serviceToDelete)}`, { method: 'DELETE' });
+                const response = await fetch(`/hosted-services/${encodeURIComponent(dnsAddress)}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 hideDeleteModal();
                 await Promise.all([fetchServices(), fetchPublishable()]);
