@@ -270,8 +270,8 @@
                 <label for="routeAllTraffic">Route all traffic through VPN</label>
             </div>
             <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="hideCreatePeerModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="createPeer()">Create Peer</button>
+                <button class="btn btn-secondary" id="createPeerCancelBtn" onclick="hideCreatePeerModal()">Cancel</button>
+                <button class="btn btn-primary" id="createPeerSubmitBtn" onclick="createPeer()">Create Peer</button>
             </div>
         </div>
     </div>
@@ -667,6 +667,12 @@
                 return;
             }
 
+            const submitBtn = document.getElementById('createPeerSubmitBtn');
+            const cancelBtn = document.getElementById('createPeerCancelBtn');
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+            submitBtn.textContent = 'Creating peer…';
+
             try {
                 const response = await fetch('/vpn/peers', {
                     method: 'POST',
@@ -683,6 +689,10 @@
                 setTimeout(() => fetchPeers(), 1000);
             } catch (error) {
                 displayError(`Failed to create peer: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                cancelBtn.disabled = false;
+                submitBtn.textContent = 'Create Peer';
             }
         }
 
