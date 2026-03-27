@@ -45,11 +45,12 @@ services:
       - -c
       - |
         until ip link show wg0 2>/dev/null; do sleep 2; done
-        while true; do
+        while ip link show wg0 2>/dev/null; do
           iptables -t nat -C POSTROUTING -s 172.20.0.0/16 -o wg0 -j MASQUERADE 2>/dev/null || \
             iptables -t nat -A POSTROUTING -s 172.20.0.0/16 -o wg0 -j MASQUERADE
           sleep 10
         done
+        exit 1
     depends_on:
       - wireguard
     restart: unless-stopped
