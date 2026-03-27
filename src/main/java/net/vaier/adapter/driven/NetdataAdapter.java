@@ -49,7 +49,7 @@ public class NetdataAdapter implements ForFetchingPeerMetrics {
         for (String chart : CHARTS) {
             try {
                 String url = "http://" + peerIp + ":" + NETDATA_PORT
-                        + "/api/v1/data?chart=" + chart + "&points=1&format=json";
+                        + "/api/v1/data?chart=" + chart + "&points=1&format=json&after=-60";
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(3))
