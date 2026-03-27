@@ -8,6 +8,7 @@ import net.vaier.application.GetHostedServicesUseCase;
 import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
+import net.vaier.application.service.PublishPeerServiceService;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +23,7 @@ public class HostedServiceRestController {
 
     private final GetHostedServicesUseCase getHostedServicesUseCase;
     private final PublishPeerServiceUseCase publishPeerServiceUseCase;
+    private final PublishPeerServiceService publishPeerServiceService;
     private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
@@ -56,6 +58,12 @@ public class HostedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @GetMapping("/{subdomain}/status")
+    public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
+        var status = publishPeerServiceService.getPublishStatus(subdomain);
+        return new PublishStatusResponse(status.dnsPropagated(), status.traefikActive());
+    }
+
     @DeleteMapping("/{subdomain}")
     public ResponseEntity<Void> deleteService(@PathVariable String subdomain) {
         log.info("Deleting hosted service: {}", subdomain);
@@ -64,4 +72,5 @@ public class HostedServiceRestController {
     }
 
     record PublishRequest(String peerIp, int port, String subdomain, boolean requiresAuth) {}
+    record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
 }

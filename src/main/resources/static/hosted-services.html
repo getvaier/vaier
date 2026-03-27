@@ -207,25 +207,66 @@
     <div id="publishModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">Add Service</div>
-            <input type="hidden" id="publishPeerIp">
-            <input type="hidden" id="publishPort">
-            <div class="form-group" style="margin-bottom:0.5rem;">
-                <span style="color:#666;font-size:0.9rem;" id="publishServiceLabel"></span>
+
+            <!-- Form view -->
+            <div id="publishForm">
+                <input type="hidden" id="publishPeerIp">
+                <input type="hidden" id="publishPort">
+                <div class="form-group" style="margin-bottom:0.5rem;">
+                    <span style="color:#666;font-size:0.9rem;" id="publishServiceLabel"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="publishSubdomain">Subdomain</label>
+                    <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
+                </div>
+                <div class="form-checkbox">
+                    <input type="checkbox" id="publishRequiresAuth">
+                    <label for="publishRequiresAuth">Require Authelia authentication</label>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
+                    <button class="btn btn-primary" id="publishSubmitBtn" onclick="submitPublish()">Add Service</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label class="form-label" for="publishSubdomain">Subdomain</label>
-                <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
-            </div>
-            <div class="form-checkbox">
-                <input type="checkbox" id="publishRequiresAuth">
-                <label for="publishRequiresAuth">Require Authelia authentication</label>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
-                <button class="btn btn-primary" id="publishSubmitBtn" onclick="submitPublish()">Add Service</button>
+
+            <!-- Progress view -->
+            <div id="publishProgress" style="display:none; padding: 1rem 0;">
+                <div id="progressSteps" style="display:flex;flex-direction:column;gap:0.75rem;margin-bottom:1.5rem;">
+                    <div id="step-dns-create" class="progress-step">
+                        <span class="step-icon">⏳</span>
+                        <span class="step-label">Creating DNS record…</span>
+                    </div>
+                    <div id="step-dns-propagate" class="progress-step" style="opacity:0.4;">
+                        <span class="step-icon">⏳</span>
+                        <span class="step-label">Waiting for DNS propagation…</span>
+                    </div>
+                    <div id="step-traefik" class="progress-step" style="opacity:0.4;">
+                        <span class="step-icon">⏳</span>
+                        <span class="step-label">Activating reverse proxy route…</span>
+                    </div>
+                    <div id="step-done" class="progress-step" style="opacity:0.4;">
+                        <span class="step-icon">⏳</span>
+                        <span class="step-label">Ready</span>
+                    </div>
+                </div>
+                <div style="font-size:0.85rem;color:#888;" id="progressNote">This may take up to 2 minutes for DNS to propagate.</div>
             </div>
         </div>
     </div>
+
+    <style>
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.95rem;
+        }
+        .step-icon {
+            font-size: 1rem;
+            width: 1.4rem;
+            text-align: center;
+        }
+    </style>
 
     <script>
         const expandedServices = new Set();
@@ -282,6 +323,8 @@
 
         function displayServices(services) {
             const container = document.getElementById('services-container');
+            // Remove any optimistic cards before rendering real data
+            container.querySelectorAll('[id^="optimistic-"]').forEach(el => el.remove());
             if (services.length === 0) {
                 container.innerHTML = '<div class="loading">No hosted services yet</div>';
                 return;
@@ -375,6 +418,16 @@
 
         function hidePublishModal() {
             document.getElementById('publishModal').classList.remove('active');
+            document.getElementById('publishForm').style.display = '';
+            document.getElementById('publishProgress').style.display = 'none';
+            clearInterval(window._publishPollInterval);
+            window._publishPollInterval = null;
+        }
+
+        function setStep(id, done) {
+            const el = document.getElementById(id);
+            el.style.opacity = '1';
+            el.querySelector('.step-icon').textContent = done ? '✅' : '⏳';
         }
 
         async function submitPublish() {
@@ -401,15 +454,76 @@
                     body: JSON.stringify({ peerIp, port, subdomain, requiresAuth })
                 });
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                hidePublishModal();
-                await Promise.all([fetchServices(), fetchPublishable()]);
+
+                // Switch to progress view
+                document.getElementById('publishForm').style.display = 'none';
+                document.getElementById('publishProgress').style.display = '';
+                setStep('step-dns-create', true);
+                setStep('step-dns-propagate', false);
+
+                addOptimisticService(subdomain, peerIp, port, requiresAuth);
+                fetchPublishable();
+
+                // Poll status endpoint
+                window._publishPollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await fetch(`/hosted-services/${encodeURIComponent(subdomain)}/status`);
+                        if (!statusRes.ok) return;
+                        const status = await statusRes.json();
+
+                        if (status.dnsPropagated) {
+                            setStep('step-dns-propagate', true);
+                            setStep('step-traefik', false);
+                        }
+                        if (status.traefikActive) {
+                            setStep('step-traefik', true);
+                            setStep('step-done', true);
+                            document.getElementById('progressNote').textContent = 'Service is live!';
+                            clearInterval(window._publishPollInterval);
+                            window._publishPollInterval = null;
+                            await fetchServices();
+                            setTimeout(() => hidePublishModal(), 1500);
+                        }
+                    } catch (_) {}
+                }, 3000);
+
             } catch (error) {
                 alert(`Failed to add service: ${error.message}`);
-            } finally {
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
                 submitBtn.textContent = 'Add Service';
             }
+        }
+
+        function addOptimisticService(subdomain, peerIp, port, requiresAuth) {
+            const container = document.getElementById('services-container');
+            // Remove "no services" placeholder if present
+            const placeholder = container.querySelector('.loading');
+            if (placeholder) placeholder.remove();
+
+            const id = cardId(subdomain);
+            const authBadge = requiresAuth
+                ? '<span class="badge badge-success">Authenticated</span>'
+                : '<span class="badge badge-warning">No Auth</span>';
+
+            const card = document.createElement('div');
+            card.id = 'optimistic-' + id;
+            card.className = 'service-card';
+            card.style.opacity = '0.6';
+            card.innerHTML = `
+                <div class="service-header">
+                    <div class="service-header-left">
+                        <span class="status-dot status-disconnected"></span>
+                        <span class="service-name">${subdomain}</span>
+                        <span style="font-size:0.85rem;color:#999">Syncing…</span>
+                    </div>
+                    <div class="service-actions">
+                        ${authBadge}
+                        <span class="service-chevron">▼</span>
+                    </div>
+                </div>
+            `;
+            container.insertBefore(card, container.firstChild);
         }
 
         let serviceToDelete = null;
