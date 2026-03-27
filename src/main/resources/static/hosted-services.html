@@ -372,6 +372,11 @@
                                 <div class="detail-row">
                                     <span class="detail-label">Authentication:</span>
                                     ${authBadge}
+                                    <button class="btn btn-small ${service.authenticated ? 'btn-warning' : 'btn-success'}"
+                                        style="margin-left:0.5rem;"
+                                        onclick="toggleAuth('${service.dnsAddress}', ${service.authenticated})">
+                                        ${service.authenticated ? 'Disable' : 'Enable'}
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -524,6 +529,21 @@
                 </div>
             `;
             container.insertBefore(card, container.firstChild);
+        }
+
+        async function toggleAuth(dnsAddress, currentlyAuthenticated) {
+            const requiresAuth = !currentlyAuthenticated;
+            try {
+                const response = await fetch(`/hosted-services/${encodeURIComponent(dnsAddress)}/auth`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ requiresAuth })
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                await fetchServices();
+            } catch (error) {
+                alert(`Failed to update authentication: ${error.message}`);
+            }
         }
 
         function showDeleteModal(dnsAddress) {

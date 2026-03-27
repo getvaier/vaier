@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteHostedServiceUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.GetHostedServicesUseCase;
+import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
@@ -25,6 +26,7 @@ public class HostedServiceRestController {
     private final PublishPeerServiceUseCase publishPeerServiceUseCase;
     private final PublishPeerServiceService publishPeerServiceService;
     private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
+    private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
 
@@ -58,6 +60,13 @@ public class HostedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @PatchMapping("/{dnsName:.+}/auth")
+    public ResponseEntity<Void> setAuth(@PathVariable String dnsName, @RequestBody AuthRequest request) {
+        log.info("Setting auth={} for {}", request.requiresAuth(), dnsName);
+        toggleServiceAuthUseCase.setAuthentication(dnsName, request.requiresAuth());
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{subdomain}/status")
     public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
         var status = publishPeerServiceService.getPublishStatus(subdomain);
@@ -73,4 +82,5 @@ public class HostedServiceRestController {
 
     record PublishRequest(String peerIp, int port, String subdomain, boolean requiresAuth) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
+    record AuthRequest(boolean requiresAuth) {}
 }

@@ -956,6 +956,30 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         deleteReverseProxyRoute(routerName);
     }
 
+    @Override
+    public void setRouteAuthentication(String dnsName, boolean requiresAuth) {
+        loadConfig();
+
+        Map<String, Object> http = getNestedMap(config, "http");
+        if (http == null) throw new RuntimeException("No HTTP configuration found");
+
+        Map<String, Object> routers = getNestedMap(http, "routers");
+        String routerName = generateRouterName(dnsName);
+        if (routers == null || !routers.containsKey(routerName)) {
+            throw new RuntimeException("Router not found: " + routerName);
+        }
+
+        Map<String, Object> routerConfig = castToMap(routers.get(routerName));
+        if (requiresAuth) {
+            routerConfig.put("middlewares", new ArrayList<>(List.of("auth-middleware")));
+            ensureAuthMiddlewareExists(http);
+        } else {
+            routerConfig.remove("middlewares");
+        }
+
+        saveConfig();
+    }
+
     /**
      * Load configuration from file.
      */
