@@ -32,7 +32,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private Map<String, Object> config;
-    private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/dynamic_conf/remote-apps.yml";
+    private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/remote-apps.yml";
     private static final String TRAEFIK_API_URL = System.getenv().getOrDefault("TRAEFIK_API_URL", "http://localhost:8080");
 
     public TraefikReverseProxyAdapter() {

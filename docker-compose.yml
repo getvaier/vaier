@@ -58,6 +58,15 @@ services:
   traefik:
     image: traefik:latest
     container_name: traefik
+    cap_add:
+      - NET_ADMIN
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
+        ip route add 10.13.13.0/24 via "$$WG_IP" 2>/dev/null || true
+        exec traefik "$$0" "$$@"
     command:
       - --api.insecure=true
       - --providers.docker=true
@@ -79,6 +88,7 @@ services:
       - ./traefik/acme:/traefik/acme
     restart: unless-stopped
     depends_on:
+      - wireguard
       - authelia
     networks:
       - vaier-network
