@@ -540,7 +540,8 @@
                     body: JSON.stringify({ requiresAuth })
                 });
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                await fetchServices();
+                // Wait for Traefik to pick up the config file change before re-fetching
+                setTimeout(() => fetchServices(), 1000);
             } catch (error) {
                 alert(`Failed to update authentication: ${error.message}`);
             }
