@@ -40,14 +40,89 @@
         .detail-value {
             color: #333;
         }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 2rem 0 1rem;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .discoverable-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.25rem 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .discoverable-info {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .discoverable-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .discoverable-meta {
+            color: #888;
+            font-size: 0.875rem;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Hosted Services</h1>
         <div id="error-message"></div>
+
         <div id="services-container">
             <div class="loading">Loading services...</div>
+        </div>
+
+        <div class="section-header">
+            <span class="section-title">Discoverable Peer Services</span>
+        </div>
+        <div id="publishable-container">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Publish Modal -->
+    <div id="publishModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Add Service</div>
+            <input type="hidden" id="publishPeerIp">
+            <input type="hidden" id="publishPort">
+            <div class="form-group" style="margin-bottom:0.5rem;">
+                <span style="color:#666;font-size:0.9rem;" id="publishServiceLabel"></span>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="publishSubdomain">Subdomain</label>
+                <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
+            </div>
+            <div class="form-checkbox">
+                <input type="checkbox" id="publishRequiresAuth">
+                <label for="publishRequiresAuth">Require Authelia authentication</label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
+                <button class="btn btn-primary" id="publishSubmitBtn" onclick="submitPublish()">Add Service</button>
+            </div>
         </div>
     </div>
 
@@ -55,19 +130,26 @@
         async function fetchServices() {
             try {
                 const response = await fetch('/hosted-services/discover');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const services = await response.json();
-                displayServices(services);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                displayServices(await response.json());
             } catch (error) {
                 displayError(`Failed to load services: ${error.message}`);
             }
         }
 
+        async function fetchPublishable() {
+            try {
+                const response = await fetch('/hosted-services/publishable');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                displayPublishable(await response.json());
+            } catch (error) {
+                document.getElementById('publishable-container').innerHTML =
+                    `<div class="error">Failed to load: ${error.message}</div>`;
+            }
+        }
+
         function displayError(message) {
-            const errorDiv = document.getElementById('error-message');
-            errorDiv.innerHTML = `<div class="error">${message}</div>`;
+            document.getElementById('error-message').innerHTML = `<div class="error">${message}</div>`;
             document.getElementById('services-container').innerHTML = '';
         }
 
@@ -81,9 +163,8 @@
 
         function displayServices(services) {
             const container = document.getElementById('services-container');
-
             if (services.length === 0) {
-                container.innerHTML = '<div class="loading">No services found</div>';
+                container.innerHTML = '<div class="loading">No hosted services yet</div>';
                 return;
             }
 
@@ -92,9 +173,9 @@
                 const hostOk = service.state === 'OK';
                 const authBadge = service.authenticated
                     ? '<span class="badge badge-success">Authenticated</span>'
-                    : '<span class="badge badge-warning">Not Authenticated</span>';
+                    : '<span class="badge badge-warning">No Auth</span>';
                 const dnsDisplay = dnsOk
-                    ? `<a href="http://${service.dnsAddress}" target="_blank">${service.dnsAddress}</a>`
+                    ? `<a href="https://${service.dnsAddress}" target="_blank">${service.dnsAddress}</a>`
                     : service.dnsAddress;
 
                 return `
@@ -102,7 +183,7 @@
                         <div class="service-name">${service.name}</div>
                         <div class="service-details">
                             <div class="detail-row">
-                                <span class="detail-label">DNS:</span>
+                                <span class="detail-label">URL:</span>
                                 <span class="detail-value">${dnsDisplay}</span>
                             </div>
                             <div class="detail-row">
@@ -129,8 +210,81 @@
             container.innerHTML = `<div class="card-grid">${html}</div>`;
         }
 
-        // Load services on page load
+        function displayPublishable(services) {
+            const container = document.getElementById('publishable-container');
+            if (services.length === 0) {
+                container.innerHTML = '<div class="loading">All peer services are already published</div>';
+                return;
+            }
+
+            const html = services.map(s => `
+                <div class="discoverable-card">
+                    <div class="discoverable-info">
+                        <span class="discoverable-name">${s.containerName}</span>
+                        <span class="discoverable-meta">${s.peerName} &bull; ${s.peerIp}:${s.port}</span>
+                    </div>
+                    <button class="btn btn-primary btn-small"
+                        onclick="showPublishModal('${s.peerIp}', ${s.port}, '${s.containerName}', '${s.peerName}')">
+                        + Add Service
+                    </button>
+                </div>
+            `).join('');
+
+            container.innerHTML = `<div style="display:flex;flex-direction:column;gap:0.75rem;">${html}</div>`;
+        }
+
+        function showPublishModal(peerIp, port, containerName, peerName) {
+            document.getElementById('publishPeerIp').value = peerIp;
+            document.getElementById('publishPort').value = port;
+            document.getElementById('publishSubdomain').value = containerName;
+            document.getElementById('publishServiceLabel').textContent =
+                `${containerName} on ${peerName} (${peerIp}:${port})`;
+            document.getElementById('publishRequiresAuth').checked = false;
+            document.getElementById('publishModal').classList.add('active');
+            document.getElementById('publishSubdomain').focus();
+        }
+
+        function hidePublishModal() {
+            document.getElementById('publishModal').classList.remove('active');
+        }
+
+        async function submitPublish() {
+            const peerIp = document.getElementById('publishPeerIp').value;
+            const port = parseInt(document.getElementById('publishPort').value);
+            const subdomain = document.getElementById('publishSubdomain').value.trim();
+            const requiresAuth = document.getElementById('publishRequiresAuth').checked;
+
+            if (!subdomain) {
+                alert('Please enter a subdomain');
+                return;
+            }
+
+            const submitBtn = document.getElementById('publishSubmitBtn');
+            const cancelBtn = document.getElementById('publishCancelBtn');
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+            submitBtn.textContent = 'Adding…';
+
+            try {
+                const response = await fetch('/hosted-services/publish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ peerIp, port, subdomain, requiresAuth })
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                hidePublishModal();
+                await Promise.all([fetchServices(), fetchPublishable()]);
+            } catch (error) {
+                alert(`Failed to add service: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                cancelBtn.disabled = false;
+                submitBtn.textContent = 'Add Service';
+            }
+        }
+
         fetchServices();
+        fetchPublishable();
     </script>
 </body>
 </html>
