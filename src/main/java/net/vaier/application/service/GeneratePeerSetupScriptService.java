@@ -40,6 +40,16 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("VPN_IP=\"").append(vpnIp).append("\"\n");
         sb.append("INSTALL_DIR=\"$HOME/vaier\"\n");
         sb.append("\n");
+        sb.append("docker_compose_up() {\n");
+        sb.append("  local RETRIES=5\n");
+        sb.append("  for i in $(seq 1 $RETRIES); do\n");
+        sb.append("    docker compose up -d && return 0\n");
+        sb.append("    echo \"docker compose up failed (attempt $i/$RETRIES), retrying in 5s...\"\n");
+        sb.append("    sleep 5\n");
+        sb.append("  done\n");
+        sb.append("  echo 'ERROR: docker compose up failed after $RETRIES attempts'; exit 1\n");
+        sb.append("}\n");
+        sb.append("\n");
         sb.append("echo \"=== Vaier Peer Setup: $PEER_NAME ===\"\n");
         sb.append("echo \"\"\n");
         sb.append("\n");
@@ -140,7 +150,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("# --- Start WireGuard first (VPN must be up before Docker binds to VPN IP) ---\n");
         sb.append("echo \"Starting WireGuard client...\"\n");
         sb.append("cd \"$INSTALL_DIR\"\n");
-        sb.append("docker compose up -d\n");
+        sb.append("docker_compose_up\n");
         sb.append("\n");
         sb.append("echo \"Waiting for VPN tunnel to establish...\"\n");
         sb.append("sleep 5\n");
@@ -201,7 +211,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("# --- Start all services ---\n");
         sb.append("echo \"Starting all services...\"\n");
         sb.append("cd \"$INSTALL_DIR\"\n");
-        sb.append("docker compose up -d\n");
+        sb.append("docker_compose_up\n");
         sb.append("\n");
         sb.append("# WireGuard runs in host network mode, so it survives Docker restart\n");
         sb.append("echo \"\"\n");
