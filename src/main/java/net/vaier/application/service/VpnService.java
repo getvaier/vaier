@@ -105,6 +105,7 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForMa
 
     @Override
     public CreatedPeerUco createPeer(String interfaceName, String peerName, boolean routeAllTraffic) {
+        peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
         log.info("Creating peer {} on interface {} (routeAllTraffic: {})", peerName, interfaceName, routeAllTraffic);
 
         try {
