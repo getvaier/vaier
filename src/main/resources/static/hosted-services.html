@@ -190,6 +190,19 @@
         </div>
     </div>
 
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Delete Service</div>
+            <p>Are you sure you want to delete <strong id="deleteServiceName"></strong>?</p>
+            <p style="color:#dc3545;margin-top:0.5rem;">This will remove the Traefik route and DNS record.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="deleteCancelBtn" onclick="hideDeleteModal()">Cancel</button>
+                <button class="btn btn-danger" id="deleteConfirmBtn" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Publish Modal -->
     <div id="publishModal" class="modal">
         <div class="modal-content">
@@ -295,6 +308,7 @@
                             </div>
                             <div class="service-actions">
                                 ${authBadge}
+                                <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); showDeleteModal('${service.dnsAddress}')">🗑️</button>
                                 <span class="service-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                             </div>
                         </div>
@@ -395,6 +409,40 @@
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
                 submitBtn.textContent = 'Add Service';
+            }
+        }
+
+        let serviceToDelete = null;
+
+        function showDeleteModal(dnsAddress) {
+            serviceToDelete = dnsAddress.split('.')[0];
+            document.getElementById('deleteServiceName').textContent = dnsAddress;
+            document.getElementById('deleteModal').classList.add('active');
+        }
+
+        function hideDeleteModal() {
+            document.getElementById('deleteModal').classList.remove('active');
+            serviceToDelete = null;
+        }
+
+        async function confirmDelete() {
+            if (!serviceToDelete) return;
+            const deleteBtn = document.getElementById('deleteConfirmBtn');
+            const cancelBtn = document.getElementById('deleteCancelBtn');
+            deleteBtn.disabled = true;
+            cancelBtn.disabled = true;
+            deleteBtn.textContent = 'Deleting…';
+            try {
+                const response = await fetch(`/hosted-services/${encodeURIComponent(serviceToDelete)}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                hideDeleteModal();
+                await Promise.all([fetchServices(), fetchPublishable()]);
+            } catch (error) {
+                alert(`Failed to delete service: ${error.message}`);
+            } finally {
+                deleteBtn.disabled = false;
+                cancelBtn.disabled = false;
+                deleteBtn.textContent = 'Delete';
             }
         }
 

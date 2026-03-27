@@ -34,6 +34,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private Map<String, Object> config;
     private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/remote-apps.yml";
     private static final String TRAEFIK_API_URL = System.getenv().getOrDefault("TRAEFIK_API_URL", "http://localhost:8080");
+    private static final String VAIER_DOMAIN = System.getenv().getOrDefault("VAIER_DOMAIN", "");
 
     public TraefikReverseProxyAdapter() {
         this.yaml = new Yaml();
@@ -800,22 +801,11 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-router"
      */
     private String generateRouterName(String dnsName) {
-        // Remove the base domain and keep the subdomain parts
-        String nameWithoutDomain = dnsName.replace(".eilertsen.family", "");
-        String routerName = nameWithoutDomain.replace(".", "-") + "-router";
-        return routerName;
+        return dnsName.replace(".", "-") + "-router";
     }
 
-    /**
-     * Generate service name from DNS name.
-     * Example: "portainer.eilertsen.family" -> "portainer-service"
-     * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-service"
-     */
     private String generateServiceName(String dnsName) {
-        // Remove the base domain and keep the subdomain parts
-        String nameWithoutDomain = dnsName.replace(".eilertsen.family", "");
-        String serviceName = nameWithoutDomain.replace(".", "-") + "-service";
-        return serviceName;
+        return dnsName.replace(".", "-") + "-service";
     }
 
     /**
@@ -1030,7 +1020,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             Map<String, Object> authMiddleware = new LinkedHashMap<>();
             Map<String, Object> forwardAuth = new LinkedHashMap<>();
 
-            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://auth.eilertsen.family/");
+            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://auth." + VAIER_DOMAIN + "/");
             forwardAuth.put("trustForwardHeader", true);
 
             List<String> authResponseHeaders = new ArrayList<>();

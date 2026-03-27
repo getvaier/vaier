@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.DeleteHostedServiceUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.GetHostedServicesUseCase;
 import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
@@ -21,6 +22,7 @@ public class HostedServiceRestController {
 
     private final GetHostedServicesUseCase getHostedServicesUseCase;
     private final PublishPeerServiceUseCase publishPeerServiceUseCase;
+    private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
 
@@ -51,6 +53,13 @@ public class HostedServiceRestController {
     public ResponseEntity<Void> publishService(@RequestBody PublishRequest request) {
         log.info("Publishing service: {}:{} as {}.* (auth={})", request.peerIp(), request.port(), request.subdomain(), request.requiresAuth());
         publishPeerServiceUseCase.publishService(request.peerIp(), request.port(), request.subdomain(), request.requiresAuth());
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/{subdomain}")
+    public ResponseEntity<Void> deleteService(@PathVariable String subdomain) {
+        log.info("Deleting hosted service: {}", subdomain);
+        deleteHostedServiceUseCase.deleteService(subdomain);
         return ResponseEntity.ok().build();
     }
 

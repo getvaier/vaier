@@ -43,8 +43,7 @@ public class HostedService {
             return State.OK;
         }
         Optional<VpnClient> wireGuardPeer = forGettingVpnClients.getClients().stream()
-            .peek(peer -> System.out.println("Processing peer: " + peer))
-            .filter(peer -> peer.endpointIp().equals(hostAddress))
+            .filter(peer -> peer.allowedIps() != null && peer.allowedIps().startsWith(hostAddress))
             .findFirst();
         if(wireGuardPeer.isPresent()) {
             return State.OK;
