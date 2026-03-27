@@ -29,6 +29,11 @@ build/
 *.conf
 *.pem
 
+# Runtime data (secrets, certs, state)
+wireguard/
+authelia/
+traefik/
+
 # WireGuard
 wireguard-config/
 wg*.conf
