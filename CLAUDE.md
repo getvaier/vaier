@@ -85,6 +85,17 @@ The `docker-compose.yml` runs five services on a custom bridge network (`172.20.
 | `VAIER_DOMAIN` | Base domain name |
 | `ACME_EMAIL` | Let's Encrypt email |
 
+## Deploying changes
+
+Always build the Docker image locally with the correct tag before deploying:
+
+```bash
+docker build -t getvaier/vaier:latest .                  # Build image (matches docker-compose.yml image tag)
+docker compose up -d --force-recreate vaier              # Deploy
+```
+
+The `docker-compose.yml` uses `image: getvaier/vaier:latest`. Building as just `vaier:latest` will not be picked up.
+
 ## Server development
 
 When developing on a server, you can use the `docker-compose.yml` file to run the full stack locally. This is useful for testing and debugging changes before deploying to production.
