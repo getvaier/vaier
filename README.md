@@ -103,6 +103,130 @@ The application uses the following environment variables:
 
 > **Note:** When running locally, you'll need to adjust the paths for accessing WireGuard and Traefik configurations, or run the full docker-compose stack for complete functionality.
 
+# Getting Started
+
+## Setting Up a Vaier Server
+
+### 1. Provision a server
+
+Spin up an Ubuntu instance (EC2 t3.small or larger works well). Assign an Elastic IP and open the following ports in your firewall / security group:
+
+| Port  | Protocol | Description              |
+|-------|----------|--------------------------|
+| 22    | TCP      | SSH                      |
+| 80    | TCP      | HTTP (Traefik / ACME)    |
+| 443   | TCP      | HTTPS (Traefik)          |
+| 51820 | UDP      | WireGuard VPN            |
+| 8888  | TCP      | Vaier API (optional)     |
+| 9443  | TCP      | Portainer UI (optional)  |
+
+### 2. Install Docker
+
+```bash
+sudo apt update && sudo apt upgrade -y
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### 3. Point your domain at the server
+
+Create an A record in your DNS provider pointing your base domain (e.g. `vpn.example.com`) to the server's public IP. Traefik uses this to obtain a Let's Encrypt certificate.
+
+### 4. Deploy the stack
+
+```bash
+git clone https://github.com/geireilertsen/vaier.git
+cd vaier
+```
+
+Create a `.env` file:
+
+```bash
+VAIER_AWS_KEY=your_aws_access_key
+VAIER_AWS_SECRET=your_aws_secret_key
+VAIER_DOMAIN=vpn.example.com
+ACME_EMAIL=you@example.com
+```
+
+Start all services:
+
+```bash
+docker compose up -d
+```
+
+### 5. Verify
+
+- Vaier API: `https://vpn.example.com/swagger-ui.html`
+- Traefik dashboard: `http://<server-ip>:8080`
+- WireGuard will be listening on UDP 51820
+
+---
+
+## Adding a Peer (VPN Client)
+
+### 1. Create the peer on the server
+
+Call the Vaier API to provision a new WireGuard peer:
+
+```bash
+curl -s -X POST https://vpn.example.com/vpn/peers \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-laptop", "routeAllTraffic": true}'
+```
+
+The response contains the peer's assigned VPN IP address, its public key, and the generated client config file path.
+
+### 2. Retrieve the peer config
+
+```bash
+curl -s https://vpn.example.com/vpn/peers/my-laptop/config
+```
+
+The `configFile` field in the response contains the full WireGuard `.conf` content ready to use on the client.
+
+### 3a. Connect with the WireGuard app
+
+Copy the `configFile` content to your device and import it into the WireGuard app (desktop or mobile). Toggle the tunnel on — you should see a handshake within a few seconds.
+
+### 3b. Connect with Docker (containerised peer)
+
+Download a ready-made `docker-compose.yml` for the peer:
+
+```bash
+curl -O "https://vpn.example.com/vpn/peers/my-laptop/docker-compose?serverUrl=vpn.example.com&serverPort=51820"
+```
+
+Then on the peer machine:
+
+```bash
+docker compose up -d
+```
+
+### 3c. Connect with the automated setup script
+
+Download and run the one-shot setup script which installs WireGuard and activates the tunnel:
+
+```bash
+curl -fsSL "https://vpn.example.com/vpn/peers/my-laptop/setup-script?serverUrl=vpn.example.com&serverPort=51820" | bash
+```
+
+### 4. Confirm the connection
+
+Back on the server, list peers to check the handshake timestamp:
+
+```bash
+curl -s https://vpn.example.com/vpn/peers | jq '.[] | {name, allowedIps, latestHandshake}'
+```
+
+### Removing a peer
+
+```bash
+curl -s -X DELETE https://vpn.example.com/vpn/peers/my-laptop
+```
+
+---
+
 # Server Setup Guide
 
 ## Prerequisites
