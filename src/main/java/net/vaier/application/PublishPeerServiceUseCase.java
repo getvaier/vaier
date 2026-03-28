@@ -2,12 +2,16 @@ package net.vaier.application;
 
 public interface PublishPeerServiceUseCase {
 
-    void publishService(String peerIp, int port, String subdomain, boolean requiresAuth);
+    void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath);
+
+    enum PublishableSource { LOCAL, PEER }
 
     record PublishableService(
+        PublishableSource source,
         String peerName,
-        String peerIp,
+        String address,
         String containerName,
-        int port
+        int port,
+        String rootRedirectPath
     ) {}
 }

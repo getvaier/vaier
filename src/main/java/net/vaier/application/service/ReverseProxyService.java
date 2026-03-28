@@ -20,7 +20,8 @@ public class ReverseProxyService implements AddReverseProxyRouteUseCase, DeleteR
             route.dnsName(),
             route.address(),
             route.port(),
-            route.requiresAuth()
+            route.requiresAuth(),
+            null
         );
     }
 

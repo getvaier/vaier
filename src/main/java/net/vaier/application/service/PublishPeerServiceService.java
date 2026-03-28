@@ -33,11 +33,11 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final Map<String, PublishStatus> pendingPublishes = new ConcurrentHashMap<>();
 
     @Override
-    public void publishService(String peerIp, int port, String subdomain, boolean requiresAuth) {
+    public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {
         String fqdn = subdomain + "." + vaierDomain;
         String serverFqdn = "vaier." + vaierDomain;
 
-        log.info("Publishing service: {} -> {}:{} (auth: {})", fqdn, peerIp, port, requiresAuth);
+        log.info("Publishing service: {} -> {}:{} (auth: {})", fqdn, address, port, requiresAuth);
 
         DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
         DnsZone zone = new DnsZone(vaierDomain);
@@ -46,7 +46,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
 
         pendingPublishes.put(subdomain, new PublishStatus(false, false));
 
-        CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, peerIp, port, requiresAuth));
+        CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath));
     }
 
     public PublishStatus getPublishStatus(String subdomain) {
@@ -61,13 +61,13 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         return new PublishStatus(status.dnsPropagated(), false);
     }
 
-    private void waitForDnsThenActivate(String subdomain, String fqdn, String peerIp, int port, boolean requiresAuth) {
+    private void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath) {
         long deadline = System.currentTimeMillis() + 120_000;
         while (System.currentTimeMillis() < deadline) {
             if (isDnsLive(fqdn)) {
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
                 pendingPublishes.put(subdomain, new PublishStatus(true, false));
-                forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, peerIp, port, requiresAuth);
+                forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
                 log.info("Created Traefik route for {}", fqdn);
                 pendingPublishes.remove(subdomain);
                 return;
@@ -76,7 +76,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
             try { Thread.sleep(3_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
         log.warn("DNS propagation timed out for {}, writing Traefik route anyway", fqdn);
-        forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, peerIp, port, requiresAuth);
+        forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
         pendingPublishes.remove(subdomain);
     }
 

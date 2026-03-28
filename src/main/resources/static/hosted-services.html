@@ -213,7 +213,7 @@
         </div>
 
         <div class="section-header">
-            <span class="section-title">Discoverable peer services</span>
+            <span class="section-title">Discoverable services</span>
         </div>
         <div id="publishable-container">
             <div class="loading">Loading…</div>
@@ -240,8 +240,9 @@
         <div class="modal-content">
             <div class="modal-header">Add Service</div>
             <div id="publishForm">
-                <input type="hidden" id="publishPeerIp">
+                <input type="hidden" id="publishAddress">
                 <input type="hidden" id="publishPort">
+                <input type="hidden" id="publishRootRedirectPath">
                 <div class="form-group" style="margin-bottom:0.5rem;">
                     <span style="color:var(--text-muted);font-size:0.8rem;" id="publishServiceLabel"></span>
                 </div>
@@ -391,31 +392,51 @@
         function displayPublishable(services) {
             const container = document.getElementById('publishable-container');
             if (services.length === 0) {
-                container.innerHTML = '<div class="loading">All peer services are already published</div>';
+                container.innerHTML = '<div class="loading">All services are already published</div>';
                 return;
             }
 
-            const html = services.map(s => `
+            const html = services.map(s => {
+                const isLocal = s.source === 'LOCAL';
+                const meta = isLocal
+                    ? `this server · ${s.address}:${s.port}`
+                    : `${s.peerName} · ${s.address}:${s.port}`;
+                const sourceBadge = isLocal
+                    ? '<span class="badge badge-warning">local</span>'
+                    : `<span class="badge badge-success">${s.peerName}</span>`;
+                return `
                 <div class="discoverable-card">
                     <div class="discoverable-info">
+                        ${sourceBadge}
                         <span class="discoverable-name">${s.containerName}</span>
-                        <span class="discoverable-meta">${s.peerName} · ${s.peerIp}:${s.port}</span>
+                        <span class="discoverable-meta">${meta}</span>
                     </div>
                     <button class="btn btn-primary btn-small"
-                        onclick="showPublishModal('${s.peerIp}', ${s.port}, '${s.containerName}', '${s.peerName}')">
+                        data-address="${s.address}"
+                        data-port="${s.port}"
+                        data-container="${s.containerName}"
+                        data-source="${isLocal ? 'this server' : s.peerName}"
+                        data-redirect="${s.rootRedirectPath || ''}"
+                        onclick="showPublishModalFromBtn(this)">
                         + Add
                     </button>
-                </div>`).join('');
+                </div>`;
+            }).join('');
 
             container.innerHTML = html;
         }
 
-        function showPublishModal(peerIp, port, containerName, peerName) {
-            document.getElementById('publishPeerIp').value    = peerIp;
-            document.getElementById('publishPort').value      = port;
-            document.getElementById('publishSubdomain').value = containerName;
+        function showPublishModalFromBtn(btn) {
+            showPublishModal(btn.dataset.address, parseInt(btn.dataset.port), btn.dataset.container, btn.dataset.source, btn.dataset.redirect || null);
+        }
+
+        function showPublishModal(address, port, containerName, sourceName, rootRedirectPath) {
+            document.getElementById('publishAddress').value          = address;
+            document.getElementById('publishPort').value             = port;
+            document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
+            document.getElementById('publishSubdomain').value        = containerName;
             document.getElementById('publishServiceLabel').textContent =
-                `${containerName} on ${peerName} (${peerIp}:${port})`;
+                `${containerName} on ${sourceName} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;
             document.getElementById('publishModal').classList.add('active');
             document.getElementById('publishSubdomain').focus();
@@ -436,10 +457,11 @@
         }
 
         async function submitPublish() {
-            const peerIp      = document.getElementById('publishPeerIp').value;
-            const port        = parseInt(document.getElementById('publishPort').value);
-            const subdomain   = document.getElementById('publishSubdomain').value.trim();
-            const requiresAuth = document.getElementById('publishRequiresAuth').checked;
+            const address          = document.getElementById('publishAddress').value;
+            const port             = parseInt(document.getElementById('publishPort').value);
+            const rootRedirectPath = document.getElementById('publishRootRedirectPath').value || null;
+            const subdomain        = document.getElementById('publishSubdomain').value.trim();
+            const requiresAuth     = document.getElementById('publishRequiresAuth').checked;
 
             if (!subdomain) { alert('Please enter a subdomain'); return; }
 
@@ -453,7 +475,7 @@
                 const response = await fetch('/hosted-services/publish', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ peerIp, port, subdomain, requiresAuth })
+                    body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -462,7 +484,7 @@
                 setStep('step-dns-create', true);
                 setStep('step-dns-propagate', false);
 
-                addOptimisticService(subdomain, peerIp, port, requiresAuth);
+                addOptimisticService(subdomain, address, port, requiresAuth);
                 fetchPublishable();
 
                 window._publishPollInterval = setInterval(async () => {
@@ -494,7 +516,7 @@
             }
         }
 
-        function addOptimisticService(subdomain, peerIp, port, requiresAuth) {
+        function addOptimisticService(subdomain, address, port, requiresAuth) {
             const container   = document.getElementById('services-container');
             const placeholder = container.querySelector('.loading');
             if (placeholder) placeholder.remove();

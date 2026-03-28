@@ -729,7 +729,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * @param requiresAuth Whether to add the auth-middleware
      */
     @Override
-    public void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth) {
+    public void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth, String rootRedirectPath) {
         loadConfig();
 
         if (config == null) {
@@ -739,6 +739,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         // Generate router name and service name from DNS name
         String routerName = generateRouterName(dnsName);
         String serviceName = generateServiceName(dnsName);
+        String redirectMiddlewareName = routerName.replace("-router", "-redirect");
 
         // Create HTTP section if it doesn't exist (using LinkedHashMap to preserve order)
         Map<String, Object> http = getOrCreateNestedMap(config, "http");
@@ -763,13 +764,11 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         tlsMap.put("certResolver", "letsencrypt");
         routerConfig.put("tls", tlsMap);
 
-        // Add auth middleware reference if required
-        boolean authRequired = requiresAuth;
-        if (authRequired) {
-            List<String> middlewares = new ArrayList<>();
-            middlewares.add("auth-middleware");
-            routerConfig.put("middlewares", middlewares);
-        }
+        // Build middleware list
+        List<String> middlewareList = new ArrayList<>();
+        if (requiresAuth) middlewareList.add("auth-middleware");
+        if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
+        if (!middlewareList.isEmpty()) routerConfig.put("middlewares", middlewareList);
 
         routers.put(routerName, routerConfig);
 
@@ -787,9 +786,16 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         serviceConfig.put("loadBalancer", loadBalancer);
         services.put(serviceName, serviceConfig);
 
-        // Ensure auth-middleware exists AFTER routers and services to maintain order
-        if (authRequired) {
-            ensureAuthMiddlewareExists(http);
+        // Add middlewares (after routers and services to maintain order)
+        if (requiresAuth) ensureAuthMiddlewareExists(http);
+        if (rootRedirectPath != null) {
+            Map<String, Object> middlewaresSection = getOrCreateNestedMapOrdered(http, "middlewares");
+            Map<String, Object> redirectRegex = new LinkedHashMap<>();
+            redirectRegex.put("regex", "^https://" + dnsName.replace(".", "\\.") + "/?$");
+            redirectRegex.put("replacement", "https://" + dnsName + rootRedirectPath);
+            Map<String, Object> redirectMiddleware = new LinkedHashMap<>();
+            redirectMiddleware.put("redirectRegex", redirectRegex);
+            middlewaresSection.put(redirectMiddlewareName, redirectMiddleware);
         }
 
         saveConfig();
