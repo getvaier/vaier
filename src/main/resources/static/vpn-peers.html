@@ -237,6 +237,54 @@
             white-space: pre-wrap;
             word-break: break-all;
         }
+
+        @media (max-width: 600px) {
+            .header-section {
+                flex-wrap: wrap;
+                gap: 0.75rem;
+                margin-bottom: 1.5rem;
+            }
+
+            .header-section > div {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .peer-header {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                padding: 0.875rem 1rem;
+            }
+
+            .peer-header-left {
+                flex: 1 1 100%;
+                flex-wrap: wrap;
+            }
+
+            .peer-actions {
+                flex: 1 1 100%;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+
+            .peer-body {
+                padding: 0 1rem 1rem;
+            }
+
+            .detail-row {
+                flex-direction: column;
+                gap: 0.2rem;
+            }
+
+            .detail-label {
+                min-width: unset;
+            }
+
+            .metrics-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            }
+        }
     </style>
 </head>
 <body>
@@ -278,7 +326,7 @@
 
     <!-- Peer Details Modal -->
     <div id="peerDetailsModal" class="modal">
-        <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-content" style="max-width: 700px; width: 95%;">
             <div class="modal-header">Peer Configuration</div>
             <div id="peerDetailsContent"></div>
             <div class="modal-actions">

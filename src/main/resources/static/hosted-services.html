@@ -171,6 +171,47 @@
         .form-checkbox input {
             width: auto;
         }
+
+        @media (max-width: 600px) {
+            .service-header {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                padding: 0.875rem 1rem;
+            }
+
+            .service-header-left {
+                flex: 1 1 100%;
+                flex-wrap: wrap;
+            }
+
+            .service-actions {
+                flex: 1 1 100%;
+                justify-content: flex-start;
+            }
+
+            .service-body {
+                padding: 0 1rem 1rem;
+            }
+
+            .detail-row {
+                flex-direction: column;
+                gap: 0.2rem;
+                align-items: flex-start;
+            }
+
+            .detail-label {
+                min-width: unset;
+            }
+
+            .discoverable-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .section-header {
+                margin: 1.5rem 0 0.75rem;
+            }
+        }
     </style>
 </head>
 <body>

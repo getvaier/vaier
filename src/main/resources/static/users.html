@@ -57,6 +57,27 @@
             display: flex;
             gap: 0.5rem;
         }
+
+        @media (max-width: 600px) {
+            .user-card {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.75rem;
+            }
+
+            .user-actions {
+                width: 100%;
+            }
+
+            .user-actions .btn {
+                flex: 1;
+            }
+
+            .header-actions {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+        }
     </style>
 </head>
 <body>

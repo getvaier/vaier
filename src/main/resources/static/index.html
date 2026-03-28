@@ -30,6 +30,7 @@
             display: flex;
             flex-direction: column;
             transition: width 0.3s;
+            flex-shrink: 0;
         }
 
         .logo-section {
@@ -102,45 +103,10 @@
             border-left-color: #667eea;
         }
 
-        /* Mobile styles */
-        @media (max-width: 768px) {
-            .sidebar {
-                width: 70px;
-            }
-
-            .logo-section {
-                padding: 1rem;
-            }
-
-            .logo-text {
-                display: none;
-            }
-
-            .nav-item {
-                padding: 1rem;
-                justify-content: center;
-            }
-
-            .nav-item-text {
-                display: none;
-            }
-
-            .nav-item-icon {
-                font-size: 1.5rem;
-            }
-
-            .welcome-screen h1 {
-                font-size: 1.75rem;
-            }
-
-            .welcome-screen p {
-                font-size: 1rem;
-            }
-        }
-
         .main-content {
             flex: 1;
             overflow: auto;
+            min-width: 0;
         }
 
         iframe {
@@ -183,11 +149,120 @@
             font-size: 1.125rem;
             max-width: 500px;
         }
+
+        /* Mobile top bar */
+        .mobile-topbar {
+            display: none;
+            background: #1a1f36;
+            color: white;
+            padding: 0 1rem;
+            align-items: center;
+            gap: 0.75rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 200;
+            height: 52px;
+            flex-shrink: 0;
+        }
+
+        .hamburger-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            line-height: 1;
+            border-radius: 4px;
+        }
+
+        .hamburger-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .mobile-topbar-logo {
+            width: 30px;
+            height: 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+
+        .mobile-topbar-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Mobile styles */
+        @media (max-width: 768px) {
+            body {
+                overflow: auto;
+            }
+
+            .mobile-topbar {
+                display: flex;
+            }
+
+            .app-container {
+                padding-top: 52px;
+                height: calc(100vh - 52px);
+            }
+
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: -260px;
+                height: 100vh;
+                z-index: 100;
+                transition: left 0.3s ease;
+                width: 250px;
+            }
+
+            .sidebar.open {
+                left: 0;
+            }
+
+            .main-content {
+                height: calc(100vh - 52px);
+                width: 100%;
+            }
+
+            .welcome-screen h1 {
+                font-size: 1.75rem;
+            }
+
+            .welcome-screen p {
+                font-size: 1rem;
+            }
+        }
     </style>
 </head>
 <body>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="mobile-topbar">
+        <button class="hamburger-btn" id="hamburgerBtn" aria-label="Open menu">☰</button>
+        <div class="mobile-topbar-logo">🔗</div>
+        <span class="mobile-topbar-title">Vaier</span>
+    </div>
     <div class="app-container">
-        <nav class="sidebar">
+        <nav class="sidebar" id="sidebar">
             <div class="logo-section">
                 <div class="logo">
                     <div class="logo-icon">🔗</div>
@@ -221,6 +296,21 @@
     <script>
         const mainContent = document.querySelector('.main-content');
         const navItems = document.querySelectorAll('.nav-item');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        const hamburgerBtn = document.getElementById('hamburgerBtn');
+
+        function closeSidebar() {
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('active');
+        }
+
+        hamburgerBtn.addEventListener('click', () => {
+            const isOpen = sidebar.classList.toggle('open');
+            sidebarOverlay.classList.toggle('active', isOpen);
+        });
+
+        sidebarOverlay.addEventListener('click', closeSidebar);
 
         navItems.forEach(item => {
             item.addEventListener('click', (e) => {
@@ -233,6 +323,9 @@
                 // Load page in iframe
                 const page = item.getAttribute('data-page');
                 mainContent.innerHTML = `<iframe src="${page}"></iframe>`;
+
+                // Close sidebar on mobile after navigation
+                closeSidebar();
             });
         });
 

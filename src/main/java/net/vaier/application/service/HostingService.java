@@ -1,11 +1,18 @@
 package net.vaier.application.service;
 
 import net.vaier.application.GetHostedServicesUseCase;
-import net.vaier.domain.HostedService;
+import net.vaier.domain.DnsRecord;
+import net.vaier.domain.DnsRecord.DnsRecordType;
+import net.vaier.domain.DnsState;
+import net.vaier.domain.DockerService;
+import net.vaier.domain.Server;
+import net.vaier.domain.Server.State;
+import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.ReverseProxyRoute;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -30,31 +37,45 @@ public class HostingService implements GetHostedServicesUseCase {
 
     @Override
     public List<HostedServiceUco> getHostedServices() {
-        return forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
-            .map(r -> new HostedService(
-                r.getName(),
-                r.getDomainName(),
-                r.getAddress(),
-                r.getPort(),
-                r.getAuthInfo() != null,
-                forPersistingDnsRecords,
-                forGettingServerInfo,
-                forGettingVpnClients
-                )
-            )
-            .map(this::toUco)
+        List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        if (routes.isEmpty()) return List.of();
+
+        // Fetch all expensive data once instead of per-service
+        List<DnsRecord> allDnsRecords = forPersistingDnsRecords.getDnsZones().stream()
+            .flatMap(zone -> forPersistingDnsRecords.getDnsRecords(zone).stream())
+            .toList();
+        List<VpnClient> vpnClients = forGettingVpnClients.getClients();
+        List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.local());
+
+        return routes.stream()
+            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices))
             .toList();
     }
 
-    private HostedServiceUco toUco(HostedService route) {
+    private HostedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
+                                    List<VpnClient> vpnClients, List<DockerService> localServices) {
         return new HostedServiceUco(
             route.getName(),
-            route.getDnsAddress(),
-            route.dnsState(),
-            route.getHostAddress(),
-            route.getHostPort(),
-            route.hostState(),
-            route.isAuthenticated()
+            route.getDomainName(),
+            dnsState(route.getDomainName(), allDnsRecords),
+            route.getAddress(),
+            route.getPort(),
+            hostState(route.getAddress(), route.getPort(), localServices, vpnClients),
+            route.getAuthInfo() != null
         );
+    }
+
+    private DnsState dnsState(String dnsAddress, List<DnsRecord> allDnsRecords) {
+        boolean found = allDnsRecords.stream()
+            .filter(r -> r.name().equals(dnsAddress))
+            .anyMatch(r -> r.type() == DnsRecordType.CNAME || r.type() == DnsRecordType.A);
+        return found ? DnsState.OK : DnsState.NON_EXISTING;
+    }
+
+    private State hostState(String hostAddress, int hostPort, List<DockerService> localServices,
+                             List<VpnClient> vpnClients) {
+        if (localServices.stream().anyMatch(s -> s.listensOnPort(hostPort))) return State.OK;
+        if (vpnClients.stream().anyMatch(p -> p.allowedIps() != null && p.allowedIps().startsWith(hostAddress))) return State.OK;
+        return State.UNREACHABLE;
     }
 }

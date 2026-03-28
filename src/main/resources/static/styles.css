@@ -247,3 +247,29 @@ a {
 a:hover {
     text-decoration: underline;
 }
+
+/* Mobile */
+@media (max-width: 600px) {
+    body {
+        padding: 1rem;
+    }
+
+    .btn-small {
+        padding: 0.4rem 0.65rem;
+        font-size: 0.8rem;
+    }
+
+    .modal-content {
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .modal-actions {
+        flex-direction: column;
+    }
+
+    .modal-actions .btn {
+        width: 100%;
+        text-align: center;
+    }
+}
