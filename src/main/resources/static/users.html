@@ -6,18 +6,11 @@
     <title>Users</title>
     <link rel="stylesheet" href="styles.css">
     <style>
-        .header-actions {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-
         .user-card {
-            background: white;
-            border-radius: 8px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 0.75rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -26,36 +19,33 @@
         .user-info {
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 0.75rem;
         }
 
         .user-avatar {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            background: #007bff;
-            color: white;
+            width: 34px;
+            height: 34px;
+            border-radius: 3px;
+            background: #0e639c;
+            color: #fff;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: 600;
-            font-size: 1.25rem;
-        }
-
-        .user-details {
-            display: flex;
-            flex-direction: column;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+            font-family: var(--mono);
         }
 
         .user-name {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: #333;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text);
         }
 
         .user-actions {
             display: flex;
-            gap: 0.5rem;
+            gap: 0.3rem;
         }
 
         @media (max-width: 600px) {
@@ -71,24 +61,32 @@
 
             .user-actions .btn {
                 flex: 1;
-            }
-
-            .header-actions {
-                flex-wrap: wrap;
-                gap: 0.5rem;
+                justify-content: center;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header-actions">
-            <h1>Users</h1>
-            <button class="btn btn-primary" onclick="showAddUserModal()">Add User</button>
+    <div class="page-header">
+        <div class="page-title">
+            <!-- Users icon -->
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="6" cy="5" r="2.8"/>
+                <path d="M1 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+                <path d="M12.5 6.5c1.2.4 2.5 1.7 2.5 3.5"/>
+                <circle cx="12" cy="4" r="2"/>
+            </svg>
+            Users
         </div>
+        <div class="page-header-actions">
+            <button class="btn btn-primary" onclick="showAddUserModal()">+ Add User</button>
+        </div>
+    </div>
+
+    <div class="container">
         <div id="message"></div>
         <div id="users-container">
-            <div class="loading">Loading users...</div>
+            <div class="loading">Loading users…</div>
         </div>
     </div>
 
@@ -145,9 +143,7 @@
         async function fetchUsers() {
             try {
                 const response = await fetch('/users');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 users = await response.json();
                 displayUsers();
             } catch (error) {
@@ -157,39 +153,32 @@
 
         function displayUsers() {
             const container = document.getElementById('users-container');
-
             if (users.length === 0) {
                 container.innerHTML = '<div class="loading">No users found</div>';
                 return;
             }
 
-            const html = users.map(user => {
-                const initials = user.name.charAt(0).toUpperCase();
-                return `
-                    <div class="user-card">
-                        <div class="user-info">
-                            <div class="user-avatar">${initials}</div>
-                            <div class="user-details">
-                                <div class="user-name">${user.name}</div>
-                            </div>
-                        </div>
-                        <div class="user-actions">
-                            <button class="btn btn-small btn-secondary" onclick="showChangePasswordModal('${user.name}')">Change Password</button>
-                            <button class="btn btn-small btn-danger" onclick="deleteUser('${user.name}')">Delete</button>
-                        </div>
+            const html = users.map(user => `
+                <div class="user-card">
+                    <div class="user-info">
+                        <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+                        <div class="user-name">${user.name}</div>
                     </div>
-                `;
-            }).join('');
+                    <div class="user-actions">
+                        <button class="btn btn-small btn-secondary" onclick="showChangePasswordModal('${user.name}')">passwd</button>
+                        <button class="btn btn-small btn-danger"    onclick="deleteUser('${user.name}')">
+                            <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
+                        </button>
+                    </div>
+                </div>`).join('');
 
             container.innerHTML = `<div class="card-grid">${html}</div>`;
         }
 
         function displayMessage(message, type) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.innerHTML = `<div class="${type}">${message}</div>`;
-            setTimeout(() => {
-                messageDiv.innerHTML = '';
-            }, 5000);
+            const el = document.getElementById('message');
+            el.innerHTML = `<div class="${type}">${message}</div>`;
+            setTimeout(() => el.innerHTML = '', 5000);
         }
 
         function showAddUserModal() {
@@ -205,25 +194,20 @@
             document.getElementById(modalId).classList.remove('active');
         }
 
-        document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+        document.getElementById('addUserForm').addEventListener('submit', async e => {
             e.preventDefault();
-
-            const username = document.getElementById('newUsername').value;
-            const displayname = document.getElementById('newDisplayname').value;
-            const email = document.getElementById('newEmail').value;
-            const password = document.getElementById('newPassword').value;
-
             try {
                 const response = await fetch('/users', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, displayname, email, password })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username:    document.getElementById('newUsername').value,
+                        displayname: document.getElementById('newDisplayname').value,
+                        email:       document.getElementById('newEmail').value,
+                        password:    document.getElementById('newPassword').value,
+                    })
                 });
-
                 const message = await response.text();
-
                 if (response.ok) {
                     displayMessage(message, 'success');
                     closeModal('addUserModal');
@@ -237,23 +221,17 @@
             }
         });
 
-        document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+        document.getElementById('changePasswordForm').addEventListener('submit', async e => {
             e.preventDefault();
-
-            const username = document.getElementById('changePasswordUsername').value;
+            const username    = document.getElementById('changePasswordUsername').value;
             const newPassword = document.getElementById('changePassword').value;
-
             try {
                 const response = await fetch(`/users/${username}/password`, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ newPassword })
                 });
-
                 const message = await response.text();
-
                 if (response.ok) {
                     displayMessage(message, 'success');
                     closeModal('changePasswordModal');
@@ -267,36 +245,21 @@
         });
 
         async function deleteUser(username) {
-            if (!confirm(`Are you sure you want to delete user '${username}'?`)) {
-                return;
-            }
-
+            if (!confirm(`Delete user '${username}'?`)) return;
             try {
-                const response = await fetch(`/users/${username}`, {
-                    method: 'DELETE'
-                });
-
-                const message = await response.text();
-
-                if (response.ok) {
-                    displayMessage(message, 'success');
-                    fetchUsers();
-                } else {
-                    displayMessage(message, 'error');
-                }
+                const response = await fetch(`/users/${username}`, { method: 'DELETE' });
+                const message  = await response.text();
+                displayMessage(message, response.ok ? 'success' : 'error');
+                if (response.ok) fetchUsers();
             } catch (error) {
                 displayMessage(`Failed to delete user: ${error.message}`, 'error');
             }
         }
 
-        // Close modal when clicking outside
-        window.addEventListener('click', (e) => {
-            if (e.target.classList.contains('modal')) {
-                e.target.classList.remove('active');
-            }
+        window.addEventListener('click', e => {
+            if (e.target.classList.contains('modal')) e.target.classList.remove('active');
         });
 
-        // Load users on page load
         fetchUsers();
     </script>
 </body>
