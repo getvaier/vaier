@@ -123,6 +123,28 @@ class GetLocalDockerServicesServiceTest {
     }
 
     @Test
+    void getUnpublishedLocalServices_piholeOnPort80_includedWithAdminRedirect() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(dockerService("pihole", 80, "tcp")));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).containerName()).isEqualTo("pihole");
+        assertThat(result.get(0).port()).isEqualTo(80);
+        assertThat(result.get(0).rootRedirectPath()).isEqualTo("/admin/");
+        assertThat(result.get(0).source()).isEqualTo(PublishableSource.LOCAL);
+    }
+
+    @Test
+    void getUnpublishedLocalServices_piholeOnOtherPort_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(dockerService("pihole", 53, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
     void getUnpublishedLocalServices_dockerThrows_returnsEmptyList() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenThrow(new RuntimeException("Docker socket unavailable"));

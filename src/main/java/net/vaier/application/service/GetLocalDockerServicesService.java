@@ -21,14 +21,15 @@ import java.util.Set;
 public class GetLocalDockerServicesService implements GetLocalDockerServicesUseCase {
 
     private static final Set<String> EXCLUDED_NAMES = Set.of(
-        "wireguard", "wireguard-masquerade", "authelia", "redis", "vaier", "pihole"
+        "wireguard", "wireguard-masquerade", "authelia", "redis", "vaier"
     );
 
     // Known services with constrained ports and a root redirect path when applicable
     private record KnownService(Set<Integer> allowedPorts, String rootRedirectPath) {}
 
     private static final Map<String, KnownService> KNOWN_SERVICES = Map.of(
-        "traefik", new KnownService(Set.of(8080), "/dashboard/")
+        "traefik", new KnownService(Set.of(8080), "/dashboard/"),
+        "pihole", new KnownService(Set.of(80), "/admin/")
     );
 
     private final ForGettingServerInfo forGettingServerInfo;

@@ -20,8 +20,16 @@ public class PiholeDetectionAdapter implements ForDetectingPihole {
 
     private DockerClient dockerClient;
 
+    public PiholeDetectionAdapter() {}
+
+    PiholeDetectionAdapter(DockerClient dockerClient) {
+        this.dockerClient = dockerClient;
+    }
+
     @PostConstruct
     public void init() {
+        if (dockerClient != null) return;
+
         try {
             var config = DefaultDockerClientConfig.createDefaultConfigBuilder()
                     .withDockerHost("unix:///var/run/docker.sock")
@@ -37,10 +45,6 @@ public class PiholeDetectionAdapter implements ForDetectingPihole {
         } catch (Exception e) {
             log.warn("Failed to initialize Docker client for Pi-hole detection: {}", e.getMessage());
         }
-    }
-
-    PiholeDetectionAdapter(DockerClient dockerClient) {
-        this.dockerClient = dockerClient;
     }
 
     @Override
