@@ -132,7 +132,7 @@ After creating a peer, download its config and connect. Vaier shows the peer's h
 1. Start a Docker container on any connected peer
 2. In Vaier → Services → Publishable, the container appears automatically
 3. Select the container, enter a subdomain, optionally enable Authelia authentication
-4. Vaier creates the DNS A record, Traefik route, and (optionally) Authelia middleware
+4. Vaier creates a DNS CNAME record pointing to the VPN server, a Traefik route, and (optionally) Authelia middleware
 
 The service is live at `https://subdomain.yourdomain.com`.
 

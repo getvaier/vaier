@@ -126,7 +126,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 
 **Current capabilities:**
 - Discover containers with exposed ports on local host and VPN peers
-- Publish a service: creates DNS A record + Traefik route + optional Authelia middleware
+- Publish a service: creates DNS CNAME record (pointing to the VPN server) + Traefik route + optional Authelia middleware
 - Toggle authentication on/off per service
 - Check publish status (DNS propagated, Traefik active)
 - Delete hosted service (removes DNS + Traefik route)
@@ -286,7 +286,7 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 2. Developer starts a Docker container on the peer
 3. In Vaier → Services → Publishable, the container appears automatically
 4. Developer selects container, types a subdomain, toggles auth if needed
-5. Vaier creates: DNS A record → Traefik route → (optional) Authelia middleware
+5. Vaier creates: DNS CNAME record (pointing to VPN server) → Traefik route → (optional) Authelia middleware
 6. Service appears in launchpad dashboard with live status
 
 **Success:** zero manual DNS/Traefik/Authelia steps.
