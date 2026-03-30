@@ -69,7 +69,7 @@ echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
 ### 2. Clone and configure
 
 ```bash
-git clone https://github.com/geireilertsen/vaier.git
+git clone https://github.com/getvaier/vaier.git
 cd vaier
 ```
 
