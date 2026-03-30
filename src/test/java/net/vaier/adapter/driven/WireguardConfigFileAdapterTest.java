@@ -128,6 +128,43 @@ class WireguardConfigFileAdapterTest {
         assertThat(adapter.resolvePeerNameByIp("10.13.13.2")).isEqualTo("10.13.13.2");
     }
 
+    // --- VAIER metadata (peerType / lanCidr) ---
+
+    @Test
+    void getPeerConfigByName_defaultsToUbuntuServerWhenNoVaierComment() throws IOException {
+        createPeerConf("server1", "10.13.13.2");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("server1");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.get().lanCidr()).isNull();
+    }
+
+    @Test
+    void getPeerConfigByName_parsesMobileClientFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("phone", "10.13.13.3",
+                "{\"peerType\":\"MOBILE_CLIENT\"}");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("phone");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.PeerType.MOBILE_CLIENT);
+        assertThat(result.get().lanCidr()).isNull();
+    }
+
+    @Test
+    void getPeerConfigByName_parsesUbuntuServerWithLanCidrFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("spain", "10.13.13.4",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.1.0/24\"}");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("spain");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.get().lanCidr()).isEqualTo("192.168.1.0/24");
+    }
+
     // helpers
 
     private void createPeerConf(String peerName, String ip) throws IOException {
@@ -135,5 +172,13 @@ class WireguardConfigFileAdapterTest {
         Files.createDirectories(peerDir);
         Files.writeString(peerDir.resolve(peerName + ".conf"),
                 "[Interface]\nAddress=" + ip + "/32\nPrivateKey=testkey\n");
+    }
+
+    private void createPeerConfWithVaierMetadata(String peerName, String ip, String vaierJson)
+            throws IOException {
+        Path peerDir = configDir.resolve(peerName);
+        Files.createDirectories(peerDir);
+        Files.writeString(peerDir.resolve(peerName + ".conf"),
+                "# VAIER: " + vaierJson + "\n[Interface]\nAddress=" + ip + "/32\nPrivateKey=testkey\n");
     }
 }

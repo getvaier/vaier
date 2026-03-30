@@ -5,8 +5,10 @@ import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import net.vaier.domain.PeerType;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForFetchingPeerMetrics;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
 
@@ -30,6 +32,7 @@ public class VpnPeerRestController {
 
     private final ForGettingVpnClients vpnClientService;
     private final ForResolvingPeerNames peerNameResolver;
+    private final ForGettingPeerConfigurations peerConfigReader;
     private final ForFetchingPeerMetrics forFetchingPeerMetrics;
     private final CreatePeerUseCase createPeerUseCase;
     private final DeletePeerUseCase deletePeerUseCase;
@@ -44,7 +47,11 @@ public class VpnPeerRestController {
             List<VpnClient> clients = vpnClientService.getClients();
             List<VpnPeerResponse> response = clients.stream()
                     .map(client -> {
-                        String peerName = peerNameResolver.resolvePeerNameByIp(client.allowedIps().split("/")[0]);
+                        String peerIp = client.allowedIps().split("/")[0];
+                        String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
+                        PeerType peerType = peerConfigReader.getPeerConfigByIp(peerIp)
+                                .map(ForGettingPeerConfigurations.PeerConfiguration::peerType)
+                                .orElse(PeerType.UBUNTU_SERVER);
                         return new VpnPeerResponse(
                                 peerName,
                                 client.publicKey(),
@@ -53,7 +60,8 @@ public class VpnPeerRestController {
                                 client.endpointPort(),
                                 client.latestHandshake(),
                                 client.transferRx(),
-                                client.transferTx()
+                                client.transferTx(),
+                                peerType.name()
                         );
                     })
                     .toList();
@@ -70,19 +78,21 @@ public class VpnPeerRestController {
         log.info("Creating new VPN peer: {}", request.name());
 
         String interfaceName = "wg0"; // Default WireGuard interface
-        boolean routeAllTraffic = request.routeAllTraffic() != null ? request.routeAllTraffic() : true;
+        PeerType peerType = request.peerType() != null ? request.peerType() : PeerType.UBUNTU_SERVER;
 
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 interfaceName,
                 request.name(),
-                routeAllTraffic
+                peerType,
+                request.lanCidr()
         );
 
         CreatePeerResponse response = new CreatePeerResponse(
                 createdPeer.name(),
                 createdPeer.ipAddress(),
                 createdPeer.publicKey(),
-                createdPeer.clientConfigFile()
+                createdPeer.clientConfigFile(),
+                createdPeer.peerType().name()
         );
 
         return ResponseEntity.ok(response);
@@ -114,7 +124,8 @@ public class VpnPeerRestController {
                     PeerConfigResponse response = new PeerConfigResponse(
                             result.name(),
                             result.ipAddress(),
-                            result.configContent()
+                            result.configContent(),
+                            result.peerType() != null ? result.peerType().name() : null
                     );
                     return ResponseEntity.ok(response);
                 })
@@ -122,6 +133,23 @@ public class VpnPeerRestController {
                     log.warn("Peer config not found for identifier: {}", peerIdentifier);
                     return ResponseEntity.notFound().build();
                 });
+    }
+
+    @GetMapping("/{peerName}/config-file")
+    public ResponseEntity<Resource> downloadConfigFile(@PathVariable String peerName) {
+        log.info("Downloading config file for peer: {}", peerName);
+        return getPeerConfigUseCase.getPeerConfig(peerName)
+                .map(result -> {
+                    byte[] content = result.configContent().getBytes();
+                    ByteArrayResource resource = new ByteArrayResource(content);
+                    return ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION,
+                                    "attachment; filename=" + peerName + ".conf")
+                            .contentType(MediaType.parseMediaType("text/plain"))
+                            .contentLength(content.length)
+                            .<Resource>body(resource);
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/{peerName}/qr-code")
@@ -207,25 +235,29 @@ public class VpnPeerRestController {
             String endpointPort,
             String latestHandshake,
             String transferRx,
-            String transferTx
+            String transferTx,
+            String peerType
     ) {}
 
     public record CreatePeerRequest(
             String name,
-            Boolean routeAllTraffic
+            PeerType peerType,
+            String lanCidr
     ) {}
 
     public record CreatePeerResponse(
             String name,
             String ipAddress,
             String publicKey,
-            String configFile
+            String configFile,
+            String peerType
     ) {}
 
     public record PeerConfigResponse(
             String name,
             String ipAddress,
-            String configFile
+            String configFile,
+            String peerType
     ) {}
 
     @GetMapping("/{peerName}/netdata")

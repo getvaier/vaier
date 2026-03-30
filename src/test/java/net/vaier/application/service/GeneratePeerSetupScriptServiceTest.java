@@ -32,7 +32,7 @@ class GeneratePeerSetupScriptServiceTest {
     @Test
     void generateSetupScript_peerFound_returnsNonEmptyScript() {
         when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
-            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "[Interface]\nAddress=10.13.13.2/32"))
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "[Interface]\nAddress=10.13.13.2/32", net.vaier.domain.PeerType.UBUNTU_SERVER))
         );
 
         Optional<String> result = service.generateSetupScript("alice", "vpn.example.com", "51820");
@@ -44,7 +44,7 @@ class GeneratePeerSetupScriptServiceTest {
     @Test
     void generateSetupScript_scriptStartsWithShebang() {
         when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
-            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config"))
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
@@ -55,7 +55,7 @@ class GeneratePeerSetupScriptServiceTest {
     @Test
     void generateSetupScript_scriptContainsPeerName() {
         when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
-            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config"))
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
@@ -66,7 +66,7 @@ class GeneratePeerSetupScriptServiceTest {
     @Test
     void generateSetupScript_scriptContainsVpnIp() {
         when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
-            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config"))
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
@@ -77,7 +77,7 @@ class GeneratePeerSetupScriptServiceTest {
     @Test
     void generateSetupScript_scriptContainsServerUrl() {
         when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
-            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config"))
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
@@ -88,7 +88,7 @@ class GeneratePeerSetupScriptServiceTest {
     @Test
     void generateSetupScript_scriptContainsServerPort() {
         when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
-            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config"))
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();

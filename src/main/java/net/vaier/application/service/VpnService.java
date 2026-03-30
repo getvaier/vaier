@@ -8,6 +8,7 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.application.CreatePeerUseCase;
+import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -99,13 +100,13 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
 
     @Override
     public CreatedPeerUco createPeer(String interfaceName, String peerName) {
-        return createPeer(interfaceName, peerName, true);
+        return createPeer(interfaceName, peerName, PeerType.UBUNTU_SERVER, null);
     }
 
     @Override
-    public CreatedPeerUco createPeer(String interfaceName, String peerName, boolean routeAllTraffic) {
+    public CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr) {
         peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
-        log.info("Creating peer {} on interface {} (routeAllTraffic: {})", peerName, interfaceName, routeAllTraffic);
+        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {})", peerName, interfaceName, peerType, lanCidr);
 
         try {
             // Step 1: Generate private key
@@ -127,7 +128,6 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
             // Step 5: Get server public key
             String serverPublicKey = getServerPublicKey(interfaceName);
             String serverEndpoint = extractServerEndpoint();
-            String allowedIps = routeAllTraffic ? "0.0.0.0/0" : "10.13.13.0/24";
 
             // Step 6: Create peer directory
             Path peerDir = Paths.get(wireguardConfigPath, peerName);
@@ -135,31 +135,19 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
 
             // Step 7: Create client configuration file
             String clientConfig = generateClientConfig(
-                    privateKey,
-                    ipAddress,
-                    serverPublicKey,
-                    presharedKey,
-                    serverEndpoint,
-                    allowedIps
-            );
+                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr);
 
             Path peerConfigPath = peerDir.resolve(peerName + ".conf");
             Files.writeString(peerConfigPath, clientConfig);
             log.info("Created client config file at {}", peerConfigPath);
 
-            // Step 8: Add peer to server configuration
-            addPeerToServer(interfaceName, publicKey, presharedKey, ipAddress);
+            // Step 8: Add peer to server configuration (include LAN CIDR for server-type peers)
+            addPeerToServer(interfaceName, publicKey, presharedKey, ipAddress, lanCidr);
             log.info("Added peer to server configuration");
 
             log.info("Peer created successfully: {} with IP {}", peerName, ipAddress);
 
-            return new CreatedPeerUco(
-                    peerName,
-                    ipAddress,
-                    publicKey,
-                    privateKey,
-                    clientConfig
-            );
+            return new CreatedPeerUco(peerName, ipAddress, publicKey, privateKey, clientConfig, peerType);
 
         } catch (IOException | InterruptedException e) {
             log.error("Error creating peer", e);
@@ -258,9 +246,20 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
         return serverUrl + ":" + serverPort;
     }
 
-    private String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
-                                        String presharedKey, String serverEndpoint, String allowedIps) {
+    static String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
+                                       String presharedKey, String serverEndpoint,
+                                       PeerType peerType, String lanCidr) {
+        String allowedIps = peerType.defaultAllowedIps();
+        if (lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER) {
+            allowedIps = allowedIps + ", " + lanCidr;
+        }
+
+        String vaierJson = lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER
+                ? String.format("{\"peerType\":\"%s\",\"lanCidr\":\"%s\"}", peerType.name(), lanCidr)
+                : String.format("{\"peerType\":\"%s\"}", peerType.name());
+
         return String.format("""
+                # VAIER: %s
                 [Interface]
                 PrivateKey = %s
                 Address = %s/32
@@ -272,19 +271,25 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
                 Endpoint = %s
                 AllowedIPs = %s
                 PersistentKeepalive = 25
-                """, privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, allowedIps);
+                """, vaierJson, privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, allowedIps);
     }
 
-    private void addPeerToServer(String interfaceName, String publicKey, String presharedKey, String ipAddress)
+    private void addPeerToServer(String interfaceName, String publicKey, String presharedKey,
+                                 String ipAddress, String lanCidr)
             throws IOException, InterruptedException {
         // Create a temporary file for the preshared key
         String pskFile = "/tmp/psk_" + System.currentTimeMillis();
         executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
 
+        String serverAllowedIps = ipAddress + "/32";
+        if (lanCidr != null && !lanCidr.isBlank()) {
+            serverAllowedIps = serverAllowedIps + "," + lanCidr;
+        }
+
         // Add peer to running WireGuard interface
         String addPeerCommand = String.format(
-                "wg set %s peer %s preshared-key %s allowed-ips %s/32",
-                interfaceName, publicKey, pskFile, ipAddress
+                "wg set %s peer %s preshared-key %s allowed-ips %s",
+                interfaceName, publicKey, pskFile, serverAllowedIps
         );
         log.info("Executing: {}", addPeerCommand);
         String output = executeInContainer("sh", "-c", addPeerCommand);

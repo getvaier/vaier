@@ -28,6 +28,6 @@ public class GetPeerConfigService implements GetPeerConfigUseCase {
             config = peerConfigProvider.getPeerConfigByName(peerIdentifier);
         }
 
-        return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent()));
+        return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType()));
     }
 }

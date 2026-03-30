@@ -1,6 +1,9 @@
 package net.vaier.adapter.driven;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,8 +18,15 @@ import java.util.Optional;
 @Slf4j
 public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations, ForResolvingPeerNames {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record VaierMetadata(String peerType, String lanCidr) {
+        VaierMetadata() { this(null, null); }
+    }
 
     @Override
     public Optional<PeerConfiguration> getPeerConfigByName(String peerName) {
@@ -31,8 +41,10 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
             String configContent = Files.readString(peerConfigPath);
             String ipAddress = extractIpAddress(configContent);
+            VaierMetadata meta = extractVaierMetadata(configContent);
 
-            return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent));
+            return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
+                    parsePeerType(meta.peerType()), meta.lanCidr()));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -66,8 +78,10 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 String peerName = foundPeerDir.get().getFileName().toString();
                 Path peerConfigPath = foundPeerDir.get().resolve(peerName + ".conf");
                 String configContent = Files.readString(peerConfigPath);
+                VaierMetadata meta = extractVaierMetadata(configContent);
 
-                return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent));
+                return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
+                        parsePeerType(meta.peerType()), meta.lanCidr()));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -133,5 +147,29 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             }
         }
         return "";
+    }
+
+    private VaierMetadata extractVaierMetadata(String configContent) {
+        for (String line : configContent.split("\n")) {
+            if (line.trim().startsWith("# VAIER:")) {
+                String json = line.substring(line.indexOf(':') + 1).trim();
+                try {
+                    return OBJECT_MAPPER.readValue(json, VaierMetadata.class);
+                } catch (Exception e) {
+                    log.warn("Failed to parse VAIER metadata: {}", e.getMessage());
+                }
+            }
+        }
+        return new VaierMetadata();
+    }
+
+    private PeerType parsePeerType(String value) {
+        if (value == null) return PeerType.UBUNTU_SERVER;
+        try {
+            return PeerType.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown peer type '{}', defaulting to UBUNTU_SERVER", value);
+            return PeerType.UBUNTU_SERVER;
+        }
     }
 }

@@ -124,6 +124,8 @@ Peers are created from the Vaier UI. When creating a peer, select its type — t
 | Ubuntu server with Docker | Self-hosted services on a Linux host | VPN subnet only | docker-compose, setup script |
 | Windows server with Docker | Self-hosted services on a Windows Docker host | VPN subnet only | docker-compose |
 
+**Ubuntu server peers** can optionally specify a **LAN CIDR** (e.g. `192.168.1.0/24`). When set, the VPN server routes traffic for that subnet through the peer's tunnel, so other VPN clients can reach devices on the peer's local network.
+
 When creating a peer, a "Use Pi-hole DNS" toggle lets you route the peer's DNS through the Pi-hole running on the VPN server. Pi-hole is part of the default stack so this option is always available.
 
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status and (if Netdata is running on the peer) live system metrics.

@@ -1,5 +1,7 @@
 package net.vaier.application;
 
+import net.vaier.domain.PeerType;
+
 import java.util.Optional;
 
 public interface GetPeerConfigUseCase {
@@ -9,6 +11,7 @@ public interface GetPeerConfigUseCase {
     record PeerConfigResult(
         String name,
         String ipAddress,
-        String configContent
+        String configContent,
+        PeerType peerType
     ) {}
 }

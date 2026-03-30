@@ -94,25 +94,24 @@ Manage WireGuard peers through the UI without touching config files.
 - **docker-compose template** — ready-to-run compose file for peers running Docker
 - **Bash setup script** — automated peer setup for Linux hosts
 
+**Implemented:**
+
+#### Peer types ✅
+
+When creating a peer, the user selects a **peer type**. The type drives the WireGuard config defaults and which download options are shown.
+
+| Type | Use case | AllowedIPs | Downloads shown |
+|------|----------|------------|-----------------|
+| **Mobile client** | Phone or tablet | `0.0.0.0/0` | QR code, `.conf` file |
+| **Windows client** | Laptop or desktop | `0.0.0.0/0` | `.conf` file |
+| **Ubuntu server with Docker** | Self-hosted services on Linux | `10.13.13.0/24` | docker-compose, bash setup script |
+| **Windows server with Docker** | Self-hosted services on Windows | `10.13.13.0/24` | docker-compose |
+
+- Server types expose containers in the peer view; client types hide that section.
+- The type is persisted in a `# VAIER: {"peerType":"..."}` JSON comment at the top of the client config file. Legacy peers with no comment default to `UBUNTU_SERVER`.
+- Ubuntu server peers can optionally specify a **LAN CIDR** (e.g. `192.168.1.0/24`). When set, the CIDR is appended to `AllowedIPs` in both the client config and the server-side peer entry, so the VPN server routes LAN traffic through that peer's tunnel. The LAN CIDR is also stored in the VAIER metadata comment.
+
 **Planned:**
-
-#### Peer types
-
-When creating a peer, the user selects a **peer type**. The type drives two things: the WireGuard config defaults, and which download options are presented after creation. Showing irrelevant downloads (e.g. a QR code to a server, or a bash script to a phone) adds confusion and is eliminated by the type selection.
-
-| Type | Use case | Route all traffic default | Downloads shown |
-|------|----------|--------------------------|-----------------|
-| **Mobile client** | Phone or tablet accessing the internet via VPN | Yes | QR code, `.conf` file |
-| **Windows client** | Laptop or desktop accessing the internet via VPN | Yes | `.conf` file |
-| **Ubuntu server with Docker** | Self-hosted services exposed via reverse proxy | No | docker-compose, bash setup script |
-| **Windows server with Docker** | Self-hosted services on a Windows Docker host | No | docker-compose |
-
-**Config implications by type:**
-- Client types (mobile, Windows client): `AllowedIPs = 0.0.0.0/0` by default (route all traffic). The user can uncheck this to get a split-tunnel config instead.
-- Server types (Ubuntu/Windows with Docker): `AllowedIPs = <VPN subnet>` by default — only VPN traffic is routed through the tunnel. Route-all-traffic option is hidden; it makes no sense for a server peer.
-- Server types expose their containers in the Vaier peer view; client types do not (the Docker API is not expected to be reachable on client devices).
-
-The type is stored in the peer name or as a metadata label in the WireGuard config comment block so Vaier can re-derive it on the list view without a database.
 
 #### Pi-hole DNS per peer
 
@@ -379,7 +378,7 @@ Ordered by user value. Items at the top should be worked first.
 
 | # | Feature | Section | Notes |
 |---|---------|---------|-------|
-| B1 | Peer types | 6.1 | Type selector in create form; drives config defaults and download options shown |
+| B1 | Peer types ✅ | 6.1 | Type selector in create form; drives config defaults and download options shown; LAN CIDR field for Ubuntu server peers |
 | B1a | Simplify Windows Docker peer service discovery | 6.1 | Getting containers listed on Windows + Docker Desktop is complex: named pipe vs TCP socket, WSL2 networking isolation, and Windows Firewall blocking inbound connections on the WireGuard interface. Explore a lightweight Vaier agent sidecar container bundled in the generated docker-compose — mounts the Docker socket and exposes a simple HTTP API on the VPN IP from within the Docker network (so traffic never crosses the Windows Firewall). Would also eliminate TLS cert management and make Windows/Ubuntu server peers functionally identical. |
 | B2 | Pi-hole DNS per peer | 6.1 | Detect `pihole/pihole` container; inject VPN IP into DNS field |
 | B3 | Root redirect path UI | 6.2 | Add optional input to publish modal; wire to existing API field |
@@ -388,3 +387,4 @@ Ordered by user value. Items at the top should be worked first.
 | B6 | Publish status auto-poll | 6.2 | Auto-poll `/status` after publish until DNS propagates |
 | B7 | Authelia email via SMTP | 6.9 | Replace filesystem notifier with SMTP in generated Authelia config; collect host, port, username, password, sender address; AWS SES as suggested default but any SMTP works |
 | B8 | First-run setup wizard | 6.10 | Web UI for initial config (domain, AWS creds, ACME email, SMTP, admin account); writes to persisted config file; `.env` still works for scripted deployments; setup page bypasses Authelia |
+| B9 | Pi-hole on server peer | 6.1 | Include Pi-hole container in generated docker-compose for Ubuntu server peers that have a LAN CIDR configured; resolves `*.home` names to local LAN IPs for devices on that network |

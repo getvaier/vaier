@@ -48,12 +48,17 @@ public class NetdataAdapter implements ForFetchingPeerMetrics {
         this.objectMapper = objectMapper;
     }
 
+    private String baseUrl(String peerIp) {
+        // If peerIp already contains a port (e.g. in tests), use it directly
+        return peerIp.contains(":") ? "http://" + peerIp : "http://" + peerIp + ":" + NETDATA_PORT;
+    }
+
     @Override
     public Map<String, Map<String, Double>> fetchMetrics(String peerIp) {
         Map<String, Map<String, Double>> result = new LinkedHashMap<>();
         for (String chart : CHARTS) {
             try {
-                String url = "http://" + peerIp + ":" + NETDATA_PORT
+                String url = baseUrl(peerIp)
                         + "/api/v1/data?chart=" + chart + "&points=1&format=json&after=-60";
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(url))
