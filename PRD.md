@@ -2,6 +2,7 @@
 
 **Last updated:** 2026-03-30
 **Status:** Living document
+**Issues:** https://github.com/getvaier/vaier/issues — GitHub issues are part of the spec and represent confirmed requirements and bugs.
 
 ---
 
@@ -227,7 +228,7 @@ Keep the operator aware when Docker images have newer versions available.
 - For each image ref, call Docker Hub Registry API v2 to compare remote digest vs. local image digest
 - Cache results in-memory (TTL: 24 h) to avoid hammering the registry
 - Expose via existing `/docker-services/peers` response — add `updateAvailable: boolean` field per container
-- Frontend polls or refreshes on page load
+- Frontend receives updates via SSE (Server-Sent Events) for immediate feedback without polling
 
 **Out of scope for v1:** GHCR, self-hosted registries, push notifications (webhook/email).
 
@@ -384,7 +385,7 @@ Ordered by user value. Items at the top should be worked first.
 | B3 | Root redirect path UI | 6.2 | Add optional input to publish modal; wire to existing API field |
 | B4 | Launchpad view | 6.3 | Clean read-only grid; no management controls; Authelia-protected |
 | B5 | Container update notifications | 6.8 | Docker Hub digest comparison; badge in peer cards and nav |
-| B6 | Publish status auto-poll | 6.2 | Auto-poll `/status` after publish until DNS propagates |
+| B6 | Publish status live updates | 6.2 | Stream `/status` updates via SSE after publish until DNS propagates; immediate feedback without polling |
 | B7 | Authelia email via SMTP | 6.9 | Replace filesystem notifier with SMTP in generated Authelia config; collect host, port, username, password, sender address; AWS SES as suggested default but any SMTP works |
 | B8 | First-run setup wizard | 6.10 | Web UI for initial config (domain, AWS creds, ACME email, SMTP, admin account); writes to persisted config file; `.env` still works for scripted deployments; setup page bypasses Authelia |
 | B9 | Pi-hole on server peer | 6.1 | Include Pi-hole container in generated docker-compose for Ubuntu server peers that have a LAN CIDR configured; resolves `*.home` names to local LAN IPs for devices on that network |
