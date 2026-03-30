@@ -116,7 +116,11 @@ The type is stored in the peer name or as a metadata label in the WireGuard conf
 
 #### Pi-hole DNS per peer
 
-When creating a peer, optionally route the peer's DNS through the Pi-hole running on the VPN server. Vaier detects Pi-hole automatically by scanning local Docker containers for the well-known Pi-hole image (`pihole/pihole`). If detected, a "Use Pi-hole DNS" toggle appears in the create-peer form (for all peer types). When enabled, Vaier injects the Pi-hole container's VPN IP into the peer's `DNS =` field. No env var required — if Pi-hole is not running, the option is simply not shown.
+Pi-hole is included in the default Vaier Docker Compose stack and runs on the VPN server alongside WireGuard, Traefik, Authelia, and Redis. It is always present and does not need to be installed separately.
+
+When creating a peer, a "Use Pi-hole DNS" toggle is shown in the create-peer form (for all peer types). When enabled, Vaier injects the Pi-hole container's VPN IP into the peer's `DNS =` field. Because Pi-hole is part of the stack, the toggle is always visible — not conditional on detection.
+
+Vaier still scans for the `pihole/pihole` container at runtime to resolve its VPN IP dynamically, so the config remains correct even if the container is restarted and gets a new internal IP.
 
 ---
 
@@ -323,7 +327,7 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 
 ## 8. Technical Constraints
 
-- **Stack is fixed:** WireGuard (linuxserver), Traefik, Authelia, Redis, AWS Route53
+- **Stack is fixed:** WireGuard (linuxserver), Traefik, Authelia, Redis, Pi-hole, AWS Route53
 - **No database:** all state is file-based (WireGuard/Traefik/Authelia configs) or cloud-based (Route53)
 - **Single WireGuard server:** multi-server mesh is out of scope
 - **Java 21 / Spring Boot 3.5.5:** backend language and framework are fixed

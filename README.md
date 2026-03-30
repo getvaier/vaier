@@ -29,6 +29,7 @@ Vaier runs as part of a five-container Docker Compose stack:
 | **Traefik** | Reverse proxy + Let's Encrypt TLS |
 | **Authelia** | Authentication middleware |
 | **Redis** | Authelia session store |
+| **Pi-hole** | DNS-level ad blocker; available to all VPN peers |
 | **Vaier** | This application (port 8888 externally) |
 
 ---
@@ -122,6 +123,8 @@ Peers are created from the Vaier UI. When creating a peer, select its type — t
 | Windows client | Laptop internet access via VPN | All traffic | `.conf` |
 | Ubuntu server with Docker | Self-hosted services on a Linux host | VPN subnet only | docker-compose, setup script |
 | Windows server with Docker | Self-hosted services on a Windows Docker host | VPN subnet only | docker-compose |
+
+When creating a peer, a "Use Pi-hole DNS" toggle lets you route the peer's DNS through the Pi-hole running on the VPN server. Pi-hole is part of the default stack so this option is always available.
 
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status and (if Netdata is running on the peer) live system metrics.
 
