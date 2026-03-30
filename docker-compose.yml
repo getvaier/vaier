@@ -55,6 +55,21 @@ services:
       - wireguard
     restart: unless-stopped
 
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    environment:
+      - TZ=Europe/Oslo
+      - WEBPASSWORD=${PIHOLE_PASSWORD:-}
+      - PIHOLE_DNS_=1.1.1.1;8.8.8.8
+    volumes:
+      - ./pihole/etc-pihole:/etc/pihole
+      - ./pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    restart: unless-stopped
+    networks:
+      vaier-network:
+        ipv4_address: 172.20.0.100
+
   traefik:
     image: traefik:latest
     container_name: traefik

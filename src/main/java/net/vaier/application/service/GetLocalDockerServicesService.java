@@ -21,7 +21,7 @@ import java.util.Set;
 public class GetLocalDockerServicesService implements GetLocalDockerServicesUseCase {
 
     private static final Set<String> EXCLUDED_NAMES = Set.of(
-        "wireguard", "wireguard-masquerade", "authelia", "redis", "vaier"
+        "wireguard", "wireguard-masquerade", "authelia", "redis", "vaier", "pihole"
     );
 
     // Known services with constrained ports and a root redirect path when applicable
