@@ -96,6 +96,16 @@ docker compose up -d --force-recreate vaier              # Deploy
 
 The `docker-compose.yml` uses `image: getvaier/vaier:latest`. Building as just `vaier:latest` will not be picked up.
 
+## Test-driven development
+
+This project follows strict TDD. Always write a failing test before writing any implementation code:
+
+1. Write a test that captures the expected behaviour — it must fail before any implementation exists
+2. Write the minimum implementation to make the test pass
+3. Refactor if needed, keeping tests green
+
+Never write implementation code without a corresponding test written first. PRs that add features without prior failing tests are not acceptable.
+
 ## Keeping docs in sync
 
 After any change to the feature set — new features, changed behaviour, removed functionality, renamed concepts — update both `README.md` and `PRD.md` before committing:
