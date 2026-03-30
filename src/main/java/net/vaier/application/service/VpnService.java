@@ -9,7 +9,6 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.domain.port.ForDeletingVpnPeers;
-import net.vaier.domain.port.ForManagingVpnNetwork;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @Slf4j
-public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForManagingVpnNetwork {
+public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -321,68 +320,6 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForMa
         } catch (Exception e) {
             log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to restart WireGuard service", e);
-        }
-    }
-
-    @Override
-    public void ensureNatRulesActive() {
-        try {
-            ensureNatRulesActiveInternal();
-        } catch (IOException | InterruptedException e) {
-            log.error("Failed to ensure NAT rules: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to setup NAT rules", e);
-        }
-    }
-
-    private void ensureNatRulesActiveInternal() throws IOException, InterruptedException {
-        log.info("Ensuring NAT rules are active");
-
-        try {
-            // Enable IP forwarding
-            String ipForwardOutput = executeInContainer("sh", "-c", "sysctl -w net.ipv4.ip_forward=1 2>&1");
-            log.info("IP forwarding output: {}", ipForwardOutput.trim());
-
-            // Get the default network interface
-            String defaultIface = executeInContainer("sh", "-c",
-                    "ip route | grep default | awk '{print $5}' | head -n1").trim();
-            if (defaultIface.isEmpty()) {
-                defaultIface = "eth0";
-            }
-            log.info("Default interface: {}", defaultIface);
-
-            // Add MASQUERADE rule (using -A to append, command will fail if it already exists but we catch that)
-            try {
-                String masqOutput = executeInContainer("sh", "-c",
-                        "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -o " + defaultIface + " -j MASQUERADE 2>&1");
-                log.info("MASQUERADE rule output: {}", masqOutput.trim());
-            } catch (Exception e) {
-                log.info("MASQUERADE rule might already exist: {}", e.getMessage());
-            }
-
-            // Add FORWARD rules
-            try {
-                String forward1 = executeInContainer("sh", "-c", "iptables -A FORWARD -i wg0 -j ACCEPT 2>&1");
-                log.info("FORWARD -i wg0 output: {}", forward1.trim());
-            } catch (Exception e) {
-                log.info("FORWARD -i wg0 might already exist: {}", e.getMessage());
-            }
-
-            try {
-                String forward2 = executeInContainer("sh", "-c", "iptables -A FORWARD -o wg0 -j ACCEPT 2>&1");
-                log.info("FORWARD -o wg0 output: {}", forward2.trim());
-            } catch (Exception e) {
-                log.info("FORWARD -o wg0 might already exist: {}", e.getMessage());
-            }
-
-            // Verify rules are in place
-            String natRules = executeInContainer("sh", "-c", "iptables -t nat -L POSTROUTING -n | grep -c MASQUERADE || echo 0");
-            String forwardRules = executeInContainer("sh", "-c", "iptables -L FORWARD -n | grep -c wg0 || echo 0");
-            log.info("NAT rules count: {}, FORWARD rules count: {}", natRules.trim(), forwardRules.trim());
-
-            log.info("NAT rules configuration completed");
-        } catch (Exception e) {
-            log.error("Error ensuring NAT rules: {}", e.getMessage(), e);
-            throw e;
         }
     }
 

@@ -5,7 +5,6 @@ import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
-import net.vaier.application.SetupVpnNetworkUseCase;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForFetchingPeerMetrics;
 import net.vaier.domain.port.ForGettingVpnClients;
@@ -35,7 +34,6 @@ public class VpnPeerRestController {
     private final CreatePeerUseCase createPeerUseCase;
     private final DeletePeerUseCase deletePeerUseCase;
     private final GetPeerConfigUseCase getPeerConfigUseCase;
-    private final SetupVpnNetworkUseCase setupVpnNetworkUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
 
@@ -88,18 +86,6 @@ public class VpnPeerRestController {
         );
 
         return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/setup-nat")
-    public ResponseEntity<String> setupNat() {
-        log.info("Manually setting up NAT rules");
-        try {
-            setupVpnNetworkUseCase.setupNatRules();
-            return ResponseEntity.ok("NAT rules configured successfully");
-        } catch (Exception e) {
-            log.error("Failed to setup NAT: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().body("Failed to setup NAT: " + e.getMessage());
-        }
     }
 
     @DeleteMapping("/{peerIdentifier}")

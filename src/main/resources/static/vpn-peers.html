@@ -272,8 +272,7 @@
             VPN Peers
         </div>
         <div class="page-header-actions">
-            <button class="btn btn-secondary" onclick="setupNat()">Setup NAT</button>
-            <button class="btn btn-primary"   onclick="showCreatePeerModal()">+ Add Peer</button>
+            <button class="btn btn-primary" onclick="showCreatePeerModal()">+ Add Peer</button>
         </div>
     </div>
 
@@ -733,15 +732,6 @@
             window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/setup-script`;
         }
 
-        async function setupNat() {
-            try {
-                const response = await fetch('/vpn/peers/setup-nat', { method: 'POST' });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                displaySuccess(await response.text());
-            } catch (error) {
-                displayError(`Failed to setup NAT: ${error.message}`);
-            }
-        }
 
         let peerToDelete = null;
 
