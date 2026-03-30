@@ -1,139 +1,72 @@
 # Vaier
 
-<p align="center">
-  <strong>Effortless WireGuard mesh networking</strong>
-</p>
+**Self-hosted infrastructure management for homelab developers.**
 
-<p align="center">
-  Self-hosted infrastructure management platform with service discovery, DNS integration, and reverse proxy configuration.
-</p>
+Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — automatically.
 
 ---
 
-## ✨ Features
+## What it does
 
-- 🔍 **Service Discovery** - Automatically discover Docker containers with exposed port mapping
-- 🌐 **DNS Management** - Full AWS Route53 management including zones and records via REST API
-- 🔀 **Reverse Proxy Integration** - Manage Traefik routes with dynamic configuration file generation
-- 🏗️ **Clean Architecture** - Built with hexagonal architecture principles for maintainability
-- 🐳 **Docker Ready** - Complete containerized deployment with WireGuard, Traefik, and the management application
-- 📚 **OpenAPI Documentation** - Interactive API documentation with Swagger UI
+| Feature | Description |
+|---------|-------------|
+| **VPN peer management** | Create and delete WireGuard peers. Download peer config as a `.conf` file, QR code (mobile), docker-compose, or a one-shot bash setup script. |
+| **Service publishing** | Discover Docker containers on the VPN server and on connected peers. Publish any container as a public HTTPS subdomain in one action. |
+| **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle. |
+| **DNS management** | Full CRUD for AWS Route53 zones and records. |
+| **User management** | Manage Authelia users from the UI (create, delete, change password). |
+| **System metrics** | Per-peer CPU, RAM, disk, network, and Docker container count via Netdata — shown inline in the peer view. |
 
-## 🚀 Getting Started
+---
 
-### Prerequisites
+## Stack
 
-- Docker and Docker Compose
-- Java 21 (for local development)
-- Maven 3.9+ (for local development)
-- AWS credentials with Route53 access (for DNS features)
-- Domain name for WireGuard and HTTPS access (recommended)
+Vaier runs as part of a five-container Docker Compose stack:
 
-### Running with Docker (Recommended)
+| Service | Role |
+|---------|------|
+| **WireGuard** (`linuxserver/wireguard`) | VPN server, UDP 51820 |
+| **Traefik** | Reverse proxy + Let's Encrypt TLS |
+| **Authelia** | Authentication middleware |
+| **Redis** | Authelia session store |
+| **Vaier** | This application (port 8888 externally) |
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/geireilertsen/vaier
-   cd vaier
-   ```
+---
 
-2. **Configure environment variables**
+## Prerequisites
 
-   Create a `.env` file with your configuration:
-   ```bash
-   VAIER_AWS_KEY=your_aws_access_key
-   VAIER_AWS_SECRET=your_aws_secret_key
-   ACME_EMAIL=your_email@example.com
-   ```
+- A Linux server with a public IP (EC2 t3.small or similar)
+- Docker and Docker Compose installed
+- A domain name you control
+- AWS credentials with Route53 access
 
-3. **Start the application**
-   ```bash
-   docker-compose up -d
-   ```
+### Server ports to open
 
-4. **Access the application**
-   - API: http://localhost:8888
-   - Swagger UI: http://localhost:8888/swagger-ui.html
-   - Hosted Services Dashboard: http://localhost:8888/hosted-services.html
-   - Traefik Dashboard: http://localhost:8080
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 22 | TCP | SSH |
+| 80 | TCP | HTTP (Let's Encrypt challenge) |
+| 443 | TCP | HTTPS |
+| 51820 | UDP | WireGuard VPN |
 
-### Environment Variables
+---
 
-The application uses the following environment variables:
+## Quick start
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VAIER_AWS_KEY` | Yes | AWS access key for Route53 operations |
-| `VAIER_AWS_SECRET` | Yes | AWS secret key for Route53 operations |
-| `ACME_EMAIL` | Yes | Email for Let's Encrypt certificate notifications |
-| `WIREGUARD_CONFIG_PATH` | No | Path to WireGuard config directory (default: `/wireguard/config`) |
-| `WIREGUARD_CONTAINER_NAME` | No | Name of WireGuard container (default: `wireguard`) |
-| `TRAEFIK_CONFIG_PATH` | No | Path to Traefik config directory (default: `/traefik/config`) |
-| `TRAEFIK_API_URL` | No | Traefik API URL (default: `http://traefik:8080`) |
-
-### Running Locally (Development)
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/geireilertsen/vaier
-   cd vaier
-   ```
-
-2. **Set environment variables**
-   ```bash
-   export VAIER_AWS_KEY=your_aws_access_key
-   export VAIER_AWS_SECRET=your_aws_secret_key
-   ```
-
-3. **Build and run**
-   ```bash
-   mvn clean package
-   java -jar target/vaier-1.0.0-SNAPSHOT.jar
-   ```
-
-   Or run directly with Maven:
-   ```bash
-   mvn spring-boot:run
-   ```
-
-4. **Access the application**
-   - API: http://localhost:8080
-   - Swagger UI: http://localhost:8080/swagger-ui.html
-   - Hosted Services Dashboard: http://localhost:8080/hosted-services.html
-
-> **Note:** When running locally, you'll need to adjust the paths for accessing WireGuard and Traefik configurations, or run the full docker-compose stack for complete functionality.
-
-# Getting Started
-
-## Setting Up a Vaier Server
-
-### 1. Provision a server
-
-Spin up an Ubuntu instance (EC2 t3.small or larger works well). Assign an Elastic IP and open the following ports in your firewall / security group:
-
-| Port  | Protocol | Description              |
-|-------|----------|--------------------------|
-| 22    | TCP      | SSH                      |
-| 80    | TCP      | HTTP (Traefik / ACME)    |
-| 443   | TCP      | HTTPS (Traefik)          |
-| 51820 | UDP      | WireGuard VPN            |
-| 8888  | TCP      | Vaier API (optional)     |
-| 9443  | TCP      | Portainer UI (optional)  |
-
-### 2. Install Docker
+### 1. Provision the server
 
 ```bash
-sudo apt update && sudo apt upgrade -y
+# Install Docker
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-newgrp docker
+sudo usermod -aG docker $USER && newgrp docker
+
+# (Optional) Add swap for small instances
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
 ```
 
-### 3. Point your domain at the server
-
-Create an A record in your DNS provider pointing your base domain (e.g. `vpn.example.com`) to the server's public IP. Traefik uses this to obtain a Let's Encrypt certificate.
-
-### 4. Deploy the stack
+### 2. Clone and configure
 
 ```bash
 git clone https://github.com/geireilertsen/vaier.git
@@ -142,277 +75,105 @@ cd vaier
 
 Create a `.env` file:
 
-```bash
+```env
 VAIER_AWS_KEY=your_aws_access_key
 VAIER_AWS_SECRET=your_aws_secret_key
-VAIER_DOMAIN=vpn.example.com
+VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@example.com
 ```
 
-Start all services:
+### 3. Point DNS at your server
+
+Create an A record for `vaier.yourdomain.com` (and `auth.yourdomain.com`) pointing to the server's public IP. Traefik will obtain Let's Encrypt certificates for both.
+
+### 4. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-### 5. Verify
-
-- Vaier API: `https://vpn.example.com/swagger-ui.html`
-- Traefik dashboard: `http://<server-ip>:8080`
-- WireGuard will be listening on UDP 51820
+Vaier will be available at `https://vaier.yourdomain.com` once certificates are issued (usually under a minute).
 
 ---
 
-## Adding a Peer (VPN Client)
+## Environment variables
 
-### 1. Create the peer on the server
-
-Call the Vaier API to provision a new WireGuard peer:
-
-```bash
-curl -s -X POST https://vpn.example.com/vpn/peers \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-laptop", "routeAllTraffic": true}'
-```
-
-The response contains the peer's assigned VPN IP address, its public key, and the generated client config file path.
-
-### 2. Retrieve the peer config
-
-```bash
-curl -s https://vpn.example.com/vpn/peers/my-laptop/config
-```
-
-The `configFile` field in the response contains the full WireGuard `.conf` content ready to use on the client.
-
-### 3a. Connect with the WireGuard app
-
-Copy the `configFile` content to your device and import it into the WireGuard app (desktop or mobile). Toggle the tunnel on — you should see a handshake within a few seconds.
-
-### 3b. Connect with Docker (containerised peer)
-
-Download a ready-made `docker-compose.yml` for the peer:
-
-```bash
-curl -O "https://vpn.example.com/vpn/peers/my-laptop/docker-compose?serverUrl=vpn.example.com&serverPort=51820"
-```
-
-Then on the peer machine:
-
-```bash
-docker compose up -d
-```
-
-### 3c. Connect with the automated setup script
-
-Download and run the one-shot setup script which installs WireGuard and activates the tunnel:
-
-```bash
-curl -fsSL "https://vpn.example.com/vpn/peers/my-laptop/setup-script?serverUrl=vpn.example.com&serverPort=51820" | bash
-```
-
-### 4. Confirm the connection
-
-Back on the server, list peers to check the handshake timestamp:
-
-```bash
-curl -s https://vpn.example.com/vpn/peers | jq '.[] | {name, allowedIps, latestHandshake}'
-```
-
-### Removing a peer
-
-```bash
-curl -s -X DELETE https://vpn.example.com/vpn/peers/my-laptop
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VAIER_AWS_KEY` | Yes | AWS access key for Route53 |
+| `VAIER_AWS_SECRET` | Yes | AWS secret key for Route53 |
+| `VAIER_DOMAIN` | Yes | Base domain (e.g. `yourdomain.com`) |
+| `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications |
+| `WIREGUARD_CONFIG_PATH` | No | WireGuard config dir (default: `/wireguard/config`) |
+| `WIREGUARD_CONTAINER_NAME` | No | WireGuard container name (default: `wireguard`) |
+| `TRAEFIK_CONFIG_PATH` | No | Traefik dynamic config dir (default: `/traefik/config`) |
+| `TRAEFIK_API_URL` | No | Traefik API URL (default: `http://traefik:8080`) |
+| `AUTHELIA_CONFIG_PATH` | No | Authelia config dir (default: `/authelia/config`) |
 
 ---
 
-# Server Setup Guide
+## Adding a VPN peer
 
-## Prerequisites
+Peers are created from the Vaier UI. When creating a peer, select its type — the type determines the WireGuard config defaults and which download options are shown:
 
-- Ubuntu EC2 t3.small (or larger)
-- Port 9443 open in AWS Security Group
-- Elastic IP assigned to the instance
+| Peer type | Typical use | Default routing | Downloads |
+|-----------|-------------|-----------------|-----------|
+| Mobile client | Phone/tablet internet access via VPN | All traffic | QR code, `.conf` |
+| Windows client | Laptop internet access via VPN | All traffic | `.conf` |
+| Ubuntu server with Docker | Self-hosted services on a Linux host | VPN subnet only | docker-compose, setup script |
+| Windows server with Docker | Self-hosted services on a Windows Docker host | VPN subnet only | docker-compose |
+
+After creating a peer, download its config and connect. Vaier shows the peer's handshake status and (if Netdata is running on the peer) live system metrics.
 
 ---
 
-## 1. System Update
+## Publishing a service
+
+1. Start a Docker container on any connected peer
+2. In Vaier → Services → Publishable, the container appears automatically
+3. Select the container, enter a subdomain, optionally enable Authelia authentication
+4. Vaier creates the DNS A record, Traefik route, and (optionally) Authelia middleware
+
+The service is live at `https://subdomain.yourdomain.com`.
+
+---
+
+## Development
+
+### Build and run locally
+
 ```bash
-sudo apt update && sudo apt upgrade -y
+mvn clean package -DskipTests   # build
+mvn spring-boot:run              # run on :8080
 ```
 
----
+Swagger UI: `http://localhost:8080/swagger-ui.html`
 
-## 2. Install Docker
+### Build the Docker image
+
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker ubuntu
-newgrp docker
+mvn clean package -DskipTests
+docker build -t getvaier/vaier:latest .
+docker compose up -d --force-recreate vaier
 ```
 
-Verify the installation:
-```bash
-docker --version
-docker compose version
-```
+> The compose file uses `getvaier/vaier:latest`. Building as any other tag will not be picked up.
+
+### Architecture
+
+Hexagonal (ports & adapters) with four layers:
+
+- **Domain** — business logic, entities, port interfaces. No Spring dependencies.
+- **Application** — use case interfaces and service implementations.
+- **Infrastructure** (`adapter/driven/`) — adapters for WireGuard, Traefik, Route53, Docker, Authelia, Netdata.
+- **Web** (`rest/`) — REST controllers; DTOs are inner `record` classes.
 
 ---
 
-## 3. Add Swap Space
+## License
 
-Recommended for small instances to prevent memory pressure:
-```bash
-sudo fallocate -l 2G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
-```
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-## 4. Install Portainer
-
-Portainer provides a web UI for managing Docker containers and Compose stacks.
-```bash
-docker volume create portainer_data
-
-docker run -d \
-  --name portainer \
-  --restart=always \
-  -p 9443:9443 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v portainer_data:/data \
-  portainer/portainer-ce:latest
-```
-
-Access Portainer at `https://<your-ec2-ip>:9443` and create your admin user on first login.
-
-> **Note:** Portainer uses a self-signed certificate by default. Your browser will show a security warning — this is expected. Accept and proceed.
-
----
-
-## 5. Deploy Vaier
-
-In Portainer, navigate to **Stacks → Add Stack**, paste the contents of `docker-compose.yml`, configure environment variables (AWS credentials and ACME email), and click **Deploy**.
-
-Alternatively, deploy from the command line:
-```bash
-git clone https://github.com/geireilertsen/vaier.git
-cd vaier
-# Create .env file with your credentials
-docker compose up -d
-```
-
----
-
-## AWS Security Group — Required Ports
-
-| Port | Protocol | Description          |
-|------|----------|----------------------|
-| 22   | TCP      | SSH                  |
-| 9443 | TCP      | Portainer UI (HTTPS) |
-| 51820| UDP      | WireGuard            |
-| 80   | TCP      | HTTP (Traefik)       |
-| 443  | TCP      | HTTPS (Traefik)      |
-| 8888 | TCP      | Vaier API (optional, if not using Traefik) |
-
----
-
-## 📡 API Endpoints
-
-### DNS Management
-- `GET /dns/zones` - List all DNS zones
-- `POST /dns/zones` - Create a new DNS zone
-- `DELETE /dns/zones/{zoneName}` - Delete a DNS zone
-- `GET /dns/zones/{zoneName}/records` - List DNS records for a zone
-- `POST /dns/zones/{zoneName}/records` - Add a DNS record to a zone
-- `DELETE /dns/zones/{zoneName}/records` - Delete a DNS record from a zone
-
-### Service Discovery
-- `GET /hosted-services/discover` - Discover hosted services from Docker containers and Traefik routes
-- `GET /docker-services?address={address}&port={port}&tlsEnabled={true|false}` - Query Docker services from a specific server
-
-### Reverse Proxy Management
-- `GET /reverse-proxy/routes` - List all configured reverse proxy routes
-- `POST /reverse-proxy/routes` - Add a reverse proxy route to Traefik
-- `DELETE /reverse-proxy/routes/{dnsName}` - Delete a reverse proxy route
-
-## 🏗️ Architecture
-
-### Application Architecture
-Vaier is built using hexagonal architecture with clear separation between:
-- **Domain Layer** - Core business logic and entities
-- **Application Layer** - Use cases and orchestration
-- **Infrastructure Layer** - Adapters for AWS Route53, Docker, Traefik, and WireGuard
-- **Web Layer** - REST API with OpenAPI documentation
-
-### Docker Stack Components
-The `docker-compose.yml` file deploys three interconnected services:
-
-1. **WireGuard** - VPN server using linuxserver/wireguard
-   - Listens on UDP port 51820
-   - Configuration stored in `./wireguard/config`
-   - Provides secure network access to hosted services
-
-2. **Traefik** - Reverse proxy with automatic HTTPS
-   - HTTP (port 80) and HTTPS (port 443) entry points
-   - Dashboard on port 8080
-   - Let's Encrypt integration for automatic SSL certificates
-   - Dynamic configuration from `./traefik/config`
-
-3. **Vaier** - Management application
-   - REST API on port 8888 (8080 internally)
-   - Accesses WireGuard config directory (read-only)
-   - Manages Traefik configuration files
-   - Connects to Docker socket for service discovery
-   - Accessible via HTTPS at configured domain
-
-## 🛠️ Technology Stack
-
-**Backend:**
-- Java 21 + Spring Boot 3.5.5
-- AWS SDK for Route53 (2.23.9)
-- Docker Java Client (3.3.4)
-- Springdoc OpenAPI (2.7.0)
-- SnakeYAML for configuration parsing
-- Project Lombok for code generation
-
-**Infrastructure:**
-- Docker Compose
-- Maven 3.9+
-- WireGuard container (linuxserver/wireguard)
-- Traefik reverse proxy with Let's Encrypt
-
-## 📋 Roadmap
-
-- [x] Project setup and Docker containerization
-- [x] AWS Route53 DNS zone and record management
-- [x] Traefik reverse proxy route management
-- [x] Docker container discovery
-- [x] Hosted service discovery with unified REST API
-- [x] Reverse proxy route persistence via Traefik file provider
-- [x] Web dashboard for hosted services
-- [ ] WireGuard peer management (create, list, configure)
-- [ ] Automatic key generation and IP allocation
-- [ ] Client configuration generation with split-tunneling support
-- [ ] Peer deletion and modification
-- [ ] WireGuard mesh topology generator
-- [ ] Automated DNS record creation for new services
-- [ ] Site-to-site routing configuration
-- [ ] Enhanced monitoring and management dashboard
-
-## 📄 License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## 👨‍💻 Author
-
-Created by [Geir Eilertsen](https://github.com/geireilertsen)
-
----
-
-<p align="center">
-  Made with ❤️ for the self-hosted community
-</p>
+*Built for the self-hosted community.*
