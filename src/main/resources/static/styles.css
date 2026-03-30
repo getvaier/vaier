@@ -127,9 +127,11 @@ body {
 .btn-success:hover { background: rgba(78, 201, 176, 0.1); border-color: var(--green); }
 
 .btn-small {
-    padding: 0.15rem 0.45rem;
+    padding: 0 0.45rem;
     font-size: 0.72rem;
-    margin-right: 0.2rem;
+    height: 22px;
+    min-width: 22px;
+    justify-content: center;
 }
 
 /* Cards / Panels */
@@ -190,8 +192,10 @@ body {
 
 /* Badges */
 .badge {
-    display: inline-block;
-    padding: 0.1rem 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.4rem;
+    height: 22px;
     border-radius: 2px;
     font-size: 0.7rem;
     font-family: var(--mono);
@@ -309,8 +313,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
     .container { padding: 1rem; }
 
     .btn-small {
-        padding: 0.35rem 0.55rem;
+        padding: 0 0.55rem;
         font-size: 0.75rem;
+        height: 26px;
+        min-width: 26px;
     }
 
     .modal-content {
