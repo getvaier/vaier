@@ -170,6 +170,12 @@ Hexagonal (ports & adapters) with four layers:
 
 ---
 
+## Disclaimer
+
+Vaier is a personal homelab tool provided as-is. Use it at your own risk. The authors accept no responsibility for security incidents, data loss, service outages, misconfigured firewalls, exposed services, or any other damage arising from its use. Running this software means exposing infrastructure to the internet — you are responsible for understanding what you are deploying.
+
+The Apache License 2.0 (below) contains the full warranty disclaimer and limitation of liability in sections 7 and 8.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
