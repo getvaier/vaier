@@ -82,9 +82,9 @@ VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@example.com
 ```
 
-### 3. Point DNS at your server
+### 3. Point your base domain at your server
 
-Create an A record for `vaier.yourdomain.com` (and `auth.yourdomain.com`) pointing to the server's public IP. Traefik will obtain Let's Encrypt certificates for both.
+Create an A record for `yourdomain.com` pointing to the server's public IP. Vaier automatically creates the `vaier.yourdomain.com` and `auth.yourdomain.com` DNS records in Route53 on first startup.
 
 ### 4. Start the stack
 
