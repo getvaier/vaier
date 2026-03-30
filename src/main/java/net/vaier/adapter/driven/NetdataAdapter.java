@@ -36,6 +36,7 @@ public class NetdataAdapter implements ForFetchingPeerMetrics {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public NetdataAdapter(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
