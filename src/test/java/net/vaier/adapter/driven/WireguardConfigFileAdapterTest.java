@@ -1,0 +1,139 @@
+package net.vaier.adapter.driven;
+
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class WireguardConfigFileAdapterTest {
+
+    @TempDir Path configDir;
+
+    WireguardConfigFileAdapter adapter;
+
+    @BeforeEach
+    void setUp() {
+        adapter = new WireguardConfigFileAdapter();
+        ReflectionTestUtils.setField(adapter, "wireguardConfigPath", configDir.toString());
+    }
+
+    // --- getPeerConfigByName ---
+
+    @Test
+    void getPeerConfigByName_returnsConfigWhenPeerExists() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("laptop");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("laptop");
+        assertThat(result.get().ipAddress()).isEqualTo("10.13.13.2");
+    }
+
+    @Test
+    void getPeerConfigByName_returnsEmptyWhenPeerDoesNotExist() {
+        assertThat(adapter.getPeerConfigByName("nonexistent")).isEmpty();
+    }
+
+    @Test
+    void getPeerConfigByName_parsesIpWithCidrNotation() throws IOException {
+        createPeerConf("server1", "10.13.13.5");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("server1");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().ipAddress()).isEqualTo("10.13.13.5");
+    }
+
+    @Test
+    void getPeerConfigByName_handlesExtraWhitespaceAroundEquals() throws IOException {
+        Path peerDir = configDir.resolve("laptop");
+        Files.createDirectories(peerDir);
+        Files.writeString(peerDir.resolve("laptop.conf"),
+                "[Interface]\nAddress = 10.13.13.3/32\nPrivateKey = abc123\n");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("laptop");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().ipAddress()).isEqualTo("10.13.13.3");
+    }
+
+    // --- getPeerConfigByIp ---
+
+    @Test
+    void getPeerConfigByIp_findsPeerMatchingIp() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+        createPeerConf("phone", "10.13.13.3");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByIp("10.13.13.3");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("phone");
+    }
+
+    @Test
+    void getPeerConfigByIp_returnsEmptyWhenNoMatchFound() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+
+        assertThat(adapter.getPeerConfigByIp("10.13.13.99")).isEmpty();
+    }
+
+    @Test
+    void getPeerConfigByIp_returnsEmptyWhenConfigDirMissing() {
+        ReflectionTestUtils.setField(adapter, "wireguardConfigPath", "/nonexistent/path");
+
+        assertThat(adapter.getPeerConfigByIp("10.13.13.2")).isEmpty();
+    }
+
+    @Test
+    void getPeerConfigByIp_ignoresWgConfsDirectory() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+        Path wgConfsDir = configDir.resolve("wg_confs");
+        Files.createDirectories(wgConfsDir);
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByIp("10.13.13.2");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("laptop");
+    }
+
+    // --- resolvePeerNameByIp ---
+
+    @Test
+    void resolvePeerNameByIp_returnsPeerNameWhenFound() throws IOException {
+        createPeerConf("my-server", "10.13.13.4");
+
+        assertThat(adapter.resolvePeerNameByIp("10.13.13.4")).isEqualTo("my-server");
+    }
+
+    @Test
+    void resolvePeerNameByIp_returnsIpWhenNoPeerFound() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+
+        assertThat(adapter.resolvePeerNameByIp("10.13.13.99")).isEqualTo("10.13.13.99");
+    }
+
+    @Test
+    void resolvePeerNameByIp_returnsIpWhenConfigDirMissing() {
+        ReflectionTestUtils.setField(adapter, "wireguardConfigPath", "/nonexistent/path");
+
+        assertThat(adapter.resolvePeerNameByIp("10.13.13.2")).isEqualTo("10.13.13.2");
+    }
+
+    // helpers
+
+    private void createPeerConf(String peerName, String ip) throws IOException {
+        Path peerDir = configDir.resolve(peerName);
+        Files.createDirectories(peerDir);
+        Files.writeString(peerDir.resolve(peerName + ".conf"),
+                "[Interface]\nAddress=" + ip + "/32\nPrivateKey=testkey\n");
+    }
+}

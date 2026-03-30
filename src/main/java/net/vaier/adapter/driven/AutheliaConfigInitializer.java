@@ -14,13 +14,26 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class AutheliaConfigInitializer implements ForInitialisingUserService {
 
-    private static final String AUTHELIA_CONFIG_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config");
-    private static final String CONFIGURATION_FILE = AUTHELIA_CONFIG_PATH + "/configuration.yml";
-    private static final String SECRETS_FILE = AUTHELIA_CONFIG_PATH + "/secrets.properties";
+    private final String configurationFile;
+    private final String secretsFile;
+    private final String vaierDomain;
+
+    public AutheliaConfigInitializer() {
+        this(
+            System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config"),
+            System.getenv().getOrDefault("VAIER_DOMAIN", "")
+        );
+    }
+
+    AutheliaConfigInitializer(String configPath, String vaierDomain) {
+        this.configurationFile = configPath + "/configuration.yml";
+        this.secretsFile = configPath + "/secrets.properties";
+        this.vaierDomain = vaierDomain;
+    }
 
     @Override
     public void initialiseConfiguration() {
-        File configFile = new File(CONFIGURATION_FILE);
+        File configFile = new File(configurationFile);
 
         log.info("Overwriting Authelia configuration file at: {}", configFile.getAbsolutePath());
 
@@ -44,7 +57,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
     }
 
     private String generateDefaultConfig() {
-        String vaierFullDomain = "vaier." + System.getenv().get("VAIER_DOMAIN");
+        String vaierFullDomain = "vaier." + vaierDomain;
         // Extract base domain from vaier domain (e.g., "vaier.eilertsen.family" -> "eilertsen.family")
         String baseDomain = vaierFullDomain.contains(".")
             ? vaierFullDomain.substring(vaierFullDomain.indexOf('.') + 1)
@@ -106,7 +119,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
     }
 
     private Properties loadOrGenerateSecrets() {
-        File secretsFile = new File(SECRETS_FILE);
+        File secretsFile = new File(this.secretsFile);
         Properties secrets = new Properties();
 
         if (secretsFile.exists()) {

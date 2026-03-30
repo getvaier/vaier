@@ -30,6 +30,10 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords {
             .build();
     }
 
+    Route53DnsAdapter(Route53Client route53Client) {
+        this.route53Client = route53Client;
+    }
+
     @Override
     public void addDnsRecord(DnsRecord dnsRecord, DnsZone dnsZone) {
         String hostedZoneId = findHostedZoneId(dnsZone.name());

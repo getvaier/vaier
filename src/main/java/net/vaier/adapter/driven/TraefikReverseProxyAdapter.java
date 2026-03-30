@@ -32,11 +32,22 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private Map<String, Object> config;
-    private static final String CONFIG_FILE_PATH = System.getenv("TRAEFIK_CONFIG_PATH") + "/remote-apps.yml";
-    private static final String TRAEFIK_API_URL = System.getenv().getOrDefault("TRAEFIK_API_URL", "http://localhost:8080");
-    private static final String VAIER_DOMAIN = System.getenv().getOrDefault("VAIER_DOMAIN", "");
+    private final String configFilePath;
+    private final String traefikApiUrl;
+    private final String vaierDomain;
 
     public TraefikReverseProxyAdapter() {
+        this(
+            System.getenv("TRAEFIK_CONFIG_PATH") + "/remote-apps.yml",
+            System.getenv().getOrDefault("TRAEFIK_API_URL", "http://localhost:8080"),
+            System.getenv().getOrDefault("VAIER_DOMAIN", "")
+        );
+    }
+
+    TraefikReverseProxyAdapter(String configFilePath, String traefikApiUrl, String vaierDomain) {
+        this.configFilePath = configFilePath;
+        this.traefikApiUrl = traefikApiUrl;
+        this.vaierDomain = vaierDomain;
         this.yaml = new Yaml();
         this.httpClient = HttpClient.newHttpClient();
         this.objectMapper = new ObjectMapper();
@@ -47,7 +58,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         options.setIndent(2);
         this.dumper = new Yaml(options);
 
-        File configFile = new File(CONFIG_FILE_PATH);
+        File configFile = new File(configFilePath);
         File configFolder = configFile.getParentFile();
         if (!configFolder.exists()) {
             configFolder.mkdirs();
@@ -120,7 +131,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     private List<ReverseProxyRoute> getReverseProxyRoutesFromFile() {
         List<ReverseProxyRoute> routes = new ArrayList<>();
-        File configFile = new File(CONFIG_FILE_PATH);
+        File configFile = new File(configFilePath);
 
         try (FileInputStream inputStream = new FileInputStream(configFile)) {
             Map<String, Object> config = yaml.load(inputStream);
@@ -165,7 +176,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     private JsonNode fetchFromTraefikApi(String endpoint) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(TRAEFIK_API_URL + endpoint))
+            .uri(URI.create(traefikApiUrl + endpoint))
             .GET()
             .build();
 
@@ -990,7 +1001,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * Load configuration from file.
      */
     private void loadConfig() {
-        File configFile = new File(CONFIG_FILE_PATH);
+        File configFile = new File(configFilePath);
 
         try (FileInputStream inputStream = new FileInputStream(configFile)) {
             this.config = yaml.load(inputStream);
@@ -1003,7 +1014,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * Save configuration to file.
      */
     private void saveConfig() {
-        File configFile = new File(CONFIG_FILE_PATH);
+        File configFile = new File(configFilePath);
 
         try (FileWriter writer = new FileWriter(configFile)) {
             dumper.dump(config, writer);
@@ -1050,7 +1061,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             Map<String, Object> authMiddleware = new LinkedHashMap<>();
             Map<String, Object> forwardAuth = new LinkedHashMap<>();
 
-            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://auth." + VAIER_DOMAIN + "/");
+            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://auth." + vaierDomain + "/");
             forwardAuth.put("trustForwardHeader", true);
 
             List<String> authResponseHeaders = new ArrayList<>();

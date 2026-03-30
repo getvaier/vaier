@@ -26,9 +26,14 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     private final Yaml yaml;
     private final Yaml dumper;
     private final Argon2 argon2;
-    private static final String AUTHELIA_USERS_DB_PATH = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config") + "/users_database.yml";
+    private final String usersDbPath;
 
     public AutheliaUserAdapter() {
+        this(System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config") + "/users_database.yml");
+    }
+
+    AutheliaUserAdapter(String usersDbPath) {
+        this.usersDbPath = usersDbPath;
         this.yaml = new Yaml();
 
         DumperOptions options = new DumperOptions();
@@ -43,7 +48,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     @Override
     public List<User> getUsers() {
         List<User> users = new ArrayList<>();
-        File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
+        File usersDbFile = new File(usersDbPath);
 
         if (!usersDbFile.exists()) {
             log.warn("Authelia users database file not found: {}", usersDbFile.getAbsolutePath());
@@ -76,7 +81,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
 
     @Override
     public void addUser(String username, String password, String email, String displayname) {
-        File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
+        File usersDbFile = new File(usersDbPath);
         Map<String, Object> config;
 
         // Load existing config or create new one
@@ -154,7 +159,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
 
     @Override
     public void deleteUser(String username) {
-        File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
+        File usersDbFile = new File(usersDbPath);
 
         if (!usersDbFile.exists()) {
             throw new RuntimeException("Users database file not found: " + usersDbFile.getAbsolutePath());
@@ -191,7 +196,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
 
     @Override
     public void changePassword(String username, String newPassword) {
-        File usersDbFile = new File(AUTHELIA_USERS_DB_PATH);
+        File usersDbFile = new File(usersDbPath);
 
         if (!usersDbFile.exists()) {
             throw new RuntimeException("Users database file not found: " + usersDbFile.getAbsolutePath());

@@ -43,6 +43,11 @@ public class NetdataAdapter implements ForFetchingPeerMetrics {
                 .build();
     }
 
+    NetdataAdapter(HttpClient httpClient, ObjectMapper objectMapper) {
+        this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
+    }
+
     @Override
     public Map<String, Map<String, Double>> fetchMetrics(String peerIp) {
         Map<String, Map<String, Double>> result = new LinkedHashMap<>();
