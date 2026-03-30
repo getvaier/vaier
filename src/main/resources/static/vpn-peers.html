@@ -256,7 +256,7 @@
             margin: 1rem 0 0.5rem;
         }
 
-        .qr-canvas-container canvas {
+        .qr-canvas-container img {
             background: #ffffff;
             padding: 12px;
             border-radius: 2px;
@@ -371,7 +371,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>
         let peers = [];
         let peerServices = {};
@@ -810,29 +809,20 @@
             const body  = document.getElementById('qrModalBody');
 
             title.textContent = 'QR Code — ' + peerName;
-            body.innerHTML = '<div class="qr-loading">Loading config\u2026</div>';
+            body.innerHTML = '<div class="qr-loading">Generating QR code\u2026</div>';
             modal.classList.add('active');
 
-            try {
-                const response = await fetch('/vpn/peers/' + encodeURIComponent(peerName) + '/config');
-                if (!response.ok) throw new Error('HTTP ' + response.status);
-                const data = await response.json();
+            const url = '/vpn/peers/' + encodeURIComponent(peerName) + '/qr-code';
+            body.innerHTML =
+                '<div class="qr-canvas-container">' +
+                  '<img src="' + url + '" width="256" height="256" alt="WireGuard QR code" onerror="qrImageError()">' +
+                '</div>' +
+                '<p class="qr-hint">Scan with WireGuard mobile app</p>';
+        }
 
-                body.innerHTML =
-                    '<div class="qr-canvas-container"><div id="qr-canvas"></div></div>' +
-                    '<p class="qr-hint">Scan with WireGuard mobile app</p>';
-
-                new QRCode(document.getElementById('qr-canvas'), {
-                    text: data.configFile,
-                    width: 256,
-                    height: 256,
-                    colorDark: '#000000',
-                    colorLight: '#ffffff',
-                    correctLevel: QRCode.CorrectLevel.M
-                });
-            } catch (err) {
-                body.innerHTML = '<div class="qr-loading" style="color:var(--red)">Failed to load config: ' + err.message + '</div>';
-            }
+        function qrImageError() {
+            document.getElementById('qrModalBody').innerHTML =
+                '<div class="qr-loading" style="color:var(--red)">Failed to generate QR code</div>';
         }
 
         function hideQrModal() {

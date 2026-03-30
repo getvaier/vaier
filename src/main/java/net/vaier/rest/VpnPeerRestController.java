@@ -124,6 +124,36 @@ public class VpnPeerRestController {
                 });
     }
 
+    @GetMapping("/{peerName}/qr-code")
+    public ResponseEntity<byte[]> getPeerQrCode(@PathVariable String peerName) {
+        log.info("Generating QR code for peer: {}", peerName);
+        var config = getPeerConfigUseCase.getPeerConfig(peerName);
+        if (config.isEmpty()) return ResponseEntity.notFound().build();
+        try {
+            com.google.zxing.qrcode.QRCodeWriter writer = new com.google.zxing.qrcode.QRCodeWriter();
+            com.google.zxing.common.BitMatrix matrix = writer.encode(
+                    config.get().configContent(),
+                    com.google.zxing.BarcodeFormat.QR_CODE,
+                    256, 256,
+                    java.util.Map.of(
+                            com.google.zxing.EncodeHintType.ERROR_CORRECTION,
+                            com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M,
+                            com.google.zxing.EncodeHintType.MARGIN, 2
+                    )
+            );
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(
+                    com.google.zxing.client.j2se.MatrixToImageWriter.toBufferedImage(matrix),
+                    "PNG", out);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.IMAGE_PNG)
+                    .body(out.toByteArray());
+        } catch (Exception e) {
+            log.error("Failed to generate QR code for peer {}: {}", peerName, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     @GetMapping("/{peerName}/docker-compose")
     public ResponseEntity<Resource> downloadDockerCompose(
             @PathVariable String peerName,
