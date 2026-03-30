@@ -249,6 +249,35 @@
 
         .form-checkbox input { width: auto; accent-color: var(--accent); }
 
+        /* QR modal */
+        .qr-canvas-container {
+            display: flex;
+            justify-content: center;
+            margin: 1rem 0 0.5rem;
+        }
+
+        .qr-canvas-container canvas {
+            background: #ffffff;
+            padding: 12px;
+            border-radius: 2px;
+            display: block;
+        }
+
+        .qr-hint {
+            text-align: center;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+
+        .qr-loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            font-style: italic;
+        }
+
         /* Mobile */
         @media (max-width: 600px) {
             .peer-header { flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 0.75rem; }
@@ -329,6 +358,22 @@
         </div>
     </div>
 
+    <!-- QR Code Modal -->
+    <div id="qrModal" class="modal">
+        <div class="modal-content" style="max-width:380px;width:95%">
+            <div class="modal-header" id="qrModalTitle">QR Code</div>
+            <div id="qrModalBody">
+                <div class="qr-loading">Loading config…</div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideQrModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+            integrity="sha512-CNvIiFAltMBnm/dg9lLnTCM6MZiU4bCm0mSBZcS8Qz3j1cDoMhpA7RZBhikfZGWBovgu4OgUON5P+5lLPSlw=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script>
         let peers = [];
         let peerServices = {};
@@ -582,6 +627,7 @@
                             <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();viewPeerConfig('${peer.name}')">config</button>
                             <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadDockerCompose('${peer.name}')">compose</button>
                             <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadSetupScript('${peer.name}')">script</button>
+                            <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();showQrModal('${peer.name}')">qr</button>
                             <button class="btn btn-small btn-danger"    onclick="event.stopPropagation();confirmDeletePeer('${peer.name}')">
                                 <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
                             </button>
@@ -760,8 +806,47 @@
             }
         }
 
+        async function showQrModal(peerName) {
+            const modal = document.getElementById('qrModal');
+            const title = document.getElementById('qrModalTitle');
+            const body  = document.getElementById('qrModalBody');
+
+            title.textContent = 'QR Code — ' + peerName;
+            body.innerHTML = '<div class="qr-loading">Loading config\u2026</div>';
+            modal.classList.add('active');
+
+            try {
+                const response = await fetch('/vpn/peers/' + encodeURIComponent(peerName) + '/config');
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const data = await response.json();
+
+                body.innerHTML =
+                    '<div class="qr-canvas-container"><div id="qr-canvas"></div></div>' +
+                    '<p class="qr-hint">Scan with WireGuard mobile app</p>';
+
+                new QRCode(document.getElementById('qr-canvas'), {
+                    text: data.configFile,
+                    width: 256,
+                    height: 256,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            } catch (err) {
+                body.innerHTML = '<div class="qr-loading" style="color:var(--red)">Failed to load config: ' + err.message + '</div>';
+            }
+        }
+
+        function hideQrModal() {
+            document.getElementById('qrModal').classList.remove('active');
+            document.getElementById('qrModalBody').innerHTML = '';
+        }
+
         window.onclick = e => {
-            if (e.target.classList.contains('modal')) e.target.classList.remove('active');
+            if (e.target.classList.contains('modal')) {
+                if (e.target.id === 'qrModal') hideQrModal();
+                else e.target.classList.remove('active');
+            }
         };
 
         fetchPeers();
