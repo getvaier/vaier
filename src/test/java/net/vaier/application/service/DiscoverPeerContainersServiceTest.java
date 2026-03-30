@@ -81,9 +81,9 @@ class DiscoverPeerContainersServiceTest {
         ));
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.3")).thenReturn("bob");
-        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> "10.13.13.2".equals(s.getAddress()))))
+        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> s != null && "10.13.13.2".equals(s.getAddress()))))
             .thenReturn(List.of(dockerService("app", 8080)));
-        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> "10.13.13.3".equals(s.getAddress()))))
+        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> s != null && "10.13.13.3".equals(s.getAddress()))))
             .thenThrow(new RuntimeException("timeout"));
 
         List<PeerContainers> result = service.discoverAll();
