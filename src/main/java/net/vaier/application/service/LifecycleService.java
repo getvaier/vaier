@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import net.vaier.domain.Lifecycle;
 import net.vaier.domain.port.ForInitialisingUserService;
+import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
@@ -18,16 +19,20 @@ public class LifecycleService {
     private final ForPersistingUsers forPersistingUsers;
     private final ForRestartingContainers containerRestarter;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
+    private final ForInitialisingVpnRouting forInitialisingVpnRouting;
 
     public LifecycleService(
         ForInitialisingUserService forInitialisingUserService,
         ForPersistingUsers forPersistingUsers,
-        ForRestartingContainers containerRestarter, ForPersistingDnsRecords forPersistingDnsRecords
+        ForRestartingContainers containerRestarter,
+        ForPersistingDnsRecords forPersistingDnsRecords,
+        ForInitialisingVpnRouting forInitialisingVpnRouting
     ) {
         this.forInitialisingUserService = forInitialisingUserService;
         this.forPersistingUsers = forPersistingUsers;
         this.containerRestarter = containerRestarter;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
+        this.forInitialisingVpnRouting = forInitialisingVpnRouting;
     }
 
     @EventListener
@@ -40,5 +45,7 @@ public class LifecycleService {
             forPersistingDnsRecords,
             containerRestarter
         ).start();
+
+        forInitialisingVpnRouting.setupVpnRouting();
     }
 }

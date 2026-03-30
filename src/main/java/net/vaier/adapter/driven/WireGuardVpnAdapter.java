@@ -288,49 +288,4 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients {
         }
     }
 
-    public static void main(String[] args) {
-        WireGuardVpnAdapter adapter = new WireGuardVpnAdapter();
-        // Manually call init since we're not in Spring context
-        adapter.init();
-
-        List<String> interfaces = adapter.getInterfaces();
-
-        if(interfaces.isEmpty()) {
-            System.out.println("No WireGuard interfaces found.");
-            return;
-        }
-
-        System.out.println("=== WireGuard Peer Query Tool ===");
-        System.out.println("NOTE: This may require administrator/root privileges");
-        System.out.println("      On Windows, run IntelliJ as Administrator\n");
-        System.out.println("Querying WireGuard interface: " + interfaces.get(0) + "\n");
-        System.out.println("Running command: wg show " + interfaces.get(0) + " dump\n");
-
-        try {
-            List<VpnClient> peers = adapter.getClients(interfaces.get(0));
-
-            System.out.println("Found " + peers.size() + " peer(s):\n");
-
-            for (int i = 0; i < peers.size(); i++) {
-                VpnClient peer = peers.get(i);
-                System.out.println("Peer #" + (i + 1) + ":");
-                System.out.println("  Public Key:      " + peer.publicKey());
-                System.out.println("  Allowed IPs:     " + peer.allowedIps());
-                System.out.println("  Endpoint IP:     " + peer.endpointIp());
-                System.out.println("  Endpoint Port:   " + peer.endpointPort());
-                System.out.println("  Latest Handshake: " + peer.latestHandshake());
-                System.out.println("  Transfer RX:     " + peer.transferRx() + " bytes");
-                System.out.println("  Transfer TX:     " + peer.transferTx() + " bytes");
-                System.out.println();
-            }
-
-            if (peers.isEmpty()) {
-                System.out.println("No peers configured on this interface.");
-            }
-
-        } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
 }

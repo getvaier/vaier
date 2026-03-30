@@ -3,20 +3,15 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteHostedServiceUseCase;
-import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.GetHostedServicesUseCase;
-import net.vaier.application.GetLocalDockerServicesUseCase;
-import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
+import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
-import net.vaier.application.service.PublishPeerServiceService;
-import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.application.ToggleServiceAuthUseCase;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -27,12 +22,9 @@ public class HostedServiceRestController {
 
     private final GetHostedServicesUseCase getHostedServicesUseCase;
     private final PublishPeerServiceUseCase publishPeerServiceUseCase;
-    private final PublishPeerServiceService publishPeerServiceService;
+    private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
-    private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
-    private final GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
-    private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
 
     @GetMapping("/discover")
     public List<HostedServiceUco> getHostedServices() {
@@ -41,24 +33,7 @@ public class HostedServiceRestController {
 
     @GetMapping("/publishable")
     public List<PublishableService> getPublishableServices() {
-        var existingRoutes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
-        var publishable = new ArrayList<PublishableService>();
-
-        discoverPeerContainersUseCase.discoverAll().stream()
-            .filter(peer -> "OK".equals(peer.status()))
-            .flatMap(peer -> peer.containers().stream()
-                .flatMap(container -> container.ports().stream()
-                    .filter(p -> "tcp".equals(p.type()))
-                    .filter(p -> existingRoutes.stream()
-                        .noneMatch(r -> r.getAddress().equals(peer.vpnIp()) && r.getPort() == p.publicPort()))
-                    .map(p -> new PublishableService(PublishableSource.PEER, peer.peerName(), peer.vpnIp(), container.containerName(), p.publicPort(), null))
-                )
-            )
-            .forEach(publishable::add);
-
-        publishable.addAll(getLocalDockerServicesUseCase.getUnpublishedLocalServices(existingRoutes));
-
-        return publishable.stream().distinct().toList();
+        return getPublishableServicesUseCase.getPublishableServices();
     }
 
     @PostMapping("/publish")
@@ -77,7 +52,7 @@ public class HostedServiceRestController {
 
     @GetMapping("/{subdomain}/status")
     public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
-        var status = publishPeerServiceService.getPublishStatus(subdomain);
+        var status = publishPeerServiceUseCase.getPublishStatus(subdomain);
         return new PublishStatusResponse(status.dnsPropagated(), status.traefikActive());
     }
 

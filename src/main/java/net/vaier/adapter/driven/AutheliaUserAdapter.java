@@ -234,15 +234,4 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         }
     }
 
-    public static void main(String[] args) {
-        ForRestartingContainers containerRestarter = new DockerContainerAdapter();
-        AutheliaUserAdapter adapter = new AutheliaUserAdapter();
-
-        List<User> users = adapter.getUsers();
-
-        System.out.println("\nFound " + users.size() + " users:");
-        users.forEach(user -> {
-            System.out.println("  - " + user.getName());
-        });
-    }
 }

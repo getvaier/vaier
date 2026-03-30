@@ -265,14 +265,4 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords {
         return name != null && name.endsWith(".") ? name.substring(0, name.length() - 1) : name;
     }
 
-    public static void main(String[] args) {
-        Route53DnsAdapter adapter = new Route53DnsAdapter();
-
-        List<DnsZone> dnsZones = adapter.getDnsZones();
-        dnsZones.forEach(System.out::println);
-
-        DnsZone dnsZone = dnsZones.getFirst();
-        List<DnsRecord> records = adapter.getDnsRecords(dnsZone);
-        records.forEach(System.out::println);
-    }
 }

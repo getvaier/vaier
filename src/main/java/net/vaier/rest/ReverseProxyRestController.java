@@ -2,8 +2,8 @@ package net.vaier.rest;
 
 import net.vaier.application.AddReverseProxyRouteUseCase;
 import net.vaier.application.DeleteReverseProxyRouteUseCase;
+import net.vaier.application.GetReverseProxyRoutesUseCase;
 import net.vaier.domain.ReverseProxyRoute;
-import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,20 +20,20 @@ public class ReverseProxyRestController {
 
     private final AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
     private final DeleteReverseProxyRouteUseCase deleteReverseProxyRouteUseCase;
-    private final ForPersistingReverseProxyRoutes reverseProxyRoutesPort;
+    private final GetReverseProxyRoutesUseCase getReverseProxyRoutesUseCase;
 
     public ReverseProxyRestController(
             AddReverseProxyRouteUseCase addReverseProxyRouteUseCase,
             DeleteReverseProxyRouteUseCase deleteReverseProxyRouteUseCase,
-            ForPersistingReverseProxyRoutes reverseProxyRoutesPort) {
+            GetReverseProxyRoutesUseCase getReverseProxyRoutesUseCase) {
         this.addReverseProxyRouteUseCase = addReverseProxyRouteUseCase;
         this.deleteReverseProxyRouteUseCase = deleteReverseProxyRouteUseCase;
-        this.reverseProxyRoutesPort = reverseProxyRoutesPort;
+        this.getReverseProxyRoutesUseCase = getReverseProxyRoutesUseCase;
     }
 
     @GetMapping("/routes")
     public List<ReverseProxyRoute> getAllRoutes() {
-        return reverseProxyRoutesPort.getReverseProxyRoutes();
+        return getReverseProxyRoutesUseCase.getReverseProxyRoutes();
     }
 
     @PostMapping("/routes")

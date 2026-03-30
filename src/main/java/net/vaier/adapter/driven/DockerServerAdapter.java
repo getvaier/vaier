@@ -187,31 +187,4 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         dockerClientCache.clear();
     }
 
-    public static void main(String[] args) {
-        DockerServerAdapter adapter = new DockerServerAdapter();
-
-        // Example: Connect to remote Docker host via TCP
-        Server server = new Server(
-            "localhost",  // hostname or IP
-            2375,               // Docker daemon port (2375 for HTTP, 2376 for HTTPS)
-            false               // TLS enabled?
-        );
-
-        System.out.println("Connecting to Docker at: " + server.dockerHostUrl());
-
-        List<DockerService> services = adapter.getServicesWithExposedPorts(server);
-
-        System.out.println("\nFound " + services.size() + " services with exposed ports:");
-        services.forEach(service -> {
-            System.out.println("\nContainer: " + service.containerName());
-            System.out.println("  ID: " + service.containerId().substring(0, Math.min(12, service.containerId().length())));
-            System.out.println("  Image: " + service.image());
-            System.out.println("  Ports:");
-            service.ports().forEach(port ->
-                System.out.println("    " + port)
-            );
-        });
-
-        adapter.cleanup();
-    }
 }

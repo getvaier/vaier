@@ -4,6 +4,8 @@ public interface PublishPeerServiceUseCase {
 
     void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath);
 
+    PublishStatus getPublishStatus(String subdomain);
+
     enum PublishableSource { LOCAL, PEER }
 
     record PublishableService(
@@ -14,4 +16,6 @@ public interface PublishPeerServiceUseCase {
         int port,
         String rootRedirectPath
     ) {}
+
+    record PublishStatus(boolean dnsPropagated, boolean traefikActive) {}
 }

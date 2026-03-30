@@ -1064,22 +1064,4 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         }
     }
 
-    public static void main(String[] args) {
-        TraefikReverseProxyAdapter adapter = new TraefikReverseProxyAdapter();
-
-        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
-
-        System.out.println("\nFound " + routes.size() + " routes:");
-        routes.forEach(route -> {
-            System.out.println("\nRoute: " + route.getName());
-            System.out.println("  Domain: " + route.getDomainName());
-            System.out.println("  Service: " + route.getService());
-            System.out.println("  Address: " + route.getAddress() + ":" + route.getPort());
-            if (route.getAuthInfo() != null) {
-                System.out.println("  Auth: " + route.getAuthInfo().getType() +
-                    " (user: " + route.getAuthInfo().getUsername() +
-                    ", realm: " + route.getAuthInfo().getRealm() + ")");
-            }
-        });
-    }
 }

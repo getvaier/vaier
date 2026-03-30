@@ -1,16 +1,15 @@
 package net.vaier.adapter.driven;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.domain.port.ForInitialisingVpnRouting;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
 
 @Component
 @Slf4j
-public class VpnNetworkSetupAdapter {
+public class VpnNetworkSetupAdapter implements ForInitialisingVpnRouting {
 
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
@@ -18,7 +17,7 @@ public class VpnNetworkSetupAdapter {
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
 
-    @EventListener(ApplicationReadyEvent.class)
+    @Override
     public void setupVpnRouting() {
         try {
             String wireguardIp = InetAddress.getByName(wireguardContainerName).getHostAddress();
