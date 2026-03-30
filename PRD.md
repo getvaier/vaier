@@ -230,6 +230,54 @@ Keep the operator aware when Docker images have newer versions available.
 
 ---
 
+### 6.9 Authelia Email Notifications 🔲 (planned)
+
+Authelia sends emails for password reset and two-factor enrolment flows. Currently the `notifier` in the generated Authelia config is set to `filesystem` — emails are written to a text file (`/config/emails.txt`) instead of being delivered. This means password reset is broken for end users.
+
+**Requirements:**
+- Replace the filesystem notifier with an SMTP notifier in the generated Authelia config
+- Vaier generates the Authelia config at startup (`AutheliaConfigInitializer`) so the SMTP block needs to be injected there
+- The SMTP settings must be persisted so they survive container restarts (stored in Vaier's config, not passed as one-time env vars)
+
+**Config fields required from the user:**
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| SMTP host | Mail server hostname | `email-smtp.eu-west-1.amazonaws.com` |
+| SMTP port | Usually 587 (STARTTLS) or 465 (SSL) | `587` |
+| SMTP username | Auth username | *(SES SMTP credential or Gmail address)* |
+| SMTP password | Auth password / app password | *(SES SMTP credential or Gmail app password)* |
+| Sender address | The `From:` address | `noreply@yourdomain.com` |
+| Sender name | Display name in the From header | `Vaier` |
+
+**Natural default — AWS SES:** Since the user already has AWS credentials in Vaier for Route53, AWS SES is the obvious first choice. The SMTP endpoint is `email-smtp.{region}.amazonaws.com:587`. Note: SES SMTP credentials are separate from IAM credentials and must be generated in the SES console; Vaier cannot derive them from the existing `VAIER_AWS_KEY`/`VAIER_AWS_SECRET`.
+
+**No lock-in:** Any SMTP provider works (Gmail with app password, Sendgrid, Mailgun, self-hosted Postfix, etc.). The UI should not assume AWS SES — it should present generic SMTP fields with AWS SES as a labelled example.
+
+---
+
+### 6.10 First-Run Setup Wizard 🔲 (planned)
+
+Currently Vaier requires four environment variables before it can start (`VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, `ACME_EMAIL`). This is a barrier for new users who need to edit a `.env` file they may not know how to create, and it makes adding new required config (like SMTP credentials for 6.9) increasingly painful.
+
+**Goal:** replace the mandatory `.env` file with a web-based first-run wizard. `docker compose up -d` with no `.env` file should produce a running — but unconfigured — Vaier instance that redirects the user to a setup page.
+
+**Wizard flow:**
+
+1. **Detect unconfigured state** — on startup, if required config is missing, Vaier serves a setup page instead of the normal UI. The setup page is accessible without Authelia (Authelia itself cannot be configured yet).
+2. **Step 1 — Domain** — enter base domain (e.g. `yourdomain.com`). Vaier derives `vaier.yourdomain.com` for its own URL and `auth.yourdomain.com` for Authelia.
+3. **Step 2 — AWS credentials** — AWS access key and secret for Route53. Vaier can test the credentials live (list zones) before proceeding.
+4. **Step 3 — Let's Encrypt** — email address for ACME certificate notifications.
+5. **Step 4 — Email (SMTP)** — SMTP settings for Authelia email delivery (see 6.9). Optional: can be skipped and configured later from Settings.
+6. **Step 5 — Admin account** — create the first Authelia user (username + password). Vaier already auto-creates an `admin` user on first run; this step lets the user set their own credentials instead.
+7. **Done** — Vaier writes config to a persisted file, restarts Authelia with the new config, and redirects to the normal UI.
+
+**Config persistence:** settings are written to a YAML file (e.g. `vaier-config.yml`) mounted into the container. This file takes precedence over env vars, so env vars still work for automated/CI deployments. If both are present, the config file wins.
+
+**`.env` file is not removed** — it remains valid and documented. The wizard is an alternative path, not a replacement. Users who prefer env vars (e.g. for scripted deployments) should continue to use them.
+
+---
+
 ## 7. End-to-End Workflows
 
 ### 7.1 New service on a peer (primary workflow)
@@ -255,6 +303,15 @@ Keep the operator aware when Docker images have newer versions available.
 1. Developer opens VPN Peers view
 2. Containers with available updates show an "update available" badge
 3. Developer updates container manually on the peer host
+
+### 7.5 First-time setup (no .env file)
+
+1. User runs `docker compose up -d` with no `.env` file
+2. Vaier starts and detects missing required config
+3. Browser opens Vaier URL — redirected to the setup wizard
+4. User steps through: domain → AWS credentials (tested live) → ACME email → SMTP → admin account
+5. Vaier writes config, initialises Authelia, redirects to normal UI
+6. Full stack is operational — no file editing required
 
 ### 7.4 Monitor peer health
 
@@ -295,7 +352,7 @@ Vaier is "done enough" when:
 2. All VPN peers can be managed (create, configure, delete) without editing any WireGuard config file
 3. A launchpad page exists that works as a browser home page showing all services and their status
 4. The operator is notified when container images have updates available
-5. The full stack can be installed from scratch with `docker compose up -d` and a single `.env` file
+5. The full stack can be installed from scratch with `docker compose up -d` — either via a `.env` file or the first-run setup wizard, with no manual config file editing required
 
 ---
 
@@ -325,3 +382,5 @@ Ordered by user value. Items at the top should be worked first.
 | B4 | Launchpad view | 6.3 | Clean read-only grid; no management controls; Authelia-protected |
 | B5 | Container update notifications | 6.8 | Docker Hub digest comparison; badge in peer cards and nav |
 | B6 | Publish status auto-poll | 6.2 | Auto-poll `/status` after publish until DNS propagates |
+| B7 | Authelia email via SMTP | 6.9 | Replace filesystem notifier with SMTP in generated Authelia config; collect host, port, username, password, sender address; AWS SES as suggested default but any SMTP works |
+| B8 | First-run setup wizard | 6.10 | Web UI for initial config (domain, AWS creds, ACME email, SMTP, admin account); writes to persisted config file; `.env` still works for scripted deployments; setup page bypasses Authelia |
