@@ -38,8 +38,6 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void publishService_createsCnameDnsRecord() {
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-
         service.publishService("10.0.0.1", 8080, "app", false, null);
 
         ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);

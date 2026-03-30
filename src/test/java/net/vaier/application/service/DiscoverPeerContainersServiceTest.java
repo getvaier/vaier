@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -80,9 +81,9 @@ class DiscoverPeerContainersServiceTest {
         ));
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.3")).thenReturn("bob");
-        when(forGettingServerInfo.getServicesWithExposedPorts(new Server("10.13.13.2", 2375, false)))
+        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> "10.13.13.2".equals(s.getAddress()))))
             .thenReturn(List.of(dockerService("app", 8080)));
-        when(forGettingServerInfo.getServicesWithExposedPorts(new Server("10.13.13.3", 2375, false)))
+        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> "10.13.13.3".equals(s.getAddress()))))
             .thenThrow(new RuntimeException("timeout"));
 
         List<PeerContainers> result = service.discoverAll();
