@@ -96,6 +96,15 @@ docker compose up -d --force-recreate vaier              # Deploy
 
 The `docker-compose.yml` uses `image: getvaier/vaier:latest`. Building as just `vaier:latest` will not be picked up.
 
+## Keeping docs in sync
+
+After any change to the feature set — new features, changed behaviour, removed functionality, renamed concepts — update both `README.md` and `PRD.md` before committing:
+
+- **README.md** — user-facing; update feature tables, workflow descriptions, and any affected quick-start steps
+- **PRD.md** — planning document; mark implemented items ✅, update planned items, and add backlog entries for anything new that was discussed
+
+The two documents must always reflect the actual state of the codebase. Stale docs are treated as bugs.
+
 ## Server development
 
 When developing on a server, you can use the `docker-compose.yml` file to run the full stack locally. This is useful for testing and debugging changes before deploying to production.
