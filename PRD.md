@@ -21,7 +21,7 @@ Vaier is a personal tool that will be open-sourced. It is not intended to compet
 The defining characteristic of Vaier is that **things should just work**. The user should never need to set an environment variable or edit a config file to enable a feature that Vaier can detect or infer automatically.
 
 Principles:
-- **Detect, don't configure.** If a capability (Pi-hole, Netdata, Docker socket location) can be discovered at runtime, it must be. Env vars are a last resort, not a first instinct.
+- **Detect, don't configure.** If a capability (Netdata, Docker socket location) can be discovered at runtime, it must be. Env vars are a last resort, not a first instinct.
 - **Sensible defaults everywhere.** Every option has a default that is correct for the common case.
 - **Progressive disclosure.** Advanced options exist but are never required to get started.
 - **The happy path is the only path.** If a user has to read documentation to do the standard workflow, that is a bug.
@@ -111,16 +111,6 @@ When creating a peer, the user selects a **peer type**. The type drives the Wire
 - Server types expose containers in the peer view; client types hide that section.
 - The type is persisted in a `# VAIER: {"peerType":"..."}` JSON comment at the top of the client config file. Legacy peers with no comment default to `UBUNTU_SERVER`.
 - Ubuntu server peers can optionally specify a **LAN CIDR** (e.g. `192.168.1.0/24`). When set, the CIDR is appended to `AllowedIPs` in both the client config and the server-side peer entry, so the VPN server routes LAN traffic through that peer's tunnel. The LAN CIDR is also stored in the VAIER metadata comment.
-
-**Planned:**
-
-#### Pi-hole DNS per peer
-
-Pi-hole is included in the default Vaier Docker Compose stack and runs on the VPN server alongside WireGuard, Traefik, Authelia, and Redis. It is always present and does not need to be installed separately.
-
-When creating a peer, a "Use Pi-hole DNS" toggle is shown in the create-peer form (for all peer types). When enabled, Vaier injects the Pi-hole container's VPN IP into the peer's `DNS =` field. Because Pi-hole is part of the stack, the toggle is always visible — not conditional on detection.
-
-Vaier still scans for the `pihole/pihole` container at runtime to resolve its VPN IP dynamically, so the config remains correct even if the container is restarted and gets a new internal IP.
 
 ---
 
@@ -297,7 +287,7 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 
 ### 7.2 Add a new VPN peer
 
-1. Developer clicks "Add peer" → enters name, optionally enables Pi-hole DNS
+1. Developer clicks "Add peer" → enters name
 2. Vaier generates WireGuard keys, assigns IP from subnet, writes config
 3. Developer downloads QR code or docker-compose file
 4. Peer is running; developer can see handshake status in Vaier
@@ -327,7 +317,7 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 
 ## 8. Technical Constraints
 
-- **Stack is fixed:** WireGuard (linuxserver), Traefik, Authelia, Redis, Pi-hole, AWS Route53
+- **Stack is fixed:** WireGuard (linuxserver), Traefik, Authelia, Redis, AWS Route53
 - **No database:** all state is file-based (WireGuard/Traefik/Authelia configs) or cloud-based (Route53)
 - **Single WireGuard server:** multi-server mesh is out of scope
 - **Java 21 / Spring Boot 3.5.5:** backend language and framework are fixed
@@ -368,7 +358,7 @@ All original open questions have been resolved:
 |---|----------|----------|
 | OQ1 | Should the launchpad be unauthenticated or protected? | Protected by Authelia, same policy as rest of Vaier UI |
 | OQ2 | Non-Docker Hub registries in v1? | No — Docker Hub only. GHCR / self-hosted are stretch goals for v2. |
-| OQ3 | Pi-hole detection: automatic or env var? | Automatic — scan local containers for `pihole/pihole` image. Env var not needed. |
+| OQ3 | Pi-hole detection: automatic or env var? | N/A — Pi-hole removed from the project. |
 | OQ4 | Update notifications: push or UI only? | UI only in v1. Webhook/email is a v2 consideration. |
 
 ---
@@ -381,11 +371,10 @@ Ordered by user value. Items at the top should be worked first.
 |---|---------|---------|-------|
 | B1 | Peer types ✅ | 6.1 | Type selector in create form; drives config defaults and download options shown; LAN CIDR field for Ubuntu server peers |
 | B1a | Simplify Windows Docker peer service discovery | 6.1 | Getting containers listed on Windows + Docker Desktop is complex: named pipe vs TCP socket, WSL2 networking isolation, and Windows Firewall blocking inbound connections on the WireGuard interface. Explore a lightweight Vaier agent sidecar container bundled in the generated docker-compose — mounts the Docker socket and exposes a simple HTTP API on the VPN IP from within the Docker network (so traffic never crosses the Windows Firewall). Would also eliminate TLS cert management and make Windows/Ubuntu server peers functionally identical. |
-| B2 | Pi-hole DNS per peer | 6.1 | Detect `pihole/pihole` container; inject VPN IP into DNS field |
 | B3 | Root redirect path UI | 6.2 | Add optional input to publish modal; wire to existing API field |
 | B4 | Launchpad view | 6.3 | Clean read-only grid; no management controls; Authelia-protected |
 | B5 | Container update notifications | 6.8 | Docker Hub digest comparison; badge in peer cards and nav |
 | B6 | Publish status live updates | 6.2 | Stream `/status` updates via SSE after publish until DNS propagates; immediate feedback without polling |
 | B7 | Authelia email via SMTP | 6.9 | Replace filesystem notifier with SMTP in generated Authelia config; collect host, port, username, password, sender address; AWS SES as suggested default but any SMTP works |
 | B8 | First-run setup wizard | 6.10 | Web UI for initial config (domain, AWS creds, ACME email, SMTP, admin account); writes to persisted config file; `.env` still works for scripted deployments; setup page bypasses Authelia |
-| B9 | Pi-hole on server peer | 6.1 | Include Pi-hole container in generated docker-compose for Ubuntu server peers that have a LAN CIDR configured; resolves `*.home` names to local LAN IPs for devices on that network |
+

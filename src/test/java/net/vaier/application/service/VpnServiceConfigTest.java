@@ -3,8 +3,6 @@ package net.vaier.application.service;
 import net.vaier.domain.PeerType;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -65,50 +63,4 @@ class VpnServiceConfigTest {
         assertThat(config).contains("\"peerType\":\"WINDOWS_SERVER\"");
     }
 
-    // --- Pi-hole DNS injection ---
-
-    @Test
-    void generateClientConfig_fullTunnelPeer_withPiholeDns_setsPiholeIpAsDns() {
-        String config = VpnService.generateClientConfig(
-                "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, Optional.of("172.20.0.100"));
-
-        assertThat(config).contains("DNS = 172.20.0.100");
-    }
-
-    @Test
-    void generateClientConfig_fullTunnelPeer_withoutPiholeDns_usesDefaultDns() {
-        String config = VpnService.generateClientConfig(
-                "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, Optional.empty());
-
-        assertThat(config).contains("DNS = 10.13.13.1");
-    }
-
-    @Test
-    void generateClientConfig_windowsClientWithPiholeDns_setsPiholeIpAsDns() {
-        String config = VpnService.generateClientConfig(
-                "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.WINDOWS_CLIENT, null, Optional.of("172.20.0.100"));
-
-        assertThat(config).contains("DNS = 172.20.0.100");
-    }
-
-    @Test
-    void generateClientConfig_serverPeer_doesNotOverrideDns() {
-        String config = VpnService.generateClientConfig(
-                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, Optional.of("172.20.0.100"));
-
-        assertThat(config).doesNotContain("DNS =");
-    }
-
-    @Test
-    void generateClientConfig_windowsServerPeer_doesNotOverrideDns() {
-        String config = VpnService.generateClientConfig(
-                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.WINDOWS_SERVER, null, Optional.of("172.20.0.100"));
-
-        assertThat(config).doesNotContain("DNS =");
-    }
 }

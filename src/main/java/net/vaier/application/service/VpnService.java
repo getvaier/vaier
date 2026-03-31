@@ -10,7 +10,6 @@ import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForDeletingVpnPeers;
-import net.vaier.domain.port.ForDetectingPihole;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +22,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -36,12 +34,7 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
 
-    private final ForDetectingPihole forDetectingPihole;
     private DockerClient dockerClient;
-
-    public VpnService(ForDetectingPihole forDetectingPihole) {
-        this.forDetectingPihole = forDetectingPihole;
-    }
 
     @PostConstruct
     public void init() {
@@ -112,13 +105,8 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
 
     @Override
     public CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr) {
-        return createPeer(interfaceName, peerName, peerType, lanCidr, false);
-    }
-
-    @Override
-    public CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr, boolean usePiholeDns) {
         peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
-        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {}, usePiholeDns: {})", peerName, interfaceName, peerType, lanCidr, usePiholeDns);
+        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {})", peerName, interfaceName, peerType, lanCidr);
 
         try {
             // Step 1: Generate private key
@@ -146,9 +134,8 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
             Files.createDirectories(peerDir);
 
             // Step 7: Create client configuration file
-            Optional<String> piholeDns = usePiholeDns ? forDetectingPihole.detectPiholeIp() : Optional.empty();
             String clientConfig = generateClientConfig(
-                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, piholeDns);
+                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr);
 
             Path peerConfigPath = peerDir.resolve(peerName + ".conf");
             Files.writeString(peerConfigPath, clientConfig);
@@ -262,14 +249,6 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
     static String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
                                        String presharedKey, String serverEndpoint,
                                        PeerType peerType, String lanCidr) {
-        return generateClientConfig(privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint,
-                peerType, lanCidr, java.util.Optional.empty());
-    }
-
-    static String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
-                                       String presharedKey, String serverEndpoint,
-                                       PeerType peerType, String lanCidr,
-                                       java.util.Optional<String> piholeDns) {
         String allowedIps = peerType.defaultAllowedIps();
         if (lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER) {
             allowedIps = allowedIps + ", " + lanCidr;
@@ -281,7 +260,7 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
 
         String dnsLine = peerType.isServerType()
                 ? ""
-                : "DNS = " + piholeDns.orElse("10.13.13.1") + "\n";
+                : "DNS = 10.13.13.1\n";
 
         return String.format("""
                 # VAIER: %s

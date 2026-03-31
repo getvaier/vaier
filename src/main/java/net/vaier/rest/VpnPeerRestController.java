@@ -80,17 +80,11 @@ public class VpnPeerRestController {
         String interfaceName = "wg0"; // Default WireGuard interface
         PeerType peerType = request.peerType() != null ? request.peerType() : PeerType.UBUNTU_SERVER;
 
-        // Default usePiholeDns to true for full-tunnel clients, false for server peers
-        boolean usePiholeDns = request.usePiholeDns() != null
-                ? request.usePiholeDns()
-                : !peerType.isServerType();
-
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 interfaceName,
                 request.name(),
                 peerType,
-                request.lanCidr(),
-                usePiholeDns
+                request.lanCidr()
         );
 
         CreatePeerResponse response = new CreatePeerResponse(
@@ -248,8 +242,7 @@ public class VpnPeerRestController {
     public record CreatePeerRequest(
             String name,
             PeerType peerType,
-            String lanCidr,
-            Boolean usePiholeDns
+            String lanCidr
     ) {}
 
     public record CreatePeerResponse(

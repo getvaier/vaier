@@ -28,8 +28,7 @@ public class GetLocalDockerServicesService implements GetLocalDockerServicesUseC
     private record KnownService(Set<Integer> allowedPorts, String rootRedirectPath) {}
 
     private static final Map<String, KnownService> KNOWN_SERVICES = Map.of(
-        "traefik", new KnownService(Set.of(8080), "/dashboard/"),
-        "pihole", new KnownService(Set.of(80), "/admin/")
+        "traefik", new KnownService(Set.of(8080), "/dashboard/")
     );
 
     private final ForGettingServerInfo forGettingServerInfo;

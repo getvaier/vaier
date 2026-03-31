@@ -6,7 +6,6 @@ public interface CreatePeerUseCase {
 
     CreatedPeerUco createPeer(String interfaceName, String peerName);
     CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr);
-    CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr, boolean usePiholeDns);
 
     record CreatedPeerUco(
         String name,
