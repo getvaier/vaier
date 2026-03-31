@@ -21,7 +21,7 @@ Vaier is a personal tool that will be open-sourced. It is not intended to compet
 The defining characteristic of Vaier is that **things should just work**. The user should never need to set an environment variable or edit a config file to enable a feature that Vaier can detect or infer automatically.
 
 Principles:
-- **Detect, don't configure.** If a capability (Netdata, Docker socket location) can be discovered at runtime, it must be. Env vars are a last resort, not a first instinct.
+- **Detect, don't configure.** If a capability (Docker socket location) can be discovered at runtime, it must be. Env vars are a last resort, not a first instinct.
 - **Sensible defaults everywhere.** Every option has a default that is correct for the common case.
 - **Progressive disclosure.** Advanced options exist but are never required to get started.
 - **The happy path is the only path.** If a user has to read documentation to do the standard workflow, that is a bug.
@@ -70,7 +70,7 @@ Each step is done in a different tool, with no feedback loop. Mistakes are silen
 
 - Not a general-purpose container orchestrator (no Portainer replacement)
 - Not a multi-cloud DNS manager (Route53 only for now)
-- Not a monitoring platform (Netdata integration is read-only)
+- Not a monitoring platform
 - No multi-server WireGuard topology (single VPN server, multiple peers)
 - No management of the Docker host OS (no package installs, kernel config, etc.)
 - No mobile app
@@ -183,24 +183,6 @@ No planned changes.
 
 ---
 
-### 6.7 System Metrics (Netdata) ✅ (exists)
-
-Per-peer system health at a glance, without leaving Vaier.
-
-**Current capabilities:**
-- CPU usage %, RAM usage %, disk usage %
-- Network I/O (inbound / outbound)
-- Docker container count
-- System uptime
-- Displayed inline in the expanded peer card on `vpn-peers.html`
-- Metrics fetched live from the Netdata HTTP API on the peer's VPN IP; gracefully absent if Netdata is not running on a peer
-
-**Detection:** Vaier infers the Netdata endpoint from the peer's VPN IP (default port 19999). No configuration required. If Netdata is not reachable, the metrics section is simply not shown for that peer.
-
-No planned changes to the data shown. Future consideration: persist last-seen values so metrics are visible even when a peer is temporarily offline.
-
----
-
 ### 6.8 Container Update Notifications 🔲 (planned)
 
 Keep the operator aware when Docker images have newer versions available.
@@ -306,14 +288,6 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 4. User steps through: domain → AWS credentials (tested live) → ACME email → SMTP → admin account
 5. Vaier writes config, initialises Authelia, redirects to normal UI
 6. Full stack is operational — no file editing required
-
-### 7.4 Monitor peer health
-
-1. Developer expands a peer card
-2. CPU, RAM, disk, network, and container count are fetched live from Netdata
-3. No navigation away from Vaier required
-
----
 
 ## 8. Technical Constraints
 

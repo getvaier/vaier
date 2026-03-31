@@ -7,12 +7,10 @@ import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.VpnClient;
-import net.vaier.domain.port.ForFetchingPeerMetrics;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
 
-import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ByteArrayResource;
@@ -34,7 +32,6 @@ public class VpnPeerRestController {
     private final ForGettingVpnClients vpnClientService;
     private final ForResolvingPeerNames peerNameResolver;
     private final ForGettingPeerConfigurations peerConfigReader;
-    private final ForFetchingPeerMetrics forFetchingPeerMetrics;
     private final CreatePeerUseCase createPeerUseCase;
     private final DeletePeerUseCase deletePeerUseCase;
     private final GetPeerConfigUseCase getPeerConfigUseCase;
@@ -269,30 +266,4 @@ public class VpnPeerRestController {
             String peerType
     ) {}
 
-    @GetMapping("/{peerName}/netdata")
-    public ResponseEntity<PeerMetricsResponse> getPeerMetrics(@PathVariable String peerName) {
-        log.info("Fetching Netdata metrics for peer: {}", peerName);
-        try {
-            String vpnIp = vpnClientService.getClients().stream()
-                    .filter(c -> peerName.equals(peerNameResolver.resolvePeerNameByIp(c.allowedIps().split("/")[0])))
-                    .map(c -> c.allowedIps().split("/")[0])
-                    .findFirst()
-                    .orElse(null);
-
-            if (vpnIp == null) {
-                return ResponseEntity.notFound().build();
-            }
-
-            Map<String, Map<String, Double>> charts = forFetchingPeerMetrics.fetchMetrics(vpnIp);
-            return ResponseEntity.ok(new PeerMetricsResponse(true, charts));
-        } catch (Exception e) {
-            log.error("Failed to fetch Netdata metrics for peer {}: {}", peerName, e.getMessage());
-            return ResponseEntity.ok(new PeerMetricsResponse(false, Map.of()));
-        }
-    }
-
-    public record PeerMetricsResponse(
-            boolean available,
-            Map<String, Map<String, Double>> charts
-    ) {}
 }

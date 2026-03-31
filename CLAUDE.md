@@ -128,7 +128,7 @@ Then ask the user to verify the fix works.
 
 If the user confirms the fix is good:
 1. Commit and push the changes to git.
-2. If the change was triggered by a GitHub issue, close that issue (ask the user for confirmation first if not already given).
+2. If the change was triggered by a GitHub issue, include `Closes #<issue-number>` in the commit message — GitHub will close the issue automatically when pushed to main.
 
 ## Server development
 

@@ -15,7 +15,6 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
-| **System metrics** | Per-peer CPU, RAM, disk, network, and Docker container count via Netdata — shown inline in the peer view. |
 
 ---
 
@@ -125,7 +124,7 @@ Peers are created from the Vaier UI. When creating a peer, select its type — t
 
 **Ubuntu server peers** can optionally specify a **LAN CIDR** (e.g. `192.168.1.0/24`). When set, the VPN server routes traffic for that subnet through the peer's tunnel, so other VPN clients can reach devices on the peer's local network.
 
-After creating a peer, download its config and connect. Vaier shows the peer's handshake status and (if Netdata is running on the peer) live system metrics.
+After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 
 ---
 
@@ -167,7 +166,7 @@ Hexagonal (ports & adapters) with four layers:
 
 - **Domain** — business logic, entities, port interfaces. No Spring dependencies.
 - **Application** — use case interfaces and service implementations.
-- **Infrastructure** (`adapter/driven/`) — adapters for WireGuard, Traefik, Route53, Docker, Authelia, Netdata.
+- **Infrastructure** (`adapter/driven/`) — adapters for WireGuard, Traefik, Route53, Docker, Authelia.
 - **Web** (`rest/`) — REST controllers; DTOs are inner `record` classes.
 
 ---
