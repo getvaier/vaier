@@ -576,7 +576,14 @@
                 expandedPeers.add(peerName);
                 body.classList.add('open');
                 chevron.classList.add('open');
-                if (!peerMetricsCache[peerName]) loadPeerMetrics(peerName);
+                const p = peers.find(x => x.name === peerName);
+                if (p && !peerMetricsCache[peerName]) {
+                    const hs = parseInt(p.latestHandshake);
+                    const connected = hs > 0 && (Math.floor(Date.now() / 1000) - hs) < 180;
+                    const pt = p.peerType || 'UBUNTU_SERVER';
+                    const isServer = pt === 'UBUNTU_SERVER' || pt === 'WINDOWS_SERVER';
+                    if (connected && isServer) loadPeerMetrics(peerName);
+                }
             }
         }
 
@@ -608,7 +615,9 @@
 
                 const services = peerServices[peer.name];
                 const servicesHtml = (() => {
-                    if (!isConnected || !isServerType) return '';
+                    if (!isServerType) return '';
+                    if (!isConnected)
+                        return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">not connected</span></div>`;
                     if (!services || services.status === 'UNREACHABLE')
                         return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
                     if (!services.containers || services.containers.length === 0)
@@ -623,10 +632,10 @@
                     return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value">${items}</span></div>`;
                 })();
 
-                const metricsSection = isConnected && isServerType ? `
+                const metricsSection = isServerType ? `
                     <div class="metrics-section">
                         <div class="metrics-title">System Metrics</div>
-                        <div id="metrics-${id}"><span class="metrics-loading">loading…</span></div>
+                        <div id="metrics-${id}">${isConnected ? '<span class="metrics-loading">loading\u2026</span>' : '<span class="metrics-unavailable">not connected</span>'}</div>
                     </div>` : '';
 
                 return `
@@ -688,8 +697,15 @@
 
             container.innerHTML = html;
 
+            const now = Math.floor(Date.now() / 1000);
             for (const peerName of expandedPeers) {
-                loadPeerMetrics(peerName);
+                const p = peers.find(x => x.name === peerName);
+                if (!p) continue;
+                const hs = parseInt(p.latestHandshake);
+                const connected = hs > 0 && (now - hs) < 180;
+                const pt = p.peerType || 'UBUNTU_SERVER';
+                const isServer = pt === 'UBUNTU_SERVER' || pt === 'WINDOWS_SERVER';
+                if (connected && isServer) loadPeerMetrics(peerName);
             }
         }
 

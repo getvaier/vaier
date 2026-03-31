@@ -322,6 +322,20 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
             Thread.sleep(2000);
 
             log.info("WireGuard container restarted successfully");
+
+            // Restart the masquerade sidecar so it re-attaches to WireGuard's new
+            // network namespace and re-installs the POSTROUTING MASQUERADE rule.
+            String masqueradeContainer = wireguardContainerName + "-masquerade";
+            try {
+                log.info("Restarting masquerade sidecar: {}", masqueradeContainer);
+                dockerClient.restartContainerCmd(masqueradeContainer)
+                        .withTimeout(15)
+                        .exec();
+                Thread.sleep(3000);
+                log.info("Masquerade sidecar restarted successfully");
+            } catch (Exception e) {
+                log.warn("Could not restart masquerade sidecar {}: {}", masqueradeContainer, e.getMessage());
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Interrupted while restarting WireGuard container", e);
