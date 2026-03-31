@@ -379,7 +379,7 @@
                                 ${service.mandatory ? '' : `
                                 <button class="btn btn-small ${service.authenticated ? 'btn-warning' : 'btn-success'}"
                                     style="margin-left:0.4rem"
-                                    onclick="toggleAuth('${service.dnsAddress}', ${service.authenticated})">
+                                    onclick="toggleAuth(this, '${service.dnsAddress}', ${service.authenticated})">
                                     ${service.authenticated ? 'Disable' : 'Enable'}
                                 </button>`}
                             </div>
@@ -525,14 +525,24 @@
             container.insertBefore(card, container.firstChild);
         }
 
-        async function toggleAuth(dnsAddress, currentlyAuthenticated) {
+        async function toggleAuth(btn, dnsAddress, currentlyAuthenticated) {
+            const newAuth = !currentlyAuthenticated;
             try {
                 const response = await fetch(`/hosted-services/${encodeURIComponent(dnsAddress)}/auth`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ requiresAuth: !currentlyAuthenticated })
+                    body: JSON.stringify({ requiresAuth: newAuth })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                // Optimistically update the card without waiting for SSE+fetchServices
+                const card = btn.closest('.service-card');
+                card.querySelectorAll('.badge').forEach(badge => {
+                    badge.className = newAuth ? 'badge badge-success' : 'badge badge-warning';
+                    badge.textContent = newAuth ? 'auth' : 'no-auth';
+                });
+                btn.className = `btn btn-small ${newAuth ? 'btn-warning' : 'btn-success'}`;
+                btn.textContent = newAuth ? 'Disable' : 'Enable';
+                btn.onclick = () => toggleAuth(btn, dnsAddress, newAuth);
             } catch (error) {
                 alert(`Failed to update authentication: ${error.message}`);
             }
@@ -592,13 +602,13 @@
                 setStep('step-traefik', true);
                 setStep('step-done', true);
                 document.getElementById('progressNote').textContent = 'Service is live!';
-                fetchServices().then(() => setTimeout(() => hidePublishModal(), 1500));
+                Promise.all([fetchServices(), fetchPublishable()])
+                    .then(() => setTimeout(() => hidePublishModal(), 1500));
             }
         });
 
         _sse.addEventListener('service-updated', () => {
-            fetchServices();
-            fetchPublishable();
+            // Auth toggle uses optimistic updates; new service publish is handled by publish-traefik-active
         });
 
         _sse.onerror = () => {
