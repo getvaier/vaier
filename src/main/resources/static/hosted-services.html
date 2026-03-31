@@ -376,11 +376,12 @@
                             <div class="detail-row">
                                 <span class="detail-label">Auth</span>
                                 ${authBadge}
+                                ${service.mandatory ? '' : `
                                 <button class="btn btn-small ${service.authenticated ? 'btn-warning' : 'btn-success'}"
                                     style="margin-left:0.4rem"
                                     onclick="toggleAuth('${service.dnsAddress}', ${service.authenticated})">
                                     ${service.authenticated ? 'Disable' : 'Enable'}
-                                </button>
+                                </button>`}
                             </div>
                         </div>
                     </div>
