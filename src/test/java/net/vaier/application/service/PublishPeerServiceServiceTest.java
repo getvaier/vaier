@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.PublishPeerServiceUseCase.PendingPublication;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.ReverseProxyRoute;
@@ -16,8 +17,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.function.Predicate;
+
+import org.mockito.InOrder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,6 +36,9 @@ class PublishPeerServiceServiceTest {
 
     @Mock
     ForPublishingEvents forPublishingEvents;
+
+    @Mock
+    PendingPublicationsTracker pendingPublicationsTracker;
 
     @InjectMocks
     PublishPeerServiceService service;
@@ -109,6 +117,33 @@ class PublishPeerServiceServiceTest {
         service.publishService("10.0.0.1", 8080, "app", false, null);
 
         verify(forPublishingEvents).publish("hosted-services", "publish-dns-created", "app");
+    }
+
+    @Test
+    void getPendingPublications_afterPublish_returnsEntry() {
+        service.publishService("10.0.0.1", 8080, "app", true, null);
+        List<PendingPublication> pending = service.getPendingPublications();
+        assertThat(pending).hasSize(1);
+        assertThat(pending.get(0).subdomain()).isEqualTo("app");
+        assertThat(pending.get(0).requiresAuth()).isTrue();
+        assertThat(pending.get(0).dnsPropagated()).isFalse();
+    }
+
+    @Test
+    void waitForDnsThenActivate_waitsForTraefikRouteBeforeFiringEvent() {
+        // DNS resolves immediately
+        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        // First getReverseProxyRoutes call: Traefik not yet loaded; second call: route present
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+
+        InOrder inOrder = inOrder(forPersistingReverseProxyRoutes, forPublishingEvents);
+        inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
+        inOrder.verify(forPublishingEvents).publish("hosted-services", "publish-traefik-active", "app");
+        verify(forPersistingReverseProxyRoutes, atLeast(2)).getReverseProxyRoutes();
     }
 
     private ReverseProxyRoute routeWithDomain(String domain) {

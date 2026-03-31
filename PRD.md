@@ -125,9 +125,22 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 - Check publish status (DNS propagated, Traefik active)
 - Delete hosted service (removes DNS + Traefik route)
 
+**Publish flow (confirmed UX):**
+
+1. User sees two lists on the hosted services page:
+   - **Discoverable** — containers with exposed TCP ports not yet published, found on local host and reachable VPN peers
+   - **Active** — published services with their DNS/reachability state
+2. Clicking **+ Add** on a discoverable service opens a modal: subdomain input + auth toggle
+3. On submit, the modal closes immediately and the service moves into a **Processing** list that sits between the discoverable and active lists
+4. The processing card shows live progress steps: DNS record created → DNS propagated → Traefik route active
+5. When the Traefik route is confirmed active, the processing card disappears and the service appears in the active list
+6. The discoverable list hides the service as soon as it enters processing (server-side, not client-side)
+7. Both active and processing lists are driven by SSE — no polling from the browser
+8. Processing state survives page refresh (backed by in-memory server state, not persisted to disk)
+9. Duplicate submissions are rejected: attempting to add a service already in active or processing shows an error
+
 **Planned:**
 - **Root redirect path UI** — the `rootRedirectPath` field already exists in the publish API request body; it needs a corresponding optional input in the publish form (e.g. a collapsible "Advanced" section)
-- **Publish status polish** — clearer loading state while DNS propagates; current status endpoint is available but not auto-polled after publish
 
 ---
 
@@ -260,12 +273,14 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 
 1. Peer is already connected to VPN (created via Vaier)
 2. Developer starts a Docker container on the peer
-3. In Vaier → Services → Publishable, the container appears automatically
-4. Developer selects container, types a subdomain, toggles auth if needed
-5. Vaier creates: DNS CNAME record (pointing to VPN server) → Traefik route → (optional) Authelia middleware
-6. Service appears in launchpad dashboard with live status
+3. In Vaier → Services, the container appears in the **Discoverable** list automatically
+4. Developer clicks **+ Add**, enters a subdomain, toggles auth if needed, clicks **Add Service**
+5. Modal closes immediately; service moves to the **Processing** list with live progress steps
+6. Vaier creates: DNS CNAME → waits for propagation → Traefik route → (optional) Authelia middleware
+7. Processing card disappears; service appears in the **Active** list with live status
+8. All updates arrive via SSE — no page reload or manual polling required
 
-**Success:** zero manual DNS/Traefik/Authelia steps.
+**Success:** zero manual DNS/Traefik/Authelia steps. The user always knows where their service is in the pipeline.
 
 ### 7.2 Add a new VPN peer
 
@@ -348,7 +363,7 @@ Ordered by user value. Items at the top should be worked first.
 | B3 | Root redirect path UI | 6.2 | Add optional input to publish modal; wire to existing API field |
 | B4 | Launchpad view | 6.3 | Clean read-only grid; no management controls; Authelia-protected |
 | B5 | Container update notifications | 6.8 | Docker Hub digest comparison; badge in peer cards and nav |
-| B6 | Publish status live updates | 6.2 | Stream `/status` updates via SSE after publish until DNS propagates; immediate feedback without polling |
+| B6 | Processing list for hosted services | 6.2 | Three-section layout: discoverable → processing → active; processing cards show live SSE progress steps; survive page refresh via server-side in-memory state |
 | B7 | Authelia email via SMTP | 6.9 | Replace filesystem notifier with SMTP in generated Authelia config; collect host, port, username, password, sender address; AWS SES as suggested default but any SMTP works |
 | B8 | First-run setup wizard | 6.10 | Web UI for initial config (domain, AWS creds, ACME email, SMTP, admin account); writes to persisted config file; `.env` still works for scripted deployments; setup page bypasses Authelia |
 

@@ -19,6 +19,7 @@ public class GetPublishableServicesService implements GetPublishableServicesUseC
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
+    private final PendingPublicationsTracker pendingPublicationsTracker;
 
     @Override
     public List<PublishableService> getPublishableServices() {
@@ -32,12 +33,15 @@ public class GetPublishableServicesService implements GetPublishableServicesUseC
                     .filter(p -> "tcp".equals(p.type()))
                     .filter(p -> existingRoutes.stream()
                         .noneMatch(r -> r.getAddress().equals(peer.vpnIp()) && r.getPort() == p.publicPort()))
+                    .filter(p -> !pendingPublicationsTracker.isPending(peer.vpnIp(), p.publicPort()))
                     .map(p -> new PublishableService(PublishableSource.PEER, peer.peerName(), peer.vpnIp(), container.containerName(), p.publicPort(), null))
                 )
             )
             .forEach(publishable::add);
 
-        publishable.addAll(getLocalDockerServicesUseCase.getUnpublishedLocalServices(existingRoutes));
+        getLocalDockerServicesUseCase.getUnpublishedLocalServices(existingRoutes).stream()
+            .filter(s -> !pendingPublicationsTracker.isPending(s.address(), s.port()))
+            .forEach(publishable::add);
 
         return publishable.stream().distinct().toList();
     }

@@ -33,6 +33,9 @@ class GetPublishableServicesServiceTest {
     @Mock
     GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
 
+    @Mock
+    PendingPublicationsTracker pendingPublicationsTracker;
+
     @InjectMocks
     GetPublishableServicesService service;
 
@@ -125,6 +128,17 @@ class GetPublishableServicesServiceTest {
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
 
+        assertThat(service.getPublishableServices()).isEmpty();
+    }
+
+    @Test
+    void getPublishableServices_pendingPublication_excluded() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+            okPeer("alice", "10.13.13.2", List.of(container("my-app", 8080, "tcp")))
+        ));
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
+        when(pendingPublicationsTracker.isPending("10.13.13.2", 8080)).thenReturn(true);
         assertThat(service.getPublishableServices()).isEmpty();
     }
 

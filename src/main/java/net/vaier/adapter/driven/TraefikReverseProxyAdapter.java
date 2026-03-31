@@ -20,8 +20,10 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Component
 @Slf4j
@@ -81,48 +83,47 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * @return List of ReverseProxyRoute objects containing route information
      */
     public List<ReverseProxyRoute> getReverseProxyRoutes() {
-        List<ReverseProxyRoute> routes = new ArrayList<>();
+        // File routes are always authoritative for our published services — reads are instantaneous
+        // and unaffected by Traefik's config reload cycle.
+        List<ReverseProxyRoute> fileRoutes = getReverseProxyRoutesFromFile();
+        Set<String> fileRouteDomains = new HashSet<>();
+        for (ReverseProxyRoute r : fileRoutes) fileRouteDomains.add(r.getDomainName());
+
+        List<ReverseProxyRoute> result = new ArrayList<>(fileRoutes);
 
         try {
-            // First, try to fetch from Traefik API (gets all active routes including Docker labels)
-            try {
-                // Fetch HTTP routers from API
-                JsonNode routersData = fetchFromTraefikApi("/api/http/routers");
-                JsonNode servicesData = fetchFromTraefikApi("/api/http/services");
+            // Add routes from Traefik API that are NOT in our file (e.g. Docker label routes).
+            // During Traefik config reload the API may briefly return an empty list; in that case
+            // we simply omit the extra API-only routes rather than clobbering our file routes.
+            List<ReverseProxyRoute> apiRoutes = new ArrayList<>();
 
-                // Convert JsonNode to Map - Traefik API returns arrays, so we need to convert them
-                Map<String, Object> routers = convertTraefikArrayToMap(routersData);
-                Map<String, Object> services = convertTraefikArrayToMap(servicesData);
-
-                if (routers != null && services != null) {
-                    routes.addAll(extractHttpRoutesFromApi(routers, services));
-                }
-
-                // Fetch TCP routers from API
-                JsonNode tcpRoutersData = fetchFromTraefikApi("/api/tcp/routers");
-                JsonNode tcpServicesData = fetchFromTraefikApi("/api/tcp/services");
-
-                Map<String, Object> tcpRouters = convertTraefikArrayToMap(tcpRoutersData);
-                Map<String, Object> tcpServices = convertTraefikArrayToMap(tcpServicesData);
-
-                if (tcpRouters != null && tcpServices != null) {
-                    routes.addAll(extractTcpRoutesFromApi(tcpRouters, tcpServices));
-                }
-
-                log.info("Fetched {} routes from Traefik API", routes.size());
-            } catch (Exception apiException) {
-                log.warn("Failed to fetch from Traefik API, falling back to file reading", apiException);
-
-                // Fallback: Read directly from configuration file
-                routes.addAll(getReverseProxyRoutesFromFile());
+            JsonNode routersData = fetchFromTraefikApi("/api/http/routers");
+            JsonNode servicesData = fetchFromTraefikApi("/api/http/services");
+            Map<String, Object> routers = convertTraefikArrayToMap(routersData);
+            Map<String, Object> services = convertTraefikArrayToMap(servicesData);
+            if (routers != null && services != null) {
+                apiRoutes.addAll(extractHttpRoutesFromApi(routers, services));
             }
 
-        } catch (Exception e) {
-            log.error("Failed to fetch routes", e);
-            throw new RuntimeException("Failed to fetch routes from Traefik", e);
+            JsonNode tcpRoutersData = fetchFromTraefikApi("/api/tcp/routers");
+            JsonNode tcpServicesData = fetchFromTraefikApi("/api/tcp/services");
+            Map<String, Object> tcpRouters = convertTraefikArrayToMap(tcpRoutersData);
+            Map<String, Object> tcpServices = convertTraefikArrayToMap(tcpServicesData);
+            if (tcpRouters != null && tcpServices != null) {
+                apiRoutes.addAll(extractTcpRoutesFromApi(tcpRouters, tcpServices));
+            }
+
+            apiRoutes.stream()
+                .filter(r -> !fileRouteDomains.contains(r.getDomainName()))
+                .forEach(result::add);
+
+            log.info("Returning {} routes ({} from file, {} API-only)",
+                result.size(), fileRoutes.size(), result.size() - fileRoutes.size());
+        } catch (Exception apiException) {
+            log.warn("Failed to fetch from Traefik API, returning file routes only", apiException);
         }
 
-        return routes;
+        return result;
     }
 
     /**
@@ -134,7 +135,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         File configFile = new File(configFilePath);
 
         try (FileInputStream inputStream = new FileInputStream(configFile)) {
-            Map<String, Object> config = yaml.load(inputStream);
+            Map<String, Object> config = new Yaml().load(inputStream);
 
             if (config == null) {
                 return routes;
@@ -147,7 +148,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                 Map<String, Object> services = getNestedMap(http, "services");
 
                 if (routers != null && services != null) {
-                    routes.addAll(extractHttpRoutes(routers, services));
+                    routes.addAll(extractHttpRoutes(routers, services, config));
                 }
             }
 
@@ -261,10 +262,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return routes;
     }
 
-    private List<ReverseProxyRoute> extractHttpRoutes(Map<String, Object> routers, Map<String, Object> services) {
+    private List<ReverseProxyRoute> extractHttpRoutes(Map<String, Object> routers, Map<String, Object> services, Map<String, Object> fullConfig) {
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
-        Map<String, Object> http = getNestedMap(config, "http");
+        Map<String, Object> http = fullConfig != null ? getNestedMap(fullConfig, "http") : null;
         Map<String, Object> middlewares = http != null ? getNestedMap(http, "middlewares") : null;
 
         for (Map.Entry<String, Object> routerEntry : routers.entrySet()) {

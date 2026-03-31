@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 @Service
 @RequiredArgsConstructor
@@ -26,11 +27,24 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForPublishingEvents forPublishingEvents;
+    private final PendingPublicationsTracker pendingPublicationsTracker;
 
     @Value("${VAIER_DOMAIN:}")
     private String vaierDomain;
 
-    private final Map<String, PublishPeerServiceUseCase.PublishStatus> pendingPublishes = new ConcurrentHashMap<>();
+    private record PendingState(boolean requiresAuth, boolean dnsPropagated) {}
+
+    // Injectable for testing; defaults to real DNS lookup
+    private Predicate<String> dnsChecker = fqdn -> {
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(fqdn);
+            return addresses != null && addresses.length > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    };
+
+    private final Map<String, PendingState> pendingPublishes = new ConcurrentHashMap<>();
 
     @Override
     public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {
@@ -44,7 +58,8 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         forPersistingDnsRecords.addDnsRecord(cname, zone);
         log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
 
-        pendingPublishes.put(subdomain, new PublishPeerServiceUseCase.PublishStatus(false, false));
+        pendingPublishes.put(subdomain, new PendingState(requiresAuth, false));
+        pendingPublicationsTracker.track(address, port);
         forPublishingEvents.publish("hosted-services", "publish-dns-created", subdomain);
 
         CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath));
@@ -59,19 +74,28 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
             pendingPublishes.remove(subdomain);
             return new PublishPeerServiceUseCase.PublishStatus(true, true);
         }
-        PublishPeerServiceUseCase.PublishStatus status = pendingPublishes.getOrDefault(subdomain, new PublishPeerServiceUseCase.PublishStatus(false, false));
-        return new PublishPeerServiceUseCase.PublishStatus(status.dnsPropagated(), false);
+        PendingState state = pendingPublishes.getOrDefault(subdomain, new PendingState(false, false));
+        return new PublishPeerServiceUseCase.PublishStatus(state.dnsPropagated(), false);
     }
 
-    private void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath) {
+    @Override
+    public List<PendingPublication> getPendingPublications() {
+        return pendingPublishes.entrySet().stream()
+            .map(e -> new PendingPublication(e.getKey(), e.getValue().requiresAuth(), e.getValue().dnsPropagated()))
+            .toList();
+    }
+
+    void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath) {
         long deadline = System.currentTimeMillis() + 120_000;
         while (System.currentTimeMillis() < deadline) {
-            if (isDnsLive(fqdn)) {
+            if (dnsChecker.test(fqdn)) {
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
-                pendingPublishes.put(subdomain, new PublishPeerServiceUseCase.PublishStatus(true, false));
+                pendingPublishes.compute(subdomain, (k, v) -> new PendingState(v != null && v.requiresAuth(), true));
                 forPublishingEvents.publish("hosted-services", "publish-dns-propagated", subdomain);
                 forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
                 log.info("Created Traefik route for {}", fqdn);
+                waitForTraefikRoute(fqdn);
+                pendingPublicationsTracker.untrack(address, port);
                 pendingPublishes.remove(subdomain);
                 forPublishingEvents.publish("hosted-services", "publish-traefik-active", subdomain);
                 forPublishingEvents.publish("hosted-services", "service-updated", subdomain);
@@ -82,17 +106,25 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         }
         log.warn("DNS propagation timed out for {}, writing Traefik route anyway", fqdn);
         forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
+        waitForTraefikRoute(fqdn);
+        pendingPublicationsTracker.untrack(address, port);
         pendingPublishes.remove(subdomain);
         forPublishingEvents.publish("hosted-services", "publish-traefik-active", subdomain);
         forPublishingEvents.publish("hosted-services", "service-updated", subdomain);
     }
 
-    private boolean isDnsLive(String fqdn) {
-        try {
-            InetAddress[] addresses = InetAddress.getAllByName(fqdn);
-            return addresses != null && addresses.length > 0;
-        } catch (Exception e) {
-            return false;
+    private void waitForTraefikRoute(String fqdn) {
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline) {
+            boolean active = forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+                .anyMatch(r -> r.getDomainName().equals(fqdn));
+            if (active) {
+                log.info("Traefik picked up route for {}", fqdn);
+                return;
+            }
+            log.debug("Waiting for Traefik to pick up route for {}", fqdn);
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
+        log.warn("Traefik did not pick up route for {} within 15s, proceeding anyway", fqdn);
     }
 }
