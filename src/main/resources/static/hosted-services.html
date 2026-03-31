@@ -489,26 +489,7 @@
                 addOptimisticService(subdomain, address, port, requiresAuth);
                 fetchPublishable();
 
-                window._publishPollInterval = setInterval(async () => {
-                    try {
-                        const statusRes = await fetch(`/hosted-services/${encodeURIComponent(subdomain)}/status`);
-                        if (!statusRes.ok) return;
-                        const status = await statusRes.json();
-                        if (status.dnsPropagated) {
-                            setStep('step-dns-propagate', true);
-                            setStep('step-traefik', false);
-                        }
-                        if (status.traefikActive) {
-                            setStep('step-traefik', true);
-                            setStep('step-done', true);
-                            document.getElementById('progressNote').textContent = 'Service is live!';
-                            clearInterval(window._publishPollInterval);
-                            window._publishPollInterval = null;
-                            await fetchServices();
-                            setTimeout(() => hidePublishModal(), 1500);
-                        }
-                    } catch (_) {}
-                }, 3000);
+                window._publishingSubdomain = subdomain;
 
             } catch (error) {
                 alert(`Failed to add service: ${error.message}`);
@@ -552,7 +533,6 @@
                     body: JSON.stringify({ requiresAuth: !currentlyAuthenticated })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                setTimeout(() => fetchServices(), 1000);
             } catch (error) {
                 alert(`Failed to update authentication: ${error.message}`);
             }
@@ -596,6 +576,36 @@
 
         fetchServices();
         fetchPublishable();
+
+        const _sse = new EventSource('/hosted-services/events');
+
+        _sse.addEventListener('publish-dns-propagated', e => {
+            if (e.data === window._publishingSubdomain) {
+                setStep('step-dns-propagate', true);
+                setStep('step-traefik', false);
+            }
+        });
+
+        _sse.addEventListener('publish-traefik-active', e => {
+            if (e.data === window._publishingSubdomain) {
+                window._publishingSubdomain = null;
+                setStep('step-traefik', true);
+                setStep('step-done', true);
+                document.getElementById('progressNote').textContent = 'Service is live!';
+                fetchServices().then(() => setTimeout(() => hidePublishModal(), 1500));
+            }
+        });
+
+        _sse.addEventListener('service-updated', () => {
+            fetchServices();
+            fetchPublishable();
+        });
+
+        _sse.onerror = () => {
+            // browser auto-reconnects; re-fetch on reconnection to catch up
+            fetchServices();
+            fetchPublishable();
+        };
     </script>
 </body>
 </html>

@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -24,6 +25,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
+    private final ForPublishingEvents forPublishingEvents;
 
     @Value("${VAIER_DOMAIN:}")
     private String vaierDomain;
@@ -43,6 +45,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
 
         pendingPublishes.put(subdomain, new PublishPeerServiceUseCase.PublishStatus(false, false));
+        forPublishingEvents.publish("hosted-services", "publish-dns-created", subdomain);
 
         CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath));
     }
@@ -66,9 +69,12 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
             if (isDnsLive(fqdn)) {
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
                 pendingPublishes.put(subdomain, new PublishPeerServiceUseCase.PublishStatus(true, false));
+                forPublishingEvents.publish("hosted-services", "publish-dns-propagated", subdomain);
                 forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
                 log.info("Created Traefik route for {}", fqdn);
                 pendingPublishes.remove(subdomain);
+                forPublishingEvents.publish("hosted-services", "publish-traefik-active", subdomain);
+                forPublishingEvents.publish("hosted-services", "service-updated", subdomain);
                 return;
             }
             log.debug("DNS not yet live for {}, retrying in 3s", fqdn);
@@ -77,6 +83,8 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         log.warn("DNS propagation timed out for {}, writing Traefik route anyway", fqdn);
         forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
         pendingPublishes.remove(subdomain);
+        forPublishingEvents.publish("hosted-services", "publish-traefik-active", subdomain);
+        forPublishingEvents.publish("hosted-services", "service-updated", subdomain);
     }
 
     private boolean isDnsLive(String fqdn) {

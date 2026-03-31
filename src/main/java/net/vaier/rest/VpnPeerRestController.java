@@ -21,6 +21,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -39,6 +40,12 @@ public class VpnPeerRestController {
     private final GetPeerConfigUseCase getPeerConfigUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
+    private final SseEventPublisher sseEventPublisher;
+
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribeToEvents() {
+        return sseEventPublisher.subscribe("vpn-peers");
+    }
 
     @GetMapping
     public ResponseEntity<List<VpnPeerResponse>> listPeers() {
@@ -95,6 +102,7 @@ public class VpnPeerRestController {
                 createdPeer.peerType().name()
         );
 
+        sseEventPublisher.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.ok(response);
     }
 
@@ -105,6 +113,7 @@ public class VpnPeerRestController {
         try {
             String interfaceName = "wg0"; // Default WireGuard interface
             deletePeerUseCase.deletePeer(interfaceName, peerIdentifier);
+            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             log.error("Peer not found: {}", e.getMessage());

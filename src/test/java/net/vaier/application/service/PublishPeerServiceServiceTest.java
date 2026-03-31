@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.ReverseProxyRoute;
@@ -27,6 +28,9 @@ class PublishPeerServiceServiceTest {
 
     @Mock
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+
+    @Mock
+    ForPublishingEvents forPublishingEvents;
 
     @InjectMocks
     PublishPeerServiceService service;
@@ -98,6 +102,13 @@ class PublishPeerServiceServiceTest {
         PublishStatus status = service.getPublishStatus("app");
 
         assertThat(status.traefikActive()).isTrue();
+    }
+
+    @Test
+    void publishService_emitsDnsCreatedEvent() {
+        service.publishService("10.0.0.1", 8080, "app", false, null);
+
+        verify(forPublishingEvents).publish("hosted-services", "publish-dns-created", "app");
     }
 
     private ReverseProxyRoute routeWithDomain(String domain) {

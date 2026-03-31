@@ -9,8 +9,10 @@ import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -25,6 +27,12 @@ public class HostedServiceRestController {
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
+    private final SseEventPublisher sseEventPublisher;
+
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribeToEvents() {
+        return sseEventPublisher.subscribe("hosted-services");
+    }
 
     @GetMapping("/discover")
     public List<HostedServiceUco> getHostedServices() {
@@ -47,6 +55,7 @@ public class HostedServiceRestController {
     public ResponseEntity<Void> setAuth(@PathVariable String dnsName, @RequestBody AuthRequest request) {
         log.info("Setting auth={} for {}", request.requiresAuth(), dnsName);
         toggleServiceAuthUseCase.setAuthentication(dnsName, request.requiresAuth());
+        sseEventPublisher.publish("hosted-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 
@@ -60,6 +69,7 @@ public class HostedServiceRestController {
     public ResponseEntity<Void> deleteService(@PathVariable String dnsName) {
         log.info("Deleting hosted service: {}", dnsName);
         deleteHostedServiceUseCase.deleteService(dnsName);
+        sseEventPublisher.publish("hosted-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 

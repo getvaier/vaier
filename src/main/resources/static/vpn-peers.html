@@ -737,7 +737,7 @@
                 hideCreatePeerModal();
                 displaySuccess(`Peer "${createdPeer.name}" created`);
                 showPeerDetails(createdPeer);
-                setTimeout(() => fetchPeers(), 1000);
+                // peers-updated SSE event will trigger fetchPeers()
             } catch (error) {
                 displayError(`Failed to create peer: ${error.message}`);
             } finally {
@@ -848,7 +848,7 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 hideDeleteConfirmModal();
                 displaySuccess(`Peer "${peerName}" deleted`);
-                setTimeout(() => fetchPeers(), 500);
+                // peers-updated SSE event will trigger fetchPeers()
             } catch (error) {
                 displayError(`Failed to delete peer: ${error.message}`);
             }
@@ -889,7 +889,10 @@
         };
 
         fetchPeers();
-        setInterval(fetchPeers, 10000);
+
+        const _sse = new EventSource('/vpn/peers/events');
+        _sse.addEventListener('peers-updated', () => fetchPeers());
+        _sse.onerror = () => fetchPeers(); // re-fetch on reconnection to catch up
     </script>
 </body>
 </html>
