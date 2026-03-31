@@ -4,8 +4,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.PeerType;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
@@ -22,6 +24,7 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingServerInfo forGettingServerInfo;
+    private final ForGettingPeerConfigurations forGettingPeerConfigurations;
 
     @Override
     public List<PeerContainers> discoverAll() {
@@ -31,6 +34,15 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
         for (VpnClient client : clients) {
             String vpnIp = client.allowedIps().split("/")[0];
             String peerName = forResolvingPeerNames.resolvePeerNameByIp(vpnIp);
+
+            PeerType peerType = forGettingPeerConfigurations.getPeerConfigByIp(vpnIp)
+                    .map(ForGettingPeerConfigurations.PeerConfiguration::peerType)
+                    .orElse(PeerType.UBUNTU_SERVER);
+
+            if (!peerType.isServerType()) {
+                log.debug("Skipping Docker discovery for non-server peer {} ({}) of type {}", peerName, vpnIp, peerType);
+                continue;
+            }
 
             try {
                 Server server = new Server(vpnIp, 2375, false);

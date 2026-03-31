@@ -115,6 +115,21 @@ After any change to the feature set — new features, changed behaviour, removed
 
 The two documents must always reflect the actual state of the codebase. Stale docs are treated as bugs.
 
+## After changing code
+
+After any code change, build and deploy to the local Docker Compose stack:
+
+```bash
+docker build -t getvaier/vaier:latest .
+docker compose up -d --force-recreate vaier
+```
+
+Then ask the user to verify the fix works.
+
+If the user confirms the fix is good:
+1. Commit and push the changes to git.
+2. If the change was triggered by a GitHub issue, close that issue (ask the user for confirmation first if not already given).
+
 ## Server development
 
 When developing on a server, you can use the `docker-compose.yml` file to run the full stack locally. This is useful for testing and debugging changes before deploying to production.
