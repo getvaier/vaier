@@ -160,6 +160,36 @@ class HostingServiceTest {
     }
 
     @Test
+    void getHostedServices_regularService_mandatoryIsFalse() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        assertThat(service.getHostedServices().get(0).mandatory()).isFalse();
+    }
+
+    @Test
+    void getHostedServices_vaierService_mandatoryIsTrue() {
+        setupOneRoute("vaier.example.com", "10.0.0.1", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        assertThat(service.getHostedServices().get(0).mandatory()).isTrue();
+    }
+
+    @Test
+    void getHostedServices_authService_mandatoryIsTrue() {
+        setupOneRoute("auth.example.com", "10.0.0.1", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        assertThat(service.getHostedServices().get(0).mandatory()).isTrue();
+    }
+
+    @Test
     void getHostedServices_expensivePortsCalledExactlyOnce() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("app.example.com", "10.0.0.1", 8080),

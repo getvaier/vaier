@@ -13,8 +13,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class DeleteHostedServiceServiceTest {
@@ -54,6 +56,20 @@ class DeleteHostedServiceServiceTest {
         InOrder order = inOrder(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
         order.verify(forPersistingReverseProxyRoutes).deleteReverseProxyRouteByDnsName("app.example.com");
         order.verify(forPersistingDnsRecords).deleteDnsRecord("app.example.com", DnsRecordType.CNAME, new DnsZone("example.com"));
+    }
+
+    @Test
+    void deleteService_rejectsVaierService() {
+        assertThrows(IllegalArgumentException.class, () -> service.deleteService("vaier.example.com"));
+
+        verifyNoInteractions(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
+    }
+
+    @Test
+    void deleteService_rejectsAuthService() {
+        assertThrows(IllegalArgumentException.class, () -> service.deleteService("auth.example.com"));
+
+        verifyNoInteractions(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
     }
 
     @Test

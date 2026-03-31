@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.DeleteHostedServiceUseCase;
 import net.vaier.application.GetHostedServicesUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -54,6 +55,8 @@ public class HostingService implements GetHostedServicesUseCase {
 
     private HostedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices) {
+        boolean mandatory = DeleteHostedServiceUseCase.MANDATORY_SUBDOMAINS.stream()
+            .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
         return new HostedServiceUco(
             route.getName(),
             route.getDomainName(),
@@ -61,7 +64,8 @@ public class HostingService implements GetHostedServicesUseCase {
             route.getAddress(),
             route.getPort(),
             hostState(route.getAddress(), route.getPort(), localServices, vpnClients),
-            route.getAuthInfo() != null
+            route.getAuthInfo() != null,
+            mandatory
         );
     }
 

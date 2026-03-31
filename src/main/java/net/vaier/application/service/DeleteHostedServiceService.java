@@ -23,6 +23,11 @@ public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
 
     @Override
     public void deleteService(String fqdn) {
+        boolean isMandatory = MANDATORY_SUBDOMAINS.stream()
+            .anyMatch(sub -> fqdn.equals(sub + "." + vaierDomain));
+        if (isMandatory) {
+            throw new IllegalArgumentException("Cannot delete built-in service: " + fqdn);
+        }
         log.info("Deleting service: {}", fqdn);
 
         forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);

@@ -15,7 +15,8 @@ public interface GetHostedServicesUseCase {
         String hostAddress,
         int hostPort,
         State state,
-        boolean authenticated
+        boolean authenticated,
+        boolean mandatory
     ){
 
     }
