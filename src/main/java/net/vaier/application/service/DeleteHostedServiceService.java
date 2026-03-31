@@ -33,7 +33,30 @@ public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
         forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);
         log.info("Deleted Traefik route for {}", fqdn);
 
+        waitForTraefikRouteDeletion(fqdn);
+
         forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(vaierDomain));
         log.info("Deleted DNS CNAME for {}", fqdn);
+    }
+
+    private void waitForTraefikRouteDeletion(String fqdn) {
+        long deadline = System.currentTimeMillis() + 15_000;
+        int consecutiveAbsent = 0;
+        while (System.currentTimeMillis() < deadline) {
+            boolean stillPresent = forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+                .anyMatch(r -> r.getDomainName().equals(fqdn));
+            if (!stillPresent) {
+                consecutiveAbsent++;
+                if (consecutiveAbsent >= 2) {
+                    log.info("Traefik confirmed route deletion for {}", fqdn);
+                    return;
+                }
+            } else {
+                consecutiveAbsent = 0;
+            }
+            log.debug("Waiting for Traefik to remove route for {}", fqdn);
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+        }
+        log.warn("Traefik did not remove route for {} within 15s, proceeding anyway", fqdn);
     }
 }

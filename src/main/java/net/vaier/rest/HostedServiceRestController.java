@@ -65,6 +65,11 @@ public class HostedServiceRestController {
         return new PublishStatusResponse(status.dnsPropagated(), status.traefikActive());
     }
 
+    @GetMapping("/pending")
+    public List<PublishPeerServiceUseCase.PendingPublication> getPendingPublications() {
+        return publishPeerServiceUseCase.getPendingPublications();
+    }
+
     @DeleteMapping("/{dnsName:.+}")
     public ResponseEntity<Void> deleteService(@PathVariable String dnsName) {
         log.info("Deleting hosted service: {}", dnsName);

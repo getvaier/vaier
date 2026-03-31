@@ -109,6 +109,7 @@
 
         .status-connected    { background: var(--green); box-shadow: 0 0 4px var(--green); }
         .status-disconnected { background: var(--red); }
+        .status-pending      { background: var(--yellow, #f59e0b); }
 
         /* Discoverable section */
         .section-header {
@@ -212,11 +213,20 @@
             <div class="loading">Loading services…</div>
         </div>
 
-        <div class="section-header">
-            <span class="section-title">Discoverable services</span>
+        <div id="processing-section" style="display:none">
+            <div class="section-header">
+                <span class="section-title">Processing</span>
+            </div>
+            <div id="processing-container"></div>
         </div>
-        <div id="publishable-container">
-            <div class="loading">Loading…</div>
+
+        <div id="discoverable-section">
+            <div class="section-header">
+                <span class="section-title">Discoverable services</span>
+            </div>
+            <div id="publishable-container">
+                <div class="loading">Loading…</div>
+            </div>
         </div>
     </div>
 
@@ -258,15 +268,6 @@
                     <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
                     <button class="btn btn-primary"   id="publishSubmitBtn" onclick="submitPublish()">Add Service</button>
                 </div>
-            </div>
-            <div id="publishProgress" style="display:none; padding: 0.75rem 0;">
-                <div id="progressSteps" style="display:flex;flex-direction:column;gap:0.6rem;margin-bottom:1.25rem;">
-                    <div id="step-dns-create"    class="progress-step"><span class="step-icon">⏳</span><span>Creating DNS record…</span></div>
-                    <div id="step-dns-propagate" class="progress-step" style="opacity:0.35"><span class="step-icon">⏳</span><span>Waiting for DNS propagation…</span></div>
-                    <div id="step-traefik"       class="progress-step" style="opacity:0.35"><span class="step-icon">⏳</span><span>Activating reverse proxy route…</span></div>
-                    <div id="step-done"          class="progress-step" style="opacity:0.35"><span class="step-icon">⏳</span><span>Ready</span></div>
-                </div>
-                <div style="font-size:0.75rem;color:var(--text-dim);" id="progressNote">This may take up to 2 minutes for DNS to propagate.</div>
             </div>
         </div>
     </div>
@@ -323,7 +324,6 @@
 
         function displayServices(services) {
             const container = document.getElementById('services-container');
-            container.querySelectorAll('[id^="optimistic-"]').forEach(el => el.remove());
             if (services.length === 0) {
                 container.innerHTML = '<div class="loading">No hosted services yet</div>';
                 return;
@@ -393,10 +393,8 @@
 
         function displayPublishable(services) {
             const container = document.getElementById('publishable-container');
-            if (services.length === 0) {
-                container.innerHTML = '<div class="loading">All services are already published</div>';
-                return;
-            }
+            document.getElementById('discoverable-section').style.display = services.length === 0 ? 'none' : '';
+            if (services.length === 0) return;
 
             const html = services.map(s => {
                 const isLocal = s.source === 'LOCAL';
@@ -446,16 +444,60 @@
 
         function hidePublishModal() {
             document.getElementById('publishModal').classList.remove('active');
-            document.getElementById('publishForm').style.display     = '';
-            document.getElementById('publishProgress').style.display = 'none';
-            clearInterval(window._publishPollInterval);
-            window._publishPollInterval = null;
         }
 
-        function setStep(id, done) {
-            const el = document.getElementById(id);
+        function addProcessingCard(subdomain, requiresAuth, dnsPropagated) {
+            const id = cardId(subdomain);
+            if (document.getElementById('proc-' + id)) return; // already exists
+            const authBadge = requiresAuth
+                ? '<span class="badge badge-success">auth</span>'
+                : '<span class="badge badge-warning">no-auth</span>';
+            const step2opacity = dnsPropagated ? '1' : '0.35';
+            const step2icon    = dnsPropagated ? '✓' : '⏳';
+            const card = document.createElement('div');
+            card.id = 'proc-' + id;
+            card.className = 'service-card';
+            card.innerHTML = `
+                <div class="service-header" style="cursor:default">
+                    <div class="service-header-left">
+                        <span class="status-dot status-pending"></span>
+                        <span class="service-name">${subdomain}</span>
+                    </div>
+                    <div class="service-actions">${authBadge}</div>
+                </div>
+                <div style="padding:0.5rem 1rem 0.75rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:0.35rem">
+                    <div id="proc-step-dns-create-${id}"    class="progress-step"><span class="step-icon">✓</span><span>DNS record created</span></div>
+                    <div id="proc-step-dns-propagate-${id}" class="progress-step" style="opacity:${step2opacity}"><span class="step-icon">${step2icon}</span><span>Waiting for DNS propagation…</span></div>
+                    <div id="proc-step-traefik-${id}"       class="progress-step" style="opacity:0.35"><span class="step-icon">⏳</span><span>Activating reverse proxy route…</span></div>
+                </div>`;
+            document.getElementById('processing-container').appendChild(card);
+            document.getElementById('processing-section').style.display = '';
+        }
+
+        function removeProcessingCard(subdomain) {
+            const el = document.getElementById('proc-' + cardId(subdomain));
+            if (el) el.remove();
+            const container = document.getElementById('processing-container');
+            if (container.children.length === 0)
+                document.getElementById('processing-section').style.display = 'none';
+        }
+
+        function setProcessingStep(subdomain, stepId, done) {
+            const el = document.getElementById('proc-step-' + stepId + '-' + cardId(subdomain));
+            if (!el) return;
             el.style.opacity = '1';
             el.querySelector('.step-icon').textContent = done ? '✓' : '⏳';
+        }
+
+        async function fetchPending() {
+            try {
+                const response = await fetch('/hosted-services/pending');
+                if (!response.ok) return;
+                (await response.json()).forEach(p => {
+                    addProcessingCard(p.subdomain, p.requiresAuth, p.dnsPropagated);
+                    if (p.dnsPropagated) setProcessingStep(p.subdomain, 'dns-propagate', true);
+                });
+            } catch (e) { /* ignore */ }
         }
 
         async function submitPublish() {
@@ -466,6 +508,12 @@
             const requiresAuth     = document.getElementById('publishRequiresAuth').checked;
 
             if (!subdomain) { alert('Please enter a subdomain'); return; }
+
+            const id = cardId(subdomain);
+            if (document.getElementById('proc-' + id) || document.getElementById('body-' + id)) {
+                alert(`"${subdomain}" is already active or being added.`);
+                return;
+            }
 
             const submitBtn = document.getElementById('publishSubmitBtn');
             const cancelBtn = document.getElementById('publishCancelBtn');
@@ -481,48 +529,17 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-                document.getElementById('publishForm').style.display     = 'none';
-                document.getElementById('publishProgress').style.display = '';
-                setStep('step-dns-create', true);
-                setStep('step-dns-propagate', false);
-
-                addOptimisticService(subdomain, address, port, requiresAuth);
+                hidePublishModal();
+                addProcessingCard(subdomain, requiresAuth, false);
                 fetchPublishable();
-
-                window._publishingSubdomain = subdomain;
 
             } catch (error) {
                 alert(`Failed to add service: ${error.message}`);
+            } finally {
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
                 submitBtn.textContent = 'Add Service';
             }
-        }
-
-        function addOptimisticService(subdomain, address, port, requiresAuth) {
-            const container   = document.getElementById('services-container');
-            const placeholder = container.querySelector('.loading');
-            if (placeholder) placeholder.remove();
-
-            const id        = cardId(subdomain);
-            const authBadge = requiresAuth
-                ? '<span class="badge badge-success">auth</span>'
-                : '<span class="badge badge-warning">no-auth</span>';
-
-            const card = document.createElement('div');
-            card.id        = 'optimistic-' + id;
-            card.className = 'service-card';
-            card.style.opacity = '0.5';
-            card.innerHTML = `
-                <div class="service-header">
-                    <div class="service-header-left">
-                        <span class="status-dot status-disconnected"></span>
-                        <span class="service-name">${subdomain}</span>
-                        <span style="font-size:0.75rem;color:var(--text-dim)">syncing…</span>
-                    </div>
-                    <div class="service-actions">${authBadge}</div>
-                </div>`;
-            container.insertBefore(card, container.firstChild);
         }
 
         async function toggleAuth(btn, dnsAddress, currentlyAuthenticated) {
@@ -586,30 +603,32 @@
 
         fetchServices();
         fetchPublishable();
+        fetchPending();
 
         const _sse = new EventSource('/hosted-services/events');
 
         _sse.addEventListener('publish-dns-propagated', e => {
-            if (e.data === window._publishingSubdomain) {
-                setStep('step-dns-propagate', true);
-                setStep('step-traefik', false);
-            }
+            setProcessingStep(e.data, 'dns-propagate', true);
+            setProcessingStep(e.data, 'traefik', false);  // reveal step 3
         });
 
         _sse.addEventListener('publish-traefik-active', e => {
-            if (e.data === window._publishingSubdomain) {
-                window._publishingSubdomain = null;
-                setStep('step-traefik', true);
-                setStep('step-done', true);
-                document.getElementById('progressNote').textContent = 'Service is live!';
-                Promise.all([fetchServices(), fetchPublishable()])
-                    .then(() => setTimeout(() => hidePublishModal(), 1500));
-            }
+            setProcessingStep(e.data, 'traefik', true);
+            setTimeout(() => {
+                removeProcessingCard(e.data);
+                Promise.all([fetchServices(), fetchPublishable()]);
+            }, 800);
         });
 
         _sse.addEventListener('service-updated', () => {
             // Auth toggle uses optimistic updates; new service publish is handled by publish-traefik-active
         });
+
+        let _sseConnected = false;
+        _sse.onopen = () => {
+            if (_sseConnected) { fetchServices(); fetchPublishable(); fetchPending(); }
+            _sseConnected = true;
+        };
 
         _sse.onerror = () => {
             // browser auto-reconnects; re-fetch on reconnection to catch up

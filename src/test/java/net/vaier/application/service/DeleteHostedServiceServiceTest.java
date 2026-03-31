@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,10 +14,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.*;
+
+
 
 @ExtendWith(MockitoExtension.class)
 class DeleteHostedServiceServiceTest {
@@ -70,6 +73,36 @@ class DeleteHostedServiceServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.deleteService("auth.example.com"));
 
         verifyNoInteractions(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
+    }
+
+    @Test
+    void deleteService_waitsForTraefikRouteToDisappearBeforeReturning() {
+        // route present → empty (transitional) → empty (stable): needs 2 consecutive absences
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc", null)))
+            .thenReturn(List.of());
+
+        service.deleteService("app.example.com");
+
+        InOrder order = inOrder(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
+        order.verify(forPersistingReverseProxyRoutes).deleteReverseProxyRouteByDnsName("app.example.com");
+        order.verify(forPersistingReverseProxyRoutes, atLeast(3)).getReverseProxyRoutes();
+        order.verify(forPersistingDnsRecords).deleteDnsRecord(any(), any(), any());
+    }
+
+    @Test
+    void deleteService_requiresTwoConsecutiveAbsentChecks() {
+        // Simulates Traefik briefly returning empty during reload, then empty again (stable)
+        // A single empty reading is not enough — other routes could temporarily disappear too
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc", null)))
+            .thenReturn(List.of(new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc", null))) // still present after first empty check
+            .thenReturn(List.of())  // first absence
+            .thenReturn(List.of()); // second absence → stable
+
+        service.deleteService("app.example.com");
+
+        verify(forPersistingReverseProxyRoutes, atLeast(4)).getReverseProxyRoutes();
     }
 
     @Test

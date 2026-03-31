@@ -1,10 +1,14 @@
 package net.vaier.application;
 
+import java.util.List;
+
 public interface PublishPeerServiceUseCase {
 
     void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath);
 
     PublishStatus getPublishStatus(String subdomain);
+
+    List<PendingPublication> getPendingPublications();
 
     enum PublishableSource { LOCAL, PEER }
 
@@ -18,4 +22,6 @@ public interface PublishPeerServiceUseCase {
     ) {}
 
     record PublishStatus(boolean dnsPropagated, boolean traefikActive) {}
+
+    record PendingPublication(String subdomain, boolean requiresAuth, boolean dnsPropagated) {}
 }

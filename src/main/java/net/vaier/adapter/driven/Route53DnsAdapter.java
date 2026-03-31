@@ -44,7 +44,7 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords {
         ResourceRecordSet recordSet = toResourceRecordSet(dnsRecord);
 
         Change change = Change.builder()
-                .action(ChangeAction.CREATE)
+                .action(ChangeAction.UPSERT)
                 .resourceRecordSet(recordSet)
                 .build();
 
