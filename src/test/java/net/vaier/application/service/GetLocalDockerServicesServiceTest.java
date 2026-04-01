@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
+import net.vaier.config.ServiceNames;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
@@ -31,7 +32,7 @@ class GetLocalDockerServicesServiceTest {
     @Test
     void getUnpublishedLocalServices_excludesWireguardContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class)))
-            .thenReturn(List.of(dockerService("wireguard", 51820, "tcp")));
+            .thenReturn(List.of(dockerService(ServiceNames.WIREGUARD, 51820, "tcp")));
 
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
@@ -39,7 +40,7 @@ class GetLocalDockerServicesServiceTest {
     @Test
     void getUnpublishedLocalServices_excludesAutheliaContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(dockerService("authelia", 9091, "tcp")));
+            .thenReturn(List.of(dockerService(ServiceNames.AUTHELIA, 9091, "tcp")));
 
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
@@ -47,7 +48,7 @@ class GetLocalDockerServicesServiceTest {
     @Test
     void getUnpublishedLocalServices_excludesRedisContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(dockerService("redis", 6379, "tcp")));
+            .thenReturn(List.of(dockerService(ServiceNames.REDIS, 6379, "tcp")));
 
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
@@ -55,7 +56,7 @@ class GetLocalDockerServicesServiceTest {
     @Test
     void getUnpublishedLocalServices_excludesVaierContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(dockerService("vaier", 8080, "tcp")));
+            .thenReturn(List.of(dockerService(ServiceNames.VAIER, 8080, "tcp")));
 
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
@@ -63,7 +64,7 @@ class GetLocalDockerServicesServiceTest {
     @Test
     void getUnpublishedLocalServices_excludesWireguardMasqueradeContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(dockerService("wireguard-masquerade", 8080, "tcp")));
+            .thenReturn(List.of(dockerService(ServiceNames.WIREGUARD_MASQUERADE, 8080, "tcp")));
 
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
@@ -71,12 +72,12 @@ class GetLocalDockerServicesServiceTest {
     @Test
     void getUnpublishedLocalServices_traefikOnPort8080_includedWithDashboardRedirect() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(dockerService("traefik", 8080, "tcp")));
+            .thenReturn(List.of(dockerService(ServiceNames.TRAEFIK, 8080, "tcp")));
 
         List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).containerName()).isEqualTo("traefik");
+        assertThat(result.get(0).containerName()).isEqualTo(ServiceNames.TRAEFIK);
         assertThat(result.get(0).port()).isEqualTo(8080);
         assertThat(result.get(0).rootRedirectPath()).isEqualTo("/dashboard/");
         assertThat(result.get(0).source()).isEqualTo(PublishableSource.LOCAL);

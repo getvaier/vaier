@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetLocalDockerServicesUseCase;
+import net.vaier.config.ServiceNames;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
 import net.vaier.domain.ReverseProxyRoute;
@@ -21,14 +22,15 @@ import java.util.Set;
 public class GetLocalDockerServicesService implements GetLocalDockerServicesUseCase {
 
     private static final Set<String> EXCLUDED_NAMES = Set.of(
-        "wireguard", "wireguard-masquerade", "authelia", "redis", "vaier"
+        ServiceNames.WIREGUARD, ServiceNames.WIREGUARD_MASQUERADE,
+        ServiceNames.AUTHELIA, ServiceNames.REDIS, ServiceNames.VAIER
     );
 
     // Known services with constrained ports and a root redirect path when applicable
     private record KnownService(Set<Integer> allowedPorts, String rootRedirectPath) {}
 
     private static final Map<String, KnownService> KNOWN_SERVICES = Map.of(
-        "traefik", new KnownService(Set.of(8080), "/dashboard/")
+        ServiceNames.TRAEFIK, new KnownService(Set.of(8080), "/dashboard/")
     );
 
     private final ForGettingServerInfo forGettingServerInfo;

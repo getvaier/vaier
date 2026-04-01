@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.application.CreatePeerUseCase;
+import net.vaier.config.ServiceNames;
 import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
@@ -192,7 +193,7 @@ public class VpnPeerRestController {
     public ResponseEntity<Resource> downloadDockerCompose(
             @PathVariable String peerName,
             @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
-            @RequestParam(required = false, defaultValue = "51820") String serverPort
+            @RequestParam(required = false, defaultValue = ServiceNames.DEFAULT_WG_PORT) String serverPort
     ) {
         log.info("Generating docker-compose for peer: {}", peerName);
 
@@ -213,7 +214,7 @@ public class VpnPeerRestController {
     public ResponseEntity<Resource> downloadSetupScript(
             @PathVariable String peerName,
             @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
-            @RequestParam(required = false, defaultValue = "51820") String serverPort
+            @RequestParam(required = false, defaultValue = ServiceNames.DEFAULT_WG_PORT) String serverPort
     ) {
         log.info("Generating setup script for peer: {}", peerName);
 

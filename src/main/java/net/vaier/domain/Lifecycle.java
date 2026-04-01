@@ -7,6 +7,7 @@ import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.config.ServiceNames;
 import java.util.Optional;
 
 @Slf4j
@@ -40,13 +41,13 @@ public class Lifecycle {
         forInitialisingUserService.initialiseConfiguration();
 
         Optional<User> admin = forPersistingUsers.getUsers().stream()
-            .filter(user -> user.getName().equals("admin"))
+            .filter(user -> user.getName().equals(ServiceNames.DEFAULT_ADMIN_USERNAME))
             .findFirst();
         if(admin.isEmpty()) {
-            forPersistingUsers.addUser("admin", "admin", "", "Admin");
+            forPersistingUsers.addUser(ServiceNames.DEFAULT_ADMIN_USERNAME, ServiceNames.DEFAULT_ADMIN_USERNAME, "", "Admin");
         }
 
-        containerRestarter.restartContainer("authelia");
+        containerRestarter.restartContainer(ServiceNames.AUTHELIA);
     }
 
     private void initDns() {
@@ -60,8 +61,8 @@ public class Lifecycle {
 
         log.info("DNS zone found: " + dnsZone.name());
 
-        String vaierHost = "vaier." + VAIER_DOMAIN;
-        String authHost = "auth." + VAIER_DOMAIN;
+        String vaierHost = ServiceNames.VAIER + "." + VAIER_DOMAIN;
+        String authHost = ServiceNames.AUTH + "." + VAIER_DOMAIN;
 
         DnsRecord dnsRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
             .filter(record -> record.name().equals(vaierHost))

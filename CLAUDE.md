@@ -56,6 +56,10 @@ Swagger UI: `http://localhost:8080/swagger-ui.html` (local) or `http://localhost
 
 All state is file-based (WireGuard/Traefik/Authelia YAML configs), cloud-based (Route53), or ephemeral (Redis for Authelia sessions). No SQL database or ORM.
 
+### Strict layer isolation
+
+Application services must never import from an unrelated use case interface just to share a constant or utility. If two unrelated services happen to need the same string value (e.g. a container name and a subdomain that are both "vaier"), keep them as separate literals in their own contexts — forced sharing via an unrelated interface creates spaghetti dependencies that violate the hexagonal architecture. Only introduce shared constants when the concepts are genuinely the same and the coupling is intentional.
+
 ## Tech Stack
 
 - Java 21, Spring Boot 3.5.5, Maven

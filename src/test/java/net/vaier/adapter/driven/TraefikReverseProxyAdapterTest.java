@@ -1,5 +1,6 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.ReverseProxyRoute;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,7 +67,7 @@ class TraefikReverseProxyAdapterTest {
         adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080, true, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains("auth-middleware");
+        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
     }
 
     @Test
@@ -74,7 +75,7 @@ class TraefikReverseProxyAdapterTest {
         adapter.addReverseProxyRoute("open.example.com", "10.13.13.2", 8080, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).doesNotContain("auth-middleware");
+        assertThat(content).doesNotContain(ServiceNames.AUTH_MIDDLEWARE);
     }
 
     @Test
@@ -82,7 +83,7 @@ class TraefikReverseProxyAdapterTest {
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains("websecure");
+        assertThat(content).contains(ServiceNames.ENTRY_POINT_WEBSECURE);
     }
 
     @Test
@@ -90,7 +91,7 @@ class TraefikReverseProxyAdapterTest {
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains("letsencrypt");
+        assertThat(content).contains(ServiceNames.CERT_RESOLVER);
     }
 
     // --- deleteReverseProxyRouteByDnsName ---
@@ -133,7 +134,7 @@ class TraefikReverseProxyAdapterTest {
         adapter.setRouteAuthentication("app.example.com", true);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains("auth-middleware");
+        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
     }
 
     @Test

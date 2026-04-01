@@ -2,6 +2,7 @@ package net.vaier.adapter.driven;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import java.io.File;
@@ -766,19 +767,19 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         // Standard entryPoints
         List<String> entryPoints = new ArrayList<>();
-        entryPoints.add("websecure");
+        entryPoints.add(ServiceNames.ENTRY_POINT_WEBSECURE);
         routerConfig.put("entryPoints", entryPoints);
 
         routerConfig.put("service", serviceName);
 
         // Standard TLS configuration with letsencrypt
         Map<String, Object> tlsMap = new LinkedHashMap<>();
-        tlsMap.put("certResolver", "letsencrypt");
+        tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
 
         // Build middleware list
         List<String> middlewareList = new ArrayList<>();
-        if (requiresAuth) middlewareList.add("auth-middleware");
+        if (requiresAuth) middlewareList.add(ServiceNames.AUTH_MIDDLEWARE);
         if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
         if (!middlewareList.isEmpty()) routerConfig.put("middlewares", middlewareList);
 
@@ -989,7 +990,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         Map<String, Object> routerConfig = castToMap(routers.get(routerName));
         if (requiresAuth) {
-            routerConfig.put("middlewares", new ArrayList<>(List.of("auth-middleware")));
+            routerConfig.put("middlewares", new ArrayList<>(List.of(ServiceNames.AUTH_MIDDLEWARE)));
             ensureAuthMiddlewareExists(http);
         } else {
             routerConfig.remove("middlewares");
@@ -1057,7 +1058,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         Map<String, Object> middlewares = getOrCreateNestedMapOrdered(http, "middlewares");
 
         // Check if auth-middleware already exists
-        if (!middlewares.containsKey("auth-middleware")) {
+        if (!middlewares.containsKey(ServiceNames.AUTH_MIDDLEWARE)) {
             // Create standard auth-middleware with forwardAuth to Authelia
             Map<String, Object> authMiddleware = new LinkedHashMap<>();
             Map<String, Object> forwardAuth = new LinkedHashMap<>();
@@ -1072,7 +1073,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             forwardAuth.put("authResponseHeaders", authResponseHeaders);
 
             authMiddleware.put("forwardAuth", forwardAuth);
-            middlewares.put("auth-middleware", authMiddleware);
+            middlewares.put(ServiceNames.AUTH_MIDDLEWARE, authMiddleware);
         }
     }
 

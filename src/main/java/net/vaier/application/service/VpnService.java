@@ -8,6 +8,7 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.application.CreatePeerUseCase;
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import jakarta.annotation.PostConstruct;
@@ -242,7 +243,7 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers {
             serverUrl = System.getenv().getOrDefault("SERVERURL", "vaier.eilertsen.family");
         }
 
-        String serverPort = System.getenv().getOrDefault("SERVERPORT", "51820");
+        String serverPort = System.getenv().getOrDefault("SERVERPORT", ServiceNames.DEFAULT_WG_PORT);
         return serverUrl + ":" + serverPort;
     }
 

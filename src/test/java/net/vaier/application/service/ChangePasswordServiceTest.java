@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ class ChangePasswordServiceTest {
         service.changePassword("alice", "newpassword");
 
         verify(forPersistingUsers).changePassword("alice", "newpassword");
-        verify(forRestartingContainers).restartContainer("authelia");
+        verify(forRestartingContainers).restartContainer(ServiceNames.AUTHELIA);
     }
 
     @Test

@@ -339,6 +339,7 @@
                     ? '<span class="badge badge-success">auth</span>'
                     : '<span class="badge badge-warning">no-auth</span>';
                 const serviceUrl = `https://${service.dnsAddress}`;
+                const isSelf = service.dnsAddress.startsWith('vaier.');
 
                 return `
                 <div class="service-card">
@@ -346,7 +347,7 @@
                         <div class="service-header-left">
                             <span class="status-dot ${dotClass}"></span>
                             <span class="service-name">${service.name}</span>
-                            ${dnsOk
+                            ${dnsOk && !isSelf
                                 ? `<a class="service-link" href="${serviceUrl}" target="_blank" onclick="event.stopPropagation()">${service.dnsAddress}</a>`
                                 : `<span style="font-size:0.75rem;color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`}
                         </div>

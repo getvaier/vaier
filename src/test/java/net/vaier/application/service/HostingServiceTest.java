@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.Server.State;
@@ -186,7 +187,7 @@ class HostingServiceTest {
 
     @Test
     void getHostedServices_vaierService_mandatoryIsTrue() {
-        setupOneRoute("vaier.example.com", "10.0.0.1", 8080);
+        setupOneRoute(ServiceNames.VAIER + ".example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();

@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.ChangePasswordUseCase;
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,6 @@ public class ChangePasswordService implements ChangePasswordUseCase {
     @Override
     public void changePassword(String username, String newPassword) {
         forPersistingUsers.changePassword(username, newPassword);
-        forRestartingContainers.restartContainer("authelia");
+        forRestartingContainers.restartContainer(ServiceNames.AUTHELIA);
     }
 }

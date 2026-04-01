@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.DeleteHostedServiceUseCase;
+import net.vaier.config.ServiceNames;
 import net.vaier.application.GetHostedServicesUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
