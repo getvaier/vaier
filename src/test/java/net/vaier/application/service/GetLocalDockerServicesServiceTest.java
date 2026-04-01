@@ -132,7 +132,7 @@ class GetLocalDockerServicesServiceTest {
     }
 
     private DockerService dockerService(String name, int port, String type) {
-        return new DockerService("id", name, "image:latest",
+        return new DockerService("id", name, "image:latest", "latest",
             List.of(new PortMapping(port, port, type, "0.0.0.0")));
     }
 

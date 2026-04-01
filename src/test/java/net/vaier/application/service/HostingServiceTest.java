@@ -101,7 +101,7 @@ class HostingServiceTest {
         setupNoDnsRecords();
         setupEmptyVpnClients();
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
-            List.of(new DockerService("id", "my-container", "image",
+            List.of(new DockerService("id", "my-container", "image", "latest",
                 List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0"))))
         );
 

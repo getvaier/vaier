@@ -230,7 +230,7 @@ class DiscoverPeerContainersServiceTest {
     }
 
     private DockerService dockerService(String name, int port) {
-        return new DockerService("id123", name, "image:latest",
+        return new DockerService("id123", name, "image:latest", "latest",
             List.of(new DockerService.PortMapping(port, port, "tcp", "0.0.0.0")));
     }
 }

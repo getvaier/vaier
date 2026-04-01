@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.InspectImageResponse;
 import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerPort;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
@@ -52,11 +53,14 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                 // Only add services that have ports
                 if (!portMappings.isEmpty()) {
                     String containerName = extractContainerName(container.getNames());
+                    String image = container.getImage();
+                    String version = resolveVersion(container.getImageId(), image, dockerClient);
 
                     services.add(new DockerService(
                         container.getId(),
                         containerName,
-                        container.getImage(),
+                        image,
+                        version,
                         portMappings
                     ));
                 }
@@ -162,6 +166,17 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         } catch (Exception e) {
             log.warn("Failed to get exposed ports for host-network container {}: {}", container.getNames()[0], e.getMessage());
             return List.of();
+        }
+    }
+
+    private String resolveVersion(String imageId, String image, DockerClient dockerClient) {
+        try {
+            InspectImageResponse info = dockerClient.inspectImageCmd(imageId).exec();
+            java.util.Map<String, String> labels = info.getConfig() != null ? info.getConfig().getLabels() : null;
+            return DockerService.versionFromLabels(labels, image);
+        } catch (Exception e) {
+            log.debug("Could not inspect image {} for version labels: {}", imageId, e.getMessage());
+            return DockerService.versionFromLabels(null, image);
         }
     }
 
