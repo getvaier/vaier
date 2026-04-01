@@ -1,8 +1,8 @@
 package net.vaier.rest;
 
+import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.domain.User;
 import net.vaier.domain.port.ForPersistingUsers;
-import net.vaier.domain.port.ForRestartingContainers;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,9 +13,11 @@ import java.util.List;
 public class AuthRestController {
 
     private final ForPersistingUsers forPersistingUsers;
+    private final ChangePasswordUseCase changePasswordUseCase;
 
-    public AuthRestController(ForPersistingUsers forPersistingUsers) {
+    public AuthRestController(ForPersistingUsers forPersistingUsers, ChangePasswordUseCase changePasswordUseCase) {
         this.forPersistingUsers = forPersistingUsers;
+        this.changePasswordUseCase = changePasswordUseCase;
     }
 
     @GetMapping
@@ -49,7 +51,7 @@ public class AuthRestController {
         @RequestBody ChangePasswordRequest request
     ) {
         try {
-            forPersistingUsers.changePassword(username, request.newPassword());
+            changePasswordUseCase.changePassword(username, request.newPassword());
             return ResponseEntity.ok("Password changed successfully");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
