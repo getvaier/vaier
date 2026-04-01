@@ -62,6 +62,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("else\n");
         sb.append("    echo \"Docker already installed.\"\n");
         sb.append("fi\n");
+        sb.append("sudo systemctl enable docker\n");
         sb.append("\n");
         sb.append("# --- Stop any existing services ---\n");
         sb.append("if [ -f \"$INSTALL_DIR/docker-compose.yml\" ]; then\n");

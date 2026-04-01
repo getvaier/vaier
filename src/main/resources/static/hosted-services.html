@@ -605,6 +605,7 @@
         fetchServices();
         fetchPublishable();
         fetchPending();
+        setInterval(fetchServices, 30000);
 
         const _sse = new EventSource('/hosted-services/events');
 

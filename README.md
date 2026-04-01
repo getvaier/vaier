@@ -58,6 +58,7 @@ Vaier runs as part of a five-container Docker Compose stack:
 # Install Docker
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER && newgrp docker
+sudo systemctl enable docker
 
 # (Optional) Add swap for small instances
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile

@@ -23,7 +23,7 @@ public class PeerStatsScheduler {
     private final ForPublishingEvents eventPublisher;
     private final ObjectMapper objectMapper;
 
-    @Scheduled(fixedDelay = 30000)
+    @Scheduled(fixedDelay = 10000)
     public void publishPeerStats() {
         try {
             List<VpnClient> clients = vpnClients.getClients();

@@ -95,4 +95,15 @@ class GeneratePeerSetupScriptServiceTest {
 
         assertThat(script).contains("51820");
     }
+
+    @Test
+    void generateSetupScript_scriptEnablesDockerOnBoot() {
+        when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("systemctl enable docker");
+    }
 }
