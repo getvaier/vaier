@@ -273,12 +273,6 @@
                 <label class="form-label" for="lanCidr">LAN CIDR (optional)</label>
                 <input type="text" id="lanCidr" class="form-input" placeholder="e.g. 192.168.1.0/24">
             </div>
-            <div class="form-group" id="piholeDnsGroup">
-                <label class="form-checkbox">
-                    <input type="checkbox" id="usePiholeDns">
-                    Use Pi-hole as DNS
-                </label>
-            </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="createPeerCancelBtn" onclick="hideCreatePeerModal()">Cancel</button>
                 <button class="btn btn-primary"   id="createPeerSubmitBtn" onclick="createPeer()">Create Peer</button>
@@ -435,9 +429,7 @@
                     const items = services.containers.map(c => {
                         const port = c.ports[0]?.publicPort;
                         const url  = port ? `http://${services.vpnIp}:${port}` : null;
-                        return url
-                            ? `<a href="${url}" target="_blank" style="margin-right:0.75rem">${c.containerName}:${port}</a>`
-                            : `<span style="margin-right:0.5rem">${c.containerName}</span>`;
+                        return `<span style="margin-right:0.75rem">${c.containerName}${port ? ':' + port : ''}</span>`;
                     }).join('');
                     return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value">${items}</span></div>`;
                 })();
@@ -508,14 +500,12 @@
             document.getElementById('peerType').value = 'UBUNTU_SERVER';
             document.getElementById('lanCidr').value = '';
             document.getElementById('lanCidrGroup').style.display = 'none';
-            document.getElementById('usePiholeDns').checked = false;
         }
 
         function onPeerTypeChange() {
             const type = document.getElementById('peerType').value;
             const isServer = type === 'UBUNTU_SERVER' || type === 'WINDOWS_SERVER';
             document.getElementById('lanCidrGroup').style.display = type === 'UBUNTU_SERVER' ? '' : 'none';
-            document.getElementById('usePiholeDns').checked = !isServer;
         }
 
         function hideCreatePeerModal() {
@@ -526,7 +516,6 @@
             const name          = document.getElementById('peerName').value.trim();
             const peerType      = document.getElementById('peerType').value;
             const lanCidr       = document.getElementById('lanCidr').value.trim() || null;
-            const usePiholeDns  = document.getElementById('usePiholeDns').checked;
             if (!name) { displayError('Please enter a peer name'); return; }
 
             const submitBtn = document.getElementById('createPeerSubmitBtn');
@@ -539,7 +528,7 @@
                 const response = await fetch('/vpn/peers', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, peerType, lanCidr, usePiholeDns })
+                    body: JSON.stringify({ name, peerType, lanCidr })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const createdPeer = await response.json();
