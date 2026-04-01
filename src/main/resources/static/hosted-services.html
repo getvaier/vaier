@@ -443,7 +443,7 @@
             document.getElementById('publishAddress').value          = address;
             document.getElementById('publishPort').value             = port;
             document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
-            document.getElementById('publishSubdomain').value        = containerName;
+            document.getElementById('publishSubdomain').value        = sourceName === 'this server' ? containerName : `${containerName}.${sourceName}`;
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceName} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;
