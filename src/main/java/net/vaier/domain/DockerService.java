@@ -8,13 +8,14 @@ public record DockerService(
         String containerName,
         String image,
         String version,
-        List<PortMapping> ports
+        List<PortMapping> ports,
+        List<String> networks
 ) {
 
     public boolean listensOnPort(int port) {
         return ports.stream()
-            .filter(mapping -> mapping.publicPort() != null)
-            .anyMatch(mapping -> mapping.publicPort() == port);
+            .anyMatch(mapping -> mapping.privatePort() == port ||
+                      (mapping.publicPort() != null && mapping.publicPort() == port));
     }
 
     public static String versionFromLabels(Map<String, String> labels, String image) {

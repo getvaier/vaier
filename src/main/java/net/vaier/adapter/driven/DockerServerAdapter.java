@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.InspectImageResponse;
 import com.github.dockerjava.api.model.Container;
+import com.github.dockerjava.api.model.ContainerNetworkSettings;
 import com.github.dockerjava.api.model.ContainerPort;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
@@ -55,13 +56,15 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                     String containerName = extractContainerName(container.getNames());
                     String image = container.getImage();
                     String version = resolveVersion(container.getImageId(), image, dockerClient);
+                    List<String> networks = extractNetworks(container);
 
                     services.add(new DockerService(
                         container.getId(),
                         containerName,
                         image,
                         version,
-                        portMappings
+                        portMappings,
+                        networks
                     ));
                 }
             }
@@ -126,7 +129,7 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                     Integer publicPort = port.getPublicPort();
                     String type = port.getType() != null ? port.getType() : "tcp";
                     String ip = port.getIp() != null ? port.getIp() : "0.0.0.0";
-                    portMappings.add(new DockerService.PortMapping(privatePort, publicPort != null ? publicPort : privatePort, type, ip));
+                    portMappings.add(new DockerService.PortMapping(privatePort, publicPort, type, ip));
                 }
             }
         }
@@ -167,6 +170,14 @@ public class DockerServerAdapter implements ForGettingServerInfo {
             log.warn("Failed to get exposed ports for host-network container {}: {}", container.getNames()[0], e.getMessage());
             return List.of();
         }
+    }
+
+    private List<String> extractNetworks(Container container) {
+        ContainerNetworkSettings networkSettings = container.getNetworkSettings();
+        if (networkSettings == null || networkSettings.getNetworks() == null) {
+            return List.of();
+        }
+        return new ArrayList<>(networkSettings.getNetworks().keySet());
     }
 
     private String resolveVersion(String imageId, String image, DockerClient dockerClient) {

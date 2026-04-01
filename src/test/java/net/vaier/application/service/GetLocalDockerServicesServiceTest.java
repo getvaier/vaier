@@ -8,9 +8,9 @@ import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.port.ForGettingServerInfo;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -23,11 +23,18 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class GetLocalDockerServicesServiceTest {
 
+    private static final String VAIER_NETWORK = "vaier-network";
+    private static final String GATEWAY_IP = "172.20.0.1";
+
     @Mock
     ForGettingServerInfo forGettingServerInfo;
 
-    @InjectMocks
     GetLocalDockerServicesService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new GetLocalDockerServicesService(forGettingServerInfo, VAIER_NETWORK, GATEWAY_IP);
+    }
 
     @Test
     void getUnpublishedLocalServices_excludesWireguardContainer() {
@@ -131,9 +138,60 @@ class GetLocalDockerServicesServiceTest {
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
 
+    @Test
+    void getUnpublishedLocalServices_containerOnVaierNetwork_usesContainerNameAndPrivatePort() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
+                List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
+                List.of(VAIER_NETWORK))));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).address()).isEqualTo("my-app");
+        assertThat(result.get(0).port()).isEqualTo(3001);
+    }
+
+    @Test
+    void getUnpublishedLocalServices_containerOnOtherNetworkWithPublicPort_usesGatewayAndPublicPort() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
+                List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
+                List.of("uptime-kuma_default"))));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).address()).isEqualTo(GATEWAY_IP);
+        assertThat(result.get(0).port()).isEqualTo(3001);
+        assertThat(result.get(0).containerName()).isEqualTo("uptime-kuma");
+    }
+
+    @Test
+    void getUnpublishedLocalServices_containerOnOtherNetworkWithoutPublicPort_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
+                List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
+                List.of("some-other-network"))));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_crossNetworkContainerAlreadyPublished_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
+                List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
+                List.of("uptime-kuma_default"))));
+        List<ReverseProxyRoute> existingRoutes = List.of(route(GATEWAY_IP, 3001));
+
+        assertThat(service.getUnpublishedLocalServices(existingRoutes)).isEmpty();
+    }
+
     private DockerService dockerService(String name, int port, String type) {
         return new DockerService("id", name, "image:latest", "latest",
-            List.of(new PortMapping(port, port, type, "0.0.0.0")));
+            List.of(new PortMapping(port, null, type, "0.0.0.0")),
+            List.of(VAIER_NETWORK));
     }
 
     private ReverseProxyRoute route(String address, int port) {
