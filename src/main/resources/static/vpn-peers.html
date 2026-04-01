@@ -144,15 +144,6 @@
             color: var(--text);
         }
 
-        .config-preview strong {
-            display: block;
-            font-size: 0.68rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            margin-bottom: 0.5rem;
-        }
-
         /* Empty state */
         .empty-state {
             text-align: center;
@@ -255,6 +246,37 @@
             font-size: 0.82rem;
             font-style: italic;
         }
+
+        .config-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .config-preview-header strong {
+            display: block;
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 0;
+        }
+
+        .btn-copy {
+            font-size: 0.68rem;
+            padding: 0.15rem 0.5rem;
+            line-height: 1.4;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 2px;
+            transition: color 0.15s, border-color 0.15s;
+        }
+
+        .btn-copy:hover { color: var(--text); border-color: var(--text-muted); }
+        .btn-copy.copied { color: var(--green); border-color: var(--green); }
 
         /* Mobile */
         @media (max-width: 600px) {
@@ -635,8 +657,11 @@
                     <div class="detail-row"><span class="detail-label">Public Key</span><span class="detail-value">${peer.publicKey}</span></div>
                 </div>
                 <div class="config-preview">
-                    <strong>Client Configuration</strong>
-                    <pre>${peer.configFile}</pre>
+                    <div class="config-preview-header">
+                        <strong>Client Configuration</strong>
+                        <button class="btn-copy" id="copyBtn" onclick="copyConfig()">copy</button>
+                    </div>
+                    <pre id="configPre">${peer.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                     ${peerDownloadButtons(peer.name, peer.peerType)}
@@ -669,8 +694,11 @@
                     <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${peerConfig.ipAddress}</span></div>
                 </div>
                 <div class="config-preview">
-                    <strong>Client Configuration</strong>
-                    <pre>${peerConfig.configFile}</pre>
+                    <div class="config-preview-header">
+                        <strong>Client Configuration</strong>
+                        <button class="btn-copy" id="copyBtn" onclick="copyConfig()">copy</button>
+                    </div>
+                    <pre id="configPre">${peerConfig.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                     ${peerDownloadButtons(peerConfig.name, peerConfig.peerType)}
@@ -737,6 +765,21 @@
         function hideQrModal() {
             document.getElementById('qrModal').classList.remove('active');
             document.getElementById('qrModalBody').innerHTML = '';
+        }
+
+        async function copyConfig() {
+            const pre = document.getElementById('configPre');
+            const btn = document.getElementById('copyBtn');
+            if (!pre || !btn) return;
+            try {
+                await navigator.clipboard.writeText(pre.textContent);
+                btn.textContent = 'copied!';
+                btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+            } catch {
+                btn.textContent = 'failed';
+                setTimeout(() => { btn.textContent = 'copy'; }, 2000);
+            }
         }
 
         window.onclick = e => {
