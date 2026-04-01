@@ -223,6 +223,7 @@
         <div id="discoverable-section">
             <div class="section-header">
                 <span class="section-title">Discoverable services</span>
+                <button class="btn btn-secondary btn-small" onclick="refreshPublishable()">Refresh</button>
             </div>
             <div id="publishable-container">
                 <div class="loading">Loading…</div>
@@ -317,6 +318,11 @@
             }
         }
 
+        async function refreshPublishable() {
+            document.getElementById('publishable-container').innerHTML = '<div class="loading">Loading…</div>';
+            await fetchPublishable();
+        }
+
         function getStatusHtml(state, isOk) {
             const cls = isOk ? 'status-ok' : 'status-error';
             return `<span class="status ${cls}"><span class="status-indicator"></span>${state}</span>`;
@@ -394,8 +400,10 @@
 
         function displayPublishable(services) {
             const container = document.getElementById('publishable-container');
-            document.getElementById('discoverable-section').style.display = services.length === 0 ? 'none' : '';
-            if (services.length === 0) return;
+            if (services.length === 0) {
+                container.innerHTML = '<div class="loading">No discoverable services</div>';
+                return;
+            }
 
             const html = services.map(s => {
                 const isLocal = s.source === 'LOCAL';
