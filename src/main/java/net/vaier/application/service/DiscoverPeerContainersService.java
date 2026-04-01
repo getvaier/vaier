@@ -44,6 +44,12 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
                 continue;
             }
 
+            if (!isPeerConnected(client)) {
+                log.debug("Skipping Docker discovery for disconnected peer {} ({})", peerName, vpnIp);
+                results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of()));
+                continue;
+            }
+
             try {
                 Server server = new Server(vpnIp, 2375, false);
                 List<DockerService> containers = forGettingServerInfo.getServicesWithExposedPorts(server);
@@ -56,5 +62,15 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
         }
 
         return results;
+    }
+
+    private boolean isPeerConnected(VpnClient peer) {
+        try {
+            long handshake = Long.parseLong(peer.latestHandshake());
+            long now = System.currentTimeMillis() / 1000;
+            return handshake > 0 && (now - handshake) < 180;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 }

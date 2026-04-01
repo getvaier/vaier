@@ -45,9 +45,19 @@ public class HostedService {
         Optional<VpnClient> wireGuardPeer = forGettingVpnClients.getClients().stream()
             .filter(peer -> peer.allowedIps() != null && peer.allowedIps().startsWith(hostAddress))
             .findFirst();
-        if(wireGuardPeer.isPresent()) {
+        if(wireGuardPeer.isPresent() && isPeerConnected(wireGuardPeer.get())) {
             return State.OK;
         }
         return State.UNREACHABLE;
+    }
+
+    private boolean isPeerConnected(VpnClient peer) {
+        try {
+            long handshake = Long.parseLong(peer.latestHandshake());
+            long now = System.currentTimeMillis() / 1000;
+            return handshake > 0 && (now - handshake) < 180;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 }

@@ -164,6 +164,20 @@ class DiscoverPeerContainersServiceTest {
     }
 
     @Test
+    void discoverAll_serverPeerWithStaleHandshake_skippedWithoutDockerQuery() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(disconnectedClient("10.13.13.5/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.5")).thenReturn("server1");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))
+            .thenReturn(Optional.of(peerConfig("server1", "10.13.13.5", PeerType.UBUNTU_SERVER)));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).status()).isEqualTo("UNREACHABLE");
+        verify(forGettingServerInfo, never()).getServicesWithExposedPorts(any());
+    }
+
+    @Test
     void discoverAll_unknownPeerConfig_defaultsToQueried() {
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.20/32")));
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.20")).thenReturn("unknown");
@@ -203,6 +217,11 @@ class DiscoverPeerContainersServiceTest {
     }
 
     private VpnClient client(String allowedIps) {
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", recentHandshake, "0", "0");
+    }
+
+    private VpnClient disconnectedClient(String allowedIps) {
         return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", "0", "0", "0");
     }
 

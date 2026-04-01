@@ -79,7 +79,17 @@ public class HostingService implements GetHostedServicesUseCase {
     private State hostState(String hostAddress, int hostPort, List<DockerService> localServices,
                              List<VpnClient> vpnClients) {
         if (localServices.stream().anyMatch(s -> s.listensOnPort(hostPort))) return State.OK;
-        if (vpnClients.stream().anyMatch(p -> p.allowedIps() != null && p.allowedIps().startsWith(hostAddress))) return State.OK;
+        if (vpnClients.stream().anyMatch(p -> p.allowedIps() != null && p.allowedIps().startsWith(hostAddress) && isPeerConnected(p))) return State.OK;
         return State.UNREACHABLE;
+    }
+
+    private boolean isPeerConnected(VpnClient peer) {
+        try {
+            long handshake = Long.parseLong(peer.latestHandshake());
+            long now = System.currentTimeMillis() / 1000;
+            return handshake > 0 && (now - handshake) < 180;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 }

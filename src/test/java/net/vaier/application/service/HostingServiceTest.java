@@ -110,7 +110,22 @@ class HostingServiceTest {
     }
 
     @Test
-    void getHostedServices_addressMatchesVpnClientAllowedIps_hostStateOk() {
+    void getHostedServices_vpnPeerWithRecentHandshake_hostStateOk() {
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        setupOneRoute("app.example.com", "10.13.13.2", 8080);
+        setupNoDnsRecords();
+        when(forGettingVpnClients.getClients()).thenReturn(
+            List.of(new VpnClient("pubkey", "10.13.13.2/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
+        );
+        setupEmptyLocalServices();
+
+        HostedServiceUco result = service.getHostedServices().get(0);
+
+        assertThat(result.state()).isEqualTo(State.OK);
+    }
+
+    @Test
+    void getHostedServices_vpnPeerWithStaleHandshake_hostStateUnreachable() {
         setupOneRoute("app.example.com", "10.13.13.2", 8080);
         setupNoDnsRecords();
         when(forGettingVpnClients.getClients()).thenReturn(
@@ -120,7 +135,7 @@ class HostingServiceTest {
 
         HostedServiceUco result = service.getHostedServices().get(0);
 
-        assertThat(result.state()).isEqualTo(State.OK);
+        assertThat(result.state()).isEqualTo(State.UNREACHABLE);
     }
 
     @Test
