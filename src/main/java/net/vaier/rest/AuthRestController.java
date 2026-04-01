@@ -1,6 +1,8 @@
 package net.vaier.rest;
 
+import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ChangePasswordUseCase;
+import net.vaier.application.DeleteUserUseCase;
 import net.vaier.domain.User;
 import net.vaier.domain.port.ForPersistingUsers;
 import org.springframework.http.ResponseEntity;
@@ -13,10 +15,14 @@ import java.util.List;
 public class AuthRestController {
 
     private final ForPersistingUsers forPersistingUsers;
+    private final AddUserUseCase addUserUseCase;
+    private final DeleteUserUseCase deleteUserUseCase;
     private final ChangePasswordUseCase changePasswordUseCase;
 
-    public AuthRestController(ForPersistingUsers forPersistingUsers, ChangePasswordUseCase changePasswordUseCase) {
+    public AuthRestController(ForPersistingUsers forPersistingUsers, AddUserUseCase addUserUseCase, DeleteUserUseCase deleteUserUseCase, ChangePasswordUseCase changePasswordUseCase) {
         this.forPersistingUsers = forPersistingUsers;
+        this.addUserUseCase = addUserUseCase;
+        this.deleteUserUseCase = deleteUserUseCase;
         this.changePasswordUseCase = changePasswordUseCase;
     }
 
@@ -28,7 +34,7 @@ public class AuthRestController {
     @PostMapping
     public ResponseEntity<String> addUser(@RequestBody AddUserRequest request) {
         try {
-            forPersistingUsers.addUser(request.username(), request.password(), request.email(), request.displayname());
+            addUserUseCase.addUser(request.username(), request.password(), request.email(), request.displayname());
             return ResponseEntity.ok("User added successfully");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -38,7 +44,7 @@ public class AuthRestController {
     @DeleteMapping("/{username}")
     public ResponseEntity<String> deleteUser(@PathVariable String username) {
         try {
-            forPersistingUsers.deleteUser(username);
+            deleteUserUseCase.deleteUser(username);
             return ResponseEntity.ok("User deleted successfully");
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
