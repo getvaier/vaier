@@ -70,7 +70,7 @@ class DeleteHostedServiceServiceTest {
 
     @Test
     void deleteService_rejectsAuthService() {
-        assertThrows(IllegalArgumentException.class, () -> service.deleteService("auth.example.com"));
+        assertThrows(IllegalArgumentException.class, () -> service.deleteService("login.example.com"));
 
         verifyNoInteractions(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
     }

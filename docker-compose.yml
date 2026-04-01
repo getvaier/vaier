@@ -115,7 +115,7 @@ services:
     labels:
       - traefik.enable=true
       # HTTPS router for Authelia
-      - traefik.http.routers.authelia.rule=Host(`auth.${VAIER_DOMAIN}`)
+      - traefik.http.routers.authelia.rule=Host(`login.${VAIER_DOMAIN}`)
       - traefik.http.routers.authelia.entrypoints=websecure
       - traefik.http.routers.authelia.tls.certresolver=letsencrypt
       - traefik.http.services.authelia.loadbalancer.server.port=9091
@@ -154,7 +154,7 @@ services:
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier.middlewares=vaier-auth
       # Authelia middleware
-      - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.${VAIER_DOMAIN}
+      - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${VAIER_DOMAIN}
       - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
       - traefik.http.middlewares.vaier-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
       - traefik.http.services.vaier.loadbalancer.server.port=8080

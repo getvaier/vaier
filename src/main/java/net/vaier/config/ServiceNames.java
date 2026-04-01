@@ -5,7 +5,7 @@ public final class ServiceNames {
     private ServiceNames() {}
 
     public static final String VAIER = "vaier";
-    public static final String AUTH = "auth";
+    public static final String AUTH = "login";
     public static final String AUTHELIA = "authelia";
     public static final String WIREGUARD = "wireguard";
     public static final String WIREGUARD_MASQUERADE = "wireguard-masquerade";

@@ -197,7 +197,7 @@ class HostingServiceTest {
 
     @Test
     void getHostedServices_authService_mandatoryIsTrue() {
-        setupOneRoute("auth.example.com", "10.0.0.1", 8080);
+        setupOneRoute("login.example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();

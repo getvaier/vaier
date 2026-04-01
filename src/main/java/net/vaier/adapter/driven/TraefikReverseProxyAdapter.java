@@ -1063,7 +1063,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             Map<String, Object> authMiddleware = new LinkedHashMap<>();
             Map<String, Object> forwardAuth = new LinkedHashMap<>();
 
-            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://auth." + vaierDomain + "/");
+            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://login." + vaierDomain + "/");
             forwardAuth.put("trustForwardHeader", true);
 
             List<String> authResponseHeaders = new ArrayList<>();

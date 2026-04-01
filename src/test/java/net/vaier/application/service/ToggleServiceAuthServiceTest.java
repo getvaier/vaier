@@ -50,7 +50,7 @@ class ToggleServiceAuthServiceTest {
 
     @Test
     void setAuthentication_rejectsAuthService() {
-        assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("auth.example.com", false));
+        assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("login.example.com", false));
 
         verifyNoInteractions(forPersistingReverseProxyRoutes);
     }
