@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.PublishPeerServiceUseCase.PendingPublication;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
@@ -39,6 +40,9 @@ class PublishPeerServiceServiceTest {
 
     @Mock
     PendingPublicationsTracker pendingPublicationsTracker;
+
+    @Mock
+    ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
 
     @InjectMocks
     PublishPeerServiceService service;
@@ -144,6 +148,17 @@ class PublishPeerServiceServiceTest {
         inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
         inOrder.verify(forPublishingEvents).publish("hosted-services", "publish-traefik-active", "app");
         verify(forPersistingReverseProxyRoutes, atLeast(2)).getReverseProxyRoutes();
+    }
+
+    @Test
+    void waitForDnsThenActivate_invalidatesHostedServicesCacheAfterActivation() {
+        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+
+        verify(forInvalidatingHostedServicesCache).invalidateHostedServicesCache();
     }
 
     private ReverseProxyRoute routeWithDomain(String domain) {

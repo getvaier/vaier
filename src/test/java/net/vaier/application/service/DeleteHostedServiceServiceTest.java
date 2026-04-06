@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.ReverseProxyRoute;
@@ -29,6 +30,9 @@ class DeleteHostedServiceServiceTest {
 
     @Mock
     ForPersistingDnsRecords forPersistingDnsRecords;
+
+    @Mock
+    ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
 
     @InjectMocks
     DeleteHostedServiceService service;
@@ -112,5 +116,12 @@ class DeleteHostedServiceServiceTest {
         service.deleteService("app.example.com");
 
         verify(forPersistingDnsRecords).deleteDnsRecord("app.example.com", DnsRecordType.CNAME, new DnsZone(""));
+    }
+
+    @Test
+    void deleteService_invalidatesHostedServicesCache() {
+        service.deleteService("app.example.com");
+
+        verify(forInvalidatingHostedServicesCache).invalidateHostedServicesCache();
     }
 }

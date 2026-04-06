@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteHostedServiceUseCase;
+import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -17,6 +18,7 @@ public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
+    private final ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
 
     @Value("${VAIER_DOMAIN:}")
     private String vaierDomain;
@@ -37,6 +39,7 @@ public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
 
         forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(vaierDomain));
         log.info("Deleted DNS CNAME for {}", fqdn);
+        forInvalidatingHostedServicesCache.invalidateHostedServicesCache();
     }
 
     private void waitForTraefikRouteDeletion(String fqdn) {

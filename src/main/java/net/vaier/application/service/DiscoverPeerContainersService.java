@@ -68,7 +68,7 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
         try {
             long handshake = Long.parseLong(peer.latestHandshake());
             long now = System.currentTimeMillis() / 1000;
-            return handshake > 0 && (now - handshake) < 180;
+            return handshake > 0 && (now - handshake) < 300;
         } catch (NumberFormatException e) {
             return false;
         }

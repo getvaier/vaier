@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,9 @@ class ToggleServiceAuthServiceTest {
 
     @Mock
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+
+    @Mock
+    ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
 
     @InjectMocks
     ToggleServiceAuthService service;
@@ -53,5 +57,12 @@ class ToggleServiceAuthServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("login.example.com", false));
 
         verifyNoInteractions(forPersistingReverseProxyRoutes);
+    }
+
+    @Test
+    void setAuthentication_invalidatesHostedServicesCache() {
+        service.setAuthentication("app.example.com", true);
+
+        verify(forInvalidatingHostedServicesCache).invalidateHostedServicesCache();
     }
 }

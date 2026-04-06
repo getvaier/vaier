@@ -222,6 +222,42 @@ class HostingServiceTest {
         verify(forGettingServerInfo, times(1)).getServicesWithExposedPorts(any());
     }
 
+    @Test
+    void getHostedServices_secondCall_returnsCachedResultWithoutRefetching() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            route("app.example.com", "10.0.0.1", 8080)
+        ));
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+
+        service.getHostedServices();
+        service.getHostedServices();
+
+        verify(forPersistingReverseProxyRoutes, times(1)).getReverseProxyRoutes();
+        verify(forPersistingDnsRecords, times(1)).getDnsZones();
+        verify(forGettingVpnClients, times(1)).getClients();
+        verify(forGettingServerInfo, times(1)).getServicesWithExposedPorts(any());
+    }
+
+    @Test
+    void getHostedServices_afterInvalidation_refetchesFromPorts() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            route("app.example.com", "10.0.0.1", 8080)
+        ));
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+
+        service.getHostedServices();
+        service.invalidateHostedServicesCache();
+        service.getHostedServices();
+
+        verify(forPersistingDnsRecords, times(2)).getDnsZones();
+        verify(forGettingVpnClients, times(2)).getClients();
+        verify(forGettingServerInfo, times(2)).getServicesWithExposedPorts(any());
+    }
+
     // --- setup helpers ---
 
     private void setupOneRoute(String domain, String address, int port) {

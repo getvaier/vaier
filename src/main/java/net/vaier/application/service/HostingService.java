@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.DeleteHostedServiceUseCase;
+import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.config.ServiceNames;
 import net.vaier.application.GetHostedServicesUseCase;
 import net.vaier.domain.DnsRecord;
@@ -19,12 +20,14 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class HostingService implements GetHostedServicesUseCase {
+public class HostingService implements GetHostedServicesUseCase, ForInvalidatingHostedServicesCache {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForGettingVpnClients forGettingVpnClients;
+
+    private volatile List<HostedServiceUco> cache = null;
 
     public HostingService(ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
         ForGettingServerInfo forGettingServerInfo,
@@ -38,7 +41,14 @@ public class HostingService implements GetHostedServicesUseCase {
     }
 
     @Override
+    public void invalidateHostedServicesCache() {
+        cache = null;
+    }
+
+    @Override
     public List<HostedServiceUco> getHostedServices() {
+        if (cache != null) return cache;
+
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         if (routes.isEmpty()) return List.of();
 
@@ -49,9 +59,10 @@ public class HostingService implements GetHostedServicesUseCase {
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.local());
 
-        return routes.stream()
+        cache = routes.stream()
             .map(r -> toUco(r, allDnsRecords, vpnClients, localServices))
             .toList();
+        return cache;
     }
 
     private HostedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
@@ -88,7 +99,7 @@ public class HostingService implements GetHostedServicesUseCase {
         try {
             long handshake = Long.parseLong(peer.latestHandshake());
             long now = System.currentTimeMillis() / 1000;
-            return handshake > 0 && (now - handshake) < 180;
+            return handshake > 0 && (now - handshake) < 300;
         } catch (NumberFormatException e) {
             return false;
         }

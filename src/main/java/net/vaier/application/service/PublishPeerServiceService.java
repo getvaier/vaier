@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.domain.DnsRecord;
@@ -28,6 +29,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForPublishingEvents forPublishingEvents;
     private final PendingPublicationsTracker pendingPublicationsTracker;
+    private final ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
 
     @Value("${VAIER_DOMAIN:}")
     private String vaierDomain;
@@ -97,6 +99,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                 waitForTraefikRoute(fqdn);
                 pendingPublicationsTracker.untrack(address, port);
                 pendingPublishes.remove(subdomain);
+                forInvalidatingHostedServicesCache.invalidateHostedServicesCache();
                 forPublishingEvents.publish("hosted-services", "publish-traefik-active", subdomain);
                 forPublishingEvents.publish("hosted-services", "service-updated", subdomain);
                 return;
@@ -109,6 +112,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         waitForTraefikRoute(fqdn);
         pendingPublicationsTracker.untrack(address, port);
         pendingPublishes.remove(subdomain);
+        forInvalidatingHostedServicesCache.invalidateHostedServicesCache();
         forPublishingEvents.publish("hosted-services", "publish-traefik-active", subdomain);
         forPublishingEvents.publish("hosted-services", "service-updated", subdomain);
     }
