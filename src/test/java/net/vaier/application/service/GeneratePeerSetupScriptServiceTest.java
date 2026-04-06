@@ -106,4 +106,39 @@ class GeneratePeerSetupScriptServiceTest {
 
         assertThat(script).contains("systemctl enable docker");
     }
+
+    @Test
+    void generateSetupScript_systemctlCallsAreNonFatal() {
+        when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("systemctl enable docker || true");
+        assertThat(script).contains("systemctl restart docker");
+    }
+
+    @Test
+    void generateSetupScript_scriptFallsBackToServiceRestartWhenSystemctlFails() {
+        when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("systemctl restart docker || sudo service docker restart || true");
+    }
+
+    @Test
+    void generateSetupScript_scriptHandlesSnapDocker() {
+        when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
+            Optional.of(new PeerConfigResult("alice", "10.13.13.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("snap.docker.dockerd");
+        assertThat(script).contains("/var/snap/docker/current/config/daemon.json");
+    }
 }

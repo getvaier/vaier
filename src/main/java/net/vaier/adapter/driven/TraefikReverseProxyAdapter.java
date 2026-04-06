@@ -17,8 +17,13 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.DumperOptions;
 
 import java.io.FileInputStream;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1016,12 +1021,15 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * Save configuration to file.
      */
     private void saveConfig() {
-        File configFile = new File(configFilePath);
-
-        try (FileWriter writer = new FileWriter(configFile)) {
-            dumper.dump(config, writer);
+        Path configPath = Path.of(configFilePath);
+        try {
+            Path tempFile = Files.createTempFile(configPath.getParent(), ".remote-apps-", ".tmp");
+            try (Writer writer = new OutputStreamWriter(Files.newOutputStream(tempFile), StandardCharsets.UTF_8)) {
+                dumper.dump(config, writer);
+            }
+            Files.move(tempFile, configPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to write Traefik configuration file: " + configFile, e);
+            throw new RuntimeException("Failed to write Traefik configuration file: " + configFilePath, e);
         }
     }
 

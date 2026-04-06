@@ -216,6 +216,22 @@ class DiscoverPeerContainersServiceTest {
         assertThat(result).extracting(PeerContainers::peerName).containsExactly("server1", "server2");
     }
 
+    @Test
+    void discoverAll_peerWithHandshake240SecondsAgo_isStillQueried() {
+        String handshake240sAgo = String.valueOf(System.currentTimeMillis() / 1000 - 240);
+        VpnClient peer = new VpnClient("pubkey", "10.13.13.5/32", "1.2.3.4", "51820", handshake240sAgo, "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(peer));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.5")).thenReturn("server1");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))
+            .thenReturn(Optional.of(peerConfig("server1", "10.13.13.5", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).status()).isEqualTo("OK");
+    }
+
     private VpnClient client(String allowedIps) {
         String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
         return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", recentHandshake, "0", "0");

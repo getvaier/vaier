@@ -153,4 +153,12 @@ class TraefikReverseProxyAdapterTest {
     void getReverseProxyRoutes_returnsEmptyListWhenFileIsEmpty() {
         assertThat(adapter.getReverseProxyRoutes()).isEmpty();
     }
+
+    @Test
+    void addReverseProxyRoute_configFileAlwaysStartsWithHttpKey() throws IOException {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content.stripLeading()).startsWith("http:");
+    }
 }

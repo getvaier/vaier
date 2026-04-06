@@ -75,9 +75,15 @@ services:
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=route53
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=30
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
       - --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme/acme.json
+    environment:
+      - AWS_ACCESS_KEY_ID=${VAIER_AWS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${VAIER_AWS_SECRET}
+      - AWS_REGION=us-east-1
     ports:
       - "80:80"
       - "443:443"

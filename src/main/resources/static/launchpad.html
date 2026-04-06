@@ -85,72 +85,63 @@
 
         .tile {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
-            gap: 0.6rem;
-            padding: 1.5rem 1rem 1.25rem;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 4px;
             text-decoration: none;
             color: var(--text);
-            transition: background 0.12s, border-color 0.12s, transform 0.1s;
+            transition: background 0.12s, border-color 0.12s;
             cursor: pointer;
         }
 
         .tile:hover {
             background: var(--bg-hover);
             border-color: #555;
-            transform: translateY(-2px);
             text-decoration: none;
             color: var(--text);
         }
 
         .tile-icon {
-            width: 52px;
-            height: 52px;
-            border-radius: 12px;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.4rem;
+            font-size: 1.1rem;
             font-weight: 700;
             color: #fff;
             flex-shrink: 0;
-            overflow: hidden;
-            position: relative;
         }
 
-        .tile-icon img {
-            width: 32px;
-            height: 32px;
-            object-fit: contain;
-            filter: brightness(0) invert(1);
-        }
-
-        .tile-icon .letter {
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: #fff;
-            line-height: 1;
+        .tile-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+            min-width: 0;
         }
 
         .tile-name {
             font-size: 0.85rem;
             font-weight: 500;
-            text-align: center;
             color: var(--text);
             line-height: 1.3;
-            word-break: break-word;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        .tile-url {
-            font-size: 0.7rem;
+        .tile-peer {
+            font-size: 0.72rem;
             color: var(--text-muted);
-            text-align: center;
-            font-family: 'SF Mono', Consolas, monospace;
-            word-break: break-all;
             line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .loading {
@@ -206,83 +197,6 @@
     </div>
 
     <script>
-        const ICON_SLUGS = {
-            'plex':           'plex',
-            'sonarr':         'sonarr',
-            'radarr':         'radarr',
-            'lidarr':         'lidarr',
-            'readarr':        'readarr',
-            'prowlarr':       'prowlarr',
-            'bazarr':         'bazarr',
-            'overseerr':      'overseerr',
-            'jellyseerr':     'jellyseerr',
-            'jellyfin':       'jellyfin',
-            'emby':           'emby',
-            'navidrome':      'navidrome',
-            'pihole':         'pihole',
-            'adguard':        'adguardhome',
-            'homeassistant':  'homeassistant',
-            'home-assistant': 'homeassistant',
-            'ha':             'homeassistant',
-            'grafana':        'grafana',
-            'prometheus':     'prometheus',
-            'portainer':      'portainer',
-            'gitea':          'gitea',
-            'nextcloud':      'nextcloud',
-            'vaultwarden':    'vaultwarden',
-            'bitwarden':      'bitwarden',
-            'immich':         'immich',
-            'paperless':      'paperlessngx',
-            'paperless-ngx':  'paperlessngx',
-            'uptime-kuma':    'uptimekuma',
-            'uptimekuma':     'uptimekuma',
-            'audiobookshelf': 'audiobookshelf',
-            'calibre':        'calibre',
-            'kavita':         'kavita',
-            'komga':          'komga',
-            'mealie':         'mealie',
-            'grocy':          'grocy',
-            'freshrss':       'freshrss',
-            'miniflux':       'miniflux',
-            'syncthing':      'syncthing',
-            'transmission':   'transmission',
-            'qbittorrent':    'qbittorrent',
-            'deluge':         'deluge',
-            'nzbget':         'nzbget',
-            'sabnzbd':        'sabnzbd',
-            'nginx':          'nginx',
-            'traefik':        'traefikproxy',
-            'wireguard':      'wireguard',
-            'docker':         'docker',
-            'wordpress':      'wordpress',
-            'ghost':          'ghost',
-            'gitHub':         'github',
-            'gitlab':         'gitlab',
-            'jenkins':        'jenkins',
-            'minio':          'minio',
-            'redis':          'redis',
-            'mysql':          'mysql',
-            'postgres':       'postgresql',
-            'mongodb':        'mongodb',
-            'elasticsearch':  'elasticsearch',
-            'kibana':         'kibana',
-            'influxdb':       'influxdb',
-            'mosquitto':      'eclipsemosquitto',
-            'node-red':       'nodered',
-            'nodered':        'nodered',
-            'cockpit':        'cockpit',
-            'heimdall':       'heimdall',
-            'dasherr':        'dasherr',
-            'homarr':         'homarr',
-            'homer':          'homer',
-            'organizr':       'organizr',
-            'duplicati':      'duplicati',
-            'restic':         'restic',
-            'authentik':      'authentik',
-            'authelia':       'authelia',
-            'keycloak':       'keycloak',
-        };
-
         const AVATAR_COLORS = [
             '#0e639c', '#1a7340', '#7c4dbd', '#c0392b',
             '#b45309', '#0f766e', '#9d174d', '#374151',
@@ -295,21 +209,22 @@
             return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
         }
 
-        function iconSlug(name) {
-            const lower = name.toLowerCase().replace(/[^a-z0-9-]/g, '');
-            return ICON_SLUGS[lower] || ICON_SLUGS[name.toLowerCase()] || null;
+        function serviceName(dnsAddress) {
+            return dnsAddress.split('.')[0];
+        }
+
+        function peerName(dnsAddress, hostAddress) {
+            if (hostAddress && hostAddress.startsWith('172.20.')) return 'local';
+            const parts = dnsAddress.split('.');
+            return parts.length >= 2 ? parts[1] : 'local';
         }
 
         function renderTile(service) {
-            const url   = `https://${service.dnsAddress}`;
-            const label = service.dnsAddress;
-            const slug  = iconSlug(service.name);
-            const color = avatarColor(service.name);
-            const letter = service.name.charAt(0).toUpperCase();
-
-            const iconHtml = slug
-                ? `<img src="https://cdn.simpleicons.org/${slug}/ffffff" alt="" onerror="this.parentNode.innerHTML='<span class=\\'letter\\'>${letter}</span>'">`
-                : `<span class="letter">${letter}</span>`;
+            const url    = `https://${service.dnsAddress}`;
+            const name   = serviceName(service.dnsAddress);
+            const color  = avatarColor(name);
+            const letter = name.charAt(0).toUpperCase();
+            const peer   = peerName(service.dnsAddress, service.hostAddress);
 
             const tile = document.createElement('a');
             tile.href = url;
@@ -317,9 +232,11 @@
             tile.rel = 'noopener noreferrer';
             tile.className = 'tile';
             tile.innerHTML = `
-                <div class="tile-icon" style="background:${color}">${iconHtml}</div>
-                <div class="tile-name">${service.name}</div>
-                <div class="tile-url">${label}</div>
+                <div class="tile-icon" style="background:${color}">${letter}</div>
+                <div class="tile-info">
+                    <div class="tile-name">${name}</div>
+                    <div class="tile-peer">${peer}</div>
+                </div>
             `;
             return tile;
         }
