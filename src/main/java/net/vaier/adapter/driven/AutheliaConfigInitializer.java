@@ -103,6 +103,12 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                   default_policy: one_factor
                   rules:
                     - domain: "%s"
+                      policy: bypass
+                      resources:
+                        - "^/$"
+                        - "^/launchpad.html$"
+                        - "^/hosted-services/discover$"
+                    - domain: "%s"
                       policy: one_factor
                 notifier:
                   filesystem:
@@ -114,7 +120,8 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
             baseDomain,                 // session cookie domain
             vaierFullDomain,            // authelia_url
             encryptionKey,              // storage encryption_key
-            vaierFullDomain             // vaier full domain for access control
+            vaierFullDomain,            // vaier full domain for bypass rule
+            vaierFullDomain             // vaier full domain for one_factor rule
         );
     }
 

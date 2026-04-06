@@ -92,4 +92,30 @@ class AutheliaConfigInitializerTest {
         assertThat(content).contains("access_control:");
         assertThat(content).contains("notifier:");
     }
+
+    @Test
+    void initialiseConfiguration_launchpadPathsBypassAuthentication() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("policy: bypass");
+        assertThat(content).contains("/launchpad.html");
+        assertThat(content).contains("/hosted-services/discover");
+    }
+
+    @Test
+    void initialiseConfiguration_vaierDomainRequiresOneFactorByDefault() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("policy: one_factor");
+        // bypass rule for launchpad must appear before the one_factor rule
+        int bypassIndex = content.indexOf("policy: bypass");
+        int oneFactorIndex = content.lastIndexOf("policy: one_factor");
+        assertThat(bypassIndex).isLessThan(oneFactorIndex);
+    }
 }
