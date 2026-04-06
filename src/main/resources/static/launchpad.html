@@ -159,19 +159,52 @@
         }
 
         .empty {
-            grid-column: 1 / -1;
             text-align: center;
             padding: 4rem;
             color: var(--text-muted);
             font-size: 0.85rem;
         }
 
-        @media (max-width: 480px) {
+        .peer-section {
+            margin-bottom: 2rem;
+        }
+
+        .peer-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .peer-heading {
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.75rem;
+        }
+
+        @media (max-width: 600px) {
             .grid {
-                grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-                gap: 0.75rem;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 0.625rem;
             }
             .content { padding: 1.25rem 1rem; }
+            .tile {
+                padding: 0.875rem 0.875rem;
+                gap: 0.625rem;
+            }
+            .tile-icon {
+                width: 40px;
+                height: 40px;
+            }
+            .tile-name {
+                font-size: 0.95rem;
+            }
+            .tile-peer {
+                display: none;
+            }
+            .peer-heading {
+                font-size: 0.8rem;
+            }
         }
     </style>
 </head>
@@ -198,7 +231,7 @@
     </div>
 
     <div class="content">
-        <div id="grid" class="grid">
+        <div id="grid">
         </div>
     </div>
 
@@ -274,20 +307,49 @@
         }
 
         async function load() {
-            const grid = document.getElementById('grid');
+            const container = document.getElementById('grid');
             try {
                 const res = await fetch('/hosted-services/discover');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const services = await res.json();
                 const external = services.filter(s => !s.dnsAddress.startsWith('vaier.') && s.dnsState === 'OK');
-                grid.innerHTML = '';
+                container.innerHTML = '';
                 if (external.length === 0) {
-                    grid.innerHTML = '<div class="empty">No services published yet.<br>Use <a href="/admin.html">Admin</a> to add services.</div>';
+                    container.innerHTML = '<div class="empty">No services published yet.<br>Use <a href="/admin.html">Admin</a> to add services.</div>';
                     return;
                 }
-                external.forEach(s => grid.appendChild(renderTile(s)));
+
+                const byPeer = new Map();
+                for (const s of external) {
+                    const peer = peerName(s.dnsAddress, s.hostAddress);
+                    if (!byPeer.has(peer)) byPeer.set(peer, []);
+                    byPeer.get(peer).push(s);
+                }
+
+                const sortedPeers = [...byPeer.keys()].sort((a, b) => a.localeCompare(b));
+
+                for (const peer of sortedPeers) {
+                    const peerServices = byPeer.get(peer).sort((a, b) =>
+                        serviceName(a.dnsAddress).localeCompare(serviceName(b.dnsAddress))
+                    );
+
+                    const section = document.createElement('div');
+                    section.className = 'peer-section';
+
+                    const heading = document.createElement('div');
+                    heading.className = 'peer-heading';
+                    heading.textContent = peer;
+                    section.appendChild(heading);
+
+                    const grid = document.createElement('div');
+                    grid.className = 'grid';
+                    peerServices.forEach(s => grid.appendChild(renderTile(s)));
+                    section.appendChild(grid);
+
+                    container.appendChild(section);
+                }
             } catch (e) {
-                grid.innerHTML = `<div class="empty">Failed to load services: ${e.message}</div>`;
+                container.innerHTML = `<div class="empty">Failed to load services: ${e.message}</div>`;
             }
         }
 
