@@ -258,7 +258,7 @@
     <!-- Publish Modal -->
     <div id="publishModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Add Service</div>
+            <div class="modal-header">Publish Service</div>
             <div id="publishForm">
                 <input type="hidden" id="publishAddress">
                 <input type="hidden" id="publishPort">
@@ -282,7 +282,7 @@
                 </details>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
-                    <button class="btn btn-primary"   id="publishSubmitBtn" onclick="submitPublish()">Add Service</button>
+                    <button class="btn btn-primary"   id="publishSubmitBtn" onclick="submitPublish()">Publish</button>
                 </div>
             </div>
         </div>
@@ -456,7 +456,7 @@
                         data-source="${isLocal ? 'this server' : s.peerName}"
                         data-redirect="${s.rootRedirectPath || ''}"
                         onclick="showPublishModalFromBtn(this)">
-                        + Add
+                        + Publish
                     </button>
                     <button class="btn btn-warning btn-small" title="Hide this service from the list" onclick="ignoreService('${key}')">Ignore</button>`;
                 return `
@@ -587,7 +587,7 @@
             const cancelBtn = document.getElementById('publishCancelBtn');
             submitBtn.disabled = true;
             cancelBtn.disabled = true;
-            submitBtn.textContent = 'Adding…';
+            submitBtn.textContent = 'Publishing…';
 
             try {
                 const response = await fetch('/hosted-services/publish', {
@@ -602,11 +602,11 @@
                 fetchPublishable();
 
             } catch (error) {
-                alert(`Failed to add service: ${error.message}`);
+                alert(`Failed to publish service: ${error.message}`);
             } finally {
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
-                submitBtn.textContent = 'Add Service';
+                submitBtn.textContent = 'Publish';
             }
         }
 
