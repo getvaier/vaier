@@ -106,6 +106,19 @@ class AutheliaConfigInitializerTest {
     }
 
     @Test
+    void initialiseConfiguration_faviconPathsBypassAuthForAllSubdomains() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("domain_regex");
+        assertThat(content).contains("example\\.com");  // dots escaped for regex
+        assertThat(content).contains("favicon\\.ico");
+        assertThat(content).contains("apple-touch-icon");
+    }
+
+    @Test
     void initialiseConfiguration_vaierDomainRequiresOneFactorByDefault() throws IOException {
         AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
 

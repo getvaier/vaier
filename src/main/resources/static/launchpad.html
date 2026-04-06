@@ -116,6 +116,13 @@
             font-weight: 700;
             color: #fff;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .tile-icon img {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
         }
 
         .tile-info {
@@ -230,13 +237,39 @@
             tile.target = '_blank';
             tile.rel = 'noopener noreferrer';
             tile.className = 'tile';
-            tile.innerHTML = `
-                <div class="tile-icon" style="background:${color}">${letter}</div>
-                <div class="tile-info">
-                    <div class="tile-name">${name}</div>
-                    <div class="tile-peer">${peer}</div>
-                </div>
+
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'tile-icon';
+
+            const FAVICON_PATHS = [
+                `/favicon?host=${encodeURIComponent(service.dnsAddress)}`,
+            ];
+
+            const img = document.createElement('img');
+            img.alt = '';
+            let attempt = 0;
+            img.onerror = () => {
+                attempt++;
+                if (attempt < FAVICON_PATHS.length) {
+                    img.src = FAVICON_PATHS[attempt];
+                } else {
+                    img.remove();
+                    iconDiv.style.background = color;
+                    iconDiv.textContent = letter;
+                }
+            };
+            img.src = FAVICON_PATHS[0];
+            iconDiv.appendChild(img);
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'tile-info';
+            infoDiv.innerHTML = `
+                <div class="tile-name">${name}</div>
+                <div class="tile-peer">${peer}</div>
             `;
+
+            tile.appendChild(iconDiv);
+            tile.appendChild(infoDiv);
             return tile;
         }
 
