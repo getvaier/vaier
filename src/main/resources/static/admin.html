@@ -212,6 +212,33 @@
 
         .status-spacer { flex: 1; }
 
+        .status-logout {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.7rem;
+            color: rgba(255, 255, 255, 0.75);
+            text-decoration: none;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid transparent;
+            white-space: nowrap;
+            cursor: pointer;
+            background: none;
+        }
+
+        .status-logout:hover {
+            color: #fff;
+            border-color: rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+        }
+
+        .status-logout svg {
+            width: 11px;
+            height: 11px;
+            opacity: 0.85;
+        }
+
         /* ── Mobile top bar ── */
         .mobile-topbar {
             display: none;
@@ -404,6 +431,21 @@
             </div>
             <div class="status-spacer"></div>
             <div class="status-item" id="statusPage">Ready</div>
+            <div class="status-item" id="statusUser" style="display:none">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="5.5" r="2.8"/>
+                    <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
+                </svg>
+                <span id="statusUsername"></span>
+            </div>
+            <a href="#" class="status-logout" id="logoutBtn" style="display:none" title="Sign out">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>
+                    <polyline points="10 11 14 8 10 5"/>
+                    <line x1="14" y1="8" x2="5" y2="8"/>
+                </svg>
+                Sign out
+            </a>
         </div>
     </div>
 
@@ -455,6 +497,25 @@
 
         window.addEventListener('hashchange', loadPageFromHash);
         loadPageFromHash();
+
+        async function loadCurrentUser() {
+            try {
+                const res = await fetch('/users/me');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.username) {
+                    document.getElementById('statusUsername').textContent = data.username;
+                    document.getElementById('statusUser').style.display = 'flex';
+                }
+                if (data.logoutUrl) {
+                    const btn = document.getElementById('logoutBtn');
+                    btn.href = data.logoutUrl + '?rd=' + encodeURIComponent(window.location.href);
+                    btn.style.display = 'flex';
+                }
+            } catch (_) {}
+        }
+
+        loadCurrentUser();
     </script>
 </body>
 </html>

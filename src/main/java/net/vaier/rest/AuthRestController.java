@@ -5,6 +5,7 @@ import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
 import net.vaier.domain.User;
 import net.vaier.domain.port.ForPersistingUsers;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,6 +14,9 @@ import java.util.List;
 @RestController
 @RequestMapping("/users")
 public class AuthRestController {
+
+    @Value("${VAIER_DOMAIN:}")
+    private String vaierDomain;
 
     private final ForPersistingUsers forPersistingUsers;
     private final AddUserUseCase addUserUseCase;
@@ -64,6 +68,16 @@ public class AuthRestController {
         }
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<MeResponse> getMe(
+            @RequestHeader(value = "Remote-User", required = false) String username) {
+        String logoutUrl = (vaierDomain != null && !vaierDomain.isBlank())
+                ? "https://login." + vaierDomain + "/logout"
+                : null;
+        return ResponseEntity.ok(new MeResponse(username, logoutUrl));
+    }
+
     public record AddUserRequest(String username, String password, String email, String displayname) {}
     public record ChangePasswordRequest(String newPassword) {}
+    public record MeResponse(String username, String logoutUrl) {}
 }
