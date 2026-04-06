@@ -253,7 +253,6 @@
             <div id="publishForm">
                 <input type="hidden" id="publishAddress">
                 <input type="hidden" id="publishPort">
-                <input type="hidden" id="publishRootRedirectPath">
                 <div class="form-group" style="margin-bottom:0.5rem;">
                     <span style="color:var(--text-muted);font-size:0.8rem;" id="publishServiceLabel"></span>
                 </div>
@@ -265,6 +264,13 @@
                     <input type="checkbox" id="publishRequiresAuth">
                     <label for="publishRequiresAuth">Require Authelia authentication</label>
                 </div>
+                <details id="publishAdvanced" style="margin-top:0.75rem;">
+                    <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
+                    <div class="form-group" style="margin-top:0.6rem;">
+                        <label class="form-label" for="publishRootRedirectPath" title="If set, visiting the service root (/) will redirect to this path">Root path redirect</label>
+                        <input type="text" id="publishRootRedirectPath" class="form-input" placeholder="e.g. /dashboard">
+                    </div>
+                </details>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
                     <button class="btn btn-primary"   id="publishSubmitBtn" onclick="submitPublish()">Add Service</button>
@@ -447,6 +453,7 @@
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceName} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;
+            document.getElementById('publishAdvanced').open = !!rootRedirectPath;
             document.getElementById('publishModal').classList.add('active');
             document.getElementById('publishSubdomain').focus();
         }
