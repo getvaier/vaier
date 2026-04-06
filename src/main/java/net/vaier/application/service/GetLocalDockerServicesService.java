@@ -74,7 +74,8 @@ public class GetLocalDockerServicesService implements GetLocalDockerServicesUseC
                             ep.address(),
                             container.containerName(),
                             ep.port(),
-                            known != null ? known.rootRedirectPath() : null
+                            known != null ? known.rootRedirectPath() : null,
+                            false
                         ));
                     });
             });

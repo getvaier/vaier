@@ -161,4 +161,60 @@ class TraefikReverseProxyAdapterTest {
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content.stripLeading()).startsWith("http:");
     }
+
+    // --- ForManagingIgnoredServices ---
+
+    @Test
+    void getIgnoredServiceKeys_emptyByDefault() {
+        assertThat(adapter.getIgnoredServiceKeys()).isEmpty();
+    }
+
+    @Test
+    void ignoreService_keyAppearsInIgnoredSet() {
+        adapter.ignoreService("my-app");
+
+        assertThat(adapter.getIgnoredServiceKeys()).containsExactly("my-app");
+    }
+
+    @Test
+    void ignoreService_multipleKeysAllPersisted() {
+        adapter.ignoreService("app-a");
+        adapter.ignoreService("app-b");
+
+        assertThat(adapter.getIgnoredServiceKeys()).containsExactlyInAnyOrder("app-a", "app-b");
+    }
+
+    @Test
+    void ignoreService_persistedAcrossAdapterInstances() {
+        adapter.ignoreService("my-app");
+
+        // New adapter instance reading the same file
+        var adapter2 = new TraefikReverseProxyAdapter(
+            tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
+        assertThat(adapter2.getIgnoredServiceKeys()).containsExactly("my-app");
+    }
+
+    @Test
+    void unignoreService_removesKeyFromIgnoredSet() {
+        adapter.ignoreService("my-app");
+        adapter.unignoreService("my-app");
+
+        assertThat(adapter.getIgnoredServiceKeys()).isEmpty();
+    }
+
+    @Test
+    void unignoreService_nonExistentKey_noError() {
+        adapter.unignoreService("does-not-exist");
+
+        assertThat(adapter.getIgnoredServiceKeys()).isEmpty();
+    }
+
+    @Test
+    void ignoreService_doesNotAffectExistingRoutes() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.ignoreService("some-container");
+
+        assertThat(adapter.getReverseProxyRoutes()).hasSize(1);
+        assertThat(adapter.getIgnoredServiceKeys()).containsExactly("some-container");
+    }
 }

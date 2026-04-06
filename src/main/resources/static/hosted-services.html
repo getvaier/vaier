@@ -111,6 +111,9 @@
         .status-disconnected { background: var(--red); }
         .status-pending      { background: var(--yellow, #f59e0b); }
 
+        /* Discoverable action buttons */
+        .btn { transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s; }
+
         /* Discoverable section */
         .section-header {
             display: flex;
@@ -223,7 +226,13 @@
         <div id="discoverable-section">
             <div class="section-header">
                 <span class="section-title">Discoverable services</span>
-                <button class="btn btn-secondary btn-small" onclick="refreshPublishable()">Refresh</button>
+                <div style="display:flex;gap:0.75rem;align-items:center">
+                    <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.75rem;color:var(--text-muted);cursor:pointer;user-select:none" title="Toggle visibility of ignored services">
+                        <input id="showIgnoredChk" type="checkbox" style="accent-color:var(--accent);cursor:pointer" onchange="toggleShowIgnored()">
+                        Show ignored
+                    </label>
+                    <button class="btn btn-secondary btn-small" title="Re-scan for discoverable services" onclick="refreshPublishable()">Refresh</button>
+                </div>
             </div>
             <div id="publishable-container">
                 <div class="loading">Loading…</div>
@@ -404,14 +413,30 @@
             container.innerHTML = html;
         }
 
+        let showIgnored = false;
+        let lastPublishableServices = [];
+
+        function ignoreKey(s) {
+            return s.source === 'PEER'
+                ? s.peerName + '/' + s.containerName + ':' + s.port
+                : s.containerName + ':' + s.port;
+        }
+
+        function toggleShowIgnored() {
+            showIgnored = document.getElementById('showIgnoredChk').checked;
+            displayPublishable(lastPublishableServices);
+        }
+
         function displayPublishable(services) {
+            lastPublishableServices = services;
             const container = document.getElementById('publishable-container');
-            if (services.length === 0) {
+            const visible = showIgnored ? services : services.filter(s => !s.ignored);
+            if (visible.length === 0) {
                 container.innerHTML = '<div class="loading">No discoverable services</div>';
                 return;
             }
 
-            const html = services.map(s => {
+            const html = visible.map(s => {
                 const isLocal = s.source === 'LOCAL';
                 const meta = isLocal
                     ? `this server · ${s.address}:${s.port}`
@@ -419,14 +444,12 @@
                 const sourceBadge = isLocal
                     ? '<span class="badge badge-warning">local</span>'
                     : `<span class="badge badge-success">${s.peerName}</span>`;
-                return `
-                <div class="discoverable-card">
-                    <div class="discoverable-info">
-                        ${sourceBadge}
-                        <span class="discoverable-name">${s.containerName}</span>
-                        <span class="discoverable-meta">${meta}</span>
-                    </div>
-                    <button class="btn btn-primary btn-small"
+                const key = ignoreKey(s);
+                const nameStyle = s.ignored ? 'opacity:0.45' : '';
+                const actionButtons = s.ignored
+                    ? `<button class="btn btn-success btn-small" title="Show this service again in the list" onclick="unignoreService('${key}')">Unignore</button>`
+                    : `<button class="btn btn-primary btn-small"
+                        title="Publish ${s.containerName} as a reverse-proxy route"
                         data-address="${s.address}"
                         data-port="${s.port}"
                         data-container="${s.containerName}"
@@ -435,10 +458,39 @@
                         onclick="showPublishModalFromBtn(this)">
                         + Add
                     </button>
+                    <button class="btn btn-warning btn-small" title="Hide this service from the list" onclick="ignoreService('${key}')">Ignore</button>`;
+                return `
+                <div class="discoverable-card">
+                    <div class="discoverable-info" style="${nameStyle}">
+                        ${sourceBadge}
+                        <span class="discoverable-name">${s.containerName}</span>
+                        <span class="discoverable-meta">${meta}</span>
+                    </div>
+                    <div style="display:flex;gap:0.4rem;align-items:center">
+                        ${actionButtons}
+                    </div>
                 </div>`;
             }).join('');
 
             container.innerHTML = html;
+        }
+
+        async function ignoreService(key) {
+            await fetch('/hosted-services/publishable/ignore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key })
+            });
+            await fetchPublishable();
+        }
+
+        async function unignoreService(key) {
+            await fetch('/hosted-services/publishable/unignore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key })
+            });
+            await fetchPublishable();
         }
 
         function showPublishModalFromBtn(btn) {

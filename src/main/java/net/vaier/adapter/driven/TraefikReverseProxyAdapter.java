@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import java.io.File;
 import java.net.URI;
@@ -33,7 +34,7 @@ import java.util.Set;
 
 @Component
 @Slf4j
-public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRoutes {
+public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRoutes, ForManagingIgnoredServices {
 
     private final Yaml yaml;
     private final Yaml dumper;
@@ -1082,6 +1083,49 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
             authMiddleware.put("forwardAuth", forwardAuth);
             middlewares.put(ServiceNames.AUTH_MIDDLEWARE, authMiddleware);
+        }
+    }
+
+    // --- ForManagingIgnoredServices ---
+
+    private static final String IGNORED_KEY = "x-vaier-ignored";
+
+    @Override
+    public Set<String> getIgnoredServiceKeys() {
+        loadConfig();
+        if (config == null) return Set.of();
+        Object raw = config.get(IGNORED_KEY);
+        if (raw instanceof List<?> list) {
+            return list.stream().map(Object::toString).collect(java.util.stream.Collectors.toSet());
+        }
+        return Set.of();
+    }
+
+    @Override
+    public void ignoreService(String key) {
+        loadConfig();
+        if (config == null) config = new LinkedHashMap<>();
+        Object raw = config.get(IGNORED_KEY);
+        List<String> ignored = (raw instanceof List<?> list)
+            ? new ArrayList<>(list.stream().map(Object::toString).toList())
+            : new ArrayList<>();
+        if (!ignored.contains(key)) {
+            ignored.add(key);
+            config.put(IGNORED_KEY, ignored);
+            saveConfig();
+        }
+    }
+
+    @Override
+    public void unignoreService(String key) {
+        loadConfig();
+        if (config == null) return;
+        Object raw = config.get(IGNORED_KEY);
+        if (!(raw instanceof List<?> list)) return;
+        List<String> ignored = new ArrayList<>(list.stream().map(Object::toString).toList());
+        if (ignored.remove(key)) {
+            config.put(IGNORED_KEY, ignored);
+            saveConfig();
         }
     }
 

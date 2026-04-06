@@ -6,9 +6,11 @@ import net.vaier.application.DeleteHostedServiceUseCase;
 import net.vaier.application.GetHostedServicesUseCase;
 import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
+import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
+import net.vaier.application.UnignorePublishableServiceUseCase;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +29,8 @@ public class HostedServiceRestController {
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
+    private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
+    private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     private final SseEventPublisher sseEventPublisher;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -78,7 +82,20 @@ public class HostedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/publishable/ignore")
+    public ResponseEntity<Void> ignoreService(@RequestBody IgnoreRequest request) {
+        ignorePublishableServiceUseCase.ignoreService(request.key());
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/publishable/unignore")
+    public ResponseEntity<Void> unignoreService(@RequestBody IgnoreRequest request) {
+        unignorePublishableServiceUseCase.unignoreService(request.key());
+        return ResponseEntity.ok().build();
+    }
+
     record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
+    record IgnoreRequest(String key) {}
 }

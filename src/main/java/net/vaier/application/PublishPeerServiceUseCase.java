@@ -18,7 +18,8 @@ public interface PublishPeerServiceUseCase {
         String address,
         String containerName,
         int port,
-        String rootRedirectPath
+        String rootRedirectPath,
+        boolean ignored
     ) {}
 
     record PublishStatus(boolean dnsPropagated, boolean traefikActive) {}

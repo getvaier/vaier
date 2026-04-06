@@ -8,6 +8,7 @@ import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,6 +37,9 @@ class GetPublishableServicesServiceTest {
 
     @Mock
     PendingPublicationsTracker pendingPublicationsTracker;
+
+    @Mock
+    ForManagingIgnoredServices forManagingIgnoredServices;
 
     @InjectMocks
     GetPublishableServicesService service;
@@ -158,10 +163,55 @@ class GetPublishableServicesServiceTest {
     }
 
     private PublishableService localService(String name, int port) {
-        return new PublishableService(PublishableSource.LOCAL, null, name, name, port, null);
+        return new PublishableService(PublishableSource.LOCAL, null, name, name, port, null, false);
     }
 
     private ReverseProxyRoute route(String address, int port) {
         return new ReverseProxyRoute("r", "svc.example.com", address, port, "svc", null);
+    }
+
+    // --- ignored services ---
+
+    @Test
+    void getPublishableServices_ignoredLocalService_markedIgnored() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        PublishableService svc = localService("boring-app", 3000);
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of(svc));
+        when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of("boring-app:3000"));
+
+        List<PublishableService> result = service.getPublishableServices();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().ignored()).isTrue();
+    }
+
+    @Test
+    void getPublishableServices_ignoredPeerService_markedIgnored() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+            okPeer("alice", "10.13.13.2", List.of(container("peer-app", 8080, "tcp")))
+        ));
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
+        when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of("alice/peer-app:8080"));
+
+        List<PublishableService> result = service.getPublishableServices();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().ignored()).isTrue();
+    }
+
+    @Test
+    void getPublishableServices_nonIgnoredService_markedNotIgnored() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        PublishableService svc = localService("useful-app", 3000);
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of(svc));
+        when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of());
+
+        List<PublishableService> result = service.getPublishableServices();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().ignored()).isFalse();
     }
 }
