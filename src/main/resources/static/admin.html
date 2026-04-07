@@ -377,12 +377,13 @@
                         Services
                     </a>
                     <a href="#vpn" class="nav-item" data-page="vpn-peers.html">
-                        <!-- Shield / VPN icon -->
+                        <!-- Monitor icon -->
                         <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M8 1.5L2 4v4c0 3.2 2.6 5.9 6 6.5 3.4-.6 6-3.3 6-6.5V4L8 1.5z"/>
-                            <polyline points="5.5 8 7.2 9.7 10.5 6"/>
+                            <rect x="1" y="2" width="14" height="10" rx="1"/>
+                            <line x1="5" y1="15" x2="11" y2="15"/>
+                            <line x1="8" y1="12" x2="8" y2="15"/>
                         </svg>
-                        VPN Peers
+                        Machines
                     </a>
                     <a href="#users" class="nav-item" data-page="users.html">
                         <!-- Users icon -->
@@ -414,7 +415,7 @@
                     <p>Select a section from the explorer to get started</p>
                     <div class="welcome-shortcuts">
                         <span>Services &mdash; reverse proxy &amp; DNS management</span>
-                        <span>VPN Peers &mdash; WireGuard peer management</span>
+                        <span>Machines &mdash; manage your servers and devices</span>
                         <span>Users &mdash; Authelia user management</span>
                     </div>
                 </div>
@@ -459,7 +460,7 @@
 
         const pageLabels = {
             'hosted-services.html': 'hosted-services',
-            'vpn-peers.html':       'vpn-peers',
+            'vpn-peers.html':       'machines',
             'users.html':           'users',
         };
 

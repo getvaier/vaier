@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VPN Peers</title>
+    <title>Machines</title>
     <link rel="stylesheet" href="styles.css">
     <style>
         .peer-card {
@@ -278,6 +278,17 @@
         .btn-copy:hover { color: var(--text); border-color: var(--text-muted); }
         .btn-copy.copied { color: var(--green); border-color: var(--green); }
 
+        /* Section headers */
+        .section-header {
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            padding: 1rem 0 0.35rem;
+            margin-top: 0.25rem;
+        }
+
         /* Mobile */
         @media (max-width: 600px) {
             .peer-header { flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 0.75rem; }
@@ -292,15 +303,16 @@
 <body>
     <div class="page-header">
         <div class="page-title">
-            <!-- Shield icon -->
+            <!-- Monitor icon -->
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 1.5L2 4v4c0 3.2 2.6 5.9 6 6.5 3.4-.6 6-3.3 6-6.5V4L8 1.5z"/>
-                <polyline points="5.5 8 7.2 9.7 10.5 6"/>
+                <rect x="1" y="2" width="14" height="10" rx="1"/>
+                <line x1="5" y1="15" x2="11" y2="15"/>
+                <line x1="8" y1="12" x2="8" y2="15"/>
             </svg>
-            VPN Peers
+            Machines
         </div>
         <div class="page-header-actions">
-            <button class="btn btn-primary" onclick="showCreatePeerModal()">+ Add Peer</button>
+            <button class="btn btn-primary" onclick="showCreatePeerModal()">+ Add Machine</button>
         </div>
     </div>
 
@@ -308,20 +320,20 @@
         <div id="error-message"></div>
         <div id="success-message"></div>
         <div id="peers-container">
-            <div class="loading">Loading peers…</div>
+            <div class="loading">Loading machines…</div>
         </div>
     </div>
 
     <!-- Create Peer Modal -->
     <div id="createPeerModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Add New Peer</div>
+            <div class="modal-header">Add Machine</div>
             <div class="form-group">
-                <label class="form-label" for="peerName">Peer Name</label>
+                <label class="form-label" for="peerName">Name</label>
                 <input type="text" id="peerName" class="form-input" placeholder="e.g. laptop, phone">
             </div>
             <div class="form-group">
-                <label class="form-label" for="peerType">Peer Type</label>
+                <label class="form-label" for="peerType">Type</label>
                 <select id="peerType" class="form-input" onchange="onPeerTypeChange()">
                     <option value="UBUNTU_SERVER">Ubuntu server with Docker</option>
                     <option value="WINDOWS_SERVER">Windows server with Docker</option>
@@ -335,7 +347,7 @@
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="createPeerCancelBtn" onclick="hideCreatePeerModal()">Cancel</button>
-                <button class="btn btn-primary"   id="createPeerSubmitBtn" onclick="createPeer()">Create Peer</button>
+                <button class="btn btn-primary"   id="createPeerSubmitBtn" onclick="createPeer()">Add Machine</button>
             </div>
         </div>
     </div>
@@ -343,7 +355,7 @@
     <!-- Peer Details Modal -->
     <div id="peerDetailsModal" class="modal">
         <div class="modal-content" style="max-width:680px;width:95%">
-            <div class="modal-header">Peer Configuration</div>
+            <div class="modal-header">Machine Configuration</div>
             <div id="peerDetailsContent"></div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="hidePeerDetailsModal()">Close</button>
@@ -354,9 +366,9 @@
     <!-- Delete Confirm Modal -->
     <div id="deleteConfirmModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Delete Peer</div>
+            <div class="modal-header">Delete Machine</div>
             <p style="font-size:0.85rem;color:var(--text-muted)">
-                Remove peer <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="deletePeerName"></code>?
+                Remove <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="deletePeerName"></code>?
             </p>
             <p style="font-size:0.78rem;color:var(--red);margin-top:0.5rem;">This action cannot be undone.</p>
             <div class="modal-actions">
@@ -382,9 +394,10 @@
     <script>
         let peers = [];
         let peerServices = {};
+        let localServices = [];
         let lastFetchSuccessful = false;
 
-        const expandedPeers     = new Set();
+        const expandedPeers = new Set();
 
         function parseImageTag(image) {
             if (!image) return '';
@@ -426,6 +439,18 @@
             }
         }
 
+        async function fetchLocalServices() {
+            try {
+                const response = await fetch('/docker-services/local');
+                if (response.ok) {
+                    localServices = await response.json();
+                    displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load local services:', error);
+            }
+        }
+
         function displayError(message) {
             document.getElementById('error-message').innerHTML = `<div class="error">${message}</div>`;
         }
@@ -461,119 +486,151 @@
             }
         }
 
+        function renderServiceList(containers) {
+            if (!containers || containers.length === 0)
+                return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">none discovered</span></div>`;
+            const rows = containers.map(c => {
+                const port    = c.ports[0]?.publicPort;
+                const version = c.version || parseImageTag(c.image);
+                return `<div class="service-row">
+                    <span class="service-name">${c.containerName}</span>
+                    <span class="service-port">${port != null ? ':' + port : '—'}</span>
+                    <span class="service-tag">${version}</span>
+                </div>`;
+            }).join('');
+            return `<div class="detail-row">
+                <span class="detail-label">Services</span>
+                <div class="service-list">
+                    <div class="service-list-header">
+                        <span>name</span><span>port</span><span>version</span>
+                    </div>
+                    ${rows}
+                </div>
+            </div>`;
+        }
+
+        function renderLocalCard() {
+            const key = '__local__';
+            const id  = cardId(key);
+            const isExpanded = expandedPeers.has(key);
+            return `
+            <div class="peer-card">
+                <div class="peer-header" onclick="togglePeer('${key}')">
+                    <div class="peer-header-left">
+                        <span class="peer-name">This machine</span>
+                    </div>
+                    <div class="peer-actions">
+                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    </div>
+                </div>
+                <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
+                    <div class="peer-details">
+                        ${renderServiceList(localServices)}
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function renderPeerCard(peer) {
+            const handshakeTime = parseInt(peer.latestHandshake);
+            const currentTime   = Math.floor(Date.now() / 1000);
+            const isConnected   = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
+            const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
+            const statusText    = isConnected ? 'connected' : 'disconnected';
+            const vpnIp      = peer.allowedIps.split('/')[0];
+            const id         = cardId(peer.name);
+            const isExpanded = expandedPeers.has(peer.name);
+            const peerType   = peer.peerType || 'UBUNTU_SERVER';
+            const isServer   = peerType === 'UBUNTU_SERVER' || peerType === 'WINDOWS_SERVER';
+
+            const services = peerServices[peer.name];
+            const servicesHtml = (() => {
+                if (!isServer) return '';
+                if (!isConnected)
+                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">not connected</span></div>`;
+                if (!services || services.status === 'UNREACHABLE')
+                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
+                return renderServiceList(services.containers);
+            })();
+
+            return `
+            <div class="peer-card">
+                <div class="peer-header" onclick="togglePeer('${peer.name.replace(/'/g, "\\'")}')">
+                    <div class="peer-header-left">
+                        <span class="status-dot ${statusClass}" id="hdr-dot-${id}"></span>
+                        <span class="peer-name">${peer.name}</span>
+                        <span class="peer-ip-badge">${vpnIp}</span>
+                        <span class="peer-status-text" id="hdr-status-${id}">${statusText}</span>
+                    </div>
+                    <div class="peer-actions">
+                        <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();viewPeerConfig('${peer.name}')">config</button>
+                        ${isServer ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadDockerCompose('${peer.name}')">compose</button>` : ''}
+                        ${peerType === 'UBUNTU_SERVER' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadSetupScript('${peer.name}')">script</button>` : ''}
+                        ${peerType === 'MOBILE_CLIENT' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();showQrModal('${peer.name}')">qr</button>` : ''}
+                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation();confirmDeletePeer('${peer.name}')">
+                            <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
+                        </button>
+                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    </div>
+                </div>
+                <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
+                    <div class="peer-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Status</span>
+                            <div class="connection-status">
+                                <span class="status-dot ${statusClass}" id="dot-${id}"></span>
+                                <span style="font-family:var(--mono);font-size:0.78rem" id="status-${id}">${statusText}</span>
+                            </div>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">IP Address</span>
+                            <span class="detail-value">${vpnIp}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Public Key</span>
+                            <span class="detail-value">${peer.publicKey}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Allowed IPs</span>
+                            <span class="detail-value">${peer.allowedIps}</span>
+                        </div>
+                        ${peer.endpointIp ? `
+                        <div class="detail-row">
+                            <span class="detail-label">Endpoint</span>
+                            <span class="detail-value">${peer.endpointIp}:${peer.endpointPort}</span>
+                        </div>` : ''}
+                        <div class="detail-row">
+                            <span class="detail-label">Rx / Tx</span>
+                            <span class="detail-value" id="rxtx-${id}">${formatBytes(peer.transferRx)} / ${formatBytes(peer.transferTx)}</span>
+                        </div>
+                        ${servicesHtml}
+                    </div>
+                </div>
+            </div>`;
+        }
+
         function displayPeers(peers) {
             const container = document.getElementById('peers-container');
 
-            if (peers.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">◎</div>
-                        <h2>No VPN Peers</h2>
-                        <p>Add your first peer to get started</p>
-                    </div>`;
-                return;
+            const servers = peers.filter(p => {
+                const t = p.peerType || 'UBUNTU_SERVER';
+                return t === 'UBUNTU_SERVER' || t === 'WINDOWS_SERVER';
+            });
+            const clients = peers.filter(p => {
+                const t = p.peerType || 'UBUNTU_SERVER';
+                return t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT';
+            });
+
+            let html = `<div class="section-header">Servers</div>`;
+            html += renderLocalCard();
+            html += servers.map(renderPeerCard).join('');
+
+            if (clients.length > 0) {
+                html += `<div class="section-header">Clients</div>`;
+                html += clients.map(renderPeerCard).join('');
             }
 
-            const html = peers.map(peer => {
-                const handshakeTime = parseInt(peer.latestHandshake);
-                const currentTime   = Math.floor(Date.now() / 1000);
-                const isConnected   = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
-                const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
-                const statusText    = isConnected ? 'connected' : 'disconnected';
-                const vpnIp  = peer.allowedIps.split('/')[0];
-                const id     = cardId(peer.name);
-                const isExpanded = expandedPeers.has(peer.name);
-
-                const peerType = peer.peerType || 'UBUNTU_SERVER';
-                const isServerType = peerType === 'UBUNTU_SERVER' || peerType === 'WINDOWS_SERVER';
-
-                const services = peerServices[peer.name];
-                const servicesHtml = (() => {
-                    if (!isServerType) return '';
-                    if (!isConnected)
-                        return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">not connected</span></div>`;
-                    if (!services || services.status === 'UNREACHABLE')
-                        return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
-                    if (!services.containers || services.containers.length === 0)
-                        return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">none discovered</span></div>`;
-                    const rows = services.containers.map(c => {
-                        const port    = c.ports[0]?.publicPort;
-                        const version = c.version || parseImageTag(c.image);
-                        return `<div class="service-row">
-                            <span class="service-name">${c.containerName}</span>
-                            <span class="service-port">${port != null ? ':' + port : '—'}</span>
-                            <span class="service-tag">${version}</span>
-                        </div>`;
-                    }).join('');
-                    return `<div class="detail-row">
-                        <span class="detail-label">Services</span>
-                        <div class="service-list">
-                            <div class="service-list-header">
-                                <span>name</span><span>port</span><span>version</span>
-                            </div>
-                            ${rows}
-                        </div>
-                    </div>`;
-                })();
-
-                return `
-                <div class="peer-card">
-                    <div class="peer-header" onclick="togglePeer('${peer.name.replace(/'/g, "\\'")}')">
-                        <div class="peer-header-left">
-                            <span class="status-dot ${statusClass}" id="hdr-dot-${id}"></span>
-                            <span class="peer-name">${peer.name}</span>
-                            <span class="peer-ip-badge">${vpnIp}</span>
-                            <span class="peer-status-text" id="hdr-status-${id}">${statusText}</span>
-                        </div>
-                        <div class="peer-actions">
-                            <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();viewPeerConfig('${peer.name}')">config</button>
-                            ${(peerType === 'UBUNTU_SERVER' || peerType === 'WINDOWS_SERVER') ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadDockerCompose('${peer.name}')">compose</button>` : ''}
-                            ${peerType === 'UBUNTU_SERVER' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadSetupScript('${peer.name}')">script</button>` : ''}
-                            ${peerType === 'MOBILE_CLIENT' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();showQrModal('${peer.name}')">qr</button>` : ''}
-                            <button class="btn btn-small btn-danger"    onclick="event.stopPropagation();confirmDeletePeer('${peer.name}')">
-                                <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
-                            </button>
-                            <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
-                        </div>
-                    </div>
-                    <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
-                        <div class="peer-details">
-                            <div class="detail-row">
-                                <span class="detail-label">Status</span>
-                                <div class="connection-status">
-                                    <span class="status-dot ${statusClass}" id="dot-${id}"></span>
-                                    <span style="font-family:var(--mono);font-size:0.78rem" id="status-${id}">${statusText}</span>
-                                </div>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">IP Address</span>
-                                <span class="detail-value">${vpnIp}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">Public Key</span>
-                                <span class="detail-value">${peer.publicKey}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">Allowed IPs</span>
-                                <span class="detail-value">${peer.allowedIps}</span>
-                            </div>
-                            ${peer.endpointIp ? `
-                            <div class="detail-row">
-                                <span class="detail-label">Endpoint</span>
-                                <span class="detail-value">${peer.endpointIp}:${peer.endpointPort}</span>
-                            </div>` : ''}
-                            <div class="detail-row">
-                                <span class="detail-label">Rx / Tx</span>
-                                <span class="detail-value" id="rxtx-${id}">${formatBytes(peer.transferRx)} / ${formatBytes(peer.transferTx)}</span>
-                            </div>
-                            ${servicesHtml}
-                        </div>
-                    </div>
-                </div>`;
-            }).join('');
-
             container.innerHTML = html;
-
         }
 
         function showCreatePeerModal() {
@@ -598,13 +655,13 @@
             const name          = document.getElementById('peerName').value.trim();
             const peerType      = document.getElementById('peerType').value;
             const lanCidr       = document.getElementById('lanCidr').value.trim() || null;
-            if (!name) { displayError('Please enter a peer name'); return; }
+            if (!name) { displayError('Please enter a name'); return; }
 
             const submitBtn = document.getElementById('createPeerSubmitBtn');
             const cancelBtn = document.getElementById('createPeerCancelBtn');
             submitBtn.disabled = true;
             cancelBtn.disabled = true;
-            submitBtn.textContent = 'Creating…';
+            submitBtn.textContent = 'Adding…';
 
             try {
                 const response = await fetch('/vpn/peers', {
@@ -615,7 +672,7 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const createdPeer = await response.json();
                 hideCreatePeerModal();
-                displaySuccess(`Peer "${createdPeer.name}" created`);
+                displaySuccess(`"${createdPeer.name}" added`);
                 showPeerDetails(createdPeer);
                 fetchPeers();
             } catch (error) {
@@ -623,7 +680,7 @@
             } finally {
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
-                submitBtn.textContent = 'Create Peer';
+                submitBtn.textContent = 'Add Machine';
             }
         }
 
@@ -790,6 +847,7 @@
         };
 
         fetchPeers();
+        fetchLocalServices();
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());

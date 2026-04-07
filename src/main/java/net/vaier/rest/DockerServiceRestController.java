@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
 import net.vaier.domain.DockerService;
@@ -17,11 +18,14 @@ public class DockerServiceRestController {
 
     private final ForGettingServerInfo forGettingServerInfo;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
+    private final DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
 
     public DockerServiceRestController(ForGettingServerInfo forGettingServerInfo,
-                                       DiscoverPeerContainersUseCase discoverPeerContainersUseCase) {
+                                       DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
+                                       DiscoverLocalContainersUseCase discoverLocalContainersUseCase) {
         this.forGettingServerInfo = forGettingServerInfo;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
+        this.discoverLocalContainersUseCase = discoverLocalContainersUseCase;
     }
 
     @GetMapping
@@ -32,6 +36,11 @@ public class DockerServiceRestController {
     ) {
         Server server = new Server(address, port, tlsEnabled);
         return forGettingServerInfo.getServicesWithExposedPorts(server);
+    }
+
+    @GetMapping("/local")
+    public List<DockerService> discoverLocalContainers() {
+        return discoverLocalContainersUseCase.discover();
     }
 
     @GetMapping("/peers")
