@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/logo.svg" width="80" alt="Vaier logo"/>
+</div>
+
 # Vaier
 
 [![Build](https://github.com/getvaier/vaier/actions/workflows/build-deploy.yml/badge.svg)](https://github.com/getvaier/vaier/actions/workflows/build-deploy.yml)
