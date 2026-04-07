@@ -1,10 +1,18 @@
 # Vaier
 
+[![Build](https://github.com/getvaier/vaier/actions/workflows/build-deploy.yml/badge.svg)](https://github.com/getvaier/vaier/actions/workflows/build-deploy.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/getvaier/vaier)](https://hub.docker.com/r/getvaier/vaier)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Java](https://img.shields.io/badge/Java-21-orange)](https://openjdk.org/projects/jdk/21/)
+
 **Self-hosted infrastructure management for homelab developers.**
 
 Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — automatically.
 
 ---
+
+<!-- Add a demo GIF here once available. Suggested flow: create a peer → publish a service → watch the live processing steps → service goes live. -->
+<!-- ![Vaier demo](docs/demo.gif) -->
 
 ## What it does
 
@@ -15,6 +23,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
+| **Backup / restore** | Export full configuration (peers, services, DNS records, users) as a JSON snapshot. Import restores everything with a real-time progress log. |
 
 ---
 
@@ -146,6 +155,12 @@ The service is live at `https://subdomain.yourdomain.com`.
 
 ---
 
+## Roadmap
+
+The backlog is tracked in [GitHub Issues](https://github.com/getvaier/vaier/issues). Feature specs for planned items are in [`PRD.md`](PRD.md). See [`CONTRIBUTING.md`](CONTRIBUTING.md) to get started.
+
+---
+
 ## Development
 
 ### Build and run locally
@@ -175,6 +190,14 @@ Hexagonal (ports & adapters) with four layers:
 - **Application** — use case interfaces and service implementations.
 - **Infrastructure** (`adapter/driven/`) — adapters for WireGuard, Traefik, Route53, Docker, Authelia.
 - **Web** (`rest/`) — REST controllers; DTOs are inner `record` classes.
+
+---
+
+## Contributing
+
+Contributions are welcome. The [roadmap](#roadmap) above lists what's planned — pick any item, check the full spec in [`PRD.md`](PRD.md), and open an issue before starting to avoid duplicate work.
+
+For bugs, browse [open issues](https://github.com/getvaier/vaier/issues) or open a new one. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development guide (architecture, TDD rules, PR expectations).
 
 ---
 

@@ -139,23 +139,21 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 8. Processing state survives page refresh (backed by in-memory server state, not persisted to disk)
 9. Duplicate submissions are rejected: attempting to add a service already in active or processing shows an error
 
-**Planned:**
-- **Root redirect path UI** — the `rootRedirectPath` field already exists in the publish API request body; it needs a corresponding optional input in the publish form (e.g. a collapsible "Advanced" section)
+**Also implemented:**
+- **Root redirect path UI** — collapsible "Advanced" section in the publish modal with an optional root path redirect input, wired to the `rootRedirectPath` API field
 
 ---
 
-### 6.3 Service Dashboard ✅ (partial — `hosted-services.html`)
+### 6.3 Service Dashboard ✅ (`launchpad.html`)
 
-A launchpad page listing all published services with their current status.
+A read-only launchpad page listing all published services as a clean grid of tiles.
 
-**Current state:** The hosted services page shows service cards with DNS/host state indicators, auth status, and management actions. It is primarily a management UI.
-
-**Planned — read-only launchpad view:**
-- Separate page (`/launchpad.html` or a toggle within the existing page) with a clean grid of service tiles
-- Each tile: service name, full URL (clickable), favicon if fetchable, status dot (reachable / unreachable), auth badge
-- No management controls in the launchpad view — those remain in the management UI
+**Current state:**
+- Separate page at `/launchpad.html`
+- Each tile: service name, peer name, favicon (with letter-avatar fallback), clickable link opening service in a new tab
+- No management controls — purely presentational
 - Suitable for use as a browser home page or new-tab page
-- Protected by Authelia under the same policy as the rest of Vaier — not a public page *(OQ1 resolved: protected)*
+- Protected by Authelia *(OQ1 resolved: protected)*
 
 ---
 
@@ -196,7 +194,18 @@ No planned changes.
 
 ---
 
-### 6.8 Container Update Notifications 🔲 (planned)
+### 6.7 Backup / Restore ✅ (exists)
+
+Export and import the full Vaier configuration as a JSON snapshot.
+
+**Current capabilities:**
+- **Export** — downloads a JSON file containing all peers, hosted services, DNS records, and users
+- **Import** — uploads a JSON backup and restores configuration; shows a real-time SSE log of each step
+- Accessible from the Settings page
+
+---
+
+### 6.8 Container Update Notifications 🔲 (planned, tracked in [#57](https://github.com/getvaier/vaier/issues/57))
 
 Keep the operator aware when Docker images have newer versions available.
 
@@ -219,7 +228,7 @@ Keep the operator aware when Docker images have newer versions available.
 
 ---
 
-### 6.9 Authelia Email Notifications 🔲 (planned)
+### 6.9 Authelia Email Notifications 🔲 (planned, tracked in [#49](https://github.com/getvaier/vaier/issues/49))
 
 Authelia sends emails for password reset and two-factor enrolment flows. Currently the `notifier` in the generated Authelia config is set to `filesystem` — emails are written to a text file (`/config/emails.txt`) instead of being delivered. This means password reset is broken for end users.
 
@@ -245,7 +254,7 @@ Authelia sends emails for password reset and two-factor enrolment flows. Current
 
 ---
 
-### 6.10 First-Run Setup Wizard 🔲 (planned)
+### 6.10 First-Run Setup Wizard 🔲 (planned, tracked in [#48](https://github.com/getvaier/vaier/issues/48))
 
 Currently Vaier requires four environment variables before it can start (`VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, `ACME_EMAIL`). This is a barrier for new users who need to edit a `.env` file they may not know how to create, and it makes adding new required config (like SMTP credentials for 6.9) increasingly painful.
 
@@ -323,7 +332,6 @@ The following are explicitly out of scope to avoid feature creep and overlap wit
 - Keycloak / other OIDC providers
 - Kubernetes
 - Secrets management (Vault, etc.)
-- Backup / restore of configs
 
 ---
 
@@ -352,18 +360,7 @@ All original open questions have been resolved:
 
 ---
 
-## 12. Implementation Backlog
+## 12. Backlog
 
-Ordered by user value. Items at the top should be worked first.
-
-| # | Feature | Section | Notes |
-|---|---------|---------|-------|
-| B1 | Peer types ✅ | 6.1 | Type selector in create form; drives config defaults and download options shown; LAN CIDR field for Ubuntu server peers |
-| B1a | Simplify Windows Docker peer service discovery | 6.1 | Getting containers listed on Windows + Docker Desktop is complex: named pipe vs TCP socket, WSL2 networking isolation, and Windows Firewall blocking inbound connections on the WireGuard interface. Explore a lightweight Vaier agent sidecar container bundled in the generated docker-compose — mounts the Docker socket and exposes a simple HTTP API on the VPN IP from within the Docker network (so traffic never crosses the Windows Firewall). Would also eliminate TLS cert management and make Windows/Ubuntu server peers functionally identical. |
-| B3 | Root redirect path UI | 6.2 | Add optional input to publish modal; wire to existing API field |
-| B4 | Launchpad view | 6.3 | Clean read-only grid; no management controls; Authelia-protected |
-| B5 | Container update notifications | 6.8 | Docker Hub digest comparison; badge in peer cards and nav |
-| B6 | Processing list for hosted services | 6.2 | Three-section layout: discoverable → processing → active; processing cards show live SSE progress steps; survive page refresh via server-side in-memory state |
-| B7 | Authelia email via SMTP | 6.9 | Replace filesystem notifier with SMTP in generated Authelia config; collect host, port, username, password, sender address; AWS SES as suggested default but any SMTP works |
-| B8 | First-run setup wizard | 6.10 | Web UI for initial config (domain, AWS creds, ACME email, SMTP, admin account); writes to persisted config file; `.env` still works for scripted deployments; setup page bypasses Authelia |
+The backlog is tracked in [GitHub Issues](https://github.com/getvaier/vaier/issues). Feature specs for planned items are in the relevant section above (6.8–6.10). Bugs and smaller improvements are described directly in the issue.
 
