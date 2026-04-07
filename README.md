@@ -54,7 +54,19 @@ Vaier runs as part of a five-container Docker Compose stack:
 
 ### 1. Provision a server and install Docker
 
-Spin up a Linux server (EC2 t3.small or similar) with the ports above open, then install Docker:
+Spin up a Linux server (EC2 t3.small or similar) with the ports above open. Once it's running, get its public DNS and connect:
+
+```bash
+# Example for AWS EC2 — get the public DNS name
+aws ec2 describe-instances \
+  --filters "Name=instance-state-name,Values=running" \
+  --query "Reservations[*].Instances[*].PublicDnsName" \
+  --output text
+
+ssh -i your-key.pem ec2-user@<public-dns>
+```
+
+Then install Docker:
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
