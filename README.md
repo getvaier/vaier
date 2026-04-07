@@ -52,28 +52,16 @@ Vaier runs as part of a five-container Docker Compose stack:
 
 ## Quick start
 
-### 1. Provision the server
+### 1. Provision a server and install Docker
+
+Spin up a Linux server (EC2 t3.small or similar) with the ports above open, then install Docker:
 
 ```bash
-# Install Docker
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER && newgrp docker
-sudo systemctl enable docker
-
-# (Optional) Add swap for small instances
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
 ```
 
-### 2. Clone and configure
-
-```bash
-git clone https://github.com/getvaier/vaier.git
-cd vaier
-```
-
-Create a `.env` file:
+### 2. Create a `.env` file
 
 ```env
 VAIER_AWS_KEY=your_aws_access_key
@@ -82,11 +70,17 @@ VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@example.com
 ```
 
-### 3. Point your base domain at your server
+### 3. Download `docker-compose.yml`
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
+```
+
+### 4. Point your base domain at your server
 
 Create an A record for `yourdomain.com` pointing to the server's public IP. Vaier automatically creates the `vaier.yourdomain.com` and `auth.yourdomain.com` DNS records in Route53 on first startup.
 
-### 4. Start the stack
+### 5. Start the stack
 
 ```bash
 docker compose up -d
