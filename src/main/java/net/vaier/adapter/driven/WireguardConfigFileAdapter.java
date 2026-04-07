@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 @Component
@@ -87,6 +89,30 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<PeerConfiguration> getAllPeerConfigs() {
+        List<PeerConfiguration> configs = new ArrayList<>();
+        Path configDir = Paths.get(wireguardConfigPath);
+
+        if (!Files.exists(configDir)) {
+            return configs;
+        }
+
+        try (var stream = Files.list(configDir)) {
+            stream.filter(Files::isDirectory)
+                    .filter(dir -> !dir.getFileName().toString().equals("wg_confs"))
+                    .filter(dir -> !dir.getFileName().toString().startsWith("."))
+                    .forEach(dir -> {
+                        String peerName = dir.getFileName().toString();
+                        getPeerConfigByName(peerName).ifPresent(configs::add);
+                    });
+        } catch (Exception e) {
+            log.error("Failed to list peer configs: {}", e.getMessage(), e);
+        }
+
+        return configs;
     }
 
     @Override

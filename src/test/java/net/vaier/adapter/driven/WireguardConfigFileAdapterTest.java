@@ -165,6 +165,48 @@ class WireguardConfigFileAdapterTest {
         assertThat(result.get().lanCidr()).isEqualTo("192.168.1.0/24");
     }
 
+    // --- getAllPeerConfigs ---
+
+    @Test
+    void getAllPeerConfigs_returnsEmptyListWhenNoPeers() {
+        assertThat(adapter.getAllPeerConfigs()).isEmpty();
+    }
+
+    @Test
+    void getAllPeerConfigs_returnsAllPeerConfigs() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+        createPeerConf("phone", "10.13.13.3");
+
+        var result = adapter.getAllPeerConfigs();
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(PeerConfiguration::name)
+                .containsExactlyInAnyOrder("laptop", "phone");
+    }
+
+    @Test
+    void getAllPeerConfigs_ignoresWgConfsDirectory() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+        Files.createDirectories(configDir.resolve("wg_confs"));
+
+        assertThat(adapter.getAllPeerConfigs()).hasSize(1);
+    }
+
+    @Test
+    void getAllPeerConfigs_ignoresDotDirectories() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+        Files.createDirectories(configDir.resolve(".hidden"));
+
+        assertThat(adapter.getAllPeerConfigs()).hasSize(1);
+    }
+
+    @Test
+    void getAllPeerConfigs_returnsEmptyListWhenConfigDirMissing() {
+        ReflectionTestUtils.setField(adapter, "wireguardConfigPath", "/nonexistent/path");
+
+        assertThat(adapter.getAllPeerConfigs()).isEmpty();
+    }
+
     // helpers
 
     private void createPeerConf(String peerName, String ip) throws IOException {

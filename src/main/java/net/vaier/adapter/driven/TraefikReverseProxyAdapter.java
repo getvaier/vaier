@@ -291,7 +291,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                     Map<String, Object> serviceConfig = castToMap(services.get(serviceName));
 
                     if (serviceConfig != null) {
-                        routes.addAll(extractServiceUrls(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig));
+                        String rootRedirectPath = extractRootRedirectPath(routerName, routerMiddlewares, middlewares, domainName);
+                        routes.addAll(extractServiceUrls(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig, rootRedirectPath));
                     }
                 }
             }
@@ -385,7 +386,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private List<ReverseProxyRoute> extractServiceUrls(String routerName, String domainName, String serviceName,
                                                         ReverseProxyRoute.AuthInfo authInfo, List<String> entryPoints,
                                                         ReverseProxyRoute.TlsConfig tlsConfig, List<String> middlewares,
-                                                        Map<String, Object> serviceConfig) {
+                                                        Map<String, Object> serviceConfig, String rootRedirectPath) {
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
         // Handle loadBalancer configuration
@@ -400,13 +401,38 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                     if (url != null) {
                         AddressPort addressPort = parseUrl(url);
                         routes.add(new ReverseProxyRoute(routerName, domainName, addressPort.address,
-                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares));
+                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares, rootRedirectPath));
                     }
                 }
             }
         }
 
         return routes;
+    }
+
+    /**
+     * If the router has a redirect middleware (ending in "-redirect"), look up its replacement URL
+     * in the middlewares config and extract the path portion (everything after the domain).
+     */
+    private String extractRootRedirectPath(String routerName, List<String> routerMiddlewares,
+                                           Map<String, Object> middlewares, String domainName) {
+        if (routerMiddlewares == null || middlewares == null) return null;
+        String expectedMiddlewareName = routerName.replace("-router", "-redirect");
+        if (!routerMiddlewares.contains(expectedMiddlewareName)) return null;
+
+        Map<String, Object> mw = castToMap(middlewares.get(expectedMiddlewareName));
+        if (mw == null) return null;
+        Map<String, Object> redirectRegex = castToMap(mw.get("redirectRegex"));
+        if (redirectRegex == null) return null;
+
+        String replacement = (String) redirectRegex.get("replacement");
+        if (replacement == null) return null;
+
+        String prefix = "https://" + domainName;
+        if (replacement.startsWith(prefix)) {
+            return replacement.substring(prefix.length());
+        }
+        return null;
     }
 
     /**
