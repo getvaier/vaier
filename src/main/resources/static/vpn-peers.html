@@ -183,7 +183,7 @@
         /* Service list */
         .service-list {
             display: grid;
-            grid-template-columns: 1fr auto auto;
+            grid-template-columns: 1fr auto;
             column-gap: 0.75rem;
             row-gap: 0.2rem;
             align-items: center;
@@ -205,12 +205,6 @@
         .service-row { display: contents; color: var(--text); }
 
         .service-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-
-        .service-port {
-            color: var(--text-muted);
-            text-align: right;
-            white-space: nowrap;
-        }
 
         .service-tag {
             color: var(--text-muted);
@@ -490,11 +484,9 @@
             if (!containers || containers.length === 0)
                 return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">none discovered</span></div>`;
             const rows = containers.map(c => {
-                const port    = c.ports[0]?.publicPort;
                 const version = c.version || parseImageTag(c.image);
                 return `<div class="service-row">
                     <span class="service-name">${c.containerName}</span>
-                    <span class="service-port">${port != null ? ':' + port : '—'}</span>
                     <span class="service-tag">${version}</span>
                 </div>`;
             }).join('');
@@ -502,7 +494,7 @@
                 <span class="detail-label">Services</span>
                 <div class="service-list">
                     <div class="service-list-header">
-                        <span>name</span><span>port</span><span>version</span>
+                        <span>name</span><span>version</span>
                     </div>
                     ${rows}
                 </div>
