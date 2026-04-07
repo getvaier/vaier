@@ -1,6 +1,6 @@
 # Product Requirements Document — Vaier
 
-**Last updated:** 2026-03-30
+**Last updated:** 2026-04-07
 **Status:** Living document
 **Issues:** https://github.com/getvaier/vaier/issues — GitHub issues are part of the spec and represent confirmed requirements and bugs.
 
