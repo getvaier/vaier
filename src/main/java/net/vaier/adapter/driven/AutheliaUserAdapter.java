@@ -46,6 +46,11 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     }
 
     @Override
+    public boolean isDatabaseInitialised() {
+        return new File(usersDbPath).exists();
+    }
+
+    @Override
     public List<User> getUsers() {
         List<User> users = new ArrayList<>();
         File usersDbFile = new File(usersDbPath);

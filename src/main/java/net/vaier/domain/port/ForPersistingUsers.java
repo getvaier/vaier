@@ -4,6 +4,7 @@ import net.vaier.domain.User;
 import java.util.List;
 
 public interface ForPersistingUsers {
+    boolean isDatabaseInitialised();
     List<User> getUsers();
     void addUser(String username, String password, String email, String displayname);
     void deleteUser(String username);

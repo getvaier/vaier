@@ -1,5 +1,5 @@
 package net.vaier.domain.port;
 
 public interface ForInitialisingUserService {
-    void initialiseConfiguration();
+    boolean initialiseConfiguration();
 }

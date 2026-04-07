@@ -131,4 +131,23 @@ class AutheliaConfigInitializerTest {
         int oneFactorIndex = content.lastIndexOf("policy: one_factor");
         assertThat(bypassIndex).isLessThan(oneFactorIndex);
     }
+
+    @Test
+    void initialiseConfiguration_returnsTrueWhenFileIsCreated() {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+
+        boolean result = init.initialiseConfiguration();
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void initialiseConfiguration_returnsFalseWhenConfigUnchanged() {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        init.initialiseConfiguration();
+
+        boolean result = init.initialiseConfiguration();
+
+        assertThat(result).isFalse();
+    }
 }

@@ -1,6 +1,8 @@
 package net.vaier.domain;
 
+import java.security.SecureRandom;
 import java.util.List;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.port.ForInitialisingUserService;
@@ -8,7 +10,6 @@ import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.config.ServiceNames;
-import java.util.Optional;
 
 @Slf4j
 public class Lifecycle {
@@ -37,17 +38,35 @@ public class Lifecycle {
         initUsers();
     }
 
-    private void initUsers() {
-        forInitialisingUserService.initialiseConfiguration();
+    void initUsers() {
+        boolean configChanged = forInitialisingUserService.initialiseConfiguration();
 
-        Optional<User> admin = forPersistingUsers.getUsers().stream()
-            .filter(user -> user.getName().equals(ServiceNames.DEFAULT_ADMIN_USERNAME))
-            .findFirst();
-        if(admin.isEmpty()) {
-            forPersistingUsers.addUser(ServiceNames.DEFAULT_ADMIN_USERNAME, ServiceNames.DEFAULT_ADMIN_USERNAME, "", "Admin");
+        boolean adminCreated = false;
+        if (!forPersistingUsers.isDatabaseInitialised()) {
+            String password = generateRandomPassword();
+            forPersistingUsers.addUser(ServiceNames.DEFAULT_ADMIN_USERNAME, password, "", "Admin");
+            log.info("==========================================================");
+            log.info("ADMIN USER CREATED");
+            log.info("Username: {}", ServiceNames.DEFAULT_ADMIN_USERNAME);
+            log.info("Password: {}", password);
+            log.info("PLEASE CHANGE THIS PASSWORD IMMEDIATELY");
+            log.info("==========================================================");
+            adminCreated = true;
         }
 
-        containerRestarter.restartContainer(ServiceNames.AUTHELIA);
+        if (configChanged || adminCreated) {
+            containerRestarter.restartContainer(ServiceNames.AUTHELIA);
+        }
+    }
+
+    private String generateRandomPassword() {
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        SecureRandom random = new SecureRandom();
+        StringBuilder password = new StringBuilder(20);
+        for (int i = 0; i < 20; i++) {
+            password.append(chars.charAt(random.nextInt(chars.length())));
+        }
+        return password.toString();
     }
 
     private void initDns() {

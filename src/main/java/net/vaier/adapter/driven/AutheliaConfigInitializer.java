@@ -32,10 +32,8 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
     }
 
     @Override
-    public void initialiseConfiguration() {
+    public boolean initialiseConfiguration() {
         File configFile = new File(configurationFile);
-
-        log.info("Overwriting Authelia configuration file at: {}", configFile.getAbsolutePath());
 
         // Create parent directories if they don't exist
         File parentDir = configFile.getParentFile();
@@ -47,6 +45,19 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
 
         String configContent = generateDefaultConfig();
 
+        if (configFile.exists()) {
+            try {
+                String existing = java.nio.file.Files.readString(configFile.toPath());
+                if (existing.equals(configContent)) {
+                    log.info("Authelia configuration unchanged, skipping write");
+                    return false;
+                }
+            } catch (IOException e) {
+                log.warn("Could not read existing Authelia configuration, will overwrite", e);
+            }
+        }
+
+        log.info("Writing Authelia configuration file at: {}", configFile.getAbsolutePath());
         try (FileWriter writer = new FileWriter(configFile)) {
             writer.write(configContent);
             log.info("Successfully wrote Authelia configuration file");
@@ -54,6 +65,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
             log.error("Failed to write Authelia configuration file", e);
             throw new RuntimeException("Failed to initialize Authelia configuration", e);
         }
+        return true;
     }
 
     private String generateDefaultConfig() {

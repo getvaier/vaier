@@ -24,6 +24,20 @@ class AutheliaUserAdapterTest {
         adapter = new AutheliaUserAdapter(tempDir.resolve("users_database.yml").toString());
     }
 
+    // --- isDatabaseInitialised ---
+
+    @Test
+    void isDatabaseInitialised_returnsFalseWhenFileDoesNotExist() {
+        assertThat(adapter.isDatabaseInitialised()).isFalse();
+    }
+
+    @Test
+    void isDatabaseInitialised_returnsTrueWhenFileExists() throws IOException {
+        Files.createFile(tempDir.resolve("users_database.yml"));
+
+        assertThat(adapter.isDatabaseInitialised()).isTrue();
+    }
+
     // --- getUsers ---
 
     @Test
