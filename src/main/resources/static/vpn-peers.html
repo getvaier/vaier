@@ -84,45 +84,12 @@
             margin-top: 0.75rem;
         }
 
-        .detail-row {
-            display: flex;
-            gap: 0.5rem;
-            font-size: 0.8rem;
-        }
-
-        .detail-label {
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            min-width: 130px;
-            flex-shrink: 0;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            padding-top: 0.05rem;
-        }
-
-        .detail-value {
-            color: var(--text);
-            font-family: var(--mono);
-            font-size: 0.78rem;
-            word-break: break-all;
-        }
-
         .connection-status {
             display: flex;
             align-items: center;
             gap: 0.4rem;
             font-size: 0.78rem;
         }
-
-        .status-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .status-connected    { background: var(--green); box-shadow: 0 0 4px var(--green); }
-        .status-disconnected { background: var(--red); }
 
         /* Config preview */
         .config-preview {
@@ -168,17 +135,6 @@
             font-size: 0.82rem;
             color: var(--text-dim);
         }
-
-        .form-checkbox {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-top: 0.5rem;
-            font-size: 0.82rem;
-            color: var(--text-muted);
-        }
-
-        .form-checkbox input { width: auto; accent-color: var(--accent); }
 
         /* Service list */
         .service-list {
@@ -289,8 +245,6 @@
             .peer-header-left { flex: 1 1 100%; flex-wrap: wrap; }
             .peer-actions { flex: 1 1 100%; flex-wrap: wrap; }
             .peer-body { padding: 0 0.75rem 0.75rem; }
-            .detail-row { flex-direction: column; gap: 0.15rem; }
-            .detail-label { min-width: unset; }
         }
     </style>
 </head>
