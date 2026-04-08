@@ -1,9 +1,9 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DeleteHostedServiceUseCase;
-import net.vaier.application.ForInvalidatingHostedServicesCache;
+import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.config.ServiceNames;
-import net.vaier.application.GetHostedServicesUseCase;
+import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -21,16 +21,16 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class HostingService implements GetHostedServicesUseCase, GetLaunchpadServicesUseCase, ForInvalidatingHostedServicesCache {
+public class PublishingService implements GetPublishedServicesUseCase, GetLaunchpadServicesUseCase, ForInvalidatingPublishedServicesCache {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForGettingVpnClients forGettingVpnClients;
 
-    private volatile List<HostedServiceUco> cache = null;
+    private volatile List<PublishedServiceUco> cache = null;
 
-    public HostingService(ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
+    public PublishingService(ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
         ForGettingServerInfo forGettingServerInfo,
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForGettingVpnClients forGettingVpnClients
@@ -42,12 +42,12 @@ public class HostingService implements GetHostedServicesUseCase, GetLaunchpadSer
     }
 
     @Override
-    public void invalidateHostedServicesCache() {
+    public void invalidatePublishedServicesCache() {
         cache = null;
     }
 
     @Override
-    public List<HostedServiceUco> getHostedServices() {
+    public List<PublishedServiceUco> getPublishedServices() {
         if (cache != null) return cache;
 
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
@@ -68,17 +68,17 @@ public class HostingService implements GetHostedServicesUseCase, GetLaunchpadSer
 
     @Override
     public List<LaunchpadServiceUco> getLaunchpadServices() {
-        return getHostedServices().stream()
+        return getPublishedServices().stream()
             .filter(s -> s.dnsState() == DnsState.OK)
             .map(s -> new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress()))
             .toList();
     }
 
-    private HostedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
+    private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices) {
-        boolean mandatory = DeleteHostedServiceUseCase.MANDATORY_SUBDOMAINS.stream()
+        boolean mandatory = DeletePublishedServiceUseCase.MANDATORY_SUBDOMAINS.stream()
             .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
-        return new HostedServiceUco(
+        return new PublishedServiceUco(
             route.getName(),
             route.getDomainName(),
             dnsState(route.getDomainName(), allDnsRecords),

@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
+import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -22,7 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class HostingServiceTest {
+class PublishingServiceTest {
 
     @Mock
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
@@ -37,66 +37,66 @@ class HostingServiceTest {
     ForGettingVpnClients forGettingVpnClients;
 
     @InjectMocks
-    HostingService service;
+    PublishingService service;
 
     @Test
-    void getHostedServices_emptyRoutes_returnsEmptyWithoutCallingOtherPorts() {
+    void getPublishedServices_emptyRoutes_returnsEmptyWithoutCallingOtherPorts() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
 
-        assertThat(service.getHostedServices()).isEmpty();
+        assertThat(service.getPublishedServices()).isEmpty();
         verifyNoInteractions(forPersistingDnsRecords, forGettingVpnClients, forGettingServerInfo);
     }
 
     @Test
-    void getHostedServices_routeWithCnameRecord_dnsStateOk() {
+    void getPublishedServices_routeWithCnameRecord_dnsStateOk() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.dnsState()).isEqualTo(DnsState.OK);
     }
 
     @Test
-    void getHostedServices_routeWithARecord_dnsStateOk() {
+    void getPublishedServices_routeWithARecord_dnsStateOk() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupDnsRecord("app.example.com", DnsRecordType.A);
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.dnsState()).isEqualTo(DnsState.OK);
     }
 
     @Test
-    void getHostedServices_routeWithNoMatchingDnsRecord_dnsStateNonExisting() {
+    void getPublishedServices_routeWithNoMatchingDnsRecord_dnsStateNonExisting() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupDnsRecord("other.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.dnsState()).isEqualTo(DnsState.NON_EXISTING);
     }
 
     @Test
-    void getHostedServices_routeWithNoDnsRecordsAtAll_dnsStateNonExisting() {
+    void getPublishedServices_routeWithNoDnsRecordsAtAll_dnsStateNonExisting() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.dnsState()).isEqualTo(DnsState.NON_EXISTING);
     }
 
     @Test
-    void getHostedServices_addressFoundInLocalServices_hostStateOk() {
+    void getPublishedServices_addressFoundInLocalServices_hostStateOk() {
         setupOneRoute("app.example.com", "my-container", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
@@ -105,13 +105,13 @@ class HostingServiceTest {
                 List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of()))
         );
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.OK);
     }
 
     @Test
-    void getHostedServices_vpnPeerWithRecentHandshake_hostStateOk() {
+    void getPublishedServices_vpnPeerWithRecentHandshake_hostStateOk() {
         String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
         setupOneRoute("app.example.com", "10.13.13.2", 8080);
         setupNoDnsRecords();
@@ -120,13 +120,13 @@ class HostingServiceTest {
         );
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.OK);
     }
 
     @Test
-    void getHostedServices_vpnPeerWithStaleHandshake_hostStateUnreachable() {
+    void getPublishedServices_vpnPeerWithStaleHandshake_hostStateUnreachable() {
         setupOneRoute("app.example.com", "10.13.13.2", 8080);
         setupNoDnsRecords();
         when(forGettingVpnClients.getClients()).thenReturn(
@@ -134,25 +134,25 @@ class HostingServiceTest {
         );
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.UNREACHABLE);
     }
 
     @Test
-    void getHostedServices_noLocalServiceAndNoVpnClientMatch_hostStateUnreachable() {
+    void getPublishedServices_noLocalServiceAndNoVpnClientMatch_hostStateUnreachable() {
         setupOneRoute("app.example.com", "192.168.99.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        HostedServiceUco result = service.getHostedServices().get(0);
+        PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.UNREACHABLE);
     }
 
     @Test
-    void getHostedServices_routeWithAuth_authenticatedIsTrue() {
+    void getPublishedServices_routeWithAuth_authenticatedIsTrue() {
         ReverseProxyRoute route = new ReverseProxyRoute(
             "route", "app.example.com", "10.0.0.1", 8080, "svc",
             new ReverseProxyRoute.AuthInfo("forwardAuth", "admin", null)
@@ -162,51 +162,51 @@ class HostingServiceTest {
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getHostedServices().get(0).authenticated()).isTrue();
+        assertThat(service.getPublishedServices().get(0).authenticated()).isTrue();
     }
 
     @Test
-    void getHostedServices_routeWithNoAuth_authenticatedIsFalse() {
+    void getPublishedServices_routeWithNoAuth_authenticatedIsFalse() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getHostedServices().get(0).authenticated()).isFalse();
+        assertThat(service.getPublishedServices().get(0).authenticated()).isFalse();
     }
 
     @Test
-    void getHostedServices_regularService_mandatoryIsFalse() {
+    void getPublishedServices_regularService_mandatoryIsFalse() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getHostedServices().get(0).mandatory()).isFalse();
+        assertThat(service.getPublishedServices().get(0).mandatory()).isFalse();
     }
 
     @Test
-    void getHostedServices_vaierService_mandatoryIsTrue() {
+    void getPublishedServices_vaierService_mandatoryIsTrue() {
         setupOneRoute(ServiceNames.VAIER + ".example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getHostedServices().get(0).mandatory()).isTrue();
+        assertThat(service.getPublishedServices().get(0).mandatory()).isTrue();
     }
 
     @Test
-    void getHostedServices_authService_mandatoryIsTrue() {
+    void getPublishedServices_authService_mandatoryIsTrue() {
         setupOneRoute("login.example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getHostedServices().get(0).mandatory()).isTrue();
+        assertThat(service.getPublishedServices().get(0).mandatory()).isTrue();
     }
 
     @Test
-    void getHostedServices_expensivePortsCalledExactlyOnce() {
+    void getPublishedServices_expensivePortsCalledExactlyOnce() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("app.example.com", "10.0.0.1", 8080),
             route("db.example.com", "10.0.0.2", 5432)
@@ -215,7 +215,7 @@ class HostingServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        service.getHostedServices();
+        service.getPublishedServices();
 
         verify(forPersistingDnsRecords, times(1)).getDnsZones();
         verify(forGettingVpnClients, times(1)).getClients();
@@ -223,7 +223,7 @@ class HostingServiceTest {
     }
 
     @Test
-    void getHostedServices_secondCall_returnsCachedResultWithoutRefetching() {
+    void getPublishedServices_secondCall_returnsCachedResultWithoutRefetching() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("app.example.com", "10.0.0.1", 8080)
         ));
@@ -231,8 +231,8 @@ class HostingServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        service.getHostedServices();
-        service.getHostedServices();
+        service.getPublishedServices();
+        service.getPublishedServices();
 
         verify(forPersistingReverseProxyRoutes, times(1)).getReverseProxyRoutes();
         verify(forPersistingDnsRecords, times(1)).getDnsZones();
@@ -241,7 +241,7 @@ class HostingServiceTest {
     }
 
     @Test
-    void getHostedServices_afterInvalidation_refetchesFromPorts() {
+    void getPublishedServices_afterInvalidation_refetchesFromPorts() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("app.example.com", "10.0.0.1", 8080)
         ));
@@ -249,9 +249,9 @@ class HostingServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        service.getHostedServices();
-        service.invalidateHostedServicesCache();
-        service.getHostedServices();
+        service.getPublishedServices();
+        service.invalidatePublishedServicesCache();
+        service.getPublishedServices();
 
         verify(forPersistingDnsRecords, times(2)).getDnsZones();
         verify(forGettingVpnClients, times(2)).getClients();

@@ -2,9 +2,9 @@ package net.vaier.rest;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.DeleteHostedServiceUseCase;
-import net.vaier.application.GetHostedServicesUseCase;
-import net.vaier.application.GetHostedServicesUseCase.HostedServiceUco;
+import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.GetPublishedServicesUseCase;
+import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
@@ -19,15 +19,15 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.List;
 
 @RestController
-@RequestMapping("/hosted-services")
+@RequestMapping("/published-services")
 @RequiredArgsConstructor
 @Slf4j
-public class HostedServiceRestController {
+public class PublishedServiceRestController {
 
-    private final GetHostedServicesUseCase getHostedServicesUseCase;
+    private final GetPublishedServicesUseCase getPublishedServicesUseCase;
     private final PublishPeerServiceUseCase publishPeerServiceUseCase;
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
-    private final DeleteHostedServiceUseCase deleteHostedServiceUseCase;
+    private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
@@ -35,12 +35,12 @@ public class HostedServiceRestController {
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
-        return sseEventPublisher.subscribe("hosted-services");
+        return sseEventPublisher.subscribe("published-services");
     }
 
     @GetMapping("/discover")
-    public List<HostedServiceUco> getHostedServices() {
-        return getHostedServicesUseCase.getHostedServices();
+    public List<PublishedServiceUco> getPublishedServices() {
+        return getPublishedServicesUseCase.getPublishedServices();
     }
 
     @GetMapping("/publishable")
@@ -59,7 +59,7 @@ public class HostedServiceRestController {
     public ResponseEntity<Void> setAuth(@PathVariable String dnsName, @RequestBody AuthRequest request) {
         log.info("Setting auth={} for {}", request.requiresAuth(), dnsName);
         toggleServiceAuthUseCase.setAuthentication(dnsName, request.requiresAuth());
-        sseEventPublisher.publish("hosted-services", "service-updated", dnsName);
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 
@@ -76,9 +76,9 @@ public class HostedServiceRestController {
 
     @DeleteMapping("/{dnsName:.+}")
     public ResponseEntity<Void> deleteService(@PathVariable String dnsName) {
-        log.info("Deleting hosted service: {}", dnsName);
-        deleteHostedServiceUseCase.deleteService(dnsName);
-        sseEventPublisher.publish("hosted-services", "service-updated", dnsName);
+        log.info("Deleting published service: {}", dnsName);
+        deletePublishedServiceUseCase.deleteService(dnsName);
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 

@@ -2,8 +2,8 @@ package net.vaier.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.DeleteHostedServiceUseCase;
-import net.vaier.application.ForInvalidatingHostedServicesCache;
+import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -14,11 +14,11 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
+public class DeletePublishedServiceService implements DeletePublishedServiceUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
-    private final ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
+    private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
 
     @Value("${VAIER_DOMAIN:}")
     private String vaierDomain;
@@ -39,7 +39,7 @@ public class DeleteHostedServiceService implements DeleteHostedServiceUseCase {
 
         forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(vaierDomain));
         log.info("Deleted DNS CNAME for {}", fqdn);
-        forInvalidatingHostedServicesCache.invalidateHostedServicesCache();
+        forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
     }
 
     private void waitForTraefikRouteDeletion(String fqdn) {

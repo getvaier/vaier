@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.ForInvalidatingHostedServicesCache;
+import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.PublishPeerServiceUseCase.PendingPublication;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
@@ -42,7 +42,7 @@ class PublishPeerServiceServiceTest {
     PendingPublicationsTracker pendingPublicationsTracker;
 
     @Mock
-    ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
+    ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
 
     @InjectMocks
     PublishPeerServiceService service;
@@ -120,7 +120,7 @@ class PublishPeerServiceServiceTest {
     void publishService_emitsDnsCreatedEvent() {
         service.publishService("10.0.0.1", 8080, "app", false, null);
 
-        verify(forPublishingEvents).publish("hosted-services", "publish-dns-created", "app");
+        verify(forPublishingEvents).publish("published-services", "publish-dns-created", "app");
     }
 
     @Test
@@ -146,19 +146,19 @@ class PublishPeerServiceServiceTest {
 
         InOrder inOrder = inOrder(forPersistingReverseProxyRoutes, forPublishingEvents);
         inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
-        inOrder.verify(forPublishingEvents).publish("hosted-services", "publish-traefik-active", "app");
+        inOrder.verify(forPublishingEvents).publish("published-services", "publish-traefik-active", "app");
         verify(forPersistingReverseProxyRoutes, atLeast(2)).getReverseProxyRoutes();
     }
 
     @Test
-    void waitForDnsThenActivate_invalidatesHostedServicesCacheAfterActivation() {
+    void waitForDnsThenActivate_invalidatesPublishedServicesCacheAfterActivation() {
         ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
         service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
 
-        verify(forInvalidatingHostedServicesCache).invalidateHostedServicesCache();
+        verify(forInvalidatingPublishedServicesCache).invalidatePublishedServicesCache();
     }
 
     private ReverseProxyRoute routeWithDomain(String domain) {

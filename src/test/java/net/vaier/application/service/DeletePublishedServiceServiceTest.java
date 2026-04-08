@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.ForInvalidatingHostedServicesCache;
+import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.ReverseProxyRoute;
@@ -23,7 +23,7 @@ import static org.mockito.Mockito.*;
 
 
 @ExtendWith(MockitoExtension.class)
-class DeleteHostedServiceServiceTest {
+class DeletePublishedServiceServiceTest {
 
     @Mock
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
@@ -32,10 +32,10 @@ class DeleteHostedServiceServiceTest {
     ForPersistingDnsRecords forPersistingDnsRecords;
 
     @Mock
-    ForInvalidatingHostedServicesCache forInvalidatingHostedServicesCache;
+    ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
 
     @InjectMocks
-    DeleteHostedServiceService service;
+    DeletePublishedServiceService service;
 
     @BeforeEach
     void setUp() {
@@ -119,9 +119,9 @@ class DeleteHostedServiceServiceTest {
     }
 
     @Test
-    void deleteService_invalidatesHostedServicesCache() {
+    void deleteService_invalidatesPublishedServicesCache() {
         service.deleteService("app.example.com");
 
-        verify(forInvalidatingHostedServicesCache).invalidateHostedServicesCache();
+        verify(forInvalidatingPublishedServicesCache).invalidatePublishedServicesCache();
     }
 }

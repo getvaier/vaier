@@ -4,11 +4,11 @@ import net.vaier.domain.DnsState;
 import net.vaier.domain.Server.State;
 import java.util.List;
 
-public interface GetHostedServicesUseCase {
+public interface GetPublishedServicesUseCase {
 
-    List<HostedServiceUco> getHostedServices();
+    List<PublishedServiceUco> getPublishedServices();
 
-    record HostedServiceUco(
+    record PublishedServiceUco(
         String name,
         String dnsAddress,
         DnsState dnsState,

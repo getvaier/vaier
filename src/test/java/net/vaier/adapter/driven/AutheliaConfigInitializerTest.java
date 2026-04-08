@@ -102,7 +102,7 @@ class AutheliaConfigInitializerTest {
         String content = Files.readString(tempDir.resolve("configuration.yml"));
         assertThat(content).contains("policy: bypass");
         assertThat(content).contains("/launchpad.html");
-        assertThat(content).contains("/hosted-services/discover");
+        assertThat(content).contains("/published-services/discover");
     }
 
     @Test

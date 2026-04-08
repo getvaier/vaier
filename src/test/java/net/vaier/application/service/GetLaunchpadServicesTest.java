@@ -35,7 +35,7 @@ class GetLaunchpadServicesTest {
     ForGettingVpnClients forGettingVpnClients;
 
     @InjectMocks
-    HostingService service;
+    PublishingService service;
 
     @Test
     void getLaunchpadServices_returnsOnlyDnsAddressAndHostAddress() {

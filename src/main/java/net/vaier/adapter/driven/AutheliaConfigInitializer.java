@@ -128,7 +128,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                       resources:
                         - "^/$"
                         - "^/launchpad.html$"
-                        - "^/hosted-services/discover$"
+                        - "^/published-services/discover$"
                         - "^/favicon$"
                     - domain: "%s"
                       policy: one_factor

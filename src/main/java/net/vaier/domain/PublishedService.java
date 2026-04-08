@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 
 @Getter
 @RequiredArgsConstructor
-public class HostedService {
+public class PublishedService {
     private final String name;
     private final String dnsAddress;
     private final String hostAddress;

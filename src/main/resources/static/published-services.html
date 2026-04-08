@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hosted Services</title>
+    <title>Published Services</title>
     <link rel="stylesheet" href="styles.css">
     <style>
         /* Service cards */
@@ -162,7 +162,7 @@
                 <circle cx="4" cy="4.25" r="0.8" fill="currentColor" stroke="none"/>
                 <circle cx="4" cy="11.75" r="0.8" fill="currentColor" stroke="none"/>
             </svg>
-            Hosted Services
+            Published Services
         </div>
     </div>
 
@@ -269,7 +269,7 @@
 
         async function fetchServices() {
             try {
-                const response = await fetch('/hosted-services/discover');
+                const response = await fetch('/published-services/discover');
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 displayServices(await response.json());
             } catch (error) {
@@ -280,7 +280,7 @@
 
         async function fetchPublishable() {
             try {
-                const response = await fetch('/hosted-services/publishable');
+                const response = await fetch('/published-services/publishable');
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 displayPublishable(await response.json());
             } catch (error) {
@@ -302,7 +302,7 @@
         function displayServices(services) {
             const container = document.getElementById('services-container');
             if (services.length === 0) {
-                container.innerHTML = '<div class="loading">No hosted services yet</div>';
+                container.innerHTML = '<div class="loading">No published services yet</div>';
                 return;
             }
 
@@ -432,7 +432,7 @@
         }
 
         async function ignoreService(key) {
-            await fetch('/hosted-services/publishable/ignore', {
+            await fetch('/published-services/publishable/ignore', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key })
@@ -441,7 +441,7 @@
         }
 
         async function unignoreService(key) {
-            await fetch('/hosted-services/publishable/unignore', {
+            await fetch('/published-services/publishable/unignore', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key })
@@ -515,7 +515,7 @@
 
         async function fetchPending() {
             try {
-                const response = await fetch('/hosted-services/pending');
+                const response = await fetch('/published-services/pending');
                 if (!response.ok) return;
                 (await response.json()).forEach(p => {
                     addProcessingCard(p.subdomain, p.requiresAuth, p.dnsPropagated);
@@ -546,7 +546,7 @@
             submitBtn.textContent = 'Publishing…';
 
             try {
-                const response = await fetch('/hosted-services/publish', {
+                const response = await fetch('/published-services/publish', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath })
@@ -569,7 +569,7 @@
         async function toggleAuth(btn, dnsAddress, currentlyAuthenticated) {
             const newAuth = !currentlyAuthenticated;
             try {
-                const response = await fetch(`/hosted-services/${encodeURIComponent(dnsAddress)}/auth`, {
+                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/auth`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ requiresAuth: newAuth })
@@ -608,7 +608,7 @@
             cancelBtn.disabled = true;
             deleteBtn.textContent = 'Deleting…';
             try {
-                const response = await fetch(`/hosted-services/${encodeURIComponent(dnsAddress)}`, { method: 'DELETE' });
+                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 hideDeleteModal();
                 await Promise.all([fetchServices(), fetchPublishable()]);
@@ -630,7 +630,7 @@
         fetchPending();
         setInterval(fetchServices, 30000);
 
-        const _sse = new EventSource('/hosted-services/events');
+        const _sse = new EventSource('/published-services/events');
 
         _sse.addEventListener('publish-dns-propagated', e => {
             setProcessingStep(e.data, 'dns-propagate', true);

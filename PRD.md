@@ -123,11 +123,11 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 - Publish a service: creates DNS CNAME record (pointing to the VPN server) + Traefik route + optional Authelia middleware
 - Toggle authentication on/off per service
 - Check publish status (DNS propagated, Traefik active)
-- Delete hosted service (removes DNS + Traefik route)
+- Delete published service (removes DNS + Traefik route)
 
 **Publish flow (confirmed UX):**
 
-1. User sees two lists on the hosted services page:
+1. User sees two lists on the published services page:
    - **Discoverable** — containers with exposed TCP ports not yet published, found on local host and reachable VPN peers
    - **Active** — published services with their DNS/reachability state
 2. Clicking **+ Add** on a discoverable service opens a modal: subdomain input + auth toggle
@@ -200,7 +200,7 @@ No planned changes.
 Export and import the full Vaier configuration as a JSON snapshot.
 
 **Current capabilities:**
-- **Export** — downloads a JSON file containing all peers, hosted services, DNS records, and users
+- **Export** — downloads a JSON file containing all peers, published services, DNS records, and users
 - **Import** — uploads a JSON backup and restores configuration; shows a real-time SSE log of each step
 - Accessible from the Settings page
 
