@@ -309,10 +309,10 @@
         async function load() {
             const container = document.getElementById('grid');
             try {
-                const res = await fetch('/hosted-services/discover');
+                const res = await fetch('/launchpad/services');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const services = await res.json();
-                const external = services.filter(s => !s.dnsAddress.startsWith('vaier.') && s.dnsState === 'OK');
+                const external = services.filter(s => !s.dnsAddress.startsWith('vaier.'));
                 container.innerHTML = '';
                 if (external.length === 0) {
                     container.innerHTML = '<div class="empty">No services published yet.<br>Use <a href="/admin.html">Admin</a> to add services.</div>';

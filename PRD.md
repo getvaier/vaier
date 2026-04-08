@@ -153,7 +153,8 @@ A read-only launchpad page listing all published services as a clean grid of til
 - Each tile: service name, peer name, favicon (with letter-avatar fallback), clickable link opening service in a new tab
 - No management controls — purely presentational
 - Suitable for use as a browser home page or new-tab page
-- Protected by Authelia *(OQ1 resolved: protected)*
+- Launchpad page and its API (`/launchpad/services`, `/favicon`) are public (no auth required)
+- Admin pages remain protected by Authelia
 
 ---
 
@@ -353,7 +354,7 @@ All original open questions have been resolved:
 
 | # | Question | Decision |
 |---|----------|----------|
-| OQ1 | Should the launchpad be unauthenticated or protected? | Protected by Authelia, same policy as rest of Vaier UI |
+| OQ1 | Should the launchpad be unauthenticated or protected? | Launchpad is public; admin UI is protected by Authelia. A dedicated `/launchpad/services` endpoint returns only DNS address and host address (no ports, auth state, or internal details). |
 | OQ2 | Non-Docker Hub registries in v1? | No — Docker Hub only. GHCR / self-hosted are stretch goals for v2. |
 | OQ3 | Pi-hole detection: automatic or env var? | N/A — Pi-hole removed from the project. |
 | OQ4 | Update notifications: push or UI only? | UI only in v1. Webhook/email is a v2 consideration. |

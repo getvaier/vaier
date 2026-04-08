@@ -4,6 +4,7 @@ import net.vaier.application.DeleteHostedServiceUseCase;
 import net.vaier.application.ForInvalidatingHostedServicesCache;
 import net.vaier.config.ServiceNames;
 import net.vaier.application.GetHostedServicesUseCase;
+import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
@@ -20,7 +21,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class HostingService implements GetHostedServicesUseCase, ForInvalidatingHostedServicesCache {
+public class HostingService implements GetHostedServicesUseCase, GetLaunchpadServicesUseCase, ForInvalidatingHostedServicesCache {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
@@ -63,6 +64,14 @@ public class HostingService implements GetHostedServicesUseCase, ForInvalidating
             .map(r -> toUco(r, allDnsRecords, vpnClients, localServices))
             .toList();
         return cache;
+    }
+
+    @Override
+    public List<LaunchpadServiceUco> getLaunchpadServices() {
+        return getHostedServices().stream()
+            .filter(s -> s.dnsState() == DnsState.OK)
+            .map(s -> new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress()))
+            .toList();
     }
 
     private HostedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,

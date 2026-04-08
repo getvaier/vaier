@@ -154,11 +154,17 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      # HTTPS router
+      # Public router — launchpad API and favicon (no auth)
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`))
+      - traefik.http.routers.vaier-public.entrypoints=websecure
+      - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
+      - traefik.http.routers.vaier-public.priority=200
+      # Authenticated router — everything else
       - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier.middlewares=vaier-auth
+      - traefik.http.routers.vaier.priority=100
       # Authelia middleware
       - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${VAIER_DOMAIN}
       - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
