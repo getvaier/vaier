@@ -1,13 +1,14 @@
 package net.vaier.application.service;
 
 import net.vaier.application.AddDnsRecordUseCase;
-import net.vaier.application.AddDnsZoneUseCase;
 import net.vaier.application.AddReverseProxyRouteUseCase;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.ImportConfigurationUseCase.ImportResult;
+import net.vaier.domain.DnsZone;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
+import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForRestoringVpnPeers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,11 +23,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ImportConfigurationServiceTest {
 
-    @Mock AddDnsZoneUseCase addDnsZoneUseCase;
+    @Mock ForPersistingDnsRecords forPersistingDnsRecords;
     @Mock AddDnsRecordUseCase addDnsRecordUseCase;
     @Mock AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
     @Mock AddUserUseCase addUserUseCase;
@@ -68,7 +70,7 @@ class ImportConfigurationServiceTest {
         ImportResult result = service.importConfiguration(json);
 
         assertThat(result.success()).isTrue();
-        verify(addDnsZoneUseCase).addDnsZone(new AddDnsZoneUseCase.DnsZoneUco("example.com"));
+        verify(forPersistingDnsRecords).addDnsZone(new DnsZone("example.com"));
         verify(addDnsRecordUseCase).addDnsRecord(
                 new AddDnsRecordUseCase.DnsRecordUco("grafana", "CNAME", 300L, java.util.List.of("vaier.example.com")),
                 "example.com");
@@ -146,7 +148,7 @@ class ImportConfigurationServiceTest {
     @Test
     void importConfiguration_continuesAfterPartialFailure() {
         doThrow(new RuntimeException("Zone already exists"))
-                .when(addDnsZoneUseCase).addDnsZone(any());
+                .when(forPersistingDnsRecords).addDnsZone(any());
 
         String json = """
                 {
@@ -169,6 +171,38 @@ class ImportConfigurationServiceTest {
     }
 
     @Test
+    void importConfiguration_skipsZoneCreationWhenZoneAlreadyExists() {
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(java.util.List.of(new DnsZone("example.com")));
+
+        String json = """
+                {
+                  "version": "1",
+                  "exportedAt": "2026-04-07T12:00:00Z",
+                  "settings": {},
+                  "peers": [],
+                  "services": [],
+                  "dnsZones": [
+                    {
+                      "name": "example.com",
+                      "records": [
+                        { "name": "grafana", "type": "CNAME", "ttl": 300, "values": ["vaier.example.com"] }
+                      ]
+                    }
+                  ],
+                  "users": []
+                }
+                """;
+
+        ImportResult result = service.importConfiguration(json);
+
+        assertThat(result.success()).isTrue();
+        verify(forPersistingDnsRecords, never()).addDnsZone(any());
+        verify(addDnsRecordUseCase).addDnsRecord(
+                new AddDnsRecordUseCase.DnsRecordUco("grafana", "CNAME", 300L, java.util.List.of("vaier.example.com")),
+                "example.com");
+    }
+
+    @Test
     void importConfiguration_handlesEmptyBackup() {
         String json = """
                 {
@@ -185,7 +219,7 @@ class ImportConfigurationServiceTest {
         ImportResult result = service.importConfiguration(json);
 
         assertThat(result.success()).isTrue();
-        verify(addDnsZoneUseCase, never()).addDnsZone(any());
+        verify(forPersistingDnsRecords, never()).addDnsZone(any());
         verify(addReverseProxyRouteUseCase, never()).addReverseProxyRoute(any());
         verify(addUserUseCase, never()).addUser(any(), any(), any(), any());
         verify(forRestoringVpnPeers, never()).restorePeer(any(), any());

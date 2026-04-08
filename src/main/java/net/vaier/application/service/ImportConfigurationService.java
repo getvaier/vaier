@@ -3,19 +3,21 @@ package net.vaier.application.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.AddDnsRecordUseCase;
-import net.vaier.application.AddDnsZoneUseCase;
 import net.vaier.application.AddReverseProxyRouteUseCase;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.ImportConfigurationUseCase;
+import net.vaier.domain.DnsZone;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
+import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForRestoringVpnPeers;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -23,7 +25,7 @@ public class ImportConfigurationService implements ImportConfigurationUseCase {
 
     public static final String IMPORT_TOPIC = "settings-import";
 
-    private final AddDnsZoneUseCase addDnsZoneUseCase;
+    private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final AddDnsRecordUseCase addDnsRecordUseCase;
     private final AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;
     private final AddUserUseCase addUserUseCase;
@@ -32,13 +34,13 @@ public class ImportConfigurationService implements ImportConfigurationUseCase {
     private final ObjectMapper objectMapper;
 
     public ImportConfigurationService(
-            AddDnsZoneUseCase addDnsZoneUseCase,
+            ForPersistingDnsRecords forPersistingDnsRecords,
             AddDnsRecordUseCase addDnsRecordUseCase,
             AddReverseProxyRouteUseCase addReverseProxyRouteUseCase,
             AddUserUseCase addUserUseCase,
             ForRestoringVpnPeers forRestoringVpnPeers,
             ForPublishingEvents forPublishingEvents) {
-        this.addDnsZoneUseCase = addDnsZoneUseCase;
+        this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.addDnsRecordUseCase = addDnsRecordUseCase;
         this.addReverseProxyRouteUseCase = addReverseProxyRouteUseCase;
         this.addUserUseCase = addUserUseCase;
@@ -115,14 +117,23 @@ public class ImportConfigurationService implements ImportConfigurationUseCase {
         if (dnsZones == null || dnsZones.isEmpty()) return;
         int totalRecords = dnsZones.stream().mapToInt(z -> z.records() == null ? 0 : z.records().size()).sum();
         emit("[dns] " + dnsZones.size() + " zone(s), " + totalRecords + " record(s)");
+
+        var existingZoneNames = forPersistingDnsRecords.getDnsZones().stream()
+                .map(DnsZone::name)
+                .collect(java.util.stream.Collectors.toSet());
+
         for (var zone : dnsZones) {
-            try {
-                addDnsZoneUseCase.addDnsZone(new AddDnsZoneUseCase.DnsZoneUco(zone.name()));
-                emit("[dns] zone " + zone.name() + " -> ok");
-            } catch (Exception e) {
-                log.warn("Failed to restore DNS zone {}: {}", zone.name(), e.getMessage());
-                emit("[dns] zone " + zone.name() + " -> failed: " + e.getMessage());
-                warnings.add("DNS zone '" + zone.name() + "' could not be restored: " + e.getMessage());
+            if (existingZoneNames.contains(zone.name())) {
+                emit("[dns] zone " + zone.name() + " -> already exists, skipping");
+            } else {
+                try {
+                    forPersistingDnsRecords.addDnsZone(new DnsZone(zone.name()));
+                    emit("[dns] zone " + zone.name() + " -> ok");
+                } catch (Exception e) {
+                    log.warn("Failed to restore DNS zone {}: {}", zone.name(), e.getMessage());
+                    emit("[dns] zone " + zone.name() + " -> failed: " + e.getMessage());
+                    warnings.add("DNS zone '" + zone.name() + "' could not be restored: " + e.getMessage());
+                }
             }
 
             if (zone.records() == null) continue;

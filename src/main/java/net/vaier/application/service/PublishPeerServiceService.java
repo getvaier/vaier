@@ -34,6 +34,9 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     @Value("${VAIER_DOMAIN:}")
     private String vaierDomain;
 
+    private long dnsTimeoutMillis = 120_000;
+    private long dnsRetryIntervalMillis = 3_000;
+
     private record PendingState(boolean requiresAuth, boolean dnsPropagated) {}
 
     // Injectable for testing; defaults to real DNS lookup
@@ -88,7 +91,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     }
 
     void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath) {
-        long deadline = System.currentTimeMillis() + 120_000;
+        long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             if (dnsChecker.test(fqdn)) {
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
@@ -104,16 +107,13 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                 forPublishingEvents.publish("published-services", "service-updated", subdomain);
                 return;
             }
-            log.debug("DNS not yet live for {}, retrying in 3s", fqdn);
-            try { Thread.sleep(3_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            log.debug("DNS not yet live for {}, retrying in {}s", fqdn, dnsRetryIntervalMillis / 1000);
+            try { Thread.sleep(dnsRetryIntervalMillis); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
-        log.warn("DNS propagation timed out for {}, writing Traefik route anyway", fqdn);
-        forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
-        waitForTraefikRoute(fqdn);
+        log.warn("DNS propagation timed out for {} after {}s — Traefik route NOT written to avoid invalid certificate", fqdn, dnsTimeoutMillis / 1000);
         pendingPublicationsTracker.untrack(address, port);
         pendingPublishes.remove(subdomain);
-        forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
-        forPublishingEvents.publish("published-services", "publish-traefik-active", subdomain);
+        forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
         forPublishingEvents.publish("published-services", "service-updated", subdomain);
     }
 

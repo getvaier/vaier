@@ -161,6 +161,17 @@ class PublishPeerServiceServiceTest {
         verify(forInvalidatingPublishedServicesCache).invalidatePublishedServicesCache();
     }
 
+    @Test
+    void waitForDnsThenActivate_dnsNeverResolves_doesNotWriteTraefikRoute() {
+        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> false);
+        ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 100L);
+        ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+
+        verify(forPersistingReverseProxyRoutes, never()).addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any());
+    }
+
     private ReverseProxyRoute routeWithDomain(String domain) {
         return new ReverseProxyRoute("route", domain, "10.0.0.1", 8080, "svc", null);
     }

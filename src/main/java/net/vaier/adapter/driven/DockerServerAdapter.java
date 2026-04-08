@@ -33,8 +33,23 @@ import org.springframework.stereotype.Component;
 public class DockerServerAdapter implements ForGettingServerInfo {
 
     private final Map<String, DockerClient> dockerClientCache = new HashMap<>();
+    private final Map<String, DockerHttpClient> httpClientCache = new HashMap<>();
     private final Map<String, Server> serverCache = new HashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public DockerServerAdapter() {
+    }
+
+    /**
+     * Test constructor that pre-populates the caches for local server.
+     */
+    DockerServerAdapter(DockerClient dockerClient, DockerHttpClient dockerHttpClient) {
+        Server local = Server.local();
+        String cacheKey = local.getAddress() + ":" + local.getPort();
+        dockerClientCache.put(cacheKey, dockerClient);
+        httpClientCache.put(cacheKey, dockerHttpClient);
+        serverCache.put(cacheKey, local);
+    }
 
     @Override
     public List<DockerService> getServicesWithExposedPorts(Server server) {
@@ -96,6 +111,7 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                 .connectionTimeout(Duration.ofSeconds(30))
                 .responseTimeout(Duration.ofSeconds(45))
                 .build();
+            httpClientCache.put(key, httpClient);
 
             DockerClient client = DockerClientImpl.getInstance(config, httpClient);
 
@@ -143,20 +159,31 @@ public class DockerServerAdapter implements ForGettingServerInfo {
             .findFirst().orElse(null);
         Server server = cacheKey != null ? serverCache.get(cacheKey) : null;
 
-        // Only direct HTTP works reliably for remote TCP servers due to docker-java Capability enum deserialization bug
-        if (server == null || server.getAddress().startsWith("/") || server.getAddress().startsWith("unix://")) {
-            return List.of();
-        }
+        boolean isLocal = server == null || server.getAddress().startsWith("/") || server.getAddress().startsWith("unix://");
 
+        // Use raw HTTP to avoid docker-java Capability enum deserialization bug
         try {
-            int dockerPort = server.getPort() != null ? server.getPort() : 2375;
-            String url = "http://" + server.getAddress() + ":" + dockerPort + "/containers/" + container.getId() + "/json";
+            String jsonResponse;
+            if (isLocal) {
+                DockerHttpClient dockerHttpClient = httpClientCache.get(cacheKey);
+                if (dockerHttpClient == null) return List.of();
+                DockerHttpClient.Request request = DockerHttpClient.Request.builder()
+                    .method(DockerHttpClient.Request.Method.GET)
+                    .path("/containers/" + container.getId() + "/json")
+                    .build();
+                try (DockerHttpClient.Response response = dockerHttpClient.execute(request)) {
+                    jsonResponse = new String(response.getBody().readAllBytes());
+                }
+            } else {
+                int dockerPort = server.getPort() != null ? server.getPort() : 2375;
+                String url = "http://" + server.getAddress() + ":" + dockerPort + "/containers/" + container.getId() + "/json";
+                HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+                HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                jsonResponse = response.body();
+            }
 
-            HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-            JsonNode exposedPorts = objectMapper.readTree(response.body()).path("Config").path("ExposedPorts");
+            JsonNode exposedPorts = objectMapper.readTree(jsonResponse).path("Config").path("ExposedPorts");
             List<DockerService.PortMapping> portMappings = new ArrayList<>();
             exposedPorts.fieldNames().forEachRemaining(portSpec -> {
                 String[] parts = portSpec.split("/");
