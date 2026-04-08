@@ -168,6 +168,10 @@
             white-space: nowrap;
         }
 
+        .service-tag.has-update { color: var(--orange); }
+
+        .status-updates-available { background: var(--orange); box-shadow: 0 0 4px var(--orange); }
+
         /* QR modal */
         .qr-canvas-container {
             display: flex;
@@ -343,9 +347,20 @@
         let peers = [];
         let peerServices = {};
         let localServices = [];
+        let containerUpdates = {};
         let lastFetchSuccessful = false;
 
         const expandedPeers = new Set();
+
+        function parseImageRef(image) {
+            if (!image) return { name: '', tag: 'latest' };
+            const lastSlash = image.lastIndexOf('/');
+            const lastColon = image.lastIndexOf(':');
+            if (lastColon > lastSlash && lastColon > 0) {
+                return { name: image.slice(0, lastColon), tag: image.slice(lastColon + 1) };
+            }
+            return { name: image, tag: 'latest' };
+        }
 
         function parseImageTag(image) {
             if (!image) return '';
@@ -399,6 +414,19 @@
             }
         }
 
+        async function fetchContainerUpdates() {
+            try {
+                const response = await fetch('/docker-services/update-status');
+                if (response.ok) {
+                    const updates = await response.json();
+                    containerUpdates = Object.fromEntries(updates.map(u => [u.image + ':' + u.tag, u]));
+                    displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load container update status:', error);
+            }
+        }
+
         function displayError(message) {
             document.getElementById('error-message').innerHTML = `<div class="error">${message}</div>`;
         }
@@ -439,9 +467,16 @@
                 return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">none discovered</span></div>`;
             const rows = containers.map(c => {
                 const version = c.version || parseImageTag(c.image);
+                const imgParts = parseImageRef(c.image);
+                const updateKey = imgParts.name + ':' + version;
+                const update = containerUpdates[updateKey];
+                const hasUpdate = update && update.updateAvailable;
+                const isLatest = update && update.latestTag;
+                const warn = hasUpdate || isLatest;
+                const tooltip = isLatest ? ' title="Digest comparison may be unreliable for :latest tag"' : '';
                 return `<div class="service-row">
                     <span class="service-name">${c.containerName}</span>
-                    <span class="service-tag">${version}</span>
+                    <span class="service-tag${warn ? ' has-update' : ''}"${tooltip}>${version}</span>
                 </div>`;
             }).join('');
             return `<div class="detail-row">
@@ -481,7 +516,6 @@
             const handshakeTime = parseInt(peer.latestHandshake);
             const currentTime   = Math.floor(Date.now() / 1000);
             const isConnected   = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
-            const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
             const statusText    = isConnected ? 'connected' : 'disconnected';
             const vpnIp      = peer.allowedIps.split('/')[0];
             const id         = cardId(peer.name);
@@ -490,6 +524,15 @@
             const isServer   = peerType === 'UBUNTU_SERVER' || peerType === 'WINDOWS_SERVER';
 
             const services = peerServices[peer.name];
+            const hasUpdates = isConnected && services && services.containers &&
+                services.containers.some(c => {
+                    const p = parseImageRef(c.image);
+                    const v = c.version || p.tag;
+                    const u = containerUpdates[p.name + ':' + v];
+                    return u && u.updateAvailable;
+                });
+            const statusClass = hasUpdates ? 'status-updates-available'
+                : isConnected ? 'status-connected' : 'status-disconnected';
             const servicesHtml = (() => {
                 if (!isServer) return '';
                 if (!isConnected)
@@ -794,9 +837,19 @@
 
         fetchPeers();
         fetchLocalServices();
+        fetchContainerUpdates();
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());
+        _sse.addEventListener('container-updates', e => {
+            try {
+                const updates = JSON.parse(e.data);
+                containerUpdates = Object.fromEntries(updates.map(u => [u.image + ':' + u.tag, u]));
+                displayPeers(peers);
+            } catch (err) {
+                console.error('Failed to apply container-updates:', err);
+            }
+        });
         _sse.addEventListener('peers-stats', e => {
             try {
                 const stats = JSON.parse(e.data);
@@ -805,7 +858,16 @@
                     const id = s.name.replace(/[^a-zA-Z0-9]/g, '_');
                     const handshake = parseInt(s.latestHandshake);
                     const connected = handshake > 0 && (now - handshake) < 180;
-                    const statusClass = connected ? 'status-connected' : 'status-disconnected';
+                    const svc = peerServices[s.name];
+                    const peerHasUpdates = connected && svc && svc.containers &&
+                        svc.containers.some(c => {
+                            const p = parseImageRef(c.image);
+                            const v = c.version || p.tag;
+                            const u = containerUpdates[p.name + ':' + v];
+                            return u && u.updateAvailable;
+                        });
+                    const statusClass = peerHasUpdates ? 'status-updates-available'
+                        : connected ? 'status-connected' : 'status-disconnected';
                     const statusText  = connected ? 'connected' : 'disconnected';
 
                     const hdrDot    = document.getElementById('hdr-dot-'    + id);

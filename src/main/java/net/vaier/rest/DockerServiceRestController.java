@@ -1,8 +1,10 @@
 package net.vaier.rest;
 
+import net.vaier.application.CheckContainerUpdatesUseCase;
 import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.domain.ContainerUpdateStatus;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
 import net.vaier.domain.port.ForGettingServerInfo;
@@ -19,13 +21,16 @@ public class DockerServiceRestController {
     private final ForGettingServerInfo forGettingServerInfo;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
+    private final CheckContainerUpdatesUseCase checkContainerUpdatesUseCase;
 
     public DockerServiceRestController(ForGettingServerInfo forGettingServerInfo,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
-                                       DiscoverLocalContainersUseCase discoverLocalContainersUseCase) {
+                                       DiscoverLocalContainersUseCase discoverLocalContainersUseCase,
+                                       CheckContainerUpdatesUseCase checkContainerUpdatesUseCase) {
         this.forGettingServerInfo = forGettingServerInfo;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverLocalContainersUseCase = discoverLocalContainersUseCase;
+        this.checkContainerUpdatesUseCase = checkContainerUpdatesUseCase;
     }
 
     @GetMapping
@@ -46,5 +51,10 @@ public class DockerServiceRestController {
     @GetMapping("/peers")
     public List<PeerContainers> discoverPeerContainers() {
         return discoverPeerContainersUseCase.discoverAll();
+    }
+
+    @GetMapping("/update-status")
+    public List<ContainerUpdateStatus> getContainerUpdateStatus() {
+        return checkContainerUpdatesUseCase.getCachedResults();
     }
 }

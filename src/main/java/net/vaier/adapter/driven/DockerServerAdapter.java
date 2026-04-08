@@ -14,6 +14,7 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.domain.Server;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.port.ForGettingImageDigests;
 import net.vaier.domain.port.ForGettingServerInfo;
 import jakarta.annotation.PreDestroy;
 import java.net.URI;
@@ -25,12 +26,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class DockerServerAdapter implements ForGettingServerInfo {
+public class DockerServerAdapter implements ForGettingServerInfo, ForGettingImageDigests {
 
     private final Map<String, DockerClient> dockerClientCache = new HashMap<>();
     private final Map<String, Server> serverCache = new HashMap<>();
@@ -198,6 +200,26 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         // Docker names start with '/', so remove it
         String name = names[0];
         return name.startsWith("/") ? name.substring(1) : name;
+    }
+
+    @Override
+    public Optional<String> getImageDigest(Server server, String imageId) {
+        try {
+            DockerClient dockerClient = getOrCreateDockerClient(server);
+            InspectImageResponse info = dockerClient.inspectImageCmd(imageId).exec();
+            List<String> repoDigests = info.getRepoDigests();
+            if (repoDigests == null || repoDigests.isEmpty()) {
+                return Optional.empty();
+            }
+            String repoDigest = repoDigests.get(0);
+            int atIndex = repoDigest.indexOf('@');
+            return atIndex >= 0
+                    ? Optional.of(repoDigest.substring(atIndex + 1))
+                    : Optional.of(repoDigest);
+        } catch (Exception e) {
+            log.debug("Could not get image digest for {} on {}: {}", imageId, server.getAddress(), e.getMessage());
+            return Optional.empty();
+        }
     }
 
     @PreDestroy
