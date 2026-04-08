@@ -206,7 +206,7 @@ Export and import the full Vaier configuration as a JSON snapshot.
 
 ---
 
-### 6.8 Container Update Notifications ✅ (implemented, tracked in [#57](https://github.com/getvaier/vaier/issues/57))
+### 6.8 Container Update Notifications 🔲 (planned, tracked in [#57](https://github.com/getvaier/vaier/issues/57))
 
 Keep the operator aware when Docker images have newer versions available.
 
@@ -218,15 +218,12 @@ Keep the operator aware when Docker images have newer versions available.
 - Containers running the `latest` tag display a warning that version tracking is unreliable for that tag (digest comparison is still attempted but flagged as approximate)
 - Only Docker Hub is supported in v1 *(OQ2 resolved: Docker Hub only for v1)*
 
-**Implementation:**
-- Background scheduled task (`@Scheduled`, 24h interval with 30s initial delay) discovers all containers from local and peer Docker daemons
-- For each unique image:tag, compares running image digest (from Docker daemon) with remote digest (from Docker Hub Registry API v2)
-- Results cached in-memory (`ConcurrentHashMap` with 24h TTL)
-- Dedicated REST endpoint `GET /docker-services/update-status` serves cached results
-- Frontend receives real-time updates via SSE (`container-updates` event on `vpn-peers` topic)
-- Container versions with available updates are highlighted in yellow
-- Peer status dot turns yellow when any container on that peer has an update available
-- `:latest`-tagged images show a tooltip about unreliable digest comparison
+**Implementation sketch:**
+- Background scheduled task (`@Scheduled`) queries each peer's Docker API for running image refs
+- For each image ref, call Docker Hub Registry API v2 to compare remote digest vs. local image digest
+- Cache results in-memory (TTL: 24 h) to avoid hammering the registry
+- Expose via existing `/docker-services/peers` response — add `updateAvailable: boolean` field per container
+- Frontend receives updates via SSE (Server-Sent Events) for immediate feedback without polling
 
 **Out of scope for v1:** GHCR, self-hosted registries, push notifications (webhook/email).
 
