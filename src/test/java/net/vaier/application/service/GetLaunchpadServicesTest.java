@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
+import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -49,6 +50,33 @@ class GetLaunchpadServicesTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).dnsAddress()).isEqualTo("app.example.com");
         assertThat(result.get(0).hostAddress()).isEqualTo("10.0.0.1");
+    }
+
+    @Test
+    void getLaunchpadServices_unreachableHost_stateIsUnreachable() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+
+        assertThat(result.get(0).state()).isEqualTo(State.UNREACHABLE);
+    }
+
+    @Test
+    void getLaunchpadServices_runningLocalService_stateIsOk() {
+        setupOneRoute("app.example.com", "my-container", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "my-container", "image", "latest",
+                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running"))
+        );
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+
+        assertThat(result.get(0).state()).isEqualTo(State.OK);
     }
 
     @Test

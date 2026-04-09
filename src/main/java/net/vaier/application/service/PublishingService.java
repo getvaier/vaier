@@ -70,7 +70,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
     public List<LaunchpadServiceUco> getLaunchpadServices() {
         return getPublishedServices().stream()
             .filter(s -> s.dnsState() == DnsState.OK)
-            .map(s -> new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress()))
+            .map(s -> new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress(), s.state()))
             .toList();
     }
 

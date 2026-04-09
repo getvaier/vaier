@@ -105,6 +105,14 @@
             color: var(--text);
         }
 
+        .tile.down {
+            opacity: 0.4;
+        }
+
+        .tile.down:hover {
+            opacity: 0.7;
+        }
+
         .tile-icon {
             width: 36px;
             height: 36px;
@@ -269,7 +277,7 @@
             tile.href = url;
             tile.target = '_blank';
             tile.rel = 'noopener noreferrer';
-            tile.className = 'tile';
+            tile.className = service.state === 'OK' ? 'tile' : 'tile down';
 
             const iconDiv = document.createElement('div');
             iconDiv.className = 'tile-icon';
@@ -354,6 +362,12 @@
         }
 
         load();
+
+        const _sse = new EventSource('/published-services/events');
+        _sse.addEventListener('service-updated', () => load());
+        let _sseConnected = false;
+        _sse.onopen = () => { if (_sseConnected) load(); _sseConnected = true; };
+        _sse.onerror = () => load();
     </script>
 </body>
 </html>
