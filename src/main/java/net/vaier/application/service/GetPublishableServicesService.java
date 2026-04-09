@@ -34,6 +34,7 @@ public class GetPublishableServicesService implements GetPublishableServicesUseC
             .flatMap(peer -> peer.containers().stream()
                 .flatMap(container -> container.ports().stream()
                     .filter(p -> "tcp".equals(p.type()))
+                    .filter(p -> p.publicPort() != null)
                     .filter(p -> existingRoutes.stream()
                         .noneMatch(r -> r.getAddress().equals(peer.vpnIp()) && r.getPort() == p.publicPort()))
                     .filter(p -> !pendingPublicationsTracker.isPending(peer.vpnIp(), p.publicPort()))

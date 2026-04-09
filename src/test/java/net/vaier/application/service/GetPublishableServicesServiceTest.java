@@ -147,6 +147,17 @@ class GetPublishableServicesServiceTest {
         assertThat(service.getPublishableServices()).isEmpty();
     }
 
+    @Test
+    void getPublishableServices_peerPortWithNullPublicPort_excluded() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+            okPeer("alice", "10.13.13.2", List.of(containerWithNullPublicPort("my-app", 8080, "tcp")))
+        ));
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
+
+        assertThat(service.getPublishableServices()).isEmpty();
+    }
+
     // --- helpers ---
 
     private PeerContainers unreachablePeer(String name, String ip) {
@@ -164,6 +175,11 @@ class GetPublishableServicesServiceTest {
 
     private PublishableService localService(String name, int port) {
         return new PublishableService(PublishableSource.LOCAL, null, name, name, port, null, false);
+    }
+
+    private DockerService containerWithNullPublicPort(String name, int privatePort, String type) {
+        return new DockerService("id", name, "image", "latest",
+            List.of(new PortMapping(privatePort, null, type, "0.0.0.0")), List.of(), "running");
     }
 
     private ReverseProxyRoute route(String address, int port) {
