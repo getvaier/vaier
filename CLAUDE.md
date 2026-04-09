@@ -131,8 +131,9 @@ docker compose up -d --force-recreate vaier
 Then ask the user to verify the fix works.
 
 If the user confirms the fix is good:
-1. Commit and push the changes to git.
+1. Commit the changes to git.
 2. If the change was triggered by a GitHub issue, include `Closes #<issue-number>` in the commit message — GitHub will close the issue automatically when pushed to main.
+3. **Do NOT push** — only commit locally. The user will push when ready.
 
 ## Server development
 
