@@ -138,7 +138,7 @@ class ExportConfigurationServiceTest {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
-        when(forPersistingUsers.getUsers()).thenReturn(List.of(new User("alice")));
+        when(forPersistingUsers.getUsers()).thenReturn(List.of(new User("alice", "Alice", "alice@example.com", List.of("admins"))));
 
         String json = service.exportConfiguration();
         JsonNode root = objectMapper.readTree(json);

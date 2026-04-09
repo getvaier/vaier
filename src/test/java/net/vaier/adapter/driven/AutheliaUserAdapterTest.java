@@ -62,6 +62,19 @@ class AutheliaUserAdapterTest {
                 .containsExactlyInAnyOrder("alice", "bob");
     }
 
+    @Test
+    void getUsers_returnsDisplaynameEmailAndGroups() {
+        adapter.addUser("alice", "password123", "alice@example.com", "Alice Example");
+
+        List<User> users = adapter.getUsers();
+
+        assertThat(users).hasSize(1);
+        User alice = users.getFirst();
+        assertThat(alice.getDisplayname()).isEqualTo("Alice Example");
+        assertThat(alice.getEmail()).isEqualTo("alice@example.com");
+        assertThat(alice.getGroups()).containsExactly("admins");
+    }
+
     // --- addUser ---
 
     @Test

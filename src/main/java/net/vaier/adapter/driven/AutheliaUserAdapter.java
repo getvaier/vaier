@@ -70,8 +70,15 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
             // Extract users from users section
             Map<String, Object> usersMap = getNestedMap(config, "users");
             if (usersMap != null) {
-                for (String username : usersMap.keySet()) {
-                    users.add(new User(username));
+                for (Map.Entry<String, Object> entry : usersMap.entrySet()) {
+                    String username = entry.getKey();
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> userEntry = (Map<String, Object>) entry.getValue();
+                    String displayname = userEntry != null ? (String) userEntry.get("displayname") : null;
+                    String email = userEntry != null ? (String) userEntry.get("email") : null;
+                    @SuppressWarnings("unchecked")
+                    List<String> groups = userEntry != null ? (List<String>) userEntry.get("groups") : null;
+                    users.add(new User(username, displayname, email, groups != null ? groups : List.of()));
                 }
             }
 

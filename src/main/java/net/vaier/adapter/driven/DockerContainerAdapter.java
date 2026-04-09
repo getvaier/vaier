@@ -55,7 +55,7 @@ public class DockerContainerAdapter implements ForRestartingContainers {
     public void restartContainer(String containerName) {
         try {
             log.info("Restarting container '{}'", containerName);
-            dockerClient.restartContainerCmd(containerName).exec();
+            dockerClient.restartContainerCmd(containerName).withTimeout(30).exec();
             log.info("Container '{}' restarted successfully", containerName);
         } catch (Exception e) {
             log.error("Failed to restart container '{}'", containerName, e);
