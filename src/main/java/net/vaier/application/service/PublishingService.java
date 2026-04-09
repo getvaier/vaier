@@ -99,7 +99,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
 
     private State hostState(String hostAddress, int hostPort, List<DockerService> localServices,
                              List<VpnClient> vpnClients) {
-        if (localServices.stream().anyMatch(s -> s.listensOnPort(hostPort))) return State.OK;
+        if (localServices.stream().anyMatch(s -> s.isRunning() && s.listensOnPort(hostPort))) return State.OK;
         if (vpnClients.stream().anyMatch(p -> p.allowedIps() != null && p.allowedIps().startsWith(hostAddress) && isPeerConnected(p))) return State.OK;
         return State.UNREACHABLE;
     }

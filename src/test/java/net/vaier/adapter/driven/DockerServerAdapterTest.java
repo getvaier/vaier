@@ -44,6 +44,8 @@ class DockerServerAdapterTest {
         when(container.getImage()).thenReturn("netdata/netdata:latest");
         when(container.getImageId()).thenReturn("sha256:abc");
 
+        when(container.getState()).thenReturn("running");
+
         ContainerHostConfig hostConfig = mock(ContainerHostConfig.class);
         when(hostConfig.getNetworkMode()).thenReturn("host");
         when(container.getHostConfig()).thenReturn(hostConfig);

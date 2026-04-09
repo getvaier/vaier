@@ -37,7 +37,7 @@ public class PublishedService {
     public State hostState() {
         Optional<DockerService> dockerService = forGettingServerInfo.getServicesWithExposedPorts(Server.local())
             .stream()
-            .filter(service -> service.listensOnPort(hostPort))
+            .filter(service -> service.isRunning() && service.listensOnPort(hostPort))
             .findFirst();
         if(dockerService.isPresent()) {
             return State.OK;

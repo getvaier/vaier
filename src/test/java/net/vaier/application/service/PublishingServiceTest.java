@@ -96,18 +96,33 @@ class PublishingServiceTest {
     }
 
     @Test
-    void getPublishedServices_addressFoundInLocalServices_hostStateOk() {
+    void getPublishedServices_runningLocalService_hostStateOk() {
         setupOneRoute("app.example.com", "my-container", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
             List.of(new DockerService("id", "my-container", "image", "latest",
-                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of()))
+                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running"))
         );
 
         PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.OK);
+    }
+
+    @Test
+    void getPublishedServices_stoppedLocalService_hostStateUnreachable() {
+        setupOneRoute("app.example.com", "my-container", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "my-container", "image", "latest",
+                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "exited"))
+        );
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.state()).isEqualTo(State.UNREACHABLE);
     }
 
     @Test

@@ -159,7 +159,7 @@ class GetPublishableServicesServiceTest {
 
     private DockerService container(String name, int port, String type) {
         return new DockerService("id", name, "image", "latest",
-            List.of(new PortMapping(port, port, type, "0.0.0.0")), List.of());
+            List.of(new PortMapping(port, port, type, "0.0.0.0")), List.of(), "running");
     }
 
     private PublishableService localService(String name, int port) {

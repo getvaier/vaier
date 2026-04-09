@@ -646,7 +646,7 @@
         });
 
         _sse.addEventListener('service-updated', () => {
-            // Auth toggle uses optimistic updates; new service publish is handled by publish-traefik-active
+            fetchServices();
         });
 
         let _sseConnected = false;

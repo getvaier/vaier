@@ -9,8 +9,13 @@ public record DockerService(
         String image,
         String version,
         List<PortMapping> ports,
-        List<String> networks
+        List<String> networks,
+        String state
 ) {
+
+    public boolean isRunning() {
+        return "running".equalsIgnoreCase(state);
+    }
 
     public boolean listensOnPort(int port) {
         return ports.stream()

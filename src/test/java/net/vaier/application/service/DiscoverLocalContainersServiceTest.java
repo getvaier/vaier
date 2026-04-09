@@ -54,6 +54,6 @@ class DiscoverLocalContainersServiceTest {
 
     private DockerService dockerService(String name, int port) {
         return new DockerService("id1", name, "image:latest", "latest",
-            List.of(new DockerService.PortMapping(port, port, "tcp", "0.0.0.0")), List.of());
+            List.of(new DockerService.PortMapping(port, port, "tcp", "0.0.0.0")), List.of(), "running");
     }
 }

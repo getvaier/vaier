@@ -79,7 +79,8 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                         image,
                         version,
                         portMappings,
-                        networks
+                        networks,
+                        container.getState()
                     ));
                 }
             }

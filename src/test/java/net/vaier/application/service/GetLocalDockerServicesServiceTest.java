@@ -143,7 +143,7 @@ class GetLocalDockerServicesServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
                 List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
-                List.of(VAIER_NETWORK))));
+                List.of(VAIER_NETWORK), "running")));
 
         List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
 
@@ -157,7 +157,7 @@ class GetLocalDockerServicesServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
                 List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
-                List.of("uptime-kuma_default"))));
+                List.of("uptime-kuma_default"), "running")));
 
         List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
 
@@ -172,7 +172,7 @@ class GetLocalDockerServicesServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
                 List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
-                List.of("some-other-network"))));
+                List.of("some-other-network"), "running")));
 
         assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
     }
@@ -182,7 +182,7 @@ class GetLocalDockerServicesServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
                 List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
-                List.of("uptime-kuma_default"))));
+                List.of("uptime-kuma_default"), "running")));
         List<ReverseProxyRoute> existingRoutes = List.of(route(GATEWAY_IP, 3001));
 
         assertThat(service.getUnpublishedLocalServices(existingRoutes)).isEmpty();
@@ -191,7 +191,7 @@ class GetLocalDockerServicesServiceTest {
     private DockerService dockerService(String name, int port, String type) {
         return new DockerService("id", name, "image:latest", "latest",
             List.of(new PortMapping(port, null, type, "0.0.0.0")),
-            List.of(VAIER_NETWORK));
+            List.of(VAIER_NETWORK), "running");
     }
 
     private ReverseProxyRoute route(String address, int port) {
