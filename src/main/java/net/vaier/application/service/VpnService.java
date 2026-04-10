@@ -8,6 +8,7 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.application.CreatePeerUseCase;
+import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForDeletingVpnPeers;
@@ -37,7 +38,12 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForRe
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
 
+    private final ConfigResolver configResolver;
     private DockerClient dockerClient;
+
+    public VpnService(ConfigResolver configResolver) {
+        this.configResolver = configResolver;
+    }
 
     @PostConstruct
     public void init() {
@@ -235,13 +241,12 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForRe
     }
 
     private String extractServerEndpoint() {
-        String vaierDomain = System.getenv("VAIER_DOMAIN");
+        String domain = configResolver.getDomain();
         String serverUrl;
 
-        if (vaierDomain != null && !vaierDomain.isEmpty()) {
-            serverUrl = "vaier." + vaierDomain;
+        if (domain != null && !domain.isEmpty()) {
+            serverUrl = "vaier." + domain;
         } else {
-            // Fallback to SERVERURL if VAIER_DOMAIN is not set
             serverUrl = System.getenv().getOrDefault("SERVERURL", "vaier.eilertsen.family");
         }
 

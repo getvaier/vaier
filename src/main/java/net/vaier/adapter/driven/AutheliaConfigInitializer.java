@@ -18,11 +18,13 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
     private final String secretsFile;
     private final String vaierDomain;
 
-    public AutheliaConfigInitializer() {
-        this(
-            System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config"),
-            System.getenv().getOrDefault("VAIER_DOMAIN", "")
-        );
+    @org.springframework.beans.factory.annotation.Autowired
+    public AutheliaConfigInitializer(net.vaier.config.ConfigResolver configResolver) {
+        String configPath = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config");
+        String domain = configResolver.getDomain() != null ? configResolver.getDomain() : "";
+        this.configurationFile = configPath + "/configuration.yml";
+        this.secretsFile = configPath + "/secrets.properties";
+        this.vaierDomain = domain;
     }
 
     AutheliaConfigInitializer(String configPath, String vaierDomain) {
@@ -130,6 +132,8 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                         - "^/launchpad.html$"
                         - "^/published-services/discover$"
                         - "^/favicon$"
+                        - "^/setup.html$"
+                        - "^/api/setup/.*$"
                     - domain: "%s"
                       policy: one_factor
                 notifier:

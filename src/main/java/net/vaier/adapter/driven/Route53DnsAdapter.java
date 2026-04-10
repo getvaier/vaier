@@ -16,22 +16,32 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-public class Route53DnsAdapter implements ForPersistingDnsRecords {
+public class Route53DnsAdapter implements ForPersistingDnsRecords, net.vaier.domain.port.ForValidatingAwsCredentials {
 
-    private final Route53Client route53Client;
+    private Route53Client route53Client;
+    private final net.vaier.config.ConfigResolver configResolver;
 
-    public Route53DnsAdapter() {
-        String accessKeyId = System.getenv("VAIER_AWS_KEY");
-        String secretAccessKey = System.getenv("VAIER_AWS_SECRET");
-        AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
-        route53Client = Route53Client.builder()
-            .credentialsProvider(StaticCredentialsProvider.create(credentials))
-            .region(Region.AWS_GLOBAL)
-            .build();
+    @org.springframework.beans.factory.annotation.Autowired
+    public Route53DnsAdapter(net.vaier.config.ConfigResolver configResolver) {
+        this.configResolver = configResolver;
+        initClient();
     }
 
     Route53DnsAdapter(Route53Client route53Client) {
         this.route53Client = route53Client;
+        this.configResolver = null;
+    }
+
+    public void initClient() {
+        String accessKeyId = configResolver.getAwsKey();
+        String secretAccessKey = configResolver.getAwsSecret();
+        if (accessKeyId != null && secretAccessKey != null) {
+            AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
+            route53Client = Route53Client.builder()
+                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .region(Region.AWS_GLOBAL)
+                .build();
+        }
     }
 
     @Override
@@ -217,6 +227,19 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords {
             route53Client.deleteHostedZone(request);
         } catch (Route53Exception e) {
             throw new RuntimeException("Failed to delete hosted zone", e);
+        }
+    }
+
+    @Override
+    public List<String> listHostedZones(String awsKey, String awsSecret) {
+        AwsBasicCredentials credentials = AwsBasicCredentials.create(awsKey, awsSecret);
+        try (Route53Client client = Route53Client.builder()
+                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .region(Region.AWS_GLOBAL)
+                .build()) {
+            return client.listHostedZones().hostedZones().stream()
+                .map(zone -> stripTrailingDot(zone.name()))
+                .collect(Collectors.toList());
         }
     }
 

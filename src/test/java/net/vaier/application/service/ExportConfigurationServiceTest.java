@@ -8,6 +8,7 @@ import net.vaier.domain.DnsZone;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.User;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
@@ -17,7 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -31,18 +31,20 @@ class ExportConfigurationServiceTest {
     @Mock ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     @Mock ForPersistingDnsRecords forPersistingDnsRecords;
     @Mock ForPersistingUsers forPersistingUsers;
+    @Mock ConfigResolver configResolver;
 
     ExportConfigurationService service;
     ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
+        when(configResolver.getDomain()).thenReturn("example.com");
         service = new ExportConfigurationService(
                 forGettingPeerConfigurations,
                 forPersistingReverseProxyRoutes,
                 forPersistingDnsRecords,
-                forPersistingUsers);
-        ReflectionTestUtils.setField(service, "domain", "example.com");
+                forPersistingUsers,
+                configResolver);
     }
 
     @Test

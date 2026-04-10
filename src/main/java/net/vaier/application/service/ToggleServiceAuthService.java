@@ -5,8 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.application.ToggleServiceAuthUseCase;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -16,14 +16,12 @@ public class ToggleServiceAuthService implements ToggleServiceAuthUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
-
-    @Value("${VAIER_DOMAIN:}")
-    private String vaierDomain;
+    private final ConfigResolver configResolver;
 
     @Override
     public void setAuthentication(String dnsName, boolean requiresAuth) {
         boolean isMandatory = DeletePublishedServiceUseCase.MANDATORY_SUBDOMAINS.stream()
-            .anyMatch(sub -> dnsName.equals(sub + "." + vaierDomain));
+            .anyMatch(sub -> dnsName.equals(sub + "." + configResolver.getDomain()));
         if (isMandatory) {
             throw new IllegalArgumentException("Cannot change auth for built-in service: " + dnsName);
         }

@@ -6,9 +6,9 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,14 +19,12 @@ public class DeletePublishedServiceService implements DeletePublishedServiceUseC
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
-
-    @Value("${VAIER_DOMAIN:}")
-    private String vaierDomain;
+    private final ConfigResolver configResolver;
 
     @Override
     public void deleteService(String fqdn) {
         boolean isMandatory = MANDATORY_SUBDOMAINS.stream()
-            .anyMatch(sub -> fqdn.equals(sub + "." + vaierDomain));
+            .anyMatch(sub -> fqdn.equals(sub + "." + configResolver.getDomain()));
         if (isMandatory) {
             throw new IllegalArgumentException("Cannot delete built-in service: " + fqdn);
         }
@@ -37,7 +35,7 @@ public class DeletePublishedServiceService implements DeletePublishedServiceUseC
 
         waitForTraefikRouteDeletion(fqdn);
 
-        forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(vaierDomain));
+        forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(configResolver.getDomain()));
         log.info("Deleted DNS CNAME for {}", fqdn);
         forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
     }

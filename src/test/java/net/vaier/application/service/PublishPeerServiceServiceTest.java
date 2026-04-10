@@ -4,6 +4,7 @@ import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.PublishPeerServiceUseCase.PendingPublication;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -44,12 +45,15 @@ class PublishPeerServiceServiceTest {
     @Mock
     ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
 
+    @Mock
+    ConfigResolver configResolver;
+
     @InjectMocks
     PublishPeerServiceService service;
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(service, "vaierDomain", "example.com");
+        lenient().when(configResolver.getDomain()).thenReturn("example.com");
     }
 
     @Test

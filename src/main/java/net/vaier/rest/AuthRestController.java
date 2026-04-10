@@ -3,9 +3,9 @@ package net.vaier.rest;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.User;
 import net.vaier.domain.port.ForPersistingUsers;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,15 +15,14 @@ import java.util.List;
 @RequestMapping("/users")
 public class AuthRestController {
 
-    @Value("${VAIER_DOMAIN:}")
-    private String vaierDomain;
-
+    private final ConfigResolver configResolver;
     private final ForPersistingUsers forPersistingUsers;
     private final AddUserUseCase addUserUseCase;
     private final DeleteUserUseCase deleteUserUseCase;
     private final ChangePasswordUseCase changePasswordUseCase;
 
-    public AuthRestController(ForPersistingUsers forPersistingUsers, AddUserUseCase addUserUseCase, DeleteUserUseCase deleteUserUseCase, ChangePasswordUseCase changePasswordUseCase) {
+    public AuthRestController(ConfigResolver configResolver, ForPersistingUsers forPersistingUsers, AddUserUseCase addUserUseCase, DeleteUserUseCase deleteUserUseCase, ChangePasswordUseCase changePasswordUseCase) {
+        this.configResolver = configResolver;
         this.forPersistingUsers = forPersistingUsers;
         this.addUserUseCase = addUserUseCase;
         this.deleteUserUseCase = deleteUserUseCase;
@@ -71,8 +70,9 @@ public class AuthRestController {
     @GetMapping("/me")
     public ResponseEntity<MeResponse> getMe(
             @RequestHeader(value = "Remote-User", required = false) String username) {
-        String logoutUrl = (vaierDomain != null && !vaierDomain.isBlank())
-                ? "https://login." + vaierDomain + "/logout"
+        String domain = configResolver.getDomain();
+        String logoutUrl = (domain != null && !domain.isBlank())
+                ? "https://login." + domain + "/logout"
                 : null;
         return ResponseEntity.ok(new MeResponse(username, logoutUrl));
     }

@@ -25,7 +25,7 @@ class LifecycleTest {
     @Mock ForRestartingContainers containerRestarter;
 
     private Lifecycle lifecycle() {
-        return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter);
+        return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter, "test.example.com");
     }
 
     @Test

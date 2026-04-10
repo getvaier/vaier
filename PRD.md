@@ -1,6 +1,6 @@
 # Product Requirements Document — Vaier
 
-**Last updated:** 2026-04-07
+**Last updated:** 2026-04-10
 **Status:** Living document
 **Issues:** https://github.com/getvaier/vaier/issues — GitHub issues are part of the spec and represent confirmed requirements and bugs.
 
@@ -255,7 +255,7 @@ Authelia sends emails for password reset and two-factor enrolment flows. Current
 
 ---
 
-### 6.10 First-Run Setup Wizard 🔲 (planned, tracked in [#48](https://github.com/getvaier/vaier/issues/48))
+### 6.10 First-Run Setup Wizard ✅ (implemented, tracked in [#48](https://github.com/getvaier/vaier/issues/48))
 
 Currently Vaier requires four environment variables before it can start (`VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, `ACME_EMAIL`). This is a barrier for new users who need to edit a `.env` file they may not know how to create, and it makes adding new required config (like SMTP credentials for 6.9) increasingly painful.
 

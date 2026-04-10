@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,11 +9,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class ToggleServiceAuthServiceTest {
@@ -23,12 +24,15 @@ class ToggleServiceAuthServiceTest {
     @Mock
     ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
 
+    @Mock
+    ConfigResolver configResolver;
+
     @InjectMocks
     ToggleServiceAuthService service;
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(service, "vaierDomain", "example.com");
+        when(configResolver.getDomain()).thenReturn("example.com");
     }
 
     @Test

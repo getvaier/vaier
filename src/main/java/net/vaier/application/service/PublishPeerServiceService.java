@@ -8,9 +8,9 @@ import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.InetAddress;
@@ -30,9 +30,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final ForPublishingEvents forPublishingEvents;
     private final PendingPublicationsTracker pendingPublicationsTracker;
     private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
-
-    @Value("${VAIER_DOMAIN:}")
-    private String vaierDomain;
+    private final ConfigResolver configResolver;
 
     private long dnsTimeoutMillis = 120_000;
     private long dnsRetryIntervalMillis = 3_000;
@@ -53,13 +51,13 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
 
     @Override
     public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {
-        String fqdn = subdomain + "." + vaierDomain;
-        String serverFqdn = "vaier." + vaierDomain;
+        String fqdn = subdomain + "." + configResolver.getDomain();
+        String serverFqdn = "vaier." + configResolver.getDomain();
 
         log.info("Publishing service: {} -> {}:{} (auth: {})", fqdn, address, port, requiresAuth);
 
         DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
-        DnsZone zone = new DnsZone(vaierDomain);
+        DnsZone zone = new DnsZone(configResolver.getDomain());
         forPersistingDnsRecords.addDnsRecord(cname, zone);
         log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
 
@@ -72,7 +70,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
 
     @Override
     public PublishPeerServiceUseCase.PublishStatus getPublishStatus(String subdomain) {
-        String fqdn = subdomain + "." + vaierDomain;
+        String fqdn = subdomain + "." + configResolver.getDomain();
         boolean traefikActive = forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
             .anyMatch(r -> r.getDomainName().equals(fqdn));
         if (traefikActive) {

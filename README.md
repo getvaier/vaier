@@ -28,6 +28,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
 | **Backup / restore** | Export full configuration (peers, services, DNS records, users) as a JSON snapshot. Import restores everything with a real-time progress log. |
+| **First-run setup wizard** | Web-based wizard at `/setup.html` guides you through domain, AWS credentials, ACME email, and admin account creation — no `.env` file editing required. |
 
 ---
 
@@ -86,32 +87,33 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER && newgrp docker
 ```
 
-### 2. Create a `.env` file
-
-```env
-VAIER_AWS_KEY=your_aws_access_key
-VAIER_AWS_SECRET=your_aws_secret_key
-VAIER_DOMAIN=yourdomain.com
-ACME_EMAIL=you@example.com
-```
-
-### 3. Download `docker-compose.yml`
+### 2. Download `docker-compose.yml`
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
 ```
 
-### 4. Point your base domain at your server
+### 3. Point your base domain at your server
 
-Create an A record for `yourdomain.com` pointing to the server's public IP. Vaier automatically creates the `vaier.yourdomain.com` and `auth.yourdomain.com` DNS records in Route53 on first startup.
+Create an A record for `yourdomain.com` pointing to the server's public IP.
 
-### 5. Start the stack
+### 4. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-Vaier will be available at `https://vaier.yourdomain.com` once certificates are issued (usually under a minute).
+### 5. Complete the setup wizard
+
+Open `http://<server-ip>:8888/setup.html` in your browser. The wizard walks you through:
+1. **Domain** — your base domain (e.g. `yourdomain.com`)
+2. **AWS Credentials** — access key and secret with Route53 permissions (validated live)
+3. **ACME Email** — for Let's Encrypt certificate notifications
+4. **Admin Account** — first Authelia user (username + password)
+
+After completing the wizard, Vaier initializes DNS records, configures Authelia, and starts all services. It will be available at `https://vaier.yourdomain.com` once certificates are issued (usually under a minute).
+
+> **Existing deployments**: If you already have a `.env` file with `VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, and `ACME_EMAIL`, Vaier continues to work with those environment variables — the setup wizard is skipped automatically.
 
 ---
 

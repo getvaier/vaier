@@ -45,11 +45,12 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private final String traefikApiUrl;
     private final String vaierDomain;
 
-    public TraefikReverseProxyAdapter() {
+    @org.springframework.beans.factory.annotation.Autowired
+    public TraefikReverseProxyAdapter(net.vaier.config.ConfigResolver configResolver) {
         this(
             System.getenv("TRAEFIK_CONFIG_PATH") + "/remote-apps.yml",
             System.getenv().getOrDefault("TRAEFIK_API_URL", "http://localhost:8080"),
-            System.getenv().getOrDefault("VAIER_DOMAIN", "")
+            configResolver.getDomain() != null ? configResolver.getDomain() : ""
         );
     }
 

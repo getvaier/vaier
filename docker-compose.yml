@@ -142,6 +142,7 @@ services:
       TRAEFIK_CONFIG_PATH: /traefik/config
       TRAEFIK_API_URL: http://traefik:8080
       AUTHELIA_CONFIG_PATH: /authelia/config
+      VAIER_CONFIG_PATH: /vaier/config
     depends_on:
       - wireguard
       - traefik
@@ -150,12 +151,13 @@ services:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config
       - ./authelia/config:/authelia/config
+      - ./vaier/config:/vaier/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
     labels:
       - traefik.enable=true
       # Public router — launchpad API and favicon (no auth)
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`))
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/setup.html`) || PathPrefix(`/api/setup/`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200

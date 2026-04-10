@@ -7,8 +7,8 @@ import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingUsers;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -23,20 +23,20 @@ public class ExportConfigurationService implements ExportConfigurationUseCase {
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForPersistingUsers forPersistingUsers;
     private final ObjectMapper objectMapper;
-
-    @Value("${VAIER_DOMAIN:}")
-    private String domain;
+    private final ConfigResolver configResolver;
 
     public ExportConfigurationService(
             ForGettingPeerConfigurations forGettingPeerConfigurations,
             ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
             ForPersistingDnsRecords forPersistingDnsRecords,
-            ForPersistingUsers forPersistingUsers) {
+            ForPersistingUsers forPersistingUsers,
+            ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.forPersistingUsers = forPersistingUsers;
         this.objectMapper = new ObjectMapper();
+        this.configResolver = configResolver;
     }
 
     @Override
@@ -45,7 +45,7 @@ public class ExportConfigurationService implements ExportConfigurationUseCase {
             BackupDto backup = new BackupDto(
                     "1",
                     Instant.now().toString(),
-                    new SettingsDto(domain),
+                    new SettingsDto(configResolver.getDomain()),
                     exportPeers(),
                     exportServices(),
                     exportDnsZones(),

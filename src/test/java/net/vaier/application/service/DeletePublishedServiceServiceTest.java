@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.ReverseProxyRoute;
@@ -13,7 +14,6 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -34,12 +34,15 @@ class DeletePublishedServiceServiceTest {
     @Mock
     ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
 
+    @Mock
+    ConfigResolver configResolver;
+
     @InjectMocks
     DeletePublishedServiceService service;
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(service, "vaierDomain", "example.com");
+        when(configResolver.getDomain()).thenReturn("example.com");
     }
 
     @Test
@@ -111,7 +114,7 @@ class DeletePublishedServiceServiceTest {
 
     @Test
     void deleteService_emptyDomain_passesDnsZoneWithEmptyString() {
-        ReflectionTestUtils.setField(service, "vaierDomain", "");
+        when(configResolver.getDomain()).thenReturn("");
 
         service.deleteService("app.example.com");
 

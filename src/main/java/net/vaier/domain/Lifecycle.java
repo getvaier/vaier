@@ -18,19 +18,20 @@ public class Lifecycle {
     private final ForPersistingUsers forPersistingUsers;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForRestartingContainers containerRestarter;
-
-    private static final String VAIER_DOMAIN = System.getenv().get("VAIER_DOMAIN");
+    private final String vaierDomain;
 
     public Lifecycle(
         ForInitialisingUserService forInitialisingUserService,
         ForPersistingUsers forPersistingUsers,
         ForPersistingDnsRecords forPersistingDnsRecords,
-        ForRestartingContainers containerRestarter
+        ForRestartingContainers containerRestarter,
+        String vaierDomain
     ) {
         this.forInitialisingUserService = forInitialisingUserService;
         this.forPersistingUsers = forPersistingUsers;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.containerRestarter = containerRestarter;
+        this.vaierDomain = vaierDomain;
     }
 
     public void start() {
@@ -70,18 +71,18 @@ public class Lifecycle {
     }
 
     private void initDns() {
-        if(VAIER_DOMAIN == null) {
+        if(vaierDomain == null || vaierDomain.isBlank()) {
             throw new RuntimeException("VAIER_DOMAIN is not set");
         }
         DnsZone dnsZone = forPersistingDnsRecords.getDnsZones().stream()
-            .filter(zone -> zone.name().equals(VAIER_DOMAIN))
+            .filter(zone -> zone.name().equals(vaierDomain))
             .findFirst()
-            .orElseThrow(() -> new RuntimeException("DNS zone not found for " + VAIER_DOMAIN));
+            .orElseThrow(() -> new RuntimeException("DNS zone not found for " + vaierDomain));
 
         log.info("DNS zone found: " + dnsZone.name());
 
-        String vaierHost = ServiceNames.VAIER + "." + VAIER_DOMAIN;
-        String authHost = ServiceNames.AUTH + "." + VAIER_DOMAIN;
+        String vaierHost = ServiceNames.VAIER + "." + vaierDomain;
+        String authHost = ServiceNames.AUTH + "." + vaierDomain;
 
         DnsRecord dnsRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
             .filter(record -> record.name().equals(vaierHost))

@@ -3,6 +3,7 @@ package net.vaier.rest;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingUsers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,6 +17,9 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AuthRestControllerTest {
+
+    @Mock
+    ConfigResolver configResolver;
 
     @Mock
     ForPersistingUsers forPersistingUsers;
