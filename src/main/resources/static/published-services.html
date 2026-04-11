@@ -216,7 +216,7 @@
             <div id="processing-container"></div>
         </div>
 
-        <div id="discoverable-section" style="display:none">
+        <div id="discoverable-section">
             <div class="section-header">
                 <span class="section-title">Discoverable services</span>
                 <div style="display:flex;gap:0.75rem;align-items:center">
@@ -343,7 +343,6 @@
         }
 
         async function refreshPublishable() {
-            document.getElementById('discoverable-section').style.display = '';
             document.getElementById('publishable-container').innerHTML = '<div class="loading">Loading…</div>';
             await fetchPublishable();
         }
@@ -446,11 +445,9 @@
             const section = document.getElementById('discoverable-section');
             const visible = showIgnored ? services : services.filter(s => !s.ignored);
             if (visible.length === 0) {
-                section.style.display = 'none';
-                container.innerHTML = '';
+                container.innerHTML = '<div class="loading">No discoverable services</div>';
                 return;
             }
-            section.style.display = '';
 
             const html = visible.map(s => {
                 const isLocal = s.source === 'LOCAL';
