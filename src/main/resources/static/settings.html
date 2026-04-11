@@ -149,6 +149,89 @@
             line-height: 1.6;
         }
 
+        /* Editable settings cards */
+        .settings-form-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 1rem 1.25rem;
+        }
+
+        .settings-form-card + .settings-form-card {
+            border-top: none;
+        }
+
+        .settings-form-card-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 0.75rem;
+        }
+
+        .settings-form-card-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            line-height: 1.5;
+        }
+
+        .settings-form-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            align-items: flex-end;
+        }
+
+        .settings-form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .settings-form-field label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .settings-form-field input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            padding: 0.4rem 0.6rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .settings-form-field input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .settings-form-field input.hint-field {
+            color: var(--text-muted);
+        }
+
+        .settings-form-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+
+        .settings-form-note {
+            font-size: 0.72rem;
+            color: var(--text-dim);
+            font-style: italic;
+        }
+
         @media (max-width: 600px) {
             .settings-card {
                 flex-direction: column;
@@ -183,6 +266,77 @@
 
     <div class="container">
         <div id="message"></div>
+
+        <!-- AWS Credentials -->
+        <div class="settings-section">
+            <div class="settings-section-title">AWS Credentials</div>
+            <div class="settings-form-card">
+                <div class="settings-form-card-title">Access key</div>
+                <div class="settings-form-card-desc">
+                    Update the AWS key used for Route 53 DNS management.
+                    The new credentials will be validated before saving.
+                </div>
+                <div class="settings-form-row">
+                    <div class="settings-form-field">
+                        <label>Current key</label>
+                        <input type="text" id="awsCurrentKey" class="hint-field" readonly placeholder="Not configured">
+                    </div>
+                    <div class="settings-form-field">
+                        <label>New access key</label>
+                        <input type="text" id="awsNewKey" placeholder="AKIA…" autocomplete="off">
+                    </div>
+                    <div class="settings-form-field">
+                        <label>New secret key</label>
+                        <input type="password" id="awsNewSecret" placeholder="Secret" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="settings-form-actions">
+                    <button class="btn btn-primary" onclick="saveAws()">Save &amp; validate</button>
+                    <span class="settings-form-note" id="awsNote"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SMTP Settings -->
+        <div class="settings-section">
+            <div class="settings-section-title">SMTP Notifier</div>
+            <div class="settings-form-card">
+                <div class="settings-form-card-title">Email notifications (Authelia)</div>
+                <div class="settings-form-card-desc">
+                    Configure an SMTP server so Authelia can send password-reset emails.
+                    Saving will regenerate the Authelia configuration.
+                    Leave blank to keep the default filesystem notifier.
+                </div>
+                <div class="settings-form-row">
+                    <div class="settings-form-field">
+                        <label>SMTP host</label>
+                        <input type="text" id="smtpHost" placeholder="smtp.example.com">
+                    </div>
+                    <div class="settings-form-field" style="flex: 0; min-width: 90px;">
+                        <label>Port</label>
+                        <input type="number" id="smtpPort" placeholder="587">
+                    </div>
+                    <div class="settings-form-field">
+                        <label>Username</label>
+                        <input type="text" id="smtpUsername" placeholder="user@example.com" autocomplete="off">
+                    </div>
+                </div>
+                <div class="settings-form-row" style="margin-top: 0.5rem;">
+                    <div class="settings-form-field">
+                        <label>Password</label>
+                        <input type="password" id="smtpPassword" placeholder="••••••••" autocomplete="new-password">
+                    </div>
+                    <div class="settings-form-field">
+                        <label>Sender address</label>
+                        <input type="text" id="smtpSender" placeholder="noreply@example.com">
+                    </div>
+                </div>
+                <div class="settings-form-actions">
+                    <button class="btn btn-primary" onclick="saveSmtp()">Save SMTP settings</button>
+                    <span class="settings-form-note" id="smtpNote"></span>
+                </div>
+            </div>
+        </div>
 
         <div class="settings-section">
             <div class="settings-section-title">Backup &amp; Restore</div>
@@ -235,6 +389,87 @@
 
     <script>
         let importEventSource = null;
+
+        // Load current settings on page load
+        async function loadSettings() {
+            try {
+                const r = await fetch('/settings/config');
+                if (!r.ok) return;
+                const s = await r.json();
+                if (s.awsKeyHint) document.getElementById('awsCurrentKey').value = s.awsKeyHint;
+                if (s.smtpHost) document.getElementById('smtpHost').value = s.smtpHost;
+                if (s.smtpPort) document.getElementById('smtpPort').value = s.smtpPort;
+                if (s.smtpUsername) document.getElementById('smtpUsername').value = s.smtpUsername;
+                if (s.smtpSender) document.getElementById('smtpSender').value = s.smtpSender;
+            } catch (_) {}
+        }
+
+        async function saveAws() {
+            const awsKey = document.getElementById('awsNewKey').value.trim();
+            const awsSecret = document.getElementById('awsNewSecret').value.trim();
+            if (!awsKey || !awsSecret) {
+                setNote('awsNote', 'Both key and secret are required.', 'error');
+                return;
+            }
+            setNote('awsNote', 'Validating…', '');
+            try {
+                const r = await fetch('/settings/aws', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ awsKey, awsSecret })
+                });
+                if (r.ok) {
+                    setNote('awsNote', 'Saved.', 'ok');
+                    document.getElementById('awsCurrentKey').value = '****' + awsKey.slice(-4);
+                    document.getElementById('awsNewKey').value = '';
+                    document.getElementById('awsNewSecret').value = '';
+                } else {
+                    const err = await r.json().catch(() => ({ error: r.statusText }));
+                    setNote('awsNote', err.error || 'Validation failed.', 'error');
+                }
+            } catch (e) {
+                setNote('awsNote', e.message, 'error');
+            }
+        }
+
+        async function saveSmtp() {
+            const host = document.getElementById('smtpHost').value.trim();
+            const port = parseInt(document.getElementById('smtpPort').value) || 587;
+            const username = document.getElementById('smtpUsername').value.trim();
+            const password = document.getElementById('smtpPassword').value;
+            const sender = document.getElementById('smtpSender').value.trim();
+            if (!host || !username || !password || !sender) {
+                setNote('smtpNote', 'Host, username, password and sender are required.', 'error');
+                return;
+            }
+            setNote('smtpNote', 'Saving…', '');
+            try {
+                const r = await fetch('/settings/smtp', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ smtpHost: host, smtpPort: port, smtpUsername: username, smtpPassword: password, smtpSender: sender })
+                });
+                if (r.ok) {
+                    setNote('smtpNote', 'Saved. Authelia config regenerated.', 'ok');
+                    document.getElementById('smtpPassword').value = '';
+                } else {
+                    const err = await r.json().catch(() => ({ error: r.statusText }));
+                    setNote('smtpNote', err.error || 'Save failed.', 'error');
+                }
+            } catch (e) {
+                setNote('smtpNote', e.message, 'error');
+            }
+        }
+
+        function setNote(id, msg, type) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.style.color = type === 'error' ? 'var(--color-error, #f48771)'
+                           : type === 'ok'    ? 'var(--color-success, #4ec9b0)'
+                           :                    'var(--text-muted)';
+        }
+
+        loadSettings();
 
         document.getElementById('importFile').addEventListener('change', e => {
             const file = e.target.files[0];

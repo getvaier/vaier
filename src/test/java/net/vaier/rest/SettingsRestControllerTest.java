@@ -1,9 +1,12 @@
 package net.vaier.rest;
 
 import net.vaier.application.ExportConfigurationUseCase;
+import net.vaier.application.GetAppSettingsUseCase;
+import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.ImportConfigurationUseCase;
 import net.vaier.application.ImportConfigurationUseCase.ImportResult;
-import net.vaier.rest.SseEventPublisher;
+import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateSmtpSettingsUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -15,6 +18,7 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +28,9 @@ class SettingsRestControllerTest {
     @Mock ExportConfigurationUseCase exportConfigurationUseCase;
     @Mock ImportConfigurationUseCase importConfigurationUseCase;
     @Mock SseEventPublisher sseEventPublisher;
+    @Mock GetAppSettingsUseCase getAppSettingsUseCase;
+    @Mock UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
+    @Mock UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -73,5 +80,65 @@ class SettingsRestControllerTest {
         ResponseEntity<ImportResult> response = controller.importConfig(json);
 
         assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void getConfig_returnsCurrentSettings() {
+        AppSettingsResult settings = new AppSettingsResult("example.com", "****MPLE", "admin@example.com",
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com");
+        when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
+
+        ResponseEntity<AppSettingsResult> response = controller.getConfig();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isEqualTo(settings);
+    }
+
+    @Test
+    void updateAws_returns200WhenValid() {
+        ResponseEntity<?> response = controller.updateAws(
+                new SettingsRestController.UpdateAwsRequest("NEW_KEY", "NEW_SECRET"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(updateAwsCredentialsUseCase).updateAwsCredentials("NEW_KEY", "NEW_SECRET");
+    }
+
+    @Test
+    void updateAws_returns400WhenValidationFails() {
+        doThrow(new RuntimeException("Invalid credentials"))
+                .when(updateAwsCredentialsUseCase).updateAwsCredentials("BAD", "BAD");
+
+        ResponseEntity<?> response = controller.updateAws(
+                new SettingsRestController.UpdateAwsRequest("BAD", "BAD"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void updateSmtp_returns200OnSuccess() {
+        ResponseEntity<?> response = controller.updateSmtp(
+                new SettingsRestController.UpdateSmtpRequest("smtp.example.com", 587,
+                        "user@example.com", "pass", "noreply@example.com"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(updateSmtpSettingsUseCase).updateSmtpSettings(
+                "smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
+    }
+
+    @Test
+    void updateSmtp_returns500WhenFails() {
+        doThrow(new RuntimeException("Config write failed"))
+                .when(updateSmtpSettingsUseCase).updateSmtpSettings(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+
+        ResponseEntity<?> response = controller.updateSmtp(
+                new SettingsRestController.UpdateSmtpRequest("smtp.example.com", 587,
+                        "user@example.com", "pass", "noreply@example.com"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(500);
     }
 }

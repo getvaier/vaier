@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -149,5 +150,61 @@ class AutheliaConfigInitializerTest {
         boolean result = init.initialiseConfiguration();
 
         assertThat(result).isFalse();
+    }
+
+    @Test
+    void initialiseConfiguration_usesFilesystemNotifierByDefault() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("filesystem:");
+        assertThat(content).contains("/config/emails.txt");
+    }
+
+    @Test
+    void updateSmtpConfig_regeneratesConfigWithSmtpNotifier() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        init.initialiseConfiguration();
+
+        init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "password123", "noreply@example.com");
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("smtp:");
+        assertThat(content).contains("smtp://smtp.example.com:587");
+        assertThat(content).contains("user@example.com");
+        assertThat(content).contains("noreply@example.com");
+        assertThat(content).doesNotContain("filesystem:");
+    }
+
+    @Test
+    void updateSmtpConfig_writesPasswordToSecretsFile() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+
+        init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "mypassword", "noreply@example.com");
+
+        Properties props = new Properties();
+        try (var fis = new java.io.FileInputStream(tempDir.resolve("secrets.properties").toFile())) {
+            props.load(fis);
+        }
+        assertThat(props.getProperty("smtp_password")).isEqualTo("mypassword");
+    }
+
+    @Test
+    void updateSmtpConfig_preservesExistingSecrets() throws IOException {
+        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        init.initialiseConfiguration(); // generates jwt_secret, session_secret, encryption_key
+
+        init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "pass", "sender@example.com");
+
+        Properties props = new Properties();
+        try (var fis = new java.io.FileInputStream(tempDir.resolve("secrets.properties").toFile())) {
+            props.load(fis);
+        }
+        assertThat(props.getProperty("jwt_secret")).isNotBlank();
+        assertThat(props.getProperty("session_secret")).isNotBlank();
+        assertThat(props.getProperty("encryption_key")).isNotBlank();
+        assertThat(props.getProperty("smtp_password")).isEqualTo("pass");
     }
 }

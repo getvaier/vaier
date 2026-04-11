@@ -1,5 +1,6 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForInitialisingUserService;
 import java.io.File;
 import java.io.FileInputStream;
@@ -12,11 +13,16 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class AutheliaConfigInitializer implements ForInitialisingUserService {
+public class AutheliaConfigInitializer implements ForInitialisingUserService, ForConfiguringSmtpNotifier {
 
     private final String configurationFile;
     private final String secretsFile;
     private final String vaierDomain;
+
+    private String smtpHost;
+    private int smtpPort;
+    private String smtpUsername;
+    private String smtpSender;
 
     @org.springframework.beans.factory.annotation.Autowired
     public AutheliaConfigInitializer(net.vaier.config.ConfigResolver configResolver) {
@@ -25,12 +31,20 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
         this.vaierDomain = domain;
+        this.smtpHost = configResolver.getSmtpHost();
+        this.smtpPort = configResolver.getSmtpPort() != null ? configResolver.getSmtpPort() : 587;
+        this.smtpUsername = configResolver.getSmtpUsername();
+        this.smtpSender = configResolver.getSmtpSender();
     }
 
     AutheliaConfigInitializer(String configPath, String vaierDomain) {
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
         this.vaierDomain = vaierDomain;
+        this.smtpHost = null;
+        this.smtpPort = 587;
+        this.smtpUsername = null;
+        this.smtpSender = null;
     }
 
     @Override
@@ -45,7 +59,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
             }
         }
 
-        String configContent = generateDefaultConfig();
+        String configContent = generateConfig();
 
         if (configFile.exists()) {
             try {
@@ -70,7 +84,37 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
         return true;
     }
 
-    private String generateDefaultConfig() {
+    @Override
+    public void updateSmtpConfig(String host, int port, String username, String password, String sender) {
+        this.smtpHost = host;
+        this.smtpPort = port;
+        this.smtpUsername = username;
+        this.smtpSender = sender;
+
+        writeSmtpPasswordToSecrets(password);
+        initialiseConfiguration();
+    }
+
+    private void writeSmtpPasswordToSecrets(String password) {
+        Properties secrets = loadOrGenerateSecrets();
+        secrets.setProperty("smtp_password", password);
+
+        File secretsFileObj = new File(this.secretsFile);
+        File parentDir = secretsFileObj.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+
+        try (FileOutputStream fos = new FileOutputStream(secretsFileObj)) {
+            secrets.store(fos, "Authelia secrets - DO NOT MODIFY OR DELETE");
+            log.info("Updated smtp_password in secrets file");
+        } catch (IOException e) {
+            log.error("Failed to update secrets file with smtp_password", e);
+            throw new RuntimeException("Failed to save SMTP password to secrets", e);
+        }
+    }
+
+    private String generateConfig() {
         String vaierFullDomain = "vaier." + vaierDomain;
         // Extract base domain from vaier domain (e.g., "vaier.eilertsen.family" -> "eilertsen.family")
         String baseDomain = vaierFullDomain.contains(".")
@@ -84,6 +128,8 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
         String jwtSecret = secrets.getProperty("jwt_secret");
         String sessionSecret = secrets.getProperty("session_secret");
         String encryptionKey = secrets.getProperty("encryption_key");
+
+        String notifierBlock = buildNotifierBlock(secrets);
 
         return String.format("""
                 ###############################################################
@@ -136,10 +182,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
                         - "^/api/setup/.*$"
                     - domain: "%s"
                       policy: one_factor
-                notifier:
-                  filesystem:
-                    filename: /config/emails.txt
-                """,
+                %s""",
             jwtSecret,                  // jwt_secret
             baseDomain,                 // totp issuer
             sessionSecret,              // session secret
@@ -148,8 +191,27 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
             encryptionKey,              // storage encryption_key
             regexBaseDomain,            // domain_regex favicon bypass (dots escaped)
             vaierFullDomain,            // vaier full domain for bypass rule
-            vaierFullDomain             // vaier full domain for one_factor rule
+            vaierFullDomain,            // vaier full domain for one_factor rule
+            notifierBlock               // notifier block (smtp or filesystem)
         );
+    }
+
+    private String buildNotifierBlock(Properties secrets) {
+        String smtpPassword = secrets.getProperty("smtp_password");
+        if (smtpHost != null && !smtpHost.isBlank() && smtpPassword != null) {
+            return String.format("""
+                    notifier:
+                      smtp:
+                        address: smtp://%s:%d
+                        username: %s
+                        password: %s
+                        sender: %s""",
+                smtpHost, smtpPort, smtpUsername, smtpPassword, smtpSender);
+        }
+        return """
+                notifier:
+                  filesystem:
+                    filename: /config/emails.txt""";
     }
 
     private Properties loadOrGenerateSecrets() {
@@ -173,6 +235,11 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService {
         secrets.setProperty("encryption_key", generateSecureSecret(64));
 
         // Save secrets
+        File parentDir = secretsFile.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            parentDir.mkdirs();
+        }
+
         try (FileOutputStream fos = new FileOutputStream(secretsFile)) {
             secrets.store(fos, "Authelia secrets - DO NOT MODIFY OR DELETE");
             log.info("Successfully saved secrets to file");

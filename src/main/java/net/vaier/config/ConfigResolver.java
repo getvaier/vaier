@@ -14,6 +14,10 @@ public class ConfigResolver {
     private String awsKey;
     private String awsSecret;
     private String acmeEmail;
+    private String smtpHost;
+    private Integer smtpPort;
+    private String smtpUsername;
+    private String smtpSender;
 
     public ConfigResolver(ForPersistingAppConfiguration configPersistence) {
         this.configPersistence = configPersistence;
@@ -27,6 +31,10 @@ public class ConfigResolver {
                 this.awsKey = config.getAwsKey();
                 this.awsSecret = config.getAwsSecret();
                 this.acmeEmail = config.getAcmeEmail();
+                this.smtpHost = config.getSmtpHost();
+                this.smtpPort = config.getSmtpPort();
+                this.smtpUsername = config.getSmtpUsername();
+                this.smtpSender = config.getSmtpSender();
                 log.info("Configuration loaded from file for domain: {}", domain);
             },
             () -> {
@@ -45,4 +53,8 @@ public class ConfigResolver {
     public String getAwsKey() { return awsKey; }
     public String getAwsSecret() { return awsSecret; }
     public String getAcmeEmail() { return acmeEmail; }
+    public String getSmtpHost() { return smtpHost; }
+    public Integer getSmtpPort() { return smtpPort; }
+    public String getSmtpUsername() { return smtpUsername; }
+    public String getSmtpSender() { return smtpSender; }
 }

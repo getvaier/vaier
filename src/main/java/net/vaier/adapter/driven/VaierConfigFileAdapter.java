@@ -46,6 +46,10 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
                 .awsKey((String) data.get("awsKey"))
                 .awsSecret((String) data.get("awsSecret"))
                 .acmeEmail((String) data.get("acmeEmail"))
+                .smtpHost((String) data.get("smtpHost"))
+                .smtpPort((Integer) data.get("smtpPort"))
+                .smtpUsername((String) data.get("smtpUsername"))
+                .smtpSender((String) data.get("smtpSender"))
                 .build());
         } catch (Exception e) {
             log.warn("Failed to load vaier config from {}", configFilePath, e);
@@ -70,6 +74,10 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
         data.put("awsKey", config.getAwsKey());
         data.put("awsSecret", config.getAwsSecret());
         data.put("acmeEmail", config.getAcmeEmail());
+        data.put("smtpHost", config.getSmtpHost());
+        data.put("smtpPort", config.getSmtpPort());
+        data.put("smtpUsername", config.getSmtpUsername());
+        data.put("smtpSender", config.getSmtpSender());
 
         try (FileWriter writer = new FileWriter(file)) {
             yaml.dump(data, writer);

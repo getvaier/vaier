@@ -10,4 +10,8 @@ public class VaierConfig {
     private String awsKey;
     private String awsSecret;
     private String acmeEmail;
+    private String smtpHost;
+    private Integer smtpPort;
+    private String smtpUsername;
+    private String smtpSender;
 }

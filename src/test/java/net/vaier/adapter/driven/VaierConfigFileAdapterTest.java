@@ -106,4 +106,50 @@ class VaierConfigFileAdapterTest {
         // Corrupt YAML may parse partially — the key thing is no exception
         assertThat(loaded).isNotNull();
     }
+
+    @Test
+    void load_roundTripsSmtpFields() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("AKID123")
+            .awsSecret("secret456")
+            .acmeEmail("admin@example.com")
+            .smtpHost("smtp.example.com")
+            .smtpPort(587)
+            .smtpUsername("user@example.com")
+            .smtpSender("noreply@example.com")
+            .build();
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getSmtpHost()).isEqualTo("smtp.example.com");
+        assertThat(loaded.get().getSmtpPort()).isEqualTo(587);
+        assertThat(loaded.get().getSmtpUsername()).isEqualTo("user@example.com");
+        assertThat(loaded.get().getSmtpSender()).isEqualTo("noreply@example.com");
+    }
+
+    @Test
+    void load_smtpFieldsAreNullWhenNotPresent() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("AKID123")
+            .awsSecret("secret456")
+            .acmeEmail("admin@example.com")
+            .build();
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getSmtpHost()).isNull();
+        assertThat(loaded.get().getSmtpPort()).isNull();
+        assertThat(loaded.get().getSmtpUsername()).isNull();
+        assertThat(loaded.get().getSmtpSender()).isNull();
+    }
 }
