@@ -3,9 +3,15 @@ package net.vaier.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePeerUseCase;
+import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
+import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -14,6 +20,9 @@ public class DeletePeerService implements DeletePeerUseCase {
 
     private final ForResolvingPeerNames peerNameResolver;
     private final ForDeletingVpnPeers vpnPeerDeleter;
+    private final ForGettingPeerConfigurations peerConfigProvider;
+    private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+    private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @Override
     public void deletePeer(String interfaceName, String peerIdentifier) {
@@ -31,7 +40,24 @@ public class DeletePeerService implements DeletePeerUseCase {
             log.info("Resolved IP {} to peer name: {}", peerIdentifier, peerName);
         }
 
+        deletePublishedServicesForPeer(peerName);
+
         vpnPeerDeleter.deletePeer(interfaceName, peerName);
         log.info("Successfully deleted peer: {}", peerName);
+    }
+
+    private void deletePublishedServicesForPeer(String peerName) {
+        peerConfigProvider.getPeerConfigByName(peerName).ifPresent(config -> {
+            String peerIp = config.ipAddress();
+            log.info("Looking for published services pointing to peer {} (IP: {})", peerName, peerIp);
+
+            List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+            routes.stream()
+                .filter(route -> peerIp.equals(route.getAddress()))
+                .forEach(route -> {
+                    log.info("Deleting published service {} pointing to peer {}", route.getDomainName(), peerName);
+                    deletePublishedServiceUseCase.deleteService(route.getDomainName());
+                });
+        });
     }
 }

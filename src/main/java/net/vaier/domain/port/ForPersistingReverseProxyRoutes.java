@@ -10,4 +10,5 @@ public interface ForPersistingReverseProxyRoutes {
     void deleteReverseProxyRoute(String routeName);
     void deleteReverseProxyRouteByDnsName(String dnsName);
     void setRouteAuthentication(String dnsName, boolean requiresAuth);
+    void setRouteRootRedirectPath(String dnsName, String rootRedirectPath);
 }

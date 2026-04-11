@@ -124,6 +124,8 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 - Toggle authentication on/off per service
 - Check publish status (DNS propagated, Traefik active)
 - Delete published service (removes DNS + Traefik route)
+- Edit root path redirect on published services
+- Auto-delete published services when a VPN peer is deleted
 
 **Publish flow (confirmed UX):**
 
@@ -140,7 +142,9 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 9. Duplicate submissions are rejected: attempting to add a service already in active or processing shows an error
 
 **Also implemented:**
-- **Root redirect path UI** — collapsible "Advanced" section in the publish modal with an optional root path redirect input, wired to the `rootRedirectPath` API field
+- **Root redirect path UI** — collapsible "Advanced" section in the publish modal with an optional root path redirect input, wired to the `rootRedirectPath` API field. Redirect path is also editable on published services via a modal.
+- **Service cleanup on peer deletion** — when a VPN peer is deleted, all published services routing to that peer's IP are automatically removed (DNS + Traefik routes)
+- **Published services page cleanup** — consolidated host/status rows, hide discoverable section when empty, replaced fragile optimistic auth toggle with server-side refresh
 
 ---
 

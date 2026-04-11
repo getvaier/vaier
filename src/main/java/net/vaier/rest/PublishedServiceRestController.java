@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -29,6 +30,7 @@ public class PublishedServiceRestController {
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
+    private final EditServiceRedirectUseCase editServiceRedirectUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     private final SseEventPublisher sseEventPublisher;
@@ -59,6 +61,14 @@ public class PublishedServiceRestController {
     public ResponseEntity<Void> setAuth(@PathVariable String dnsName, @RequestBody AuthRequest request) {
         log.info("Setting auth={} for {}", request.requiresAuth(), dnsName);
         toggleServiceAuthUseCase.setAuthentication(dnsName, request.requiresAuth());
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        return ResponseEntity.ok().build();
+    }
+
+    @PatchMapping("/{dnsName:.+}/redirect")
+    public ResponseEntity<Void> setRedirect(@PathVariable String dnsName, @RequestBody RedirectRequest request) {
+        log.info("Setting rootRedirectPath={} for {}", request.rootRedirectPath(), dnsName);
+        editServiceRedirectUseCase.setRootRedirectPath(dnsName, request.rootRedirectPath());
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
@@ -97,5 +107,6 @@ public class PublishedServiceRestController {
     record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
+    record RedirectRequest(String rootRedirectPath) {}
     record IgnoreRequest(String key) {}
 }

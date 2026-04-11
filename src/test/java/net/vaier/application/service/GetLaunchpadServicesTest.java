@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.Server.State;
@@ -8,6 +9,8 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForResolvingPeerNames;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -18,6 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -35,8 +39,19 @@ class GetLaunchpadServicesTest {
     @Mock
     ForGettingVpnClients forGettingVpnClients;
 
+    @Mock
+    ForResolvingPeerNames forResolvingPeerNames;
+
+    @Mock
+    ConfigResolver configResolver;
+
     @InjectMocks
     PublishingService service;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(configResolver.getDomain()).thenReturn("example.com");
+    }
 
     @Test
     void getLaunchpadServices_returnsOnlyDnsAddressAndHostAddress() {

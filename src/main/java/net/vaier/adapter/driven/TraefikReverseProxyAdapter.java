@@ -1032,6 +1032,64 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         saveConfig();
     }
 
+    @Override
+    public void setRouteRootRedirectPath(String dnsName, String rootRedirectPath) {
+        loadConfig();
+
+        Map<String, Object> http = getNestedMap(config, "http");
+        if (http == null) throw new RuntimeException("No HTTP configuration found");
+
+        Map<String, Object> routers = getNestedMap(http, "routers");
+        String routerName = generateRouterName(dnsName);
+        if (routers == null || !routers.containsKey(routerName)) {
+            throw new RuntimeException("Router not found: " + routerName);
+        }
+
+        Map<String, Object> routerConfig = castToMap(routers.get(routerName));
+        String redirectMiddlewareName = routerName.replace("-router", "-redirect");
+
+        // Update middleware list on router
+        @SuppressWarnings("unchecked")
+        List<String> middlewares = routerConfig.get("middlewares") instanceof List
+            ? new ArrayList<>((List<String>) routerConfig.get("middlewares"))
+            : new ArrayList<>();
+
+        Map<String, Object> middlewaresSection = getNestedMap(http, "middlewares");
+
+        if (rootRedirectPath != null) {
+            // Add or update redirect middleware
+            if (!middlewares.contains(redirectMiddlewareName)) {
+                middlewares.add(redirectMiddlewareName);
+            }
+            if (!middlewares.isEmpty()) {
+                routerConfig.put("middlewares", middlewares);
+            }
+
+            if (middlewaresSection == null) {
+                middlewaresSection = getOrCreateNestedMapOrdered(http, "middlewares");
+            }
+            Map<String, Object> redirectRegex = new LinkedHashMap<>();
+            redirectRegex.put("regex", "^https://" + dnsName.replace(".", "\\.") + "/?$");
+            redirectRegex.put("replacement", "https://" + dnsName + rootRedirectPath);
+            Map<String, Object> redirectMiddleware = new LinkedHashMap<>();
+            redirectMiddleware.put("redirectRegex", redirectRegex);
+            middlewaresSection.put(redirectMiddlewareName, redirectMiddleware);
+        } else {
+            // Remove redirect middleware
+            middlewares.remove(redirectMiddlewareName);
+            if (middlewares.isEmpty()) {
+                routerConfig.remove("middlewares");
+            } else {
+                routerConfig.put("middlewares", middlewares);
+            }
+            if (middlewaresSection != null) {
+                middlewaresSection.remove(redirectMiddlewareName);
+            }
+        }
+
+        saveConfig();
+    }
+
     /**
      * Load configuration from file.
      */

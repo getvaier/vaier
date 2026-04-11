@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
+import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -9,6 +10,8 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForResolvingPeerNames;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -36,8 +39,19 @@ class PublishingServiceTest {
     @Mock
     ForGettingVpnClients forGettingVpnClients;
 
+    @Mock
+    ForResolvingPeerNames forResolvingPeerNames;
+
+    @Mock
+    ConfigResolver configResolver;
+
     @InjectMocks
     PublishingService service;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(configResolver.getDomain()).thenReturn("example.com");
+    }
 
     @Test
     void getPublishedServices_emptyRoutes_returnsEmptyWithoutCallingOtherPorts() {
@@ -133,6 +147,7 @@ class PublishingServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(
             List.of(new VpnClient("pubkey", "10.13.13.2/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
         );
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
         setupEmptyLocalServices();
 
         PublishedServiceUco result = service.getPublishedServices().get(0);
@@ -147,6 +162,7 @@ class PublishingServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(
             List.of(new VpnClient("pubkey", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0"))
         );
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
         setupEmptyLocalServices();
 
         PublishedServiceUco result = service.getPublishedServices().get(0);
@@ -271,6 +287,81 @@ class PublishingServiceTest {
         verify(forPersistingDnsRecords, times(2)).getDnsZones();
         verify(forGettingVpnClients, times(2)).getClients();
         verify(forGettingServerInfo, times(2)).getServicesWithExposedPorts(any());
+    }
+
+    @Test
+    void getPublishedServices_localService_nameIsSubdomainAtLocal() {
+        setupOneRoute("pihole.example.com", "pihole", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "pihole", "image", "latest",
+                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running"))
+        );
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.name()).isEqualTo("pihole @ local");
+    }
+
+    @Test
+    void getPublishedServices_peerService_nameIsSubdomainAtPeerName() {
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        setupOneRoute("pihole.myserver.example.com", "10.13.13.2", 8080);
+        setupNoDnsRecords();
+        when(forGettingVpnClients.getClients()).thenReturn(
+            List.of(new VpnClient("pubkey", "10.13.13.2/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
+        );
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("myserver");
+        setupEmptyLocalServices();
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.name()).isEqualTo("pihole @ myserver");
+    }
+
+    @Test
+    void getPublishedServices_unknownIpAddress_nameShowsLocal() {
+        setupOneRoute("app.example.com", "10.13.13.5", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.name()).isEqualTo("app @ local");
+    }
+
+    @Test
+    void getPublishedServices_simpleSubdomain_extractedCorrectly() {
+        setupOneRoute("traefik.example.com", "traefik", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.name()).isEqualTo("traefik @ local");
+    }
+
+    @Test
+    void getPublishedServices_peerServiceOnSamePortAsLocal_resolvesToPeerNotLocal() {
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        setupOneRoute("openhab.myserver.example.com", "10.13.13.3", 8080);
+        setupNoDnsRecords();
+        when(forGettingVpnClients.getClients()).thenReturn(
+            List.of(new VpnClient("pubkey", "10.13.13.3/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
+        );
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.3")).thenReturn("myserver");
+        // Local traefik also listens on port 8080
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "traefik", "image", "latest",
+                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running"))
+        );
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.name()).isEqualTo("openhab @ myserver");
     }
 
     // --- setup helpers ---

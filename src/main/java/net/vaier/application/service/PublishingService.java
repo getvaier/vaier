@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
@@ -16,6 +17,7 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.ReverseProxyRoute;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -27,18 +29,24 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
     private final ForGettingServerInfo forGettingServerInfo;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForGettingVpnClients forGettingVpnClients;
+    private final ForResolvingPeerNames forResolvingPeerNames;
+    private final ConfigResolver configResolver;
 
     private volatile List<PublishedServiceUco> cache = null;
 
     public PublishingService(ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
         ForGettingServerInfo forGettingServerInfo,
         ForPersistingDnsRecords forPersistingDnsRecords,
-        ForGettingVpnClients forGettingVpnClients
+        ForGettingVpnClients forGettingVpnClients,
+        ForResolvingPeerNames forResolvingPeerNames,
+        ConfigResolver configResolver
     ) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.forGettingVpnClients = forGettingVpnClients;
+        this.forResolvingPeerNames = forResolvingPeerNames;
+        this.configResolver = configResolver;
     }
 
     @Override
@@ -79,16 +87,51 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
         boolean mandatory = DeletePublishedServiceUseCase.MANDATORY_SUBDOMAINS.stream()
             .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
         return new PublishedServiceUco(
-            route.getName(),
+            displayName(route, localServices, vpnClients),
             route.getDomainName(),
             dnsState(route.getDomainName(), allDnsRecords),
             route.getAddress(),
             route.getPort(),
             hostState(route.getAddress(), route.getPort(), localServices, vpnClients),
             route.getAuthInfo() != null,
-            mandatory
+            mandatory,
+            route.getRootRedirectPath()
         );
     }
+
+    private String displayName(ReverseProxyRoute route, List<DockerService> localServices,
+                               List<VpnClient> vpnClients) {
+        String subdomain = extractSubdomain(route.getDomainName());
+        String server = resolveServer(route.getAddress(), route.getPort(), localServices, vpnClients);
+        // Strip server name from subdomain suffix: "openhab.colina27" + "colina27" → "openhab"
+        if (!"local".equals(server) && subdomain.endsWith("." + server)) {
+            subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
+        }
+        return subdomain + " @ " + server;
+    }
+
+    private String extractSubdomain(String dnsAddress) {
+        String domain = configResolver.getDomain();
+        if (domain != null && dnsAddress.endsWith("." + domain)) {
+            return dnsAddress.substring(0, dnsAddress.length() - domain.length() - 1);
+        }
+        return dnsAddress;
+    }
+
+    private String resolveServer(String address, int port, List<DockerService> localServices,
+                                 List<VpnClient> vpnClients) {
+        // Check VPN peers first — a peer IP is unambiguous, whereas port-only local
+        // matching can produce false positives when a local container happens to use the same port.
+        boolean isPeer = vpnClients.stream()
+            .anyMatch(p -> p.allowedIps() != null && p.allowedIps().startsWith(address));
+        if (isPeer) {
+            String peerName = forResolvingPeerNames.resolvePeerNameByIp(address);
+            return peerName.equals(address) ? address : peerName;
+        }
+        return "local";
+    }
+
+
 
     private DnsState dnsState(String dnsAddress, List<DnsRecord> allDnsRecords) {
         boolean found = allDnsRecords.stream()
