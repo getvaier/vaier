@@ -66,52 +66,36 @@ Vaier runs as part of a five-container Docker Compose stack:
 
 ## Quick start
 
-### 1. Provision a server and install Docker
-
-Spin up a Linux server (EC2 t3.small or similar) with the ports above open. Once it's running, get its public DNS and connect:
+### 1. Create a folder and download the compose file
 
 ```bash
-# Example for AWS EC2 — get the public DNS name
-aws ec2 describe-instances \
-  --filters "Name=instance-state-name,Values=running" \
-  --query "Reservations[*].Instances[*].PublicDnsName" \
-  --output text
-
-ssh -i your-key.pem ec2-user@<public-dns>
-```
-
-Then install Docker:
-
-```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER && newgrp docker
-```
-
-### 2. Download `docker-compose.yml`
-
-```bash
+mkdir vaier && cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
 ```
 
-### 3. Point your base domain at your server
+### 2. Create a one-line `.env` file
 
-Create an A record for `yourdomain.com` pointing to the server's public IP.
+```bash
+echo "VAIER_DOMAIN=yourdomain.com" > .env
+```
 
-### 4. Start the stack
+Then create an A record for `vaier.yourdomain.com` pointing to your server's public IP.
+
+### 3. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-### 5. Complete the setup wizard
+### 4. Open the setup page
 
-Open `http://<server-ip>:8888/setup.html` in your browser. The wizard walks you through:
-1. **Domain** — your base domain (e.g. `yourdomain.com`)
-2. **AWS Credentials** — access key and secret with Route53 permissions (validated live)
-3. **ACME Email** — for Let's Encrypt certificate notifications
-4. **Admin Account** — first Authelia user (username + password)
+Navigate to `https://vaier.yourdomain.com` in your browser. The setup wizard opens automatically and walks you through:
 
-After completing the wizard, Vaier initializes DNS records, configures Authelia, and starts all services. It will be available at `https://vaier.yourdomain.com` once certificates are issued (usually under a minute).
+1. **AWS Credentials** — access key and secret with Route53 permissions (validated live)
+2. **ACME Email** — for Let's Encrypt certificate notifications
+3. **Admin Account** — first Authelia user (username + password)
+
+After completing the wizard, Vaier initializes DNS records, configures Authelia, and starts all services.
 
 > **Existing deployments**: If you already have a `.env` file with `VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, and `ACME_EMAIL`, Vaier continues to work with those environment variables — the setup wizard is skipped automatically.
 
