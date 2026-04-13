@@ -405,7 +405,7 @@
                             <span class="status-dot ${dotClass}"></span>
                             <span class="service-name">${displayName}</span>
                             ${dnsOk && !isSelf
-                                ? `<a class="service-link" href="${serviceUrl}" target="_blank" onclick="event.stopPropagation()">${service.dnsAddress}</a>`
+                                ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}" onclick="event.stopPropagation()">${service.dnsAddress}</a>`
                                 : `<span style="font-size:0.75rem;color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`}
                         </div>
                         <div class="service-actions">
