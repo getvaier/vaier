@@ -120,20 +120,6 @@ class UpdatePublishedServiceDnsServiceTest {
     }
 
     @Test
-    void updateDns_withGroupPrefix_preservesGroupInNewFqdn() {
-        ReverseProxyRoute existingRoute = routeWithDomain("openhab.colina27.example.com");
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
-            .thenReturn(List.of(existingRoute));
-
-        service.updateDns("openhab.colina27.example.com", "open");
-
-        ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);
-        verify(forPersistingDnsRecords).addDnsRecord(recordCaptor.capture(), any());
-        DnsRecord added = recordCaptor.getValue();
-        assertThat(added.name()).isEqualTo("open.colina27.example.com.");
-    }
-
-    @Test
     void waitForDnsThenSwitch_replacesTraefikRouteWithNewFqdn() {
         ReverseProxyRoute existingRoute = routeWithDomain("app.example.com");
 

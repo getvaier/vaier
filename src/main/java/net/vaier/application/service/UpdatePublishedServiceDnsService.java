@@ -59,13 +59,7 @@ public class UpdatePublishedServiceDnsService implements UpdatePublishedServiceD
     @Override
     public void updateDns(String currentFqdn, String newSubdomain) {
         String domain = configResolver.getDomain();
-        // Preserve any group prefix between the first label and the domain.
-        // e.g. "openhab.colina27.example.com" with domain "example.com" → group is "colina27"
-        String currentWithoutDomain = currentFqdn.substring(0, currentFqdn.length() - domain.length() - 1);
-        int dotIndex = currentWithoutDomain.indexOf('.');
-        String newFqdn = dotIndex >= 0
-            ? newSubdomain + "." + currentWithoutDomain.substring(dotIndex + 1) + "." + domain
-            : newSubdomain + "." + domain;
+        String newFqdn = newSubdomain + "." + domain;
 
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
 
