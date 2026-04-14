@@ -264,27 +264,6 @@
         </div>
     </div>
 
-    <!-- DNS Modal -->
-    <div id="dnsModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">Change Subdomain</div>
-            <div>
-                <span style="font-size:0.8rem;color:var(--text-muted)" id="dnsServiceLabel"></span>
-                <div class="form-group" style="margin-top:0.6rem;">
-                    <label class="form-label" for="dnsNewSubdomain">New subdomain</label>
-                    <input type="text" id="dnsNewSubdomain" class="form-input" placeholder="e.g. myapp">
-                </div>
-                <p style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">
-                    A new DNS CNAME will be created and the old one removed once it propagates.
-                </p>
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" id="dnsCancelBtn" onclick="hideDnsModal()">Cancel</button>
-                    <button class="btn btn-primary" id="dnsSubmitBtn" onclick="submitDnsChange()">Save</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Publish Modal -->
     <div id="publishModal" class="modal">
         <div class="modal-content">
@@ -420,11 +399,7 @@
                     <div class="service-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                         <div class="service-details">
                             <span class="detail-label">DNS</span>
-                            <span class="detail-value">${getStatusHtml(service.dnsState, dnsOk)}${service.mandatory ? '' : `
-                                <span class="detail-edit-icon" title="Change subdomain"
-                                    onclick="showDnsModal('${service.dnsAddress}')">
-                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>
-                                </span>`}</span>
+                            <span class="detail-value">${getStatusHtml(service.dnsState, dnsOk)}</span>
 
                             <span class="detail-label">Host</span>
                             <span class="detail-value">${service.hostAddress}:${service.hostPort} ${getStatusHtml(service.state, hostOk)}</span>
@@ -726,50 +701,6 @@
                 await fetchServices();
             } catch (error) {
                 alert(`Failed to update redirect: ${error.message}`);
-            } finally {
-                submitBtn.disabled = false;
-                cancelBtn.disabled = false;
-                submitBtn.textContent = 'Save';
-            }
-        }
-
-        function showDnsModal(dnsAddress) {
-            const subdomain = dnsAddress.split('.')[0];
-            document.getElementById('dnsServiceLabel').textContent = dnsAddress;
-            document.getElementById('dnsNewSubdomain').value = subdomain;
-            document.getElementById('dnsSubmitBtn').dataset.dns = dnsAddress;
-            document.getElementById('dnsModal').classList.add('active');
-            document.getElementById('dnsNewSubdomain').focus();
-            document.getElementById('dnsNewSubdomain').select();
-        }
-
-        function hideDnsModal() {
-            document.getElementById('dnsModal').classList.remove('active');
-        }
-
-        async function submitDnsChange() {
-            const dnsAddress   = document.getElementById('dnsSubmitBtn').dataset.dns;
-            const newSubdomain = document.getElementById('dnsNewSubdomain').value.trim();
-            if (!newSubdomain) { alert('Please enter a subdomain'); return; }
-            const submitBtn = document.getElementById('dnsSubmitBtn');
-            const cancelBtn = document.getElementById('dnsCancelBtn');
-            submitBtn.disabled = true;
-            cancelBtn.disabled = true;
-            submitBtn.textContent = 'Saving…';
-            try {
-                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/dns`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ newSubdomain })
-                });
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(text || `HTTP ${response.status}`);
-                }
-                hideDnsModal();
-                await fetchServices();
-            } catch (error) {
-                alert(`Failed to change subdomain: ${error.message}`);
             } finally {
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;

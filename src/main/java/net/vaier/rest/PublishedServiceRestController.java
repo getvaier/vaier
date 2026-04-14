@@ -12,7 +12,6 @@ import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
-import net.vaier.application.UpdatePublishedServiceDnsUseCase;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -34,7 +33,6 @@ public class PublishedServiceRestController {
     private final EditServiceRedirectUseCase editServiceRedirectUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
-    private final UpdatePublishedServiceDnsUseCase updatePublishedServiceDnsUseCase;
     private final SseEventPublisher sseEventPublisher;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -64,13 +62,6 @@ public class PublishedServiceRestController {
         log.info("Setting auth={} for {}", request.requiresAuth(), dnsName);
         toggleServiceAuthUseCase.setAuthentication(dnsName, request.requiresAuth());
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
-        return ResponseEntity.ok().build();
-    }
-
-    @PatchMapping("/{dnsName:.+}/dns")
-    public ResponseEntity<Void> updateDns(@PathVariable String dnsName, @RequestBody DnsUpdateRequest request) {
-        log.info("Changing DNS for {} to subdomain {}", dnsName, request.newSubdomain());
-        updatePublishedServiceDnsUseCase.updateDns(dnsName, request.newSubdomain());
         return ResponseEntity.ok().build();
     }
 
@@ -117,6 +108,5 @@ public class PublishedServiceRestController {
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}
-    record DnsUpdateRequest(String newSubdomain) {}
     record IgnoreRequest(String key) {}
 }

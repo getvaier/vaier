@@ -13,10 +13,7 @@ import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.springframework.stereotype.Service;
 
-import javax.naming.NamingException;
-import javax.naming.directory.DirContext;
-import javax.naming.directory.InitialDirContext;
-import java.util.Hashtable;
+import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -40,21 +37,12 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
 
     private record PendingState(boolean requiresAuth, boolean dnsPropagated) {}
 
-    // Injectable for testing; queries 8.8.8.8 directly to bypass Docker's internal DNS cache
+    // Injectable for testing; defaults to real DNS lookup
     private Predicate<String> dnsChecker = fqdn -> {
         try {
-            Hashtable<String, String> env = new Hashtable<>();
-            env.put("java.naming.factory.initial", "com.sun.jndi.dns.DnsContextFactory");
-            env.put("java.naming.provider.url", "dns://8.8.8.8");
-            DirContext ctx = new InitialDirContext(env);
-            var attrs = ctx.getAttributes(fqdn, new String[]{"CNAME", "A"});
-            boolean found = attrs.getAll().hasMore();
-            ctx.close();
-            return found;
-        } catch (NamingException e) {
-            return false;
+            InetAddress[] addresses = InetAddress.getAllByName(fqdn);
+            return addresses != null && addresses.length > 0;
         } catch (Exception e) {
-            log.debug("DNS check error for {}: {}", fqdn, e.getMessage());
             return false;
         }
     };
