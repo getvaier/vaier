@@ -8,7 +8,10 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForRestoringVpnPeers;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
@@ -16,6 +19,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.StringReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +31,10 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class WireGuardVpnAdapter implements ForGettingVpnClients {
+public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpnPeers, ForRestoringVpnPeers {
+
+    @Value("${wireguard.config.path:/wireguard/config}")
+    private String wireguardConfigPath;
 
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
@@ -196,6 +205,226 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients {
             } catch (IOException e) {
                 throw new RuntimeException("Failed to process Docker exec output", e);
             }
+        }
+    }
+
+    private String executeInContainer(String... command) throws IOException, InterruptedException {
+        ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(wireguardContainerName)
+                .withCmd(command)
+                .withAttachStdout(true)
+                .withAttachStderr(true)
+                .exec();
+
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+
+        dockerClient.execStartCmd(execCreateCmdResponse.getId())
+                .exec(new DockerExecCallback(stdout, stderr))
+                .awaitCompletion();
+
+        String stderrStr = stderr.toString();
+        if (!stderrStr.isEmpty()) {
+            log.debug("Command stderr: {}", stderrStr);
+        }
+
+        return stdout.toString();
+    }
+
+    private String executeInContainerWithInput(String input, String... command) throws IOException, InterruptedException {
+        String bashCommand = String.format("echo '%s' | %s", input, String.join(" ", command));
+        return executeInContainer("bash", "-c", bashCommand);
+    }
+
+    private void restartWireGuardService() {
+        try {
+            log.info("Restarting WireGuard container: {}", wireguardContainerName);
+            dockerClient.restartContainerCmd(wireguardContainerName)
+                    .withTimeout(30)
+                    .exec();
+            Thread.sleep(2000);
+            log.info("WireGuard container restarted successfully");
+
+            String masqueradeContainer = wireguardContainerName + "-masquerade";
+            try {
+                log.info("Restarting masquerade sidecar: {}", masqueradeContainer);
+                dockerClient.restartContainerCmd(masqueradeContainer)
+                        .withTimeout(15)
+                        .exec();
+                Thread.sleep(3000);
+                log.info("Masquerade sidecar restarted successfully");
+            } catch (Exception e) {
+                log.warn("Could not restart masquerade sidecar {}: {}", masqueradeContainer, e.getMessage());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Interrupted while restarting WireGuard container", e);
+            throw new RuntimeException("Failed to restart WireGuard service", e);
+        } catch (Exception e) {
+            log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to restart WireGuard service", e);
+        }
+    }
+
+    private String findPeerPublicKeyByIp(String interfaceName, String ipAddress) throws IOException, InterruptedException {
+        String output = executeInContainer("wg", "show", interfaceName, "dump");
+
+        try (var reader = new java.io.BufferedReader(new java.io.StringReader(output))) {
+            String line;
+            boolean firstLine = true;
+
+            while ((line = reader.readLine()) != null) {
+                if (firstLine) {
+                    firstLine = false;
+                    continue;
+                }
+
+                String[] parts = line.split("\t");
+                if (parts.length >= 4) {
+                    String publicKey = parts[0];
+                    String allowedIps = parts[3];
+
+                    if (allowedIps.startsWith(ipAddress + "/") || allowedIps.equals(ipAddress)) {
+                        log.info("Found peer with public key {} for IP {}", publicKey, ipAddress);
+                        return publicKey;
+                    }
+                }
+            }
+        }
+
+        log.warn("No peer found with IP address: {}", ipAddress);
+        return "";
+    }
+
+    private void deleteDirectory(Path directory) throws IOException {
+        if (Files.exists(directory)) {
+            Files.walk(directory)
+                    .sorted((a, b) -> -a.compareTo(b))
+                    .forEach(path -> {
+                        try {
+                            Files.delete(path);
+                        } catch (IOException e) {
+                            log.warn("Failed to delete: {}", path, e);
+                        }
+                    });
+        }
+    }
+
+    static String extractValue(String configContent, String key) {
+        for (String line : configContent.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(key + " =") || trimmed.startsWith(key + "=")) {
+                return trimmed.substring(trimmed.indexOf('=') + 1).trim();
+            }
+        }
+        return "";
+    }
+
+    @Override
+    public void deletePeer(String interfaceName, String peerName) {
+        log.info("Deleting peer {} from interface {}", peerName, interfaceName);
+
+        try {
+            Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
+            if (!Files.exists(peerConfigPath)) {
+                log.warn("Peer config not found: {}", peerConfigPath);
+                throw new RuntimeException("Peer not found: " + peerName);
+            }
+
+            String configContent = Files.readString(peerConfigPath);
+            String ipAddress = "";
+            for (String line : configContent.split("\n")) {
+                if (line.trim().startsWith("Address")) {
+                    String address = line.substring(line.indexOf('=') + 1).trim();
+                    ipAddress = address.split("/")[0];
+                    break;
+                }
+            }
+
+            if (ipAddress.isEmpty()) {
+                log.error("Could not find IP address in peer config");
+                throw new RuntimeException("Invalid peer configuration");
+            }
+
+            log.info("Found peer IP address: {}", ipAddress);
+
+            String publicKey = findPeerPublicKeyByIp(interfaceName, ipAddress);
+            if (publicKey.isEmpty()) {
+                log.error("Could not find peer with IP {} in WireGuard interface", ipAddress);
+                throw new RuntimeException("Peer not found in WireGuard interface");
+            }
+
+            log.info("Removing peer with public key: {}", publicKey);
+
+            String removePeerCommand = String.format("wg set %s peer %s remove", interfaceName, publicKey);
+            log.info("Executing: {}", removePeerCommand);
+            String output = executeInContainer("sh", "-c", removePeerCommand);
+            log.info("Remove peer output: {}", output);
+
+            String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
+            log.info("Save config output: {}", saveOutput);
+
+            deleteDirectory(Paths.get(wireguardConfigPath, peerName));
+            log.info("Deleted peer directory: {}", peerName);
+
+            log.info("Peer deleted successfully: {}", peerName);
+
+        } catch (IOException | InterruptedException e) {
+            log.error("Error deleting peer", e);
+            throw new RuntimeException("Failed to delete peer: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void restorePeer(String interfaceName, ForGettingPeerConfigurations.PeerConfiguration config) {
+        String peerName = config.name();
+        String configContent = config.configContent();
+        String ipAddress = config.ipAddress();
+        String lanCidr = config.lanCidr();
+
+        log.info("Restoring peer {} on interface {}", peerName, interfaceName);
+
+        try {
+            String privateKey = extractValue(configContent, "PrivateKey");
+            String presharedKey = extractValue(configContent, "PresharedKey");
+
+            if (privateKey.isEmpty()) {
+                throw new RuntimeException("Cannot restore peer " + peerName + ": PrivateKey not found in config");
+            }
+
+            String publicKey = executeInContainerWithInput(privateKey, "wg", "pubkey").trim();
+            log.info("Derived public key for peer {}: {}", peerName, publicKey);
+
+            Path peerDir = Paths.get(wireguardConfigPath, peerName);
+            Files.createDirectories(peerDir);
+            Files.writeString(peerDir.resolve(peerName + ".conf"), configContent);
+            log.info("Wrote config file for peer {}", peerName);
+
+            String serverAllowedIps = ipAddress + "/32";
+            if (lanCidr != null && !lanCidr.isBlank()) {
+                serverAllowedIps = serverAllowedIps + "," + lanCidr;
+            }
+
+            if (!presharedKey.isEmpty()) {
+                String pskFile = "/tmp/psk_restore_" + System.currentTimeMillis();
+                executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
+                executeInContainer("sh", "-c", String.format(
+                        "wg set %s peer %s preshared-key %s allowed-ips %s",
+                        interfaceName, publicKey, pskFile, serverAllowedIps));
+                executeInContainer("rm", "-f", pskFile);
+            } else {
+                executeInContainer("sh", "-c", String.format(
+                        "wg set %s peer %s allowed-ips %s",
+                        interfaceName, publicKey, serverAllowedIps));
+            }
+
+            executeInContainer("wg-quick", "save", interfaceName);
+            restartWireGuardService();
+
+            log.info("Peer {} restored successfully", peerName);
+
+        } catch (IOException | InterruptedException e) {
+            log.error("Error restoring peer {}", peerName, e);
+            throw new RuntimeException("Failed to restore peer: " + e.getMessage(), e);
         }
     }
 

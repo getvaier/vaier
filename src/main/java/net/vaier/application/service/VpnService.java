@@ -11,9 +11,6 @@ import net.vaier.application.CreatePeerUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
-import net.vaier.domain.port.ForDeletingVpnPeers;
-import net.vaier.domain.port.ForGettingPeerConfigurations;
-import net.vaier.domain.port.ForRestoringVpnPeers;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @Slf4j
-public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForRestoringVpnPeers {
+public class VpnService implements CreatePeerUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -268,7 +265,7 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForRe
 
         String dnsLine = peerType.isServerType()
                 ? ""
-                : "DNS = 10.13.13.1\n";
+                : "DNS = 172.20.0.53\n";
 
         return String.format("""
                 # VAIER: %s
@@ -351,169 +348,6 @@ public class VpnService implements CreatePeerUseCase, ForDeletingVpnPeers, ForRe
         } catch (Exception e) {
             log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to restart WireGuard service", e);
-        }
-    }
-
-    private String findPeerPublicKeyByIp(String interfaceName, String ipAddress) throws IOException, InterruptedException {
-        // Query WireGuard to get all peers and find the one with matching IP
-        String output = executeInContainer("wg", "show", interfaceName, "dump");
-
-        try (var reader = new java.io.BufferedReader(new java.io.StringReader(output))) {
-            String line;
-            boolean firstLine = true;
-
-            while ((line = reader.readLine()) != null) {
-                // Skip the first line (interface info)
-                if (firstLine) {
-                    firstLine = false;
-                    continue;
-                }
-
-                // Parse peer line
-                // Format: public-key\tpreshared-key\tendpoint\tallowed-ips\tlatest-handshake\ttransfer-rx\ttransfer-tx\tpersistent-keepalive
-                String[] parts = line.split("\t");
-                if (parts.length >= 4) {
-                    String publicKey = parts[0];
-                    String allowedIps = parts[3];
-
-                    // Check if this peer has the matching IP
-                    if (allowedIps.startsWith(ipAddress + "/") || allowedIps.equals(ipAddress)) {
-                        log.info("Found peer with public key {} for IP {}", publicKey, ipAddress);
-                        return publicKey;
-                    }
-                }
-            }
-        }
-
-        log.warn("No peer found with IP address: {}", ipAddress);
-        return "";
-    }
-
-    @Override
-    public void restorePeer(String interfaceName, ForGettingPeerConfigurations.PeerConfiguration config) {
-        String peerName = config.name();
-        String configContent = config.configContent();
-        String ipAddress = config.ipAddress();
-        String lanCidr = config.lanCidr();
-
-        log.info("Restoring peer {} on interface {}", peerName, interfaceName);
-
-        try {
-            String privateKey = extractValue(configContent, "PrivateKey");
-            String presharedKey = extractValue(configContent, "PresharedKey");
-
-            if (privateKey.isEmpty()) {
-                throw new RuntimeException("Cannot restore peer " + peerName + ": PrivateKey not found in config");
-            }
-
-            String publicKey = executeInContainerWithInput(privateKey, "wg", "pubkey").trim();
-            log.info("Derived public key for peer {}: {}", peerName, publicKey);
-
-            Path peerDir = Paths.get(wireguardConfigPath, peerName);
-            Files.createDirectories(peerDir);
-            Files.writeString(peerDir.resolve(peerName + ".conf"), configContent);
-            log.info("Wrote config file for peer {}", peerName);
-
-            String serverAllowedIps = ipAddress + "/32";
-            if (lanCidr != null && !lanCidr.isBlank()) {
-                serverAllowedIps = serverAllowedIps + "," + lanCidr;
-            }
-
-            if (!presharedKey.isEmpty()) {
-                String pskFile = "/tmp/psk_restore_" + System.currentTimeMillis();
-                executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
-                executeInContainer("sh", "-c", String.format(
-                        "wg set %s peer %s preshared-key %s allowed-ips %s",
-                        interfaceName, publicKey, pskFile, serverAllowedIps));
-                executeInContainer("rm", "-f", pskFile);
-            } else {
-                executeInContainer("sh", "-c", String.format(
-                        "wg set %s peer %s allowed-ips %s",
-                        interfaceName, publicKey, serverAllowedIps));
-            }
-
-            executeInContainer("wg-quick", "save", interfaceName);
-            restartWireGuardService();
-
-            log.info("Peer {} restored successfully", peerName);
-
-        } catch (IOException | InterruptedException e) {
-            log.error("Error restoring peer {}", peerName, e);
-            throw new RuntimeException("Failed to restore peer: " + e.getMessage(), e);
-        }
-    }
-
-    @Override
-    public void deletePeer(String interfaceName, String peerName) {
-        log.info("Deleting peer {} from interface {}", peerName, interfaceName);
-
-        try {
-            // Step 1: Read the peer config to get the IP address
-            Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
-            if (!Files.exists(peerConfigPath)) {
-                log.warn("Peer config not found: {}", peerConfigPath);
-                throw new RuntimeException("Peer not found: " + peerName);
-            }
-
-            String configContent = Files.readString(peerConfigPath);
-            String ipAddress = "";
-            for (String line : configContent.split("\n")) {
-                if (line.trim().startsWith("Address")) {
-                    String address = line.substring(line.indexOf('=') + 1).trim();
-                    ipAddress = address.split("/")[0]; // Extract IP without CIDR
-                    break;
-                }
-            }
-
-            if (ipAddress.isEmpty()) {
-                log.error("Could not find IP address in peer config");
-                throw new RuntimeException("Invalid peer configuration");
-            }
-
-            log.info("Found peer IP address: {}", ipAddress);
-
-            // Step 2: Find the peer's public key by querying WireGuard for peers with this IP
-            String publicKey = findPeerPublicKeyByIp(interfaceName, ipAddress);
-            if (publicKey.isEmpty()) {
-                log.error("Could not find peer with IP {} in WireGuard interface", ipAddress);
-                throw new RuntimeException("Peer not found in WireGuard interface");
-            }
-
-            log.info("Removing peer with public key: {}", publicKey);
-
-            // Step 3: Remove peer from running WireGuard interface
-            String removePeerCommand = String.format("wg set %s peer %s remove", interfaceName, publicKey);
-            log.info("Executing: {}", removePeerCommand);
-            String output = executeInContainer("sh", "-c", removePeerCommand);
-            log.info("Remove peer output: {}", output);
-
-            // Step 4: Save configuration to make it persistent
-            String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
-            log.info("Save config output: {}", saveOutput);
-
-            // Step 5: Delete peer directory and config files
-            deleteDirectory(Paths.get(wireguardConfigPath, peerName));
-            log.info("Deleted peer directory: {}", peerName);
-
-            log.info("Peer deleted successfully: {}", peerName);
-
-        } catch (IOException | InterruptedException e) {
-            log.error("Error deleting peer", e);
-            throw new RuntimeException("Failed to delete peer: " + e.getMessage(), e);
-        }
-    }
-
-    private void deleteDirectory(Path directory) throws IOException {
-        if (Files.exists(directory)) {
-            Files.walk(directory)
-                    .sorted((a, b) -> -a.compareTo(b)) // Reverse order to delete files before directories
-                    .forEach(path -> {
-                        try {
-                            Files.delete(path);
-                        } catch (IOException e) {
-                            log.warn("Failed to delete: {}", path, e);
-                        }
-                    });
         }
     }
 
