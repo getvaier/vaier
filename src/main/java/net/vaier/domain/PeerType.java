@@ -10,7 +10,7 @@ public enum PeerType {
         return this == UBUNTU_SERVER || this == WINDOWS_SERVER;
     }
 
-    public String defaultAllowedIps() {
-        return isServerType() ? "10.13.13.0/24" : "0.0.0.0/0";
+    public String defaultAllowedIps(String vpnSubnet) {
+        return isServerType() ? vpnSubnet : "0.0.0.0/0";
     }
 }

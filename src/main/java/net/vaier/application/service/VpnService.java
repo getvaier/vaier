@@ -35,6 +35,9 @@ public class VpnService implements CreatePeerUseCase {
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
 
+    @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
+    private String vpnSubnet;
+
     private final ConfigResolver configResolver;
     private DockerClient dockerClient;
 
@@ -141,7 +144,7 @@ public class VpnService implements CreatePeerUseCase {
 
             // Step 7: Create client configuration file
             String clientConfig = generateClientConfig(
-                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr);
+                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, vpnSubnet);
 
             Path peerConfigPath = peerDir.resolve(peerName + ".conf");
             Files.writeString(peerConfigPath, clientConfig);
@@ -223,7 +226,9 @@ public class VpnService implements CreatePeerUseCase {
 
         // Return next available IP (start from .2, server is .1)
         int nextOctet = Math.max(maxLastOctet.get() + 1, 2);
-        return "10.13.13." + nextOctet;
+        String networkAddress = vpnSubnet.split("/")[0]; // e.g. "10.13.13.0"
+        String prefix = networkAddress.substring(0, networkAddress.lastIndexOf('.') + 1); // e.g. "10.13.13."
+        return prefix + nextOctet;
     }
 
     private String getServerPublicKey(String interfaceName) throws IOException, InterruptedException {
@@ -253,8 +258,8 @@ public class VpnService implements CreatePeerUseCase {
 
     static String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
                                        String presharedKey, String serverEndpoint,
-                                       PeerType peerType, String lanCidr) {
-        String allowedIps = peerType.defaultAllowedIps();
+                                       PeerType peerType, String lanCidr, String vpnSubnet) {
+        String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
         if (lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER) {
             allowedIps = allowedIps + ", " + lanCidr;
         }

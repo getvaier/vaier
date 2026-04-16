@@ -7,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
@@ -140,5 +141,18 @@ class GeneratePeerSetupScriptServiceTest {
 
         assertThat(script).contains("snap.docker.dockerd");
         assertThat(script).contains("/var/snap/docker/current/config/daemon.json");
+    }
+
+    @Test
+    void generateSetupScript_usesConfiguredVpnSubnetInFirewallRules() {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.10.10.0/24");
+        when(getPeerConfigUseCase.getPeerConfig("alice")).thenReturn(
+            Optional.of(new PeerConfigResult("alice", "10.10.10.2", "wg-config", net.vaier.domain.PeerType.UBUNTU_SERVER))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("10.10.10.0/24");
+        assertThat(script).doesNotContain("10.13.13.0/24");
     }
 }

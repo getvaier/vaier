@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -14,6 +15,9 @@ import java.util.Optional;
 public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUseCase {
 
     private final GetPeerConfigUseCase getPeerConfigUseCase;
+
+    @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
+    private String vpnSubnet;
 
     @Override
     public Optional<String> generateSetupScript(String peerName, String serverUrl, String serverPort) {
@@ -92,7 +96,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("\n");
         sb.append("# Force split tunneling: only route VPN subnet through the tunnel\n");
         sb.append("# This prevents SSH and other external traffic from breaking\n");
-        sb.append("sed -i 's|AllowedIPs.*=.*0\\.0\\.0\\.0/0.*|AllowedIPs = 10.13.13.0/24|' \"$INSTALL_DIR/wireguard-client/config/wg_confs/wg0.conf\"\n");
+        sb.append("sed -i 's|AllowedIPs.*=.*0\\.0\\.0\\.0/0.*|AllowedIPs = ").append(vpnSubnet).append("|' \"$INSTALL_DIR/wireguard-client/config/wg_confs/wg0.conf\"\n");
         sb.append("\n");
         sb.append("echo \"Created WireGuard config (split tunneling enabled)\"\n");
         sb.append("\n");
@@ -161,8 +165,8 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("# --- Firewall: only allow Docker API from VPN subnet ---\n");
         sb.append("echo \"Configuring firewall to restrict Docker API to VPN network...\"\n");
         sb.append("sudo iptables -D INPUT -p tcp --dport 2375 -j DROP 2>/dev/null || true\n");
-        sb.append("sudo iptables -D INPUT -p tcp --dport 2375 -s 10.13.13.0/24 -j ACCEPT 2>/dev/null || true\n");
-        sb.append("sudo iptables -A INPUT -p tcp --dport 2375 -s 10.13.13.0/24 -j ACCEPT\n");
+        sb.append("sudo iptables -D INPUT -p tcp --dport 2375 -s ").append(vpnSubnet).append(" -j ACCEPT 2>/dev/null || true\n");
+        sb.append("sudo iptables -A INPUT -p tcp --dport 2375 -s ").append(vpnSubnet).append(" -j ACCEPT\n");
         sb.append("sudo iptables -A INPUT -p tcp --dport 2375 -j DROP\n");
         sb.append("\n");
         sb.append("# Persist iptables rules across reboots\n");
@@ -189,7 +193,7 @@ public class GeneratePeerSetupScriptService implements GeneratePeerSetupScriptUs
         sb.append("echo \"=== Setup complete ===\"\n");
         sb.append("echo \"  Install dir:  $INSTALL_DIR\"\n");
         sb.append("echo \"  VPN IP:       $VPN_IP\"\n");
-        sb.append("echo \"  Docker API:   tcp://0.0.0.0:2375 (firewalled to VPN subnet 10.13.13.0/24)\"\n");
+        sb.append("echo \"  Docker API:   tcp://0.0.0.0:2375 (firewalled to VPN subnet ").append(vpnSubnet).append(")\"\n");
         sb.append("echo \"\"\n");
         sb.append("echo \"Verify VPN connection:\"\n");
         sb.append("echo \"  docker exec wireguard-client wg show\"\n");
