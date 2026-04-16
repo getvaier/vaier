@@ -3,9 +3,9 @@ package net.vaier.rest;
 import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
-import net.vaier.domain.port.ForGettingServerInfo;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,14 +16,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/docker-services")
 public class DockerServiceRestController {
 
-    private final ForGettingServerInfo forGettingServerInfo;
+    private final GetServerInfoUseCase getServerInfoUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
 
-    public DockerServiceRestController(ForGettingServerInfo forGettingServerInfo,
+    public DockerServiceRestController(GetServerInfoUseCase getServerInfoUseCase,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
                                        DiscoverLocalContainersUseCase discoverLocalContainersUseCase) {
-        this.forGettingServerInfo = forGettingServerInfo;
+        this.getServerInfoUseCase = getServerInfoUseCase;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverLocalContainersUseCase = discoverLocalContainersUseCase;
     }
@@ -35,7 +35,7 @@ public class DockerServiceRestController {
         @RequestParam(defaultValue = "false") boolean tlsEnabled
     ) {
         Server server = new Server(address, port, tlsEnabled);
-        return forGettingServerInfo.getServicesWithExposedPorts(server);
+        return getServerInfoUseCase.getServicesWithExposedPorts(server);
     }
 
     @GetMapping("/local")

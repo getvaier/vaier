@@ -3,9 +3,9 @@ package net.vaier.rest;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
+import net.vaier.application.GetUsersUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.User;
-import net.vaier.domain.port.ForPersistingUsers;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,14 +16,14 @@ import java.util.List;
 public class AuthRestController {
 
     private final ConfigResolver configResolver;
-    private final ForPersistingUsers forPersistingUsers;
+    private final GetUsersUseCase getUsersUseCase;
     private final AddUserUseCase addUserUseCase;
     private final DeleteUserUseCase deleteUserUseCase;
     private final ChangePasswordUseCase changePasswordUseCase;
 
-    public AuthRestController(ConfigResolver configResolver, ForPersistingUsers forPersistingUsers, AddUserUseCase addUserUseCase, DeleteUserUseCase deleteUserUseCase, ChangePasswordUseCase changePasswordUseCase) {
+    public AuthRestController(ConfigResolver configResolver, GetUsersUseCase getUsersUseCase, AddUserUseCase addUserUseCase, DeleteUserUseCase deleteUserUseCase, ChangePasswordUseCase changePasswordUseCase) {
         this.configResolver = configResolver;
-        this.forPersistingUsers = forPersistingUsers;
+        this.getUsersUseCase = getUsersUseCase;
         this.addUserUseCase = addUserUseCase;
         this.deleteUserUseCase = deleteUserUseCase;
         this.changePasswordUseCase = changePasswordUseCase;
@@ -31,7 +31,7 @@ public class AuthRestController {
 
     @GetMapping
     public List<User> getUsers() {
-        return forPersistingUsers.getUsers();
+        return getUsersUseCase.getUsers();
     }
 
     @PostMapping

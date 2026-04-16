@@ -2,9 +2,9 @@ package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.domain.VpnClient;
-import net.vaier.domain.port.ForGettingVpnClients;
-import net.vaier.domain.port.ForResolvingPeerNames;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,15 +16,15 @@ import static org.mockito.Mockito.*;
 
 class PeerStatsSchedulerTest {
 
-    ForGettingVpnClients vpnClients;
-    ForResolvingPeerNames peerNameResolver;
+    GetVpnClientsUseCase vpnClients;
+    ResolveVpnPeerNameUseCase peerNameResolver;
     ForPublishingEvents eventPublisher;
     PeerStatsScheduler scheduler;
 
     @BeforeEach
     void setUp() {
-        vpnClients = mock(ForGettingVpnClients.class);
-        peerNameResolver = mock(ForResolvingPeerNames.class);
+        vpnClients = mock(GetVpnClientsUseCase.class);
+        peerNameResolver = mock(ResolveVpnPeerNameUseCase.class);
         eventPublisher = mock(ForPublishingEvents.class);
         scheduler = new PeerStatsScheduler(vpnClients, peerNameResolver, eventPublisher, new ObjectMapper());
     }

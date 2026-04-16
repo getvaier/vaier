@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.domain.VpnClient;
-import net.vaier.domain.port.ForGettingVpnClients;
-import net.vaier.domain.port.ForResolvingPeerNames;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,8 +18,8 @@ import java.util.Map;
 @Slf4j
 public class PeerStatsScheduler {
 
-    private final ForGettingVpnClients vpnClients;
-    private final ForResolvingPeerNames peerNameResolver;
+    private final GetVpnClientsUseCase vpnClients;
+    private final ResolveVpnPeerNameUseCase peerNameResolver;
     private final ForPublishingEvents eventPublisher;
     private final ObjectMapper objectMapper;
 

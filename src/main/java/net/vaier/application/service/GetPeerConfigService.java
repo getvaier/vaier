@@ -30,4 +30,10 @@ public class GetPeerConfigService implements GetPeerConfigUseCase {
 
         return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType()));
     }
+
+    @Override
+    public Optional<PeerConfigResult> getPeerConfigByIp(String ipAddress) {
+        return peerConfigProvider.getPeerConfigByIp(ipAddress)
+                .map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType()));
+    }
 }

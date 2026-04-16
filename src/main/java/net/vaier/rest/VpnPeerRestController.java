@@ -1,16 +1,15 @@
 package net.vaier.rest;
 
 import net.vaier.application.CreatePeerUseCase;
-import net.vaier.config.ServiceNames;
 import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.VpnClient;
-import net.vaier.domain.port.ForGettingPeerConfigurations;
-import net.vaier.domain.port.ForGettingVpnClients;
-import net.vaier.domain.port.ForResolvingPeerNames;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,12 +29,11 @@ import java.util.List;
 @Slf4j
 public class VpnPeerRestController {
 
-    private final ForGettingVpnClients vpnClientService;
-    private final ForResolvingPeerNames peerNameResolver;
-    private final ForGettingPeerConfigurations peerConfigReader;
+    private final GetVpnClientsUseCase vpnClientService;
+    private final ResolveVpnPeerNameUseCase peerNameResolver;
+    private final GetPeerConfigUseCase getPeerConfigUseCase;
     private final CreatePeerUseCase createPeerUseCase;
     private final DeletePeerUseCase deletePeerUseCase;
-    private final GetPeerConfigUseCase getPeerConfigUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     private final SseEventPublisher sseEventPublisher;
@@ -54,8 +52,8 @@ public class VpnPeerRestController {
                     .map(client -> {
                         String peerIp = client.allowedIps().split("/")[0];
                         String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
-                        PeerType peerType = peerConfigReader.getPeerConfigByIp(peerIp)
-                                .map(ForGettingPeerConfigurations.PeerConfiguration::peerType)
+                        PeerType peerType = getPeerConfigUseCase.getPeerConfigByIp(peerIp)
+                                .map(GetPeerConfigUseCase.PeerConfigResult::peerType)
                                 .orElse(PeerType.UBUNTU_SERVER);
                         return new VpnPeerResponse(
                                 peerName,

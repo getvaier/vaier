@@ -8,6 +8,8 @@ public interface GetPeerConfigUseCase {
 
     Optional<PeerConfigResult> getPeerConfig(String peerIdentifier);
 
+    Optional<PeerConfigResult> getPeerConfigByIp(String ipAddress);
+
     record PeerConfigResult(
         String name,
         String ipAddress,
