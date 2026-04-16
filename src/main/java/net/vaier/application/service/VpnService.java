@@ -38,6 +38,9 @@ public class VpnService implements CreatePeerUseCase {
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
 
+    @Value("${wireguard.interface:wg0}")
+    private String wireguardInterface;
+
     private final ConfigResolver configResolver;
     private DockerClient dockerClient;
 
@@ -108,14 +111,14 @@ public class VpnService implements CreatePeerUseCase {
     }
 
     @Override
-    public CreatedPeerUco createPeer(String interfaceName, String peerName) {
-        return createPeer(interfaceName, peerName, PeerType.UBUNTU_SERVER, null);
+    public CreatedPeerUco createPeer(String peerName) {
+        return createPeer(peerName, PeerType.UBUNTU_SERVER, null);
     }
 
     @Override
-    public CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr) {
+    public CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr) {
         peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
-        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {})", peerName, interfaceName, peerType, lanCidr);
+        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {})", peerName, wireguardInterface, peerType, lanCidr);
 
         try {
             // Step 1: Generate private key
@@ -135,7 +138,7 @@ public class VpnService implements CreatePeerUseCase {
             log.info("Assigned IP address {} to peer {}", ipAddress, peerName);
 
             // Step 5: Get server public key
-            String serverPublicKey = getServerPublicKey(interfaceName);
+            String serverPublicKey = getServerPublicKey(wireguardInterface);
             String serverEndpoint = extractServerEndpoint();
 
             // Step 6: Create peer directory
@@ -151,7 +154,7 @@ public class VpnService implements CreatePeerUseCase {
             log.info("Created client config file at {}", peerConfigPath);
 
             // Step 8: Add peer to server configuration (include LAN CIDR for server-type peers)
-            addPeerToServer(interfaceName, publicKey, presharedKey, ipAddress, lanCidr);
+            addPeerToServer(wireguardInterface, publicKey, presharedKey, ipAddress, lanCidr);
             log.info("Added peer to server configuration");
 
             log.info("Peer created successfully: {} with IP {}", peerName, ipAddress);

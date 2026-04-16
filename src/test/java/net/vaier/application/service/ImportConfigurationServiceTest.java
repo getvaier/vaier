@@ -140,7 +140,6 @@ class ImportConfigurationServiceTest {
 
         assertThat(result.success()).isTrue();
         verify(forRestoringVpnPeers).restorePeer(
-                eq("wg0"),
                 eq(new ForGettingPeerConfigurations.PeerConfiguration(
                         "myserver", "10.13.13.2", "# config", PeerType.UBUNTU_SERVER, null)));
     }
@@ -222,6 +221,6 @@ class ImportConfigurationServiceTest {
         verify(forPersistingDnsRecords, never()).addDnsZone(any());
         verify(addReverseProxyRouteUseCase, never()).addReverseProxyRoute(any());
         verify(addUserUseCase, never()).addUser(any(), any(), any(), any());
-        verify(forRestoringVpnPeers, never()).restorePeer(any(), any());
+        verify(forRestoringVpnPeers, never()).restorePeer(any());
     }
 }

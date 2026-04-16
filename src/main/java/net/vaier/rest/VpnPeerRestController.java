@@ -80,11 +80,9 @@ public class VpnPeerRestController {
     public ResponseEntity<CreatePeerResponse> createPeer(@RequestBody CreatePeerRequest request) {
         log.info("Creating new VPN peer: {}", request.name());
 
-        String interfaceName = "wg0"; // Default WireGuard interface
         PeerType peerType = request.peerType() != null ? request.peerType() : PeerType.UBUNTU_SERVER;
 
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
-                interfaceName,
                 request.name(),
                 peerType,
                 request.lanCidr()
@@ -107,8 +105,7 @@ public class VpnPeerRestController {
         log.info("Deleting VPN peer: {}", peerIdentifier);
 
         try {
-            String interfaceName = "wg0"; // Default WireGuard interface
-            deletePeerUseCase.deletePeer(interfaceName, peerIdentifier);
+            deletePeerUseCase.deletePeer(peerIdentifier);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {

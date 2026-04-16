@@ -25,7 +25,7 @@ public class DeletePeerService implements DeletePeerUseCase {
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @Override
-    public void deletePeer(String interfaceName, String peerIdentifier) {
+    public void deletePeer(String peerIdentifier) {
         log.info("Deleting VPN peer: {}", peerIdentifier);
 
         // Resolve peer name if IP address was provided
@@ -42,7 +42,7 @@ public class DeletePeerService implements DeletePeerUseCase {
 
         deletePublishedServicesForPeer(peerName);
 
-        vpnPeerDeleter.deletePeer(interfaceName, peerName);
+        vpnPeerDeleter.deletePeer(peerName);
         log.info("Successfully deleted peer: {}", peerName);
     }
 

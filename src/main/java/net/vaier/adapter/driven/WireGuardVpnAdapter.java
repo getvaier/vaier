@@ -39,6 +39,9 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     @Value("${wireguard.container.name:wireguard}")
     private String wireguardContainerName;
 
+    @Value("${wireguard.interface:wg0}")
+    private String wireguardInterface;
+
     private DockerClient dockerClient;
     private boolean isWindows;
 
@@ -320,8 +323,8 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     }
 
     @Override
-    public void deletePeer(String interfaceName, String peerName) {
-        log.info("Deleting peer {} from interface {}", peerName, interfaceName);
+    public void deletePeer(String peerName) {
+        log.info("Deleting peer {} from interface {}", peerName, wireguardInterface);
 
         try {
             Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
@@ -347,7 +350,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
             log.info("Found peer IP address: {}", ipAddress);
 
-            String publicKey = findPeerPublicKeyByIp(interfaceName, ipAddress);
+            String publicKey = findPeerPublicKeyByIp(wireguardInterface, ipAddress);
             if (publicKey.isEmpty()) {
                 log.error("Could not find peer with IP {} in WireGuard interface", ipAddress);
                 throw new RuntimeException("Peer not found in WireGuard interface");
@@ -355,12 +358,12 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
             log.info("Removing peer with public key: {}", publicKey);
 
-            String removePeerCommand = String.format("wg set %s peer %s remove", interfaceName, publicKey);
+            String removePeerCommand = String.format("wg set %s peer %s remove", wireguardInterface, publicKey);
             log.info("Executing: {}", removePeerCommand);
             String output = executeInContainer("sh", "-c", removePeerCommand);
             log.info("Remove peer output: {}", output);
 
-            String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
+            String saveOutput = executeInContainer("wg-quick", "save", wireguardInterface);
             log.info("Save config output: {}", saveOutput);
 
             deleteDirectory(Paths.get(wireguardConfigPath, peerName));
@@ -375,13 +378,13 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     }
 
     @Override
-    public void restorePeer(String interfaceName, ForGettingPeerConfigurations.PeerConfiguration config) {
+    public void restorePeer(ForGettingPeerConfigurations.PeerConfiguration config) {
         String peerName = config.name();
         String configContent = config.configContent();
         String ipAddress = config.ipAddress();
         String lanCidr = config.lanCidr();
 
-        log.info("Restoring peer {} on interface {}", peerName, interfaceName);
+        log.info("Restoring peer {} on interface {}", peerName, wireguardInterface);
 
         try {
             String privateKey = extractValue(configContent, "PrivateKey");
@@ -409,15 +412,15 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
                 executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
                 executeInContainer("sh", "-c", String.format(
                         "wg set %s peer %s preshared-key %s allowed-ips %s",
-                        interfaceName, publicKey, pskFile, serverAllowedIps));
+                        wireguardInterface, publicKey, pskFile, serverAllowedIps));
                 executeInContainer("rm", "-f", pskFile);
             } else {
                 executeInContainer("sh", "-c", String.format(
                         "wg set %s peer %s allowed-ips %s",
-                        interfaceName, publicKey, serverAllowedIps));
+                        wireguardInterface, publicKey, serverAllowedIps));
             }
 
-            executeInContainer("wg-quick", "save", interfaceName);
+            executeInContainer("wg-quick", "save", wireguardInterface);
             restartWireGuardService();
 
             log.info("Peer {} restored successfully", peerName);

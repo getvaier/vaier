@@ -48,7 +48,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     void createPeer_returns200WithCreatedPeerInfo() throws Exception {
         CreatedPeerUco created = new CreatedPeerUco(
                 "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]\n...", PeerType.UBUNTU_SERVER);
-        when(createPeerUseCase.createPeer(eq("wg0"), eq("peer1"), eq(PeerType.UBUNTU_SERVER), any()))
+        when(createPeerUseCase.createPeer(eq("peer1"), eq(PeerType.UBUNTU_SERVER), any()))
                 .thenReturn(created);
 
         mockMvc.perform(post("/vpn/peers")
@@ -67,7 +67,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     void createPeer_defaultsPeerTypeToUbuntuServerWhenNull() throws Exception {
         CreatedPeerUco created = new CreatedPeerUco(
                 "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]", PeerType.UBUNTU_SERVER);
-        when(createPeerUseCase.createPeer(eq("wg0"), eq("peer1"), eq(PeerType.UBUNTU_SERVER), any()))
+        when(createPeerUseCase.createPeer(eq("peer1"), eq(PeerType.UBUNTU_SERVER), any()))
                 .thenReturn(created);
 
         mockMvc.perform(post("/vpn/peers")
@@ -84,13 +84,13 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
         mockMvc.perform(delete("/vpn/peers/peer1"))
                .andExpect(status().isNoContent());
 
-        verify(deletePeerUseCase).deletePeer("wg0", "peer1");
+        verify(deletePeerUseCase).deletePeer("peer1");
     }
 
     @Test
     void deletePeer_returns404WhenNotFound() throws Exception {
         doThrow(new IllegalArgumentException("Peer not found: peer1"))
-                .when(deletePeerUseCase).deletePeer(any(), eq("peer1"));
+                .when(deletePeerUseCase).deletePeer(eq("peer1"));
 
         mockMvc.perform(delete("/vpn/peers/peer1"))
                .andExpect(status().isNotFound());
@@ -99,7 +99,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void deletePeer_returns500OnUnexpectedError() throws Exception {
         doThrow(new RuntimeException("Unexpected error"))
-                .when(deletePeerUseCase).deletePeer(any(), eq("peer1"));
+                .when(deletePeerUseCase).deletePeer(eq("peer1"));
 
         mockMvc.perform(delete("/vpn/peers/peer1"))
                .andExpect(status().isInternalServerError());

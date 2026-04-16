@@ -82,7 +82,7 @@ public class ImportConfigurationService implements ImportConfigurationUseCase {
         for (var peer : peers) {
             try {
                 PeerType peerType = peer.peerType() != null ? peer.peerType() : PeerType.UBUNTU_SERVER;
-                forRestoringVpnPeers.restorePeer("wg0",
+                forRestoringVpnPeers.restorePeer(
                         new ForGettingPeerConfigurations.PeerConfiguration(
                                 peer.name(), peer.ipAddress(), peer.configContent(),
                                 peerType, peer.lanCidr()));

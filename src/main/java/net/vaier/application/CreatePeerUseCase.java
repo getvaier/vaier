@@ -4,8 +4,8 @@ import net.vaier.domain.PeerType;
 
 public interface CreatePeerUseCase {
 
-    CreatedPeerUco createPeer(String interfaceName, String peerName);
-    CreatedPeerUco createPeer(String interfaceName, String peerName, PeerType peerType, String lanCidr);
+    CreatedPeerUco createPeer(String peerName);
+    CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr);
 
     record CreatedPeerUco(
         String name,
