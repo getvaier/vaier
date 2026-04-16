@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.PublishingConstants;
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
@@ -84,7 +84,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices) {
-        boolean mandatory = DeletePublishedServiceUseCase.MANDATORY_SUBDOMAINS.stream()
+        boolean mandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
             .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
         return new PublishedServiceUco(
             displayName(route, localServices, vpnClients),

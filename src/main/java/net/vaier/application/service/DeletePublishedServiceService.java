@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.application.PublishingConstants;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.config.ConfigResolver;
@@ -23,7 +24,7 @@ public class DeletePublishedServiceService implements DeletePublishedServiceUseC
 
     @Override
     public void deleteService(String fqdn) {
-        boolean isMandatory = MANDATORY_SUBDOMAINS.stream()
+        boolean isMandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
             .anyMatch(sub -> fqdn.equals(sub + "." + configResolver.getDomain()));
         if (isMandatory) {
             throw new IllegalArgumentException("Cannot delete built-in service: " + fqdn);
