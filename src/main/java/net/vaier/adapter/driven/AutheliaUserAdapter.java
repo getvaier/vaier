@@ -32,7 +32,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         this(System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config") + "/users_database.yml");
     }
 
-    AutheliaUserAdapter(String usersDbPath) {
+    public AutheliaUserAdapter(String usersDbPath) {
         this.usersDbPath = usersDbPath;
         this.yaml = new Yaml();
 

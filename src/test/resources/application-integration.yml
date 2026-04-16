@@ -1,0 +1,12 @@
+spring:
+  main:
+    allow-bean-definition-overriding: true
+
+wireguard:
+  config:
+    path: /tmp/vaier-test-wg
+
+logging:
+  level:
+    net.vaier: WARN
+    org.springframework: WARN

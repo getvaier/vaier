@@ -54,7 +54,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         );
     }
 
-    TraefikReverseProxyAdapter(String configFilePath, String traefikApiUrl, String vaierDomain) {
+    public TraefikReverseProxyAdapter(String configFilePath, String traefikApiUrl, String vaierDomain) {
         this.configFilePath = configFilePath;
         this.traefikApiUrl = traefikApiUrl;
         this.vaierDomain = vaierDomain;

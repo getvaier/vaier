@@ -27,7 +27,7 @@ public class Route53DnsAdapter implements ForPersistingDnsRecords, net.vaier.dom
         initClient();
     }
 
-    Route53DnsAdapter(Route53Client route53Client) {
+    public Route53DnsAdapter(Route53Client route53Client) {
         this.route53Client = route53Client;
         this.configResolver = null;
     }

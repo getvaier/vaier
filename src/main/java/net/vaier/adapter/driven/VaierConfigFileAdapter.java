@@ -25,7 +25,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
         this(System.getenv().getOrDefault("VAIER_CONFIG_PATH", "/vaier/config"));
     }
 
-    VaierConfigFileAdapter(String configDir) {
+    public VaierConfigFileAdapter(String configDir) {
         this.configFilePath = configDir + "/" + CONFIG_FILE_NAME;
     }
 
