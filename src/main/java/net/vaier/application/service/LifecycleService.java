@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.config.ConfigResolver;
+import net.vaier.config.ServiceNames;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.domain.Lifecycle;
 import net.vaier.domain.port.ForInitialisingUserService;
@@ -61,7 +62,11 @@ public class LifecycleService {
             forPersistingUsers,
             forPersistingDnsRecords,
             containerRestarter,
-            configResolver.getDomain()
+            configResolver.getDomain(),
+            ServiceNames.DEFAULT_ADMIN_USERNAME,
+            ServiceNames.AUTHELIA,
+            ServiceNames.VAIER,
+            ServiceNames.AUTH
         ).start();
 
         forInitialisingVpnRouting.setupVpnRouting();

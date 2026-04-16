@@ -9,7 +9,6 @@ import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
-import net.vaier.config.ServiceNames;
 
 @Slf4j
 public class Lifecycle {
@@ -19,19 +18,31 @@ public class Lifecycle {
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForRestartingContainers containerRestarter;
     private final String vaierDomain;
+    private final String defaultAdminUsername;
+    private final String autheliaContainerName;
+    private final String vaierSubdomain;
+    private final String authSubdomain;
 
     public Lifecycle(
         ForInitialisingUserService forInitialisingUserService,
         ForPersistingUsers forPersistingUsers,
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForRestartingContainers containerRestarter,
-        String vaierDomain
+        String vaierDomain,
+        String defaultAdminUsername,
+        String autheliaContainerName,
+        String vaierSubdomain,
+        String authSubdomain
     ) {
         this.forInitialisingUserService = forInitialisingUserService;
         this.forPersistingUsers = forPersistingUsers;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.containerRestarter = containerRestarter;
         this.vaierDomain = vaierDomain;
+        this.defaultAdminUsername = defaultAdminUsername;
+        this.autheliaContainerName = autheliaContainerName;
+        this.vaierSubdomain = vaierSubdomain;
+        this.authSubdomain = authSubdomain;
     }
 
     public void start() {
@@ -45,10 +56,10 @@ public class Lifecycle {
         boolean adminCreated = false;
         if (!forPersistingUsers.isDatabaseInitialised()) {
             String password = generateRandomPassword();
-            forPersistingUsers.addUser(ServiceNames.DEFAULT_ADMIN_USERNAME, password, "", "Admin");
+            forPersistingUsers.addUser(defaultAdminUsername, password, "", "Admin");
             log.info("==========================================================");
             log.info("ADMIN USER CREATED");
-            log.info("Username: {}", ServiceNames.DEFAULT_ADMIN_USERNAME);
+            log.info("Username: {}", defaultAdminUsername);
             log.info("Password: {}", password);
             log.info("PLEASE CHANGE THIS PASSWORD IMMEDIATELY");
             log.info("==========================================================");
@@ -56,7 +67,7 @@ public class Lifecycle {
         }
 
         if (configChanged || adminCreated) {
-            containerRestarter.restartContainer(ServiceNames.AUTHELIA);
+            containerRestarter.restartContainer(autheliaContainerName);
         }
     }
 
@@ -81,8 +92,8 @@ public class Lifecycle {
 
         log.info("DNS zone found: " + dnsZone.name());
 
-        String vaierHost = ServiceNames.VAIER + "." + vaierDomain;
-        String authHost = ServiceNames.AUTH + "." + vaierDomain;
+        String vaierHost = vaierSubdomain + "." + vaierDomain;
+        String authHost = authSubdomain + "." + vaierDomain;
 
         DnsRecord dnsRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
             .filter(record -> record.name().equals(vaierHost))

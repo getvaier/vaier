@@ -1,6 +1,5 @@
 package net.vaier.domain;
 
-import net.vaier.config.ServiceNames;
 import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
@@ -25,7 +24,8 @@ class LifecycleTest {
     @Mock ForRestartingContainers containerRestarter;
 
     private Lifecycle lifecycle() {
-        return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter, "test.example.com");
+        return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter,
+                "test.example.com", "admin", "authelia", "vaier", "login");
     }
 
     @Test
@@ -36,8 +36,8 @@ class LifecycleTest {
         lifecycle().initUsers();
 
         ArgumentCaptor<String> passwordCaptor = ArgumentCaptor.forClass(String.class);
-        verify(forPersistingUsers).addUser(eq(ServiceNames.DEFAULT_ADMIN_USERNAME), passwordCaptor.capture(), any(), any());
-        assertThat(passwordCaptor.getValue()).isNotEqualTo(ServiceNames.DEFAULT_ADMIN_USERNAME);
+        verify(forPersistingUsers).addUser(eq("admin"), passwordCaptor.capture(), any(), any());
+        assertThat(passwordCaptor.getValue()).isNotEqualTo("admin");
         assertThat(passwordCaptor.getValue()).hasSizeGreaterThanOrEqualTo(12);
     }
 
@@ -58,7 +58,7 @@ class LifecycleTest {
 
         lifecycle().initUsers();
 
-        verify(containerRestarter).restartContainer(ServiceNames.AUTHELIA);
+        verify(containerRestarter).restartContainer("authelia");
     }
 
     @Test
@@ -68,7 +68,7 @@ class LifecycleTest {
 
         lifecycle().initUsers();
 
-        verify(containerRestarter).restartContainer(ServiceNames.AUTHELIA);
+        verify(containerRestarter).restartContainer("authelia");
     }
 
     @Test
