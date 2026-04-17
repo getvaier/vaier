@@ -28,7 +28,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForPublishingEvents forPublishingEvents;
-    private final PendingPublicationsTracker pendingPublicationsTracker;
+    private final PendingPublicationsService pendingPublicationsService;
     private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
 
@@ -62,7 +62,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
 
         pendingPublishes.put(subdomain, new PendingState(requiresAuth, false));
-        pendingPublicationsTracker.track(address, port);
+        pendingPublicationsService.track(address, port);
         forPublishingEvents.publish("published-services", "publish-dns-created", subdomain);
 
         CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath));
@@ -98,7 +98,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                 forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
                 log.info("Created Traefik route for {}", fqdn);
                 waitForTraefikRoute(fqdn);
-                pendingPublicationsTracker.untrack(address, port);
+                pendingPublicationsService.untrack(address, port);
                 pendingPublishes.remove(subdomain);
                 publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
                 forPublishingEvents.publish("published-services", "publish-traefik-active", subdomain);
@@ -109,7 +109,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
             try { Thread.sleep(dnsRetryIntervalMillis); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
         log.warn("DNS propagation timed out for {} after {}s — Traefik route NOT written to avoid invalid certificate", fqdn, dnsTimeoutMillis / 1000);
-        pendingPublicationsTracker.untrack(address, port);
+        pendingPublicationsService.untrack(address, port);
         pendingPublishes.remove(subdomain);
         forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
         forPublishingEvents.publish("published-services", "service-updated", subdomain);

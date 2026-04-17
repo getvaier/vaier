@@ -36,7 +36,7 @@ class GetPublishableServicesServiceTest {
     GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
 
     @Mock
-    PendingPublicationsTracker pendingPublicationsTracker;
+    PendingPublicationsService pendingPublicationsService;
 
     @Mock
     ForManagingIgnoredServices forManagingIgnoredServices;
@@ -143,7 +143,7 @@ class GetPublishableServicesServiceTest {
             okPeer("alice", "10.13.13.2", List.of(container("my-app", 8080, "tcp")))
         ));
         when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
-        when(pendingPublicationsTracker.isPending("10.13.13.2", 8080)).thenReturn(true);
+        when(pendingPublicationsService.isPending("10.13.13.2", 8080)).thenReturn(true);
         assertThat(service.getPublishableServices()).isEmpty();
     }
 

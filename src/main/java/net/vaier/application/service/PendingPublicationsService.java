@@ -6,7 +6,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
-public class PendingPublicationsTracker {
+public class PendingPublicationsService {
 
     private final Set<String> pending = ConcurrentHashMap.newKeySet();
 

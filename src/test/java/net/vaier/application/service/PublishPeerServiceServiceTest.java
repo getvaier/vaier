@@ -40,7 +40,7 @@ class PublishPeerServiceServiceTest {
     ForPublishingEvents forPublishingEvents;
 
     @Mock
-    PendingPublicationsTracker pendingPublicationsTracker;
+    PendingPublicationsService pendingPublicationsService;
 
     @Mock
     PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;

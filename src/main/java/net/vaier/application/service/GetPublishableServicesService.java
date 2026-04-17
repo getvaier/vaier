@@ -21,7 +21,7 @@ public class GetPublishableServicesService implements GetPublishableServicesUseC
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
-    private final PendingPublicationsTracker pendingPublicationsTracker;
+    private final PendingPublicationsService pendingPublicationsService;
     private final ForManagingIgnoredServices forManagingIgnoredServices;
 
     @Override
@@ -37,14 +37,14 @@ public class GetPublishableServicesService implements GetPublishableServicesUseC
                     .filter(p -> p.publicPort() != null)
                     .filter(p -> existingRoutes.stream()
                         .noneMatch(r -> r.getAddress().equals(peer.vpnIp()) && r.getPort() == p.publicPort()))
-                    .filter(p -> !pendingPublicationsTracker.isPending(peer.vpnIp(), p.publicPort()))
+                    .filter(p -> !pendingPublicationsService.isPending(peer.vpnIp(), p.publicPort()))
                     .map(p -> new PublishableService(PublishableSource.PEER, peer.peerName(), peer.vpnIp(), container.containerName(), p.publicPort(), null, false))
                 )
             )
             .forEach(publishable::add);
 
         getLocalDockerServicesUseCase.getUnpublishedLocalServices(existingRoutes).stream()
-            .filter(s -> !pendingPublicationsTracker.isPending(s.address(), s.port()))
+            .filter(s -> !pendingPublicationsService.isPending(s.address(), s.port()))
             .forEach(publishable::add);
 
         Set<String> ignoredKeys = forManagingIgnoredServices.getIgnoredServiceKeys();
