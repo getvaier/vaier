@@ -1,4 +1,4 @@
-package net.vaier.rest;
+package net.vaier.adapter.driven;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

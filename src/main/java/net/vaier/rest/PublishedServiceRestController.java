@@ -12,6 +12,7 @@ import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
+import net.vaier.adapter.driven.SseEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

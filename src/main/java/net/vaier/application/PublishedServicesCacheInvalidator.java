@@ -1,5 +1,5 @@
 package net.vaier.application;
 
-public interface ForInvalidatingPublishedServicesCache {
+public interface PublishedServicesCacheInvalidator {
     void invalidatePublishedServicesCache();
 }

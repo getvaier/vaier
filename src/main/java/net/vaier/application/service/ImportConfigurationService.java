@@ -5,12 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.AddDnsRecordUseCase;
 import net.vaier.application.AddReverseProxyRouteUseCase;
 import net.vaier.application.AddUserUseCase;
-import net.vaier.application.ForPublishingEvents;
 import net.vaier.application.ImportConfigurationUseCase;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForPersistingDnsRecords;
+import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRestoringVpnPeers;
 import org.springframework.stereotype.Service;
 

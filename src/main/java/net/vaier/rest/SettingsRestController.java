@@ -8,6 +8,7 @@ import net.vaier.application.ImportConfigurationUseCase.ImportResult;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.application.service.ImportConfigurationService;
+import net.vaier.adapter.driven.SseEventPublisher;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;

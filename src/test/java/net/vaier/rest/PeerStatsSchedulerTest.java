@@ -1,7 +1,7 @@
 package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import net.vaier.application.ForPublishingEvents;
+import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.domain.VpnClient;

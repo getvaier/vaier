@@ -4,8 +4,8 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.EventsCmd;
 import com.github.dockerjava.api.model.Event;
 import com.github.dockerjava.api.model.EventType;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
-import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.PublishedServicesCacheInvalidator;
+import net.vaier.domain.port.ForPublishingEvents;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -19,7 +19,7 @@ class DockerEventListenerTest {
 
     @Test
     void containerStartEvent_invalidatesCacheAndPublishesSseEvent() {
-        ForInvalidatingPublishedServicesCache cache = mock(ForInvalidatingPublishedServicesCache.class);
+        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
         ForPublishingEvents events = mock(ForPublishingEvents.class);
 
         DockerEventListener listener = new DockerEventListener(cache, events);
@@ -36,7 +36,7 @@ class DockerEventListenerTest {
 
     @Test
     void containerStopEvent_invalidatesCacheAndPublishesSseEvent() {
-        ForInvalidatingPublishedServicesCache cache = mock(ForInvalidatingPublishedServicesCache.class);
+        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
         ForPublishingEvents events = mock(ForPublishingEvents.class);
 
         DockerEventListener listener = new DockerEventListener(cache, events);
@@ -53,7 +53,7 @@ class DockerEventListenerTest {
 
     @Test
     void containerDieEvent_invalidatesCacheAndPublishesSseEvent() {
-        ForInvalidatingPublishedServicesCache cache = mock(ForInvalidatingPublishedServicesCache.class);
+        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
         ForPublishingEvents events = mock(ForPublishingEvents.class);
 
         DockerEventListener listener = new DockerEventListener(cache, events);
@@ -70,7 +70,7 @@ class DockerEventListenerTest {
 
     @Test
     void irrelevantContainerEvent_doesNotInvalidateCache() {
-        ForInvalidatingPublishedServicesCache cache = mock(ForInvalidatingPublishedServicesCache.class);
+        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
         ForPublishingEvents events = mock(ForPublishingEvents.class);
 
         DockerEventListener listener = new DockerEventListener(cache, events);
@@ -86,7 +86,7 @@ class DockerEventListenerTest {
 
     @Test
     void nonContainerEvent_doesNotInvalidateCache() {
-        ForInvalidatingPublishedServicesCache cache = mock(ForInvalidatingPublishedServicesCache.class);
+        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
         ForPublishingEvents events = mock(ForPublishingEvents.class);
 
         DockerEventListener listener = new DockerEventListener(cache, events);

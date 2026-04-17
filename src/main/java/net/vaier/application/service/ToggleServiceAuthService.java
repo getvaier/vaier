@@ -2,7 +2,7 @@ package net.vaier.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
 import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.config.ConfigResolver;
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 public class ToggleServiceAuthService implements ToggleServiceAuthUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
-    private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
 
     @Override
@@ -27,6 +27,6 @@ public class ToggleServiceAuthService implements ToggleServiceAuthUseCase {
         }
         log.info("Setting auth={} for {}", requiresAuth, dnsName);
         forPersistingReverseProxyRoutes.setRouteAuthentication(dnsName, requiresAuth);
-        forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
     }
 }

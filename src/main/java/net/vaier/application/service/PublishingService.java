@@ -1,7 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.PublishingConstants;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.application.GetPublishedServicesUseCase;
@@ -23,7 +23,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 @Service
-public class PublishingService implements GetPublishedServicesUseCase, GetLaunchpadServicesUseCase, ForInvalidatingPublishedServicesCache {
+public class PublishingService implements GetPublishedServicesUseCase, GetLaunchpadServicesUseCase, PublishedServicesCacheInvalidator {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;

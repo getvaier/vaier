@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,7 +20,7 @@ class EditServiceRedirectServiceTest {
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
 
     @Mock
-    ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
 
     @Mock
     ConfigResolver configResolver;
@@ -51,7 +51,7 @@ class EditServiceRedirectServiceTest {
     void setRootRedirectPath_invalidatesCache() {
         service.setRootRedirectPath("app.example.com", "/dashboard/");
 
-        verify(forInvalidatingPublishedServicesCache).invalidatePublishedServicesCache();
+        verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
     }
 
     @Test

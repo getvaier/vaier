@@ -7,6 +7,7 @@ import net.vaier.application.ImportConfigurationUseCase;
 import net.vaier.application.ImportConfigurationUseCase.ImportResult;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
+import net.vaier.adapter.driven.SseEventPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

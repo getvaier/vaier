@@ -2,8 +2,7 @@ package net.vaier.application.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
-import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -11,6 +10,7 @@ import net.vaier.domain.DnsZone;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForPublishingEvents;
 import org.springframework.stereotype.Service;
 
 import java.net.InetAddress;
@@ -29,7 +29,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForPublishingEvents forPublishingEvents;
     private final PendingPublicationsTracker pendingPublicationsTracker;
-    private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
 
     private long dnsTimeoutMillis = 120_000;
@@ -100,7 +100,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                 waitForTraefikRoute(fqdn);
                 pendingPublicationsTracker.untrack(address, port);
                 pendingPublishes.remove(subdomain);
-                forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
+                publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
                 forPublishingEvents.publish("published-services", "publish-traefik-active", subdomain);
                 forPublishingEvents.publish("published-services", "service-updated", subdomain);
                 return;

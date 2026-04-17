@@ -1,7 +1,7 @@
-package net.vaier.rest;
+package net.vaier.adapter.driven;
 
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.ForPublishingEvents;
+import net.vaier.domain.port.ForPublishingEvents;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;

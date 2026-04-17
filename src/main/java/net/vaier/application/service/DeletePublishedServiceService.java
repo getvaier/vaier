@@ -3,7 +3,7 @@ package net.vaier.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
@@ -19,7 +19,7 @@ public class DeletePublishedServiceService implements DeletePublishedServiceUseC
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
-    private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
 
     @Override
@@ -38,7 +38,7 @@ public class DeletePublishedServiceService implements DeletePublishedServiceUseC
 
         forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(configResolver.getDomain()));
         log.info("Deleted DNS CNAME for {}", fqdn);
-        forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
     }
 
     private void waitForTraefikRouteDeletion(String fqdn) {

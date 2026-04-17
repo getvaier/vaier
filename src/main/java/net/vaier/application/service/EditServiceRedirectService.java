@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.PublishingConstants;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.springframework.stereotype.Service;
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 public class EditServiceRedirectService implements EditServiceRedirectUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
-    private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
 
     @Override
@@ -28,6 +28,6 @@ public class EditServiceRedirectService implements EditServiceRedirectUseCase {
 
         log.info("Setting root redirect path for {} to {}", dnsName, rootRedirectPath);
         forPersistingReverseProxyRoutes.setRouteRootRedirectPath(dnsName, rootRedirectPath);
-        forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
     }
 }

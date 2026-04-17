@@ -7,6 +7,7 @@ import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.VpnClient;

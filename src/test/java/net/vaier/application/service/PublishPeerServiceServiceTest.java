@@ -1,7 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
-import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishPeerServiceUseCase.PendingPublication;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
 import net.vaier.config.ConfigResolver;
@@ -9,6 +8,7 @@ import net.vaier.domain.DnsRecord;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForPublishingEvents;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +43,7 @@ class PublishPeerServiceServiceTest {
     PendingPublicationsTracker pendingPublicationsTracker;
 
     @Mock
-    ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
 
     @Mock
     ConfigResolver configResolver;
@@ -162,7 +162,7 @@ class PublishPeerServiceServiceTest {
 
         service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
 
-        verify(forInvalidatingPublishedServicesCache).invalidatePublishedServicesCache();
+        verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
     }
 
     @Test

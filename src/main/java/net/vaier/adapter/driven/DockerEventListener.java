@@ -10,8 +10,8 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.ForInvalidatingPublishedServicesCache;
-import net.vaier.application.ForPublishingEvents;
+import net.vaier.application.PublishedServicesCacheInvalidator;
+import net.vaier.domain.port.ForPublishingEvents;
 import org.springframework.stereotype.Component;
 
 import java.io.Closeable;
@@ -25,13 +25,13 @@ public class DockerEventListener {
 
     private static final Set<String> STATE_CHANGE_ACTIONS = Set.of("start", "stop", "die", "kill", "pause", "unpause");
 
-    private final ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ForPublishingEvents forPublishingEvents;
     private volatile Closeable eventStream;
 
-    public DockerEventListener(ForInvalidatingPublishedServicesCache forInvalidatingPublishedServicesCache,
+    public DockerEventListener(PublishedServicesCacheInvalidator publishedServicesCacheInvalidator,
                                ForPublishingEvents forPublishingEvents) {
-        this.forInvalidatingPublishedServicesCache = forInvalidatingPublishedServicesCache;
+        this.publishedServicesCacheInvalidator = publishedServicesCacheInvalidator;
         this.forPublishingEvents = forPublishingEvents;
     }
 
@@ -64,7 +64,7 @@ public class DockerEventListener {
         if (!STATE_CHANGE_ACTIONS.contains(event.getAction())) return;
 
         log.info("Container state changed: {} (action={})", event.getAction(), event.getAction());
-        forInvalidatingPublishedServicesCache.invalidatePublishedServicesCache();
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
         forPublishingEvents.publish("published-services", "service-updated", "container-state-changed");
     }
 
