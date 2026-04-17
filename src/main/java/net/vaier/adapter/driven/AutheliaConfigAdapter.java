@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class AutheliaConfigInitializer implements ForInitialisingUserService, ForConfiguringSmtpNotifier {
+public class AutheliaConfigAdapter implements ForInitialisingUserService, ForConfiguringSmtpNotifier {
 
     private final String configurationFile;
     private final String secretsFile;
@@ -25,7 +25,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService, Fo
     private String smtpSender;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public AutheliaConfigInitializer(net.vaier.config.ConfigResolver configResolver) {
+    public AutheliaConfigAdapter(net.vaier.config.ConfigResolver configResolver) {
         String configPath = System.getenv().getOrDefault("AUTHELIA_CONFIG_PATH", "./authelia/config");
         String domain = configResolver.getDomain() != null ? configResolver.getDomain() : "";
         this.configurationFile = configPath + "/configuration.yml";
@@ -37,7 +37,7 @@ public class AutheliaConfigInitializer implements ForInitialisingUserService, Fo
         this.smtpSender = configResolver.getSmtpSender();
     }
 
-    AutheliaConfigInitializer(String configPath, String vaierDomain) {
+    AutheliaConfigAdapter(String configPath, String vaierDomain) {
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
         this.vaierDomain = vaierDomain;

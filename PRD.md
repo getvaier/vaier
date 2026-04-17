@@ -239,7 +239,7 @@ Authelia sends emails for password reset and two-factor enrolment flows. Current
 
 **Requirements:**
 - Replace the filesystem notifier with an SMTP notifier in the generated Authelia config
-- Vaier generates the Authelia config at startup (`AutheliaConfigInitializer`) so the SMTP block needs to be injected there
+- Vaier generates the Authelia config at startup (`AutheliaConfigAdapter`) so the SMTP block needs to be injected there
 - The SMTP settings must be persisted so they survive container restarts (stored in Vaier's config, not passed as one-time env vars)
 
 **Config fields required from the user:**

@@ -10,7 +10,7 @@ import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class AutheliaConfigInitializerTest {
+class AutheliaConfigAdapterTest {
 
     @TempDir Path tempDir;
 
@@ -18,7 +18,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_createsConfigFile() {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -27,7 +27,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_injectsCorrectBaseDomain() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -38,7 +38,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_injectsFullVaierDomainForAccessControl() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -48,7 +48,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_generatesSecretsFile() {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -57,7 +57,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_reusesSecretsOnSecondCall() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
         String firstConfig = Files.readString(tempDir.resolve("configuration.yml"));
@@ -71,7 +71,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_handlesSubdomain() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "sub.example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "sub.example.com");
 
         init.initialiseConfiguration();
 
@@ -82,7 +82,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_configContainsRequiredSections() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -96,7 +96,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_launchpadPathsBypassAuthentication() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -108,7 +108,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_faviconPathsBypassAuthForAllSubdomains() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -121,7 +121,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_vaierDomainRequiresOneFactorByDefault() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -135,7 +135,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_returnsTrueWhenFileIsCreated() {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         boolean result = init.initialiseConfiguration();
 
@@ -144,7 +144,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_returnsFalseWhenConfigUnchanged() {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
         init.initialiseConfiguration();
 
         boolean result = init.initialiseConfiguration();
@@ -154,7 +154,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void initialiseConfiguration_usesFilesystemNotifierByDefault() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
 
@@ -165,7 +165,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void updateSmtpConfig_regeneratesConfigWithSmtpNotifier() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
         init.initialiseConfiguration();
 
         init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "password123", "noreply@example.com");
@@ -180,7 +180,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void updateSmtpConfig_writesPasswordToSecretsFile() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "mypassword", "noreply@example.com");
 
@@ -193,7 +193,7 @@ class AutheliaConfigInitializerTest {
 
     @Test
     void updateSmtpConfig_preservesExistingSecrets() throws IOException {
-        AutheliaConfigInitializer init = new AutheliaConfigInitializer(tempDir.toString(), "example.com");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
         init.initialiseConfiguration(); // generates jwt_secret, session_secret, encryption_key
 
         init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "pass", "sender@example.com");
