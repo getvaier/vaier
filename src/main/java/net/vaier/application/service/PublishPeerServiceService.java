@@ -8,6 +8,8 @@ import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.Server;
+import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -31,6 +33,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final PendingPublicationsService pendingPublicationsService;
     private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
+    private final ForGettingServerInfo forGettingServerInfo;
 
     private long dnsTimeoutMillis = 120_000;
     private long dnsRetryIntervalMillis = 3_000;
@@ -95,7 +98,11 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
                 pendingPublishes.compute(subdomain, (k, v) -> new PendingState(v != null && v.requiresAuth(), true));
                 forPublishingEvents.publish("published-services", "publish-dns-propagated", subdomain);
-                forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, address, port, requiresAuth, rootRedirectPath);
+                String persistedAddress = forGettingServerInfo.findContainerNameByIp(Server.local(), address).orElse(address);
+                if (!persistedAddress.equals(address)) {
+                    log.info("Normalized backend address {} -> {} for {}", address, persistedAddress, fqdn);
+                }
+                forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, persistedAddress, port, requiresAuth, rootRedirectPath);
                 log.info("Created Traefik route for {}", fqdn);
                 waitForTraefikRoute(fqdn);
                 pendingPublicationsService.untrack(address, port);

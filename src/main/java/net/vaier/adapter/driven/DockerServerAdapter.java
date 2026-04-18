@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -91,6 +92,28 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         } catch (Exception e) {
             log.error("Failed to get Docker services from {} - {}", server.getAddress(), e.getMessage());
             throw new RuntimeException("Failed to get Docker services from " + server.getAddress(), e);
+        }
+    }
+
+    @Override
+    public Optional<String> findContainerNameByIp(Server server, String ipAddress) {
+        if (ipAddress == null || ipAddress.isBlank()) return Optional.empty();
+        try {
+            DockerClient dockerClient = getOrCreateDockerClient(server);
+            List<Container> containers = dockerClient.listContainersCmd().withShowAll(true).exec();
+            for (Container container : containers) {
+                ContainerNetworkSettings settings = container.getNetworkSettings();
+                if (settings == null || settings.getNetworks() == null) continue;
+                boolean match = settings.getNetworks().values().stream()
+                    .anyMatch(n -> n != null && ipAddress.equals(n.getIpAddress()));
+                if (match) {
+                    return Optional.of(extractContainerName(container.getNames()));
+                }
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            log.warn("Failed to resolve container name for IP {}: {}", ipAddress, e.getMessage());
+            return Optional.empty();
         }
     }
 

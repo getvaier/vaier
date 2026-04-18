@@ -6,6 +6,8 @@ import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.Server;
+import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -19,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 import org.mockito.InOrder;
@@ -47,6 +50,9 @@ class PublishPeerServiceServiceTest {
 
     @Mock
     ConfigResolver configResolver;
+
+    @Mock
+    ForGettingServerInfo forGettingServerInfo;
 
     @InjectMocks
     PublishPeerServiceService service;
@@ -178,5 +184,33 @@ class PublishPeerServiceServiceTest {
 
     private ReverseProxyRoute routeWithDomain(String domain) {
         return new ReverseProxyRoute("route", domain, "10.0.0.1", 8080, "svc", null);
+    }
+
+    @Test
+    void waitForDnsThenActivate_addressMatchesLocalContainerIp_normalizesToContainerName() {
+        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+        when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("172.20.0.3")))
+            .thenReturn(Optional.of("vaier"));
+
+        service.waitForDnsThenActivate("app", "app.example.com", "172.20.0.3", 8080, false, null);
+
+        verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
+            "app.example.com", "vaier", 8080, false, null);
+    }
+
+    @Test
+    void waitForDnsThenActivate_addressIsNotALocalContainerIp_passesAddressThroughUnchanged() {
+        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+        when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("10.13.13.3")))
+            .thenReturn(Optional.empty());
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.13.13.3", 8080, false, null);
+
+        verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
+            "app.example.com", "10.13.13.3", 8080, false, null);
     }
 }

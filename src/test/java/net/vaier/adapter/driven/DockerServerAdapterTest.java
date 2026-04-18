@@ -18,6 +18,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -81,5 +82,56 @@ class DockerServerAdapterTest {
         assertThat(services.get(0).ports().get(0).privatePort()).isEqualTo(19999);
         assertThat(services.get(0).ports().get(0).publicPort()).isEqualTo(19999);
         assertThat(services.get(0).ports().get(0).type()).isEqualTo("tcp");
+    }
+
+    @Test
+    void findContainerNameByIp_matchingIp_returnsContainerName() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = mock(Container.class);
+        when(container.getNames()).thenReturn(new String[]{"/vaier"});
+
+        ContainerNetworkSettings networkSettings = mock(ContainerNetworkSettings.class);
+        com.github.dockerjava.api.model.ContainerNetwork network = mock(com.github.dockerjava.api.model.ContainerNetwork.class);
+        when(network.getIpAddress()).thenReturn("172.20.0.3");
+        when(networkSettings.getNetworks()).thenReturn(Map.of("vaier-network", network));
+        when(container.getNetworkSettings()).thenReturn(networkSettings);
+
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        Optional<String> name = adapter.findContainerNameByIp(Server.local(), "172.20.0.3");
+
+        assertThat(name).contains("vaier");
+    }
+
+    @Test
+    void findContainerNameByIp_noMatchingIp_returnsEmpty() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = mock(Container.class);
+
+        ContainerNetworkSettings networkSettings = mock(ContainerNetworkSettings.class);
+        com.github.dockerjava.api.model.ContainerNetwork network = mock(com.github.dockerjava.api.model.ContainerNetwork.class);
+        when(network.getIpAddress()).thenReturn("172.20.0.3");
+        when(networkSettings.getNetworks()).thenReturn(Map.of("vaier-network", network));
+        when(container.getNetworkSettings()).thenReturn(networkSettings);
+
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        Optional<String> name = adapter.findContainerNameByIp(Server.local(), "10.13.13.3");
+
+        assertThat(name).isEmpty();
     }
 }
