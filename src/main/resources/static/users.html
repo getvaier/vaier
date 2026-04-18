@@ -126,6 +126,7 @@
         <div class="modal-content">
             <div class="modal-header">Add New User</div>
             <form id="addUserForm">
+                <div id="addUserError" style="display:none"></div>
                 <div class="form-group">
                     <label class="form-label">Username</label>
                     <input type="text" class="form-input" id="newUsername" required>
@@ -154,6 +155,7 @@
     <div id="deleteUserModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">Delete User</div>
+            <div id="deleteUserError" style="display:none"></div>
             <p style="font-size:0.85rem;color:var(--text-muted)">
                 Remove <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="deleteUsername"></code>?
             </p>
@@ -171,6 +173,7 @@
             <div class="modal-header">Change Password</div>
             <form id="changePasswordForm">
                 <input type="hidden" id="changePasswordUsername">
+                <div id="changePasswordError" style="display:none"></div>
                 <div class="form-group">
                     <label class="form-label">New Password</label>
                     <input type="password" class="form-input" id="changePassword" required>
@@ -283,11 +286,26 @@
             setTimeout(() => el.innerHTML = '', 5000);
         }
 
+        function showModalError(errorElId, message) {
+            const el = document.getElementById(errorElId);
+            el.className = 'error';
+            el.textContent = message;
+            el.style.display = '';
+        }
+
+        function clearModalError(errorElId) {
+            const el = document.getElementById(errorElId);
+            el.style.display = 'none';
+            el.textContent = '';
+        }
+
         function showAddUserModal() {
+            clearModalError('addUserError');
             document.getElementById('addUserModal').classList.add('active');
         }
 
         function showChangePasswordModal(username) {
+            clearModalError('changePasswordError');
             document.getElementById('changePasswordUsername').value = username;
             document.getElementById('changePasswordModal').classList.add('active');
         }
@@ -298,6 +316,7 @@
 
         document.getElementById('addUserForm').addEventListener('submit', async e => {
             e.preventDefault();
+            clearModalError('addUserError');
             try {
                 const response = await fetch('/users', {
                     method: 'POST',
@@ -316,15 +335,16 @@
                     document.getElementById('addUserForm').reset();
                     fetchUsers();
                 } else {
-                    displayMessage(message, 'error');
+                    showModalError('addUserError', message);
                 }
             } catch (error) {
-                displayMessage(`Failed to add user: ${error.message}`, 'error');
+                showModalError('addUserError', `Failed to add user: ${error.message}`);
             }
         });
 
         document.getElementById('changePasswordForm').addEventListener('submit', async e => {
             e.preventDefault();
+            clearModalError('changePasswordError');
             const username    = document.getElementById('changePasswordUsername').value;
             const newPassword = document.getElementById('changePassword').value;
             try {
@@ -339,10 +359,10 @@
                     closeModal('changePasswordModal');
                     document.getElementById('changePasswordForm').reset();
                 } else {
-                    displayMessage(message, 'error');
+                    showModalError('changePasswordError', message);
                 }
             } catch (error) {
-                displayMessage(`Failed to change password: ${error.message}`, 'error');
+                showModalError('changePasswordError', `Failed to change password: ${error.message}`);
             }
         });
 
@@ -350,6 +370,7 @@
 
         function deleteUser(username) {
             userToDelete = username;
+            clearModalError('deleteUserError');
             document.getElementById('deleteUsername').textContent = username;
             document.getElementById('deleteUserModal').classList.add('active');
         }
@@ -357,16 +378,21 @@
         async function confirmDelete() {
             if (!userToDelete) return;
             const username = userToDelete;
+            clearModalError('deleteUserError');
             try {
                 const response = await fetch(`/users/${username}`, { method: 'DELETE' });
                 const message  = await response.text();
-                closeModal('deleteUserModal');
-                displayMessage(message, response.ok ? 'success' : 'error');
-                if (response.ok) fetchUsers();
+                if (response.ok) {
+                    closeModal('deleteUserModal');
+                    displayMessage(message, 'success');
+                    userToDelete = null;
+                    fetchUsers();
+                } else {
+                    showModalError('deleteUserError', message);
+                }
             } catch (error) {
-                displayMessage(`Failed to delete user: ${error.message}`, 'error');
+                showModalError('deleteUserError', `Failed to delete user: ${error.message}`);
             }
-            userToDelete = null;
         }
 
         window.addEventListener('click', e => {

@@ -35,8 +35,8 @@ class UserServiceFileIT {
 
     @Test
     void addUser_thenDeleteUser_fileReflectsOnlyRemainingUser() {
-        userService.addUser("alice", "pass1", "alice@example.com", "Alice");
-        userService.addUser("bob", "pass2", "bob@example.com", "Bob");
+        userService.addUser("alice", "password1", "alice@example.com", "Alice");
+        userService.addUser("bob", "password2", "bob@example.com", "Bob");
 
         userService.deleteUser("alice");
 
@@ -58,7 +58,7 @@ class UserServiceFileIT {
 
     @Test
     void deleteUser_nonExistent_throwsRuntimeException() {
-        userService.addUser("alice", "pass", "alice@example.com", "Alice");
+        userService.addUser("alice", "password", "alice@example.com", "Alice");
 
         assertThatThrownBy(() -> userService.deleteUser("bob"))
                 .isInstanceOf(RuntimeException.class);
@@ -66,9 +66,9 @@ class UserServiceFileIT {
 
     @Test
     void addDuplicateUser_throwsRuntimeException() {
-        userService.addUser("alice", "pass1", "alice@example.com", "Alice");
+        userService.addUser("alice", "password1", "alice@example.com", "Alice");
 
-        assertThatThrownBy(() -> userService.addUser("alice", "pass2", "a@b.com", "Alice2"))
+        assertThatThrownBy(() -> userService.addUser("alice", "password2", "a@b.com", "Alice2"))
                 .isInstanceOf(RuntimeException.class);
     }
 
