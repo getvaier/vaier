@@ -732,6 +732,12 @@
             }, 800);
         });
 
+        _sse.addEventListener('publish-dns-timeout', e => {
+            removeProcessingCard(e.data);
+            alert(`DNS propagation timed out for "${e.data}". The DNS record was created but did not become visible on authoritative nameservers in time. Try publishing again — if it keeps failing, check your Route53 zone.`);
+            Promise.all([fetchServices(), fetchPublishable()]);
+        });
+
         _sse.addEventListener('service-updated', () => {
             fetchServices();
         });

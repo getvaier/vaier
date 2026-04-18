@@ -13,14 +13,13 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForResolvingDns;
 import org.springframework.stereotype.Service;
 
-import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Predicate;
 
 @Service
 @RequiredArgsConstructor
@@ -34,21 +33,12 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ConfigResolver configResolver;
     private final ForGettingServerInfo forGettingServerInfo;
+    private final ForResolvingDns forResolvingDns;
 
     private long dnsTimeoutMillis = 120_000;
     private long dnsRetryIntervalMillis = 3_000;
 
     private record PendingState(boolean requiresAuth, boolean dnsPropagated) {}
-
-    // Injectable for testing; defaults to real DNS lookup
-    private Predicate<String> dnsChecker = fqdn -> {
-        try {
-            InetAddress[] addresses = InetAddress.getAllByName(fqdn);
-            return addresses != null && addresses.length > 0;
-        } catch (Exception e) {
-            return false;
-        }
-    };
 
     private final Map<String, PendingState> pendingPublishes = new ConcurrentHashMap<>();
 
@@ -94,7 +84,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath) {
         long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
-            if (dnsChecker.test(fqdn)) {
+            if (forResolvingDns.isResolvable(fqdn)) {
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
                 pendingPublishes.compute(subdomain, (k, v) -> new PendingState(v != null && v.requiresAuth(), true));
                 forPublishingEvents.publish("published-services", "publish-dns-propagated", subdomain);

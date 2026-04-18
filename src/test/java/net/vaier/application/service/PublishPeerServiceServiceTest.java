@@ -11,6 +11,7 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForResolvingDns;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,7 +23,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Predicate;
 
 import org.mockito.InOrder;
 
@@ -53,6 +53,9 @@ class PublishPeerServiceServiceTest {
 
     @Mock
     ForGettingServerInfo forGettingServerInfo;
+
+    @Mock
+    ForResolvingDns forResolvingDns;
 
     @InjectMocks
     PublishPeerServiceService service;
@@ -145,8 +148,7 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void waitForDnsThenActivate_waitsForTraefikRouteBeforeFiringEvent() {
-        // DNS resolves immediately
-        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
         // First getReverseProxyRoutes call: Traefik not yet loaded; second call: route present
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of())
@@ -162,7 +164,7 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void waitForDnsThenActivate_invalidatesPublishedServicesCacheAfterActivation() {
-        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
@@ -173,7 +175,7 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void waitForDnsThenActivate_dnsNeverResolves_doesNotWriteTraefikRoute() {
-        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> false);
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(false);
         ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 100L);
         ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
 
@@ -182,13 +184,24 @@ class PublishPeerServiceServiceTest {
         verify(forPersistingReverseProxyRoutes, never()).addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any());
     }
 
+    @Test
+    void waitForDnsThenActivate_dnsNeverResolves_emitsTimeoutEvent() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(false);
+        ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 50L);
+        ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+
+        verify(forPublishingEvents).publish("published-services", "publish-dns-timeout", "app");
+    }
+
     private ReverseProxyRoute routeWithDomain(String domain) {
         return new ReverseProxyRoute("route", domain, "10.0.0.1", 8080, "svc", null);
     }
 
     @Test
     void waitForDnsThenActivate_addressMatchesLocalContainerIp_normalizesToContainerName() {
-        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
         when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("172.20.0.3")))
@@ -202,7 +215,7 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void waitForDnsThenActivate_addressIsNotALocalContainerIp_passesAddressThroughUnchanged() {
-        ReflectionTestUtils.setField(service, "dnsChecker", (Predicate<String>) fqdn -> true);
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
         when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("10.13.13.3")))
