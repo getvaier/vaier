@@ -320,25 +320,48 @@
             }
         }
 
+        let _servicesLoaded = false;
+        let _publishableLoaded = false;
+
+        async function fetchWithRetry(url, attempts = 4) {
+            let lastErr;
+            for (let i = 0; i < attempts; i++) {
+                try {
+                    const response = await fetch(url, { cache: 'no-store' });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response;
+                } catch (e) {
+                    lastErr = e;
+                    if (i < attempts - 1) await new Promise(r => setTimeout(r, 400 * Math.pow(2, i)));
+                }
+            }
+            throw lastErr;
+        }
+
         async function fetchServices() {
             try {
-                const response = await fetch('/published-services/discover');
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const response = await fetchWithRetry('/published-services/discover');
                 displayServices(await response.json());
+                _servicesLoaded = true;
+                document.getElementById('error-message').innerHTML = '';
             } catch (error) {
-                document.getElementById('error-message').innerHTML =
-                    `<div class="error">Failed to load services: ${error.message}</div>`;
+                if (!_servicesLoaded) {
+                    document.getElementById('error-message').innerHTML =
+                        `<div class="error">Failed to load services: ${error.message}</div>`;
+                }
             }
         }
 
         async function fetchPublishable() {
             try {
-                const response = await fetch('/published-services/publishable');
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const response = await fetchWithRetry('/published-services/publishable');
                 displayPublishable(await response.json());
+                _publishableLoaded = true;
             } catch (error) {
-                document.getElementById('publishable-container').innerHTML =
-                    `<div class="error">Failed to load: ${error.message}</div>`;
+                if (!_publishableLoaded) {
+                    document.getElementById('publishable-container').innerHTML =
+                        `<div class="error">Failed to load: ${error.message}</div>`;
+                }
             }
         }
 
@@ -753,6 +776,17 @@
             fetchServices();
             fetchPublishable();
         };
+
+        function refreshAll() {
+            fetchServices();
+            fetchPublishable();
+            fetchPending();
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') refreshAll();
+        });
+        window.addEventListener('online', refreshAll);
+        window.addEventListener('focus', refreshAll);
     </script>
 </body>
 </html>
