@@ -107,6 +107,16 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
+    void initialiseConfiguration_stylesheetBypassesAuthentication() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("/styles.css");
+    }
+
+    @Test
     void initialiseConfiguration_faviconPathsBypassAuthForAllSubdomains() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 

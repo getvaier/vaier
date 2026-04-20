@@ -176,6 +176,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                       resources:
                         - "^/$"
                         - "^/launchpad.html$"
+                        - "^/styles.css$"
                         - "^/published-services/discover$"
                         - "^/favicon$"
                         - "^/setup.html$"
