@@ -30,6 +30,10 @@ public class DockerContainerAdapter implements ForRestartingContainers {
         this.dockerClient = DockerClientImpl.getInstance(config, httpClient);
     }
 
+    DockerContainerAdapter(DockerClient dockerClient) {
+        this.dockerClient = dockerClient;
+    }
+
     private String getDockerHost() {
         // Check environment variable first
         String dockerHost = System.getenv("DOCKER_HOST");
