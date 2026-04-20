@@ -14,7 +14,7 @@ class VpnServiceConfigTest {
     void generateClientConfig_mobileClient_routesAllTrafficAndEmbedsPeerType() {
         String config = VpnService.generateClientConfig(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, "10.13.13.0/24");
+                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(config).contains("\"peerType\":\"MOBILE_CLIENT\"");
@@ -25,7 +25,7 @@ class VpnServiceConfigTest {
     void generateClientConfig_windowsClient_routesAllTrafficAndEmbedsPeerType() {
         String config = VpnService.generateClientConfig(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.WINDOWS_CLIENT, null, "10.13.13.0/24");
+                "vpn.example.com:51820", PeerType.WINDOWS_CLIENT, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(config).contains("\"peerType\":\"WINDOWS_CLIENT\"");
@@ -35,7 +35,7 @@ class VpnServiceConfigTest {
     void generateClientConfig_ubuntuServer_routesOnlyVpnTraffic() {
         String config = VpnService.generateClientConfig(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, "10.13.13.0/24");
+                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).contains("\"peerType\":\"UBUNTU_SERVER\"");
@@ -46,7 +46,7 @@ class VpnServiceConfigTest {
     void generateClientConfig_ubuntuServerWithLanCidr_appendsLanCidrToAllowedIps() {
         String config = VpnService.generateClientConfig(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, "192.168.1.0/24", "10.13.13.0/24");
+                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24, 192.168.1.0/24");
         assertThat(config).contains("\"peerType\":\"UBUNTU_SERVER\"");
@@ -57,17 +57,36 @@ class VpnServiceConfigTest {
     void generateClientConfig_windowsServer_routesOnlyVpnTraffic() {
         String config = VpnService.generateClientConfig(
                 "privateKey", "10.13.13.4", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.WINDOWS_SERVER, null, "10.13.13.0/24");
+                "vpn.example.com:51820", PeerType.WINDOWS_SERVER, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).contains("\"peerType\":\"WINDOWS_SERVER\"");
     }
 
     @Test
+    void generateClientConfig_ubuntuServerWithLanAddress_embedsLanAddressInMetadata() {
+        String config = VpnService.generateClientConfig(
+                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, "192.168.3.121", "10.13.13.0/24");
+
+        assertThat(config).contains("\"lanAddress\":\"192.168.3.121\"");
+        assertThat(config).doesNotContain("\"lanCidr\"");
+    }
+
+    @Test
+    void generateClientConfig_mobileClientWithLanAddress_doesNotEmbedLanAddress() {
+        String config = VpnService.generateClientConfig(
+                "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, "192.168.3.121", "10.13.13.0/24");
+
+        assertThat(config).doesNotContain("lanAddress");
+    }
+
+    @Test
     void generateClientConfig_ubuntuServer_usesConfiguredSubnetNotDefault() {
         String config = VpnService.generateClientConfig(
                 "privateKey", "10.10.10.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, "10.10.10.0/24");
+                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, null, "10.10.10.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.10.10.0/24");
         assertThat(config).doesNotContain("10.13.13.0/24");

@@ -112,13 +112,19 @@ public class VpnService implements CreatePeerUseCase {
 
     @Override
     public CreatedPeerUco createPeer(String peerName) {
-        return createPeer(peerName, PeerType.UBUNTU_SERVER, null);
+        return createPeer(peerName, PeerType.UBUNTU_SERVER, null, null);
     }
 
     @Override
     public CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr) {
+        return createPeer(peerName, peerType, lanCidr, null);
+    }
+
+    @Override
+    public CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr, String lanAddress) {
         peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
-        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {})", peerName, wireguardInterface, peerType, lanCidr);
+        log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {}, lanAddress: {})",
+                peerName, wireguardInterface, peerType, lanCidr, lanAddress);
 
         try {
             // Step 1: Generate private key
@@ -147,7 +153,7 @@ public class VpnService implements CreatePeerUseCase {
 
             // Step 7: Create client configuration file
             String clientConfig = generateClientConfig(
-                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, vpnSubnet);
+                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, lanAddress, vpnSubnet);
 
             Path peerConfigPath = peerDir.resolve(peerName + ".conf");
             Files.writeString(peerConfigPath, clientConfig);
@@ -261,15 +267,13 @@ public class VpnService implements CreatePeerUseCase {
 
     static String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
                                        String presharedKey, String serverEndpoint,
-                                       PeerType peerType, String lanCidr, String vpnSubnet) {
+                                       PeerType peerType, String lanCidr, String lanAddress, String vpnSubnet) {
         String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
         if (lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER) {
             allowedIps = allowedIps + ", " + lanCidr;
         }
 
-        String vaierJson = lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER
-                ? String.format("{\"peerType\":\"%s\",\"lanCidr\":\"%s\"}", peerType.name(), lanCidr)
-                : String.format("{\"peerType\":\"%s\"}", peerType.name());
+        String vaierJson = buildVaierJson(peerType, lanCidr, lanAddress);
 
         String dnsLine = peerType.isServerType()
                 ? ""
@@ -289,6 +293,20 @@ public class VpnService implements CreatePeerUseCase {
                 PersistentKeepalive = 25
                 """, vaierJson, privateKey, ipAddress, dnsLine,
                 serverPublicKey, presharedKey, serverEndpoint, allowedIps);
+    }
+
+    static String buildVaierJson(PeerType peerType, String lanCidr, String lanAddress) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
+        boolean serverType = peerType == PeerType.UBUNTU_SERVER;
+        if (serverType && lanCidr != null && !lanCidr.isBlank()) {
+            sb.append(",\"lanCidr\":\"").append(lanCidr).append("\"");
+        }
+        if (serverType && lanAddress != null && !lanAddress.isBlank()) {
+            sb.append(",\"lanAddress\":\"").append(lanAddress).append("\"");
+        }
+        sb.append("}");
+        return sb.toString();
     }
 
     private void addPeerToServer(String interfaceName, String publicKey, String presharedKey,

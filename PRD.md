@@ -111,6 +111,7 @@ When creating a peer, the user selects a **peer type**. The type drives the Wire
 - Server types expose containers in the peer view; client types hide that section.
 - The type is persisted in a `# VAIER: {"peerType":"..."}` JSON comment at the top of the client config file. Legacy peers with no comment default to `UBUNTU_SERVER`.
 - Ubuntu server peers can optionally specify a **LAN CIDR** (e.g. `192.168.1.0/24`). When set, the CIDR is appended to `AllowedIPs` in both the client config and the server-side peer entry, so the VPN server routes LAN traffic through that peer's tunnel. The LAN CIDR is also stored in the VAIER metadata comment.
+- Ubuntu/Windows server peers can additionally specify a **LAN address** (e.g. `192.168.1.50`) — the server's reachable host/IP on that LAN. Used by the launchpad to return direct, proxy-bypassing URLs when the caller is on the same LAN. Editable inline on the expanded server card via `PATCH /vpn/peers/{name}/lan-address`, so existing peers can be annotated without recreation.
 
 ---
 
@@ -159,6 +160,7 @@ A read-only launchpad page listing all published services as a clean grid of til
 - Suitable for use as a browser home page or new-tab page
 - Launchpad page and its API (`/launchpad/services`, `/favicon`) are public (no auth required)
 - Admin pages remain protected by Authelia
+- When the caller's public IP matches a VPN peer's WireGuard endpoint IP (i.e. they share a NAT gateway with that peer), and the service is hosted on that peer, the tile links to `http://lanAddress:port` directly — bypassing Traefik and Authelia. Falls back to the public HTTPS URL otherwise. The caller IP is taken from `X-Forwarded-For` only when the direct peer (`RemoteAddr`) is inside the trusted proxy CIDR (`launchpad.trusted-proxy-cidr`, default `172.20.0.0/16`).
 
 ---
 

@@ -8,6 +8,7 @@ import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.VpnClient;
@@ -37,6 +38,7 @@ public class VpnPeerRestController {
     private final DeletePeerUseCase deletePeerUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
+    private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final SseEventPublisher sseEventPublisher;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -53,9 +55,12 @@ public class VpnPeerRestController {
                     .map(client -> {
                         String peerIp = client.allowedIps().split("/")[0];
                         String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
-                        PeerType peerType = getPeerConfigUseCase.getPeerConfigByIp(peerIp)
+                        var cfg = getPeerConfigUseCase.getPeerConfigByIp(peerIp);
+                        PeerType peerType = cfg
                                 .map(GetPeerConfigUseCase.PeerConfigResult::peerType)
                                 .orElse(PeerType.UBUNTU_SERVER);
+                        String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
+                        String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
                         return new VpnPeerResponse(
                                 peerName,
                                 client.publicKey(),
@@ -65,7 +70,9 @@ public class VpnPeerRestController {
                                 client.latestHandshake(),
                                 client.transferRx(),
                                 client.transferTx(),
-                                peerType.name()
+                                peerType.name(),
+                                lanCidr,
+                                lanAddress
                         );
                     })
                     .toList();
@@ -86,7 +93,8 @@ public class VpnPeerRestController {
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 request.name(),
                 peerType,
-                request.lanCidr()
+                request.lanCidr(),
+                request.lanAddress()
         );
 
         CreatePeerResponse response = new CreatePeerResponse(
@@ -114,6 +122,25 @@ public class VpnPeerRestController {
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
             log.error("Failed to delete peer: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PatchMapping("/{peerName}/lan-address")
+    public ResponseEntity<Void> updateLanAddress(
+            @PathVariable String peerName,
+            @RequestBody(required = false) UpdateLanAddressRequest request) {
+        String lanAddress = request != null ? request.lanAddress() : null;
+        log.info("Updating LAN address for peer {} to {}", peerName, lanAddress);
+        try {
+            forUpdatingPeerConfigurations.updateLanAddress(peerName, lanAddress);
+            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Peer not found for lan-address update: {}", peerName);
+            return ResponseEntity.notFound().build();
+        } catch (Exception e) {
+            log.error("Failed to update lan address for peer {}: {}", peerName, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -239,13 +266,16 @@ public class VpnPeerRestController {
             String latestHandshake,
             String transferRx,
             String transferTx,
-            String peerType
+            String peerType,
+            String lanCidr,
+            String lanAddress
     ) {}
 
     public record CreatePeerRequest(
             String name,
             PeerType peerType,
-            String lanCidr
+            String lanCidr,
+            String lanAddress
     ) {}
 
     public record CreatePeerResponse(
@@ -254,6 +284,10 @@ public class VpnPeerRestController {
             String publicKey,
             String configFile,
             String peerType
+    ) {}
+
+    public record UpdateLanAddressRequest(
+            String lanAddress
     ) {}
 
     public record PeerConfigResponse(

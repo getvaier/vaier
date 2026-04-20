@@ -1,11 +1,13 @@
 package net.vaier.adapter.driven;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +20,7 @@ import java.util.Optional;
 
 @Component
 @Slf4j
-public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations, ForResolvingPeerNames {
+public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations, ForResolvingPeerNames, ForUpdatingPeerConfigurations {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -26,8 +28,9 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     private String wireguardConfigPath;
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record VaierMetadata(String peerType, String lanCidr) {
-        VaierMetadata() { this(null, null); }
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record VaierMetadata(String peerType, String lanCidr, String lanAddress) {
+        VaierMetadata() { this(null, null, null); }
     }
 
     @Override
@@ -46,7 +49,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata meta = extractVaierMetadata(configContent);
 
             return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
-                    parsePeerType(meta.peerType()), meta.lanCidr()));
+                    parsePeerType(meta.peerType()), meta.lanCidr(), meta.lanAddress()));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -83,7 +86,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 VaierMetadata meta = extractVaierMetadata(configContent);
 
                 return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
-                        parsePeerType(meta.peerType()), meta.lanCidr()));
+                        parsePeerType(meta.peerType()), meta.lanCidr(), meta.lanAddress()));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -187,6 +190,35 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             }
         }
         return new VaierMetadata();
+    }
+
+    @Override
+    public void updateLanAddress(String peerName, String lanAddress) {
+        Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
+        if (!Files.exists(peerConfigPath)) {
+            throw new IllegalArgumentException("Peer not found: " + peerName);
+        }
+        try {
+            String content = Files.readString(peerConfigPath);
+            VaierMetadata existing = extractVaierMetadata(content);
+            String normalized = (lanAddress == null || lanAddress.isBlank()) ? null : lanAddress.trim();
+            VaierMetadata updated = new VaierMetadata(
+                existing.peerType() != null ? existing.peerType() : PeerType.UBUNTU_SERVER.name(),
+                existing.lanCidr(),
+                normalized);
+            String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
+
+            String rewritten;
+            if (content.contains("# VAIER:")) {
+                rewritten = content.replaceAll("(?m)^# VAIER:.*$", java.util.regex.Matcher.quoteReplacement(newLine));
+            } else {
+                rewritten = newLine + "\n" + content;
+            }
+            Files.writeString(peerConfigPath, rewritten);
+            log.info("Updated lanAddress for peer {} to {}", peerName, normalized);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to update lanAddress for peer " + peerName + ": " + e.getMessage(), e);
+        }
     }
 
     private PeerType parsePeerType(String value) {

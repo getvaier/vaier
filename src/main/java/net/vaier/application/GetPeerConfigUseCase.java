@@ -14,6 +14,12 @@ public interface GetPeerConfigUseCase {
         String name,
         String ipAddress,
         String configContent,
-        PeerType peerType
-    ) {}
+        PeerType peerType,
+        String lanCidr,
+        String lanAddress
+    ) {
+        public PeerConfigResult(String name, String ipAddress, String configContent, PeerType peerType) {
+            this(name, ipAddress, configContent, peerType, null, null);
+        }
+    }
 }

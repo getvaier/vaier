@@ -5,6 +5,8 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.Server.State;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -43,6 +45,9 @@ class GetLaunchpadServicesTest {
     ForResolvingPeerNames forResolvingPeerNames;
 
     @Mock
+    ForGettingPeerConfigurations forGettingPeerConfigurations;
+
+    @Mock
     ConfigResolver configResolver;
 
     @InjectMocks
@@ -51,6 +56,9 @@ class GetLaunchpadServicesTest {
     @BeforeEach
     void setUp() {
         lenient().when(configResolver.getDomain()).thenReturn("example.com");
+        lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        lenient().when(forResolvingPeerNames.resolvePeerNameByIp(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
@@ -60,7 +68,7 @@ class GetLaunchpadServicesTest {
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).dnsAddress()).isEqualTo("app.example.com");
@@ -74,7 +82,7 @@ class GetLaunchpadServicesTest {
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result.get(0).state()).isEqualTo(State.UNREACHABLE);
     }
@@ -89,7 +97,7 @@ class GetLaunchpadServicesTest {
                 List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running"))
         );
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result.get(0).state()).isEqualTo(State.OK);
     }
@@ -101,7 +109,7 @@ class GetLaunchpadServicesTest {
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result).isEmpty();
     }
@@ -110,7 +118,7 @@ class GetLaunchpadServicesTest {
     void getLaunchpadServices_emptyRoutes_returnsEmpty() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
 
-        assertThat(service.getLaunchpadServices()).isEmpty();
+        assertThat(service.getLaunchpadServices(null)).isEmpty();
     }
 
     @Test
@@ -126,10 +134,116 @@ class GetLaunchpadServicesTest {
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices();
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).dnsAddress()).isEqualTo("published.example.com");
+    }
+
+    @Test
+    void getLaunchpadServices_callerIpMatchesPeerEndpoint_setsDirectUrlToLanAddress() {
+        setupOneRoute("app.example.com", "10.13.13.6", 6875);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
+
+        assertThat(result.get(0).directUrl()).isEqualTo("http://192.168.3.121:6875");
+    }
+
+    @Test
+    void getLaunchpadServices_callerIpDoesNotMatchAnyPeerEndpoint_noDirectUrl() {
+        setupOneRoute("app.example.com", "10.13.13.6", 6875);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("203.0.113.10");
+
+        assertThat(result.get(0).directUrl()).isNull();
+    }
+
+    @Test
+    void getLaunchpadServices_peerHasNoLanAddress_noDirectUrl() {
+        setupOneRoute("app.example.com", "10.13.13.6", 6875);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, null)
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
+
+        assertThat(result.get(0).directUrl()).isNull();
+    }
+
+    @Test
+    void getLaunchpadServices_callerIpNull_noDirectUrl() {
+        setupOneRoute("app.example.com", "10.13.13.6", 6875);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).directUrl()).isNull();
+    }
+
+    @Test
+    void getLaunchpadServices_routeAddressHasNoMatchingPeer_noDirectUrl() {
+        setupOneRoute("app.example.com", "my-local-container", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
+
+        assertThat(result.get(0).directUrl()).isNull();
+    }
+
+    @Test
+    void getLaunchpadServices_peerHasNoEndpoint_noDirectUrl() {
+        setupOneRoute("app.example.com", "10.13.13.6", 6875);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", null)
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
+
+        assertThat(result.get(0).directUrl()).isNull();
+    }
+
+    private VpnClient vpnClient(String allowedIps, String endpointIp) {
+        return new VpnClient("pubkey", allowedIps, endpointIp, "51820", "1700000000", "0", "0");
     }
 
     // --- setup helpers ---

@@ -6,6 +6,7 @@ public interface CreatePeerUseCase {
 
     CreatedPeerUco createPeer(String peerName);
     CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr);
+    CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr, String lanAddress);
 
     record CreatedPeerUco(
         String name,

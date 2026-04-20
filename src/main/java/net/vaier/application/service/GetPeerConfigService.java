@@ -28,12 +28,12 @@ public class GetPeerConfigService implements GetPeerConfigUseCase {
             config = peerConfigProvider.getPeerConfigByName(peerIdentifier);
         }
 
-        return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType()));
+        return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress()));
     }
 
     @Override
     public Optional<PeerConfigResult> getPeerConfigByIp(String ipAddress) {
         return peerConfigProvider.getPeerConfigByIp(ipAddress)
-                .map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType()));
+                .map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress()));
     }
 }

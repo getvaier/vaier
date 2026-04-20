@@ -13,6 +13,8 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -30,6 +32,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
+    private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ConfigResolver configResolver;
 
     private volatile List<PublishedServiceUco> cache = null;
@@ -39,6 +42,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForGettingVpnClients forGettingVpnClients,
         ForResolvingPeerNames forResolvingPeerNames,
+        ForGettingPeerConfigurations forGettingPeerConfigurations,
         ConfigResolver configResolver
     ) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
@@ -46,6 +50,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
+        this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.configResolver = configResolver;
     }
 
@@ -75,11 +80,38 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
     }
 
     @Override
-    public List<LaunchpadServiceUco> getLaunchpadServices() {
+    public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp) {
+        List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         return getPublishedServices().stream()
             .filter(s -> s.dnsState() == DnsState.OK)
-            .map(s -> new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress(), s.state()))
+            .map(s -> new LaunchpadServiceUco(
+                s.dnsAddress(),
+                s.hostAddress(),
+                s.state(),
+                directUrl(s, callerIp, peers, vpnClients)))
             .toList();
+    }
+
+    private String directUrl(PublishedServiceUco s, String callerIp,
+                             List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
+        if (callerIp == null || callerIp.isBlank()) return null;
+        PeerConfiguration peer = peers.stream()
+            .filter(p -> p.ipAddress() != null && p.ipAddress().equals(s.hostAddress()))
+            .findFirst().orElse(null);
+        if (peer == null) return null;
+        String lanAddress = peer.lanAddress();
+        if (lanAddress == null || lanAddress.isBlank()) return null;
+
+        String peerEndpointIp = vpnClients.stream()
+            .filter(c -> c.allowedIps() != null && c.allowedIps().startsWith(peer.ipAddress()))
+            .map(VpnClient::endpointIp)
+            .filter(ip -> ip != null && !ip.isBlank())
+            .findFirst().orElse(null);
+        if (peerEndpointIp == null) return null;
+        if (!peerEndpointIp.equals(callerIp)) return null;
+
+        return "http://" + lanAddress + ":" + s.hostPort();
     }
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,

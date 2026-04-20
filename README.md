@@ -22,8 +22,9 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 
 | Feature | Description |
 |---------|-------------|
-| **VPN peer management** | Create and delete WireGuard peers. Download peer config as a `.conf` file, QR code (mobile), docker-compose, or a one-shot bash setup script. |
+| **VPN peer management** | Create and delete WireGuard peers. Download peer config as a `.conf` file, QR code (mobile), docker-compose, or a one-shot bash setup script. Server peers can record a LAN address (editable inline) so the launchpad can link directly to services on the local network. |
 | **Service publishing** | Discover Docker containers on the VPN server and on connected peers. Publish any container as a public HTTPS subdomain in one action. Automatic cleanup of published services when a peer is deleted. |
+| **Smart launchpad** | Public `/launchpad.html` tiles link to `https://service.domain` normally, but switch to direct `http://lanAddress:port` when the caller is on the same LAN as the hosting server — bypassing the proxy and auth. |
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle and editable root path redirect. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |

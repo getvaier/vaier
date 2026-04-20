@@ -5,7 +5,7 @@ import java.util.List;
 
 public interface GetLaunchpadServicesUseCase {
 
-    List<LaunchpadServiceUco> getLaunchpadServices();
+    List<LaunchpadServiceUco> getLaunchpadServices(String callerIp);
 
-    record LaunchpadServiceUco(String dnsAddress, String hostAddress, State state) {}
+    record LaunchpadServiceUco(String dnsAddress, String hostAddress, State state, String directUrl) {}
 }
