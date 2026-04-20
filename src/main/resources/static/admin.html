@@ -5,528 +5,186 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vaier Admin</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
+    <link rel="stylesheet" href="styles.css">
     <style>
-        :root {
-            --bg:        #1e1e1e;
-            --bg-panel:  #252526;
-            --bg-active: #37373d;
-            --bg-hover:  #2a2d2e;
-            --border:    #3c3c3c;
-            --text:      #d4d4d4;
-            --text-muted:#858585;
-            --text-dim:  #5a5a5a;
-            --accent:    #4fc3f7;
-            --status-bar:#007acc;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
         html, body { height: 100%; overflow: hidden; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            font-size: 13px;
-        }
-
-        .app {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-
-        /* ── Shell ── */
-        .shell {
-            display: flex;
+        body { display: flex; flex-direction: column; }
+        .app-main {
             flex: 1;
             overflow: hidden;
-        }
-
-        /* ── Sidebar ── */
-        .sidebar {
-            width: 220px;
-            background: var(--bg-panel);
-            display: flex;
-            flex-direction: column;
-            border-right: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-
-        .sidebar-header {
-            padding: 0 12px;
-            height: 35px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .sidebar-title {
-            font-size: 0.68rem;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-
-        .logo-mark {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .logo-icon {
-            width: 16px;
-            height: 16px;
-            color: var(--accent);
-        }
-
-        .nav-section {
-            padding: 6px 0;
-        }
-
-        .nav-divider {
-            height: 1px;
-            background: var(--border);
-            margin: 4px 0;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 5px 12px;
-            color: var(--text-muted);
-            text-decoration: none;
-            cursor: pointer;
-            border-left: 2px solid transparent;
-            user-select: none;
-            font-size: 0.82rem;
-        }
-
-        .nav-item:hover {
-            background: var(--bg-hover);
-            color: var(--text);
-            text-decoration: none;
-        }
-
-        .nav-item.active {
-            background: var(--bg-active);
-            color: var(--text);
-            border-left-color: var(--accent);
-        }
-
-        .nav-icon {
-            width: 15px;
-            height: 15px;
-            flex-shrink: 0;
-            opacity: 0.7;
-        }
-
-        .nav-item.active .nav-icon,
-        .nav-item:hover .nav-icon {
-            opacity: 1;
-        }
-
-        /* ── Main content ── */
-        .main-content {
-            flex: 1;
-            overflow: auto;
             background: var(--bg);
-            min-width: 0;
         }
-
         iframe {
             width: 100%;
             height: 100%;
             border: none;
             display: block;
         }
-
-        /* ── Welcome screen ── */
         .welcome {
             height: 100%;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 1rem;
+            gap: 0.75rem;
             color: var(--text-muted);
             text-align: center;
             padding: 2rem;
         }
-
-        .welcome-logo {
-            color: var(--accent);
-            opacity: 0.4;
-            margin-bottom: 0.5rem;
-        }
-
+        .welcome-logo { color: var(--accent); opacity: 0.4; }
         .welcome h1 {
             font-size: 1.1rem;
             font-weight: 400;
             color: var(--text-muted);
-            letter-spacing: 0.02em;
         }
-
         .welcome p {
-            font-size: 0.8rem;
+            font-size: 0.82rem;
             color: var(--text-dim);
-        }
-
-        .welcome-shortcuts {
-            margin-top: 1.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.4rem;
-            font-size: 0.78rem;
-            color: var(--text-dim);
-        }
-
-        /* ── Status bar ── */
-        .status-bar {
-            height: 22px;
-            background: var(--status-bar);
-            display: flex;
-            align-items: center;
-            padding: 0 10px;
-            gap: 12px;
-            flex-shrink: 0;
-        }
-
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.7rem;
-            color: rgba(255, 255, 255, 0.9);
-            white-space: nowrap;
-        }
-
-        .status-item svg {
-            width: 11px;
-            height: 11px;
-            opacity: 0.85;
-        }
-
-        .status-spacer { flex: 1; }
-
-        .status-logout {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.7rem;
-            color: rgba(255, 255, 255, 0.75);
-            text-decoration: none;
-            padding: 2px 6px;
-            border-radius: 3px;
-            border: 1px solid transparent;
-            white-space: nowrap;
-            cursor: pointer;
-            background: none;
-        }
-
-        .status-logout:hover {
-            color: #fff;
-            border-color: rgba(255,255,255,0.3);
-            background: rgba(255,255,255,0.1);
-        }
-
-        .status-logout svg {
-            width: 11px;
-            height: 11px;
-            opacity: 0.85;
-        }
-
-        /* ── Mobile top bar ── */
-        .mobile-topbar {
-            display: none;
-            background: var(--bg-panel);
-            border-bottom: 1px solid var(--border);
-            padding: 0 12px;
-            align-items: center;
-            gap: 10px;
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            z-index: 200;
-            height: 48px;
-            flex-shrink: 0;
-        }
-
-        .hamburger-btn {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 4px 6px;
-            border-radius: 3px;
-            display: flex;
-            align-items: center;
-        }
-        .hamburger-btn:hover { background: var(--bg-hover); color: var(--text); }
-
-        .mobile-title {
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .sidebar-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.6);
-            z-index: 99;
-        }
-
-        .sidebar-overlay.active { display: block; }
-
-        /* ── Mobile ── */
-        @media (max-width: 768px) {
-            html, body { overflow: auto; }
-
-            .mobile-topbar { display: flex; }
-
-            .app { height: calc(100vh - 48px); margin-top: 48px; }
-
-            .sidebar {
-                position: fixed;
-                top: 0; left: -230px;
-                height: 100vh;
-                z-index: 100;
-                transition: left 0.25s ease;
-                width: 220px;
-            }
-
-            .sidebar.open { left: 0; }
-
-            .main-content { height: calc(100vh - 48px - 22px); }
-
-            .status-bar { display: none; }
         }
     </style>
 </head>
 <body>
-    <!-- Mobile chrome -->
-    <div class="sidebar-overlay" id="sidebarOverlay"></div>
-    <div class="mobile-topbar">
-        <button class="hamburger-btn" id="hamburgerBtn" aria-label="Open menu">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                <line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/>
-            </svg>
-        </button>
-        <div class="mobile-title">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#4fc3f7" stroke-width="1.5" stroke-linecap="round">
-                <circle cx="8" cy="8" r="2.2" fill="#4fc3f7" stroke="none"/>
+    <div class="topbar">
+        <a href="/launchpad.html" class="topbar-brand" aria-label="Vaier">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
                 <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
                 <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
-                <circle cx="2.5" cy="3.5" r="1.5" fill="#4fc3f7" stroke="none"/>
-                <circle cx="13.5" cy="3.5" r="1.5" fill="#4fc3f7" stroke="none"/>
-                <circle cx="2.5" cy="12.5" r="1.5" fill="#4fc3f7" stroke="none"/>
-                <circle cx="13.5" cy="12.5" r="1.5" fill="#4fc3f7" stroke="none"/>
+                <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
             </svg>
-            Vaier Admin
-        </div>
-    </div>
-
-    <!-- App shell -->
-    <div class="app">
-        <div class="shell">
-            <nav class="sidebar" id="sidebar">
-                <div class="sidebar-header">
-                    <div class="logo-mark">
-                        <svg class="logo-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                            <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
-                            <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
-                            <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
-                            <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
-                            <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
-                            <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
-                            <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
-                        </svg>
-                        <span class="sidebar-title">Vaier</span>
-                    </div>
-                </div>
-
-                <div class="nav-section">
-                    <a href="/launchpad.html" class="nav-item">
-                        <!-- Grid / launchpad icon -->
-                        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="1.5" y="1.5" width="5" height="5" rx="1"/>
-                            <rect x="9.5" y="1.5" width="5" height="5" rx="1"/>
-                            <rect x="1.5" y="9.5" width="5" height="5" rx="1"/>
-                            <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
-                        </svg>
-                        Launchpad
-                    </a>
-                    <div class="nav-divider"></div>
-                    <a href="#services" class="nav-item" data-page="published-services.html">
-                        <!-- Server / layers icon -->
-                        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="1.5" y="2" width="13" height="4.5" rx="1"/>
-                            <rect x="1.5" y="9.5" width="13" height="4.5" rx="1"/>
-                            <circle cx="4" cy="4.25" r="0.8" fill="currentColor" stroke="none"/>
-                            <circle cx="4" cy="11.75" r="0.8" fill="currentColor" stroke="none"/>
-                            <line x1="7" y1="4.25" x2="11" y2="4.25" stroke-width="1"/>
-                            <line x1="7" y1="11.75" x2="11" y2="11.75" stroke-width="1"/>
-                        </svg>
-                        Services
-                    </a>
-                    <a href="#vpn" class="nav-item" data-page="vpn-peers.html">
-                        <!-- Monitor icon -->
-                        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="1" y="2" width="14" height="10" rx="1"/>
-                            <line x1="5" y1="15" x2="11" y2="15"/>
-                            <line x1="8" y1="12" x2="8" y2="15"/>
-                        </svg>
-                        Machines
-                    </a>
-                    <a href="#users" class="nav-item" data-page="users.html">
-                        <!-- Users icon -->
-                        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="6" cy="5" r="2.8"/>
-                            <path d="M1 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
-                            <path d="M12.5 6.5c1.2.4 2.5 1.7 2.5 3.5"/>
-                            <circle cx="12" cy="4" r="2"/>
-                        </svg>
-                        Users
-                    </a>
-                    <div class="nav-divider"></div>
-                    <a href="#settings" class="nav-item" data-page="settings.html">
-                        <!-- Gear icon -->
-                        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="8" cy="8" r="2.2"/>
-                            <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06"/>
-                        </svg>
-                        Settings
-                    </a>
-                </div>
-            </nav>
-
-            <main class="main-content" id="mainContent">
-                <div class="welcome">
-                    <div class="welcome-logo">
-                        <svg width="56" height="56" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round">
-                            <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
-                            <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
-                            <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
-                            <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
-                            <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
-                            <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
-                            <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
-                        </svg>
-                    </div>
-                    <h1>Vaier Admin</h1>
-                    <p>Select a section from the explorer to get started</p>
-                    <div class="welcome-shortcuts">
-                        <span>Services &mdash; reverse proxy &amp; DNS management</span>
-                        <span>Machines &mdash; manage your servers and devices</span>
-                        <span>Users &mdash; Authelia user management</span>
-                    </div>
-                </div>
-            </main>
-        </div>
-
-        <!-- Status bar -->
-        <div class="status-bar">
-            <div class="status-item">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                    <path d="M8 1.5L2 4v4c0 3.2 2.6 5.9 6 6.5 3.4-.6 6-3.3 6-6.5V4L8 1.5z"/>
+            <span>Vaier</span>
+        </a>
+        <nav class="topbar-nav">
+            <a href="/launchpad.html" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="1.5" y="1.5" width="5" height="5" rx="1"/>
+                    <rect x="9.5" y="1.5" width="5" height="5" rx="1"/>
+                    <rect x="1.5" y="9.5" width="5" height="5" rx="1"/>
+                    <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
                 </svg>
-                Vaier Admin
-            </div>
-            <div class="status-spacer"></div>
-            <div class="status-item" id="statusPage">Ready</div>
-            <div class="status-item" id="statusUser" style="display:none">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="8" cy="5.5" r="2.8"/>
-                    <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
-                </svg>
-                <span id="statusUsername"></span>
-            </div>
-            <a href="#" class="status-logout" id="logoutBtn" style="display:none" title="Sign out">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>
-                    <polyline points="10 11 14 8 10 5"/>
-                    <line x1="14" y1="8" x2="5" y2="8"/>
-                </svg>
-                Sign out
+                <span class="link-label">Launchpad</span>
             </a>
-        </div>
+            <a href="/admin.html" class="topbar-item active">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5a1.5 1.5 0 0 1 2.1 2.1L5 13.2l-3 .8.8-3 8.7-8.5z"/></svg>
+                <span class="link-label">Admin</span>
+            </a>
+            <a href="/mypage.html" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="5" r="3"/>
+                    <path d="M2 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/>
+                </svg>
+                <span class="link-label">My Page</span>
+            </a>
+        </nav>
+        <div class="topbar-user" id="topbarUser"></div>
     </div>
+
+    <nav class="page-tabs" id="adminTabs">
+        <button class="page-tab" data-page="published-services.html" data-hash="services">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="1.5" y="2" width="13" height="4.5" rx="1"/>
+                <rect x="1.5" y="9.5" width="13" height="4.5" rx="1"/>
+                <circle cx="4" cy="4.25" r="0.8" fill="currentColor" stroke="none"/>
+                <circle cx="4" cy="11.75" r="0.8" fill="currentColor" stroke="none"/>
+                <line x1="7" y1="4.25" x2="11" y2="4.25" stroke-width="1"/>
+                <line x1="7" y1="11.75" x2="11" y2="11.75" stroke-width="1"/>
+            </svg>
+            <span class="tab-label">Services</span>
+        </button>
+        <button class="page-tab" data-page="vpn-peers.html" data-hash="vpn">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="1" y="2" width="14" height="10" rx="1"/>
+                <line x1="5" y1="15" x2="11" y2="15"/>
+                <line x1="8" y1="12" x2="8" y2="15"/>
+            </svg>
+            <span class="tab-label">Machines</span>
+        </button>
+        <button class="page-tab" data-page="users.html" data-hash="users">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="6" cy="5" r="2.8"/>
+                <path d="M1 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+                <path d="M12.5 6.5c1.2.4 2.5 1.7 2.5 3.5"/>
+                <circle cx="12" cy="4" r="2"/>
+            </svg>
+            <span class="tab-label">Users</span>
+        </button>
+        <button class="page-tab" data-page="settings.html" data-hash="settings">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="8" r="2.2"/>
+                <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M3.05 12.95l1.06-1.06M11.89 4.11l1.06-1.06"/>
+            </svg>
+            <span class="tab-label">Settings</span>
+        </button>
+    </nav>
+
+    <main class="app-main" id="mainContent">
+        <div class="welcome">
+            <div class="welcome-logo">
+                <svg width="48" height="48" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round">
+                    <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
+                    <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
+                    <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
+                    <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+            </div>
+            <h1>Vaier Admin</h1>
+            <p>Select a section above to get started</p>
+        </div>
+    </main>
 
     <script>
         const mainContent = document.getElementById('mainContent');
-        const navItems = document.querySelectorAll('.nav-item[data-page]');
-        const sidebar = document.getElementById('sidebar');
-        const sidebarOverlay = document.getElementById('sidebarOverlay');
-        const hamburgerBtn = document.getElementById('hamburgerBtn');
-        const statusPage = document.getElementById('statusPage');
+        const tabs = document.querySelectorAll('.page-tab[data-page]');
 
-        const pageLabels = {
-            'published-services.html': 'published-services',
-            'vpn-peers.html':       'machines',
-            'users.html':           'users',
-            'settings.html':        'settings',
-        };
-
-        function closeSidebar() {
-            sidebar.classList.remove('open');
-            sidebarOverlay.classList.remove('active');
-        }
-
-        hamburgerBtn.addEventListener('click', () => {
-            const isOpen = sidebar.classList.toggle('open');
-            sidebarOverlay.classList.toggle('active', isOpen);
-        });
-
-        sidebarOverlay.addEventListener('click', closeSidebar);
-
-        navItems.forEach(item => {
-            item.addEventListener('click', e => {
-                e.preventDefault();
-                navItems.forEach(n => n.classList.remove('active'));
-                item.classList.add('active');
-
-                const page = item.getAttribute('data-page');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const page = tab.getAttribute('data-page');
+                const hash = tab.getAttribute('data-hash');
+                tabs.forEach(t => t.classList.toggle('active', t === tab));
                 mainContent.innerHTML = `<iframe src="${page}"></iframe>`;
-                statusPage.textContent = pageLabels[page] || page;
-
-                closeSidebar();
+                if (window.location.hash !== '#' + hash) {
+                    history.replaceState(null, '', '#' + hash);
+                }
             });
         });
 
-        function loadPageFromHash() {
+        function loadFromHash() {
             const hash = window.location.hash.slice(1);
-            const navItem = document.querySelector(`.nav-item[href="#${hash}"]`);
-            if (navItem) navItem.click();
+            if (!hash) return;
+            const tab = document.querySelector(`.page-tab[data-hash="${hash}"]`);
+            if (tab) tab.click();
         }
 
-        window.addEventListener('hashchange', loadPageFromHash);
-        loadPageFromHash();
+        window.addEventListener('hashchange', loadFromHash);
+        loadFromHash();
 
-        async function loadCurrentUser() {
+        const ICON_LOGOUT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><polyline points="10 11 14 8 10 5"/><line x1="14" y1="8" x2="5" y2="8"/></svg>';
+
+        async function loadUser() {
+            const userEl = document.getElementById('topbarUser');
             try {
-                const res = await fetch('/users/me');
+                const res = await fetch('/users/me', { cache: 'no-store' });
                 if (!res.ok) return;
-                const data = await res.json();
-                if (data.username) {
-                    document.getElementById('statusUsername').textContent = data.username;
-                    document.getElementById('statusUser').style.display = 'flex';
-                }
-                if (data.logoutUrl) {
-                    const btn = document.getElementById('logoutBtn');
-                    btn.href = data.logoutUrl + '?rd=' + encodeURIComponent(window.location.href);
-                    btn.style.display = 'flex';
-                }
+                const me = await res.json();
+                if (!me.username) return;
+                const name = me.displayname || me.username;
+                const logout = me.logoutUrl
+                    ? me.logoutUrl + '?rd=' + encodeURIComponent(window.location.href)
+                    : '#';
+                userEl.innerHTML = `
+                    <span class="display-name" title="${name}">${name}</span>
+                    <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
+                `;
             } catch (_) {}
         }
 
-        loadCurrentUser();
+        loadUser();
     </script>
 </body>
 </html>

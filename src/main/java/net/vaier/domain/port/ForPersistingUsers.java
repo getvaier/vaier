@@ -9,4 +9,6 @@ public interface ForPersistingUsers {
     void addUser(String username, String password, String email, String displayname);
     void deleteUser(String username);
     void changePassword(String username, String newPassword);
+    void updateEmail(String username, String email);
+    void updateDisplayName(String username, String displayname);
 }

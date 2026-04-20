@@ -171,4 +171,89 @@ class AutheliaUserAdapterTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("User not found");
     }
+
+    // --- updateEmail ---
+
+    @Test
+    void updateEmail_changesEmailForExistingUser() {
+        adapter.addUser("alice", "secret", "old@example.com", "Alice");
+
+        adapter.updateEmail("alice", "new@example.com");
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getEmail()).isEqualTo("new@example.com");
+    }
+
+    @Test
+    void updateEmail_preservesPasswordAndOtherFields() throws IOException {
+        adapter.addUser("alice", "secret", "old@example.com", "Alice");
+        String before = Files.readString(tempDir.resolve("users_database.yml"));
+        int hashIndex = before.indexOf("$argon2id$");
+        String hashBefore = before.substring(hashIndex, before.indexOf('\n', hashIndex));
+
+        adapter.updateEmail("alice", "new@example.com");
+
+        String after = Files.readString(tempDir.resolve("users_database.yml"));
+        assertThat(after).contains(hashBefore);
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getDisplayname()).isEqualTo("Alice");
+        assertThat(alice.getGroups()).containsExactly("admins");
+    }
+
+    @Test
+    void updateEmail_throwsWhenUserNotFound() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+
+        assertThatThrownBy(() -> adapter.updateEmail("nobody", "x@example.com"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("User not found");
+    }
+
+    @Test
+    void updateEmail_throwsWhenFileDoesNotExist() {
+        assertThatThrownBy(() -> adapter.updateEmail("alice", "x@example.com"))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    // --- updateDisplayName ---
+
+    @Test
+    void updateDisplayName_changesDisplayNameForExistingUser() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Old Name");
+
+        adapter.updateDisplayName("alice", "New Name");
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getDisplayname()).isEqualTo("New Name");
+    }
+
+    @Test
+    void updateDisplayName_preservesPasswordAndEmail() throws IOException {
+        adapter.addUser("alice", "secret", "alice@example.com", "Old Name");
+        String before = Files.readString(tempDir.resolve("users_database.yml"));
+        int hashIndex = before.indexOf("$argon2id$");
+        String hashBefore = before.substring(hashIndex, before.indexOf('\n', hashIndex));
+
+        adapter.updateDisplayName("alice", "New Name");
+
+        String after = Files.readString(tempDir.resolve("users_database.yml"));
+        assertThat(after).contains(hashBefore);
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getEmail()).isEqualTo("alice@example.com");
+    }
+
+    @Test
+    void updateDisplayName_throwsWhenUserNotFound() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+
+        assertThatThrownBy(() -> adapter.updateDisplayName("nobody", "New"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("User not found");
+    }
+
+    @Test
+    void updateDisplayName_throwsWhenFileDoesNotExist() {
+        assertThatThrownBy(() -> adapter.updateDisplayName("alice", "New"))
+                .isInstanceOf(RuntimeException.class);
+    }
 }

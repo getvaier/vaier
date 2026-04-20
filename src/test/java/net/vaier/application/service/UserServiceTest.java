@@ -182,4 +182,94 @@ class UserServiceTest {
 
         verifyNoInteractions(forPersistingUsers);
     }
+
+    // --- updateEmail ---
+
+    @Test
+    void updateEmail_updatesEmail() {
+        service.updateEmail("alice", "new@example.com");
+
+        verify(forPersistingUsers).updateEmail("alice", "new@example.com");
+    }
+
+    @Test
+    void updateEmail_throwsWhenUserNotFound() {
+        doThrow(new RuntimeException("User not found: alice"))
+                .when(forPersistingUsers).updateEmail("alice", "new@example.com");
+
+        assertThatThrownBy(() -> service.updateEmail("alice", "new@example.com"))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void updateEmail_rejectsBlankUsername(String username) {
+        assertThatThrownBy(() -> service.updateEmail(username, "new@example.com"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("username");
+
+        verifyNoInteractions(forPersistingUsers);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void updateEmail_rejectsBlankEmail(String email) {
+        assertThatThrownBy(() -> service.updateEmail("alice", email))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("email");
+
+        verifyNoInteractions(forPersistingUsers);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-an-email", "missing-at-sign.com", "@no-local.com", "no-domain@", "no-tld@foo"})
+    void updateEmail_rejectsInvalidEmailFormat(String email) {
+        assertThatThrownBy(() -> service.updateEmail("alice", email))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("email");
+
+        verifyNoInteractions(forPersistingUsers);
+    }
+
+    // --- updateDisplayName ---
+
+    @Test
+    void updateDisplayName_updatesDisplayName() {
+        service.updateDisplayName("alice", "Alice Smith");
+
+        verify(forPersistingUsers).updateDisplayName("alice", "Alice Smith");
+    }
+
+    @Test
+    void updateDisplayName_throwsWhenUserNotFound() {
+        doThrow(new RuntimeException("User not found: alice"))
+                .when(forPersistingUsers).updateDisplayName("alice", "Alice Smith");
+
+        assertThatThrownBy(() -> service.updateDisplayName("alice", "Alice Smith"))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void updateDisplayName_rejectsBlankUsername(String username) {
+        assertThatThrownBy(() -> service.updateDisplayName(username, "Alice"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("username");
+
+        verifyNoInteractions(forPersistingUsers);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void updateDisplayName_rejectsBlankDisplayName(String displayname) {
+        assertThatThrownBy(() -> service.updateDisplayName("alice", displayname))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("displayname");
+
+        verifyNoInteractions(forPersistingUsers);
+    }
 }

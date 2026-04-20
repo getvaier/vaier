@@ -5,6 +5,7 @@ import net.vaier.application.*;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.rest.FaviconFetcherService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +74,12 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected ChangePasswordUseCase changePasswordUseCase;
 
+    @MockBean
+    protected UpdateUserEmailUseCase updateUserEmailUseCase;
+
+    @MockBean
+    protected UpdateUserDisplayNameUseCase updateUserDisplayNameUseCase;
+
     // --- DNS use cases ---
     @MockBean
     protected GetDnsInfoUseCase getDnsInfoUseCase;
@@ -120,6 +127,9 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
+
+    @MockBean
+    protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
 
     // --- Published service use cases ---
     @MockBean

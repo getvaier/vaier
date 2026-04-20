@@ -58,15 +58,17 @@ class AuthRestControllerTest {
 
     @Test
     void me_returnsUsernameFromRemoteUserHeader() {
-        ResponseEntity<AuthRestController.MeResponse> response = controller.getMe("alice");
+        ResponseEntity<AuthRestController.MeResponse> response = controller.getMe("alice", "Alice", "alice@example.com");
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().username()).isEqualTo("alice");
+        assertThat(response.getBody().displayname()).isEqualTo("Alice");
+        assertThat(response.getBody().email()).isEqualTo("alice@example.com");
     }
 
     @Test
     void me_returnsNullUsernameWhenHeaderAbsent() {
-        ResponseEntity<AuthRestController.MeResponse> response = controller.getMe(null);
+        ResponseEntity<AuthRestController.MeResponse> response = controller.getMe(null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().username()).isNull();

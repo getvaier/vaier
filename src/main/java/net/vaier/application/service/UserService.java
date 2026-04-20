@@ -3,13 +3,16 @@ package net.vaier.application.service;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
+import net.vaier.application.UpdateUserDisplayNameUseCase;
+import net.vaier.application.UpdateUserEmailUseCase;
 import net.vaier.domain.port.ForPersistingUsers;
 import org.springframework.stereotype.Service;
 
 import java.util.regex.Pattern;
 
 @Service
-public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePasswordUseCase {
+public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePasswordUseCase,
+        UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase {
 
     private static final int MIN_PASSWORD_LENGTH = 8;
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
@@ -39,6 +42,20 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
         requireNonBlank(username, "username");
         requirePassword(newPassword);
         forPersistingUsers.changePassword(username, newPassword);
+    }
+
+    @Override
+    public void updateEmail(String username, String email) {
+        requireNonBlank(username, "username");
+        requireEmail(email);
+        forPersistingUsers.updateEmail(username, email);
+    }
+
+    @Override
+    public void updateDisplayName(String username, String displayname) {
+        requireNonBlank(username, "username");
+        requireNonBlank(displayname, "displayname");
+        forPersistingUsers.updateDisplayName(username, displayname);
     }
 
     private static void requireNonBlank(String value, String field) {

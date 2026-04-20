@@ -5,71 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vaier</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
+    <link rel="stylesheet" href="styles.css">
     <style>
-        :root {
-            --bg:       #1e1e1e;
-            --bg-card:  #2d2d30;
-            --bg-hover: #37373d;
-            --border:   #3c3c3c;
-            --text:     #d4d4d4;
-            --text-muted: #858585;
-            --text-dim: #5a5a5a;
-            --accent:   #4fc3f7;
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            font-size: 13px;
-            min-height: 100vh;
-        }
-
-        .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 1.5rem;
-            height: 44px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--accent);
-            font-size: 0.85rem;
-            font-weight: 500;
-            letter-spacing: 0.04em;
-            text-decoration: none;
-        }
-
-        .logo svg { flex-shrink: 0; }
-
-        .admin-link {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 0.78rem;
-            padding: 4px 10px;
-            border-radius: 3px;
-            border: 1px solid transparent;
-            transition: background 0.12s, color 0.12s, border-color 0.12s;
-        }
-
-        .admin-link:hover {
-            color: var(--text);
-            background: var(--bg-hover);
-            border-color: var(--border);
-            text-decoration: none;
-        }
-
-        .admin-link svg { flex-shrink: 0; }
+        body { min-height: 100vh; }
 
         .content {
             padding: 2rem 1.5rem;
@@ -218,8 +156,8 @@
 </head>
 <body>
     <div class="topbar">
-        <div class="logo">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <a href="/launchpad.html" class="topbar-brand" aria-label="Vaier">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
                 <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
                 <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
                 <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
@@ -228,14 +166,10 @@
                 <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
                 <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
             </svg>
-            Vaier
-        </div>
-        <a href="/admin.html" class="admin-link" title="Admin">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11.5 2.5a1.5 1.5 0 0 1 2.1 2.1L5 13.2l-3 .8.8-3 8.7-8.5z"/>
-            </svg>
-            Admin
+            <span>Vaier</span>
         </a>
+        <nav class="topbar-nav" id="topbarNav"></nav>
+        <div class="topbar-user" id="topbarUser"></div>
     </div>
 
     <div class="content">
@@ -244,6 +178,46 @@
     </div>
 
     <script>
+        const ICON_GRID   = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg>';
+        const ICON_ADMIN  = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5a1.5 1.5 0 0 1 2.1 2.1L5 13.2l-3 .8.8-3 8.7-8.5z"/></svg>';
+        const ICON_USER   = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5" r="3"/><path d="M2 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/></svg>';
+        const ICON_LOGOUT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><polyline points="10 11 14 8 10 5"/><line x1="14" y1="8" x2="5" y2="8"/></svg>';
+        const ICON_LOGIN  = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3"/><polyline points="6 11 2 8 6 5"/><line x1="2" y1="8" x2="11" y2="8"/></svg>';
+
+        async function loadTopbarNav() {
+            const nav = document.getElementById('topbarNav');
+            const user = document.getElementById('topbarUser');
+            let me = null;
+            try {
+                const res = await fetch('/users/me', { redirect: 'manual', cache: 'no-store' });
+                if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+                    me = await res.json();
+                    if (!me.username) me = null;
+                }
+            } catch (_) { /* anonymous */ }
+
+            if (me) {
+                const name = me.displayname || me.username;
+                const logout = me.logoutUrl || '#';
+                nav.innerHTML = `
+                    <a href="/launchpad.html" class="topbar-item active">${ICON_GRID}<span class="link-label">Launchpad</span></a>
+                    <a href="/admin.html" class="topbar-item">${ICON_ADMIN}<span class="link-label">Admin</span></a>
+                    <a href="/mypage.html" class="topbar-item">${ICON_USER}<span class="link-label">My Page</span></a>
+                `;
+                user.innerHTML = `
+                    <span class="display-name" title="${name}">${name}</span>
+                    <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
+                `;
+            } else {
+                nav.innerHTML = '';
+                user.innerHTML = `
+                    <a href="/admin.html" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
+                `;
+            }
+        }
+
+        loadTopbarNav();
+
         const AVATAR_COLORS = [
             '#0e639c', '#1a7340', '#7c4dbd', '#c0392b',
             '#b45309', '#0f766e', '#9d174d', '#374151',

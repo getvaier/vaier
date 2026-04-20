@@ -130,4 +130,68 @@ class UserControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.logoutUrl").doesNotExist());
     }
+
+    @Test
+    void getMe_returnsDisplaynameAndEmailFromHeaders() throws Exception {
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        mockMvc.perform(get("/users/me")
+                       .header("Remote-User", "alice")
+                       .header("Remote-Name", "Alice Example")
+                       .header("Remote-Email", "alice@example.com"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.username").value("alice"))
+               .andExpect(jsonPath("$.displayname").value("Alice Example"))
+               .andExpect(jsonPath("$.email").value("alice@example.com"));
+    }
+
+    @Test
+    void updateEmail_returns200OnSuccess() throws Exception {
+        mockMvc.perform(put("/users/alice/email")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"email":"new@example.com"}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(updateUserEmailUseCase).updateEmail("alice", "new@example.com");
+    }
+
+    @Test
+    void updateEmail_returns400WhenInvalid() throws Exception {
+        doThrow(new IllegalArgumentException("email is not a valid format"))
+                .when(updateUserEmailUseCase).updateEmail(eq("alice"), any());
+
+        mockMvc.perform(put("/users/alice/email")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"email":"bogus"}
+                           """))
+               .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateDisplayName_returns200OnSuccess() throws Exception {
+        mockMvc.perform(put("/users/alice/displayname")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"displayname":"Alice Example"}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(updateUserDisplayNameUseCase).updateDisplayName("alice", "Alice Example");
+    }
+
+    @Test
+    void updateDisplayName_returns400WhenInvalid() throws Exception {
+        doThrow(new IllegalArgumentException("displayname must not be blank"))
+                .when(updateUserDisplayNameUseCase).updateDisplayName(eq("alice"), any());
+
+        mockMvc.perform(put("/users/alice/displayname")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"displayname":""}
+                           """))
+               .andExpect(status().isBadRequest());
+    }
 }

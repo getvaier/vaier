@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Page</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .profile-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .profile-card h2 {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.9rem;
+        }
+        .profile-card .helper {
+            font-size: 0.72rem;
+            color: var(--text-dim);
+            margin-top: 0.4rem;
+        }
+        .profile-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+        .profile-row .form-group { flex: 1; margin-bottom: 0; }
+        .inline-msg {
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        .inline-msg.ok    { color: var(--green); }
+        .inline-msg.err   { color: var(--red); }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <a href="/launchpad.html" class="topbar-brand" aria-label="Vaier">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
+                <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
+                <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
+                <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+            </svg>
+            <span>Vaier</span>
+        </a>
+        <nav class="topbar-nav">
+            <a href="/launchpad.html" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="1.5" y="1.5" width="5" height="5" rx="1"/>
+                    <rect x="9.5" y="1.5" width="5" height="5" rx="1"/>
+                    <rect x="1.5" y="9.5" width="5" height="5" rx="1"/>
+                    <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
+                </svg>
+                <span class="link-label">Launchpad</span>
+            </a>
+            <a href="/admin.html" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5a1.5 1.5 0 0 1 2.1 2.1L5 13.2l-3 .8.8-3 8.7-8.5z"/></svg>
+                <span class="link-label">Admin</span>
+            </a>
+            <a href="/mypage.html" class="topbar-item active">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="5" r="3"/>
+                    <path d="M2 14c0-3 2.7-5.5 6-5.5s6 2.5 6 5.5"/>
+                </svg>
+                <span class="link-label">My Page</span>
+            </a>
+        </nav>
+        <div class="topbar-user" id="topbarUser"></div>
+    </div>
+
+    <div class="container">
+        <div id="notLoggedIn" style="display:none">
+            <div class="profile-card">
+                <h2>Not signed in</h2>
+                <p style="font-size:0.82rem;color:var(--text-muted)">
+                    You must be signed in to manage your profile.
+                </p>
+            </div>
+        </div>
+
+        <div id="profileForms" style="display:none">
+            <div class="profile-card">
+                <h2>Display Name</h2>
+                <form id="displayNameForm" class="profile-row">
+                    <div class="form-group">
+                        <label class="form-label" for="displayName">Name</label>
+                        <input type="text" class="form-input" id="displayName" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Update</button>
+                </form>
+                <div id="displayNameMsg" class="inline-msg"></div>
+            </div>
+
+            <div class="profile-card">
+                <h2>Email</h2>
+                <form id="emailForm" class="profile-row">
+                    <div class="form-group">
+                        <label class="form-label" for="email">Email address</label>
+                        <input type="email" class="form-input" id="email" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Update</button>
+                </form>
+                <div id="emailMsg" class="inline-msg"></div>
+            </div>
+
+            <div class="profile-card">
+                <h2>Password</h2>
+                <form id="passwordForm">
+                    <div class="form-group">
+                        <label class="form-label" for="newPassword">New password</label>
+                        <input type="password" class="form-input" id="newPassword" minlength="8" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="confirmPassword">Confirm new password</label>
+                        <input type="password" class="form-input" id="confirmPassword" minlength="8" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Change password</button>
+                </form>
+                <div id="passwordMsg" class="inline-msg"></div>
+                <div class="helper">Minimum 8 characters.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        function setMsg(id, text, ok) {
+            const el = document.getElementById(id);
+            el.textContent = text || '';
+            el.className = 'inline-msg ' + (ok ? 'ok' : 'err');
+        }
+
+        const ICON_LOGOUT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><polyline points="10 11 14 8 10 5"/><line x1="14" y1="8" x2="5" y2="8"/></svg>';
+
+        async function loadMe() {
+            let me = null;
+            try {
+                const res = await fetch('/users/me', { cache: 'no-store' });
+                if (res.ok) me = await res.json();
+            } catch (_) {}
+
+            if (!me || !me.username) {
+                document.getElementById('notLoggedIn').style.display = 'block';
+                return;
+            }
+
+            currentUser = me;
+            document.getElementById('profileForms').style.display = 'block';
+            document.getElementById('displayName').value = me.displayname || '';
+            document.getElementById('email').value = me.email || '';
+
+            const name = me.displayname || me.username;
+            const logout = me.logoutUrl || '#';
+            document.getElementById('topbarUser').innerHTML = `
+                <span class="display-name" title="${name}">${name}</span>
+                <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
+            `;
+        }
+
+        async function putJson(url, body) {
+            const res = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const text = await res.text();
+            if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+            return text;
+        }
+
+        document.getElementById('displayNameForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const v = document.getElementById('displayName').value.trim();
+            try {
+                await putJson(`/users/${encodeURIComponent(currentUser.username)}/displayname`, { displayname: v });
+                setMsg('displayNameMsg', 'Updated. New value will appear after your next sign-in.', true);
+            } catch (err) {
+                setMsg('displayNameMsg', err.message, false);
+            }
+        });
+
+        document.getElementById('emailForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const v = document.getElementById('email').value.trim();
+            try {
+                await putJson(`/users/${encodeURIComponent(currentUser.username)}/email`, { email: v });
+                setMsg('emailMsg', 'Updated. New value will appear after your next sign-in.', true);
+            } catch (err) {
+                setMsg('emailMsg', err.message, false);
+            }
+        });
+
+        document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const a = document.getElementById('newPassword').value;
+            const b = document.getElementById('confirmPassword').value;
+            if (a !== b) { setMsg('passwordMsg', 'Passwords do not match.', false); return; }
+            try {
+                await putJson(`/users/${encodeURIComponent(currentUser.username)}/password`, { newPassword: a });
+                setMsg('passwordMsg', 'Password changed.', true);
+                document.getElementById('newPassword').value = '';
+                document.getElementById('confirmPassword').value = '';
+            } catch (err) {
+                setMsg('passwordMsg', err.message, false);
+            }
+        });
+
+        loadMe();
+    </script>
+</body>
+</html>

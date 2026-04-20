@@ -98,28 +98,13 @@
     </style>
 </head>
 <body>
-    <div class="page-header">
-        <div class="page-title">
-            <!-- Users icon -->
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="6" cy="5" r="2.8"/>
-                <path d="M1 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
-                <path d="M12.5 6.5c1.2.4 2.5 1.7 2.5 3.5"/>
-                <circle cx="12" cy="4" r="2"/>
-            </svg>
-            Users
-        </div>
-        <div class="page-header-actions">
-            <button class="btn btn-primary" onclick="showAddUserModal()">+ Add User</button>
-        </div>
-    </div>
-
     <div class="container">
         <div id="message"></div>
         <div id="users-container">
             <div class="loading">Loading users…</div>
         </div>
     </div>
+    <button class="fab" onclick="showAddUserModal()" aria-label="Add User" title="Add User">+</button>
 
     <!-- Add User Modal -->
     <div id="addUserModal" class="modal">
