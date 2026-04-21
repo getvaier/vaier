@@ -7,6 +7,7 @@ import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
 import java.util.List;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -29,22 +30,34 @@ public class DockerServiceRestController {
     }
 
     @GetMapping
-    public List<DockerService> getDockerServices(
+    public ResponseEntity<List<DockerService>> getDockerServices(
         @RequestParam String address,
         @RequestParam(required = false) Integer port,
         @RequestParam(defaultValue = "false") boolean tlsEnabled
     ) {
-        Server server = new Server(address, port, tlsEnabled);
-        return getServerInfoUseCase.getServicesWithExposedPorts(server);
+        try {
+            Server server = new Server(address, port, tlsEnabled);
+            return ResponseEntity.ok(getServerInfoUseCase.getServicesWithExposedPorts(server));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @GetMapping("/local")
-    public List<DockerService> discoverLocalContainers() {
-        return discoverLocalContainersUseCase.discover();
+    public ResponseEntity<List<DockerService>> discoverLocalContainers() {
+        try {
+            return ResponseEntity.ok(discoverLocalContainersUseCase.discover());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @GetMapping("/peers")
-    public List<PeerContainers> discoverPeerContainers() {
-        return discoverPeerContainersUseCase.discoverAll();
+    public ResponseEntity<List<PeerContainers>> discoverPeerContainers() {
+        try {
+            return ResponseEntity.ok(discoverPeerContainersUseCase.discoverAll());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
     }
 }

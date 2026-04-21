@@ -11,7 +11,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-class UserControllerIT extends VaierWebMvcIntegrationBase {
+class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void getUsers_returnsListOfUsers() throws Exception {
@@ -57,6 +57,32 @@ class UserControllerIT extends VaierWebMvcIntegrationBase {
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
                            {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice"}
+                           """))
+               .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void addUser_returns400WhenPasswordMissing() throws Exception {
+        doThrow(new IllegalArgumentException("password must not be blank"))
+                .when(addUserUseCase).addUser(eq("alice"), isNull(), any(), any());
+
+        mockMvc.perform(post("/users")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"username":"alice","email":"alice@example.com","displayname":"Alice"}
+                           """))
+               .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void addUser_returns400WhenUsernameMissing() throws Exception {
+        doThrow(new IllegalArgumentException("username must not be blank"))
+                .when(addUserUseCase).addUser(isNull(), any(), any(), any());
+
+        mockMvc.perform(post("/users")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"password":"secret","email":"alice@example.com","displayname":"Alice"}
                            """))
                .andExpect(status().isBadRequest());
     }
