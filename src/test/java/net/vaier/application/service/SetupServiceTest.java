@@ -164,7 +164,7 @@ class SetupServiceTest {
         assertThatThrownBy(() ->
             setupService.completeSetup(VALID_DOMAIN, VALID_KEY, VALID_SECRET, VALID_EMAIL, username, VALID_PASSWORD)
         ).isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("adminUsername");
+            .hasMessageContaining("username");
 
         verifyNoInteractions(configPersistence, forPersistingUsers, lifecycleService);
     }
@@ -176,7 +176,7 @@ class SetupServiceTest {
         assertThatThrownBy(() ->
             setupService.completeSetup(VALID_DOMAIN, VALID_KEY, VALID_SECRET, VALID_EMAIL, VALID_USERNAME, password)
         ).isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("adminPassword");
+            .hasMessageContaining("password");
 
         verifyNoInteractions(configPersistence, forPersistingUsers, lifecycleService);
     }
@@ -186,7 +186,7 @@ class SetupServiceTest {
         assertThatThrownBy(() ->
             setupService.completeSetup(VALID_DOMAIN, VALID_KEY, VALID_SECRET, VALID_EMAIL, VALID_USERNAME, "short")
         ).isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("adminPassword");
+            .hasMessageContaining("password");
 
         verifyNoInteractions(configPersistence, forPersistingUsers, lifecycleService);
     }
