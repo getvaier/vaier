@@ -21,7 +21,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
         when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(
                 new PublishedServiceUco(
                         "app", "app.example.com", DnsState.OK,
-                        "10.13.13.2", 8080, State.OK, false, false, null)
+                        "10.13.13.2", 8080, State.OK, false, false, null, false)
         ));
 
         mockMvc.perform(get("/published-services/discover"))
@@ -95,6 +95,18 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(status().isOk());
 
         verify(toggleServiceAuthUseCase).setAuthentication("app.example.com", true);
+    }
+
+    @Test
+    void setDirectUrlDisabled_togglesFlag() throws Exception {
+        mockMvc.perform(patch("/published-services/app.example.com/direct-url-disabled")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"directUrlDisabled":true}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(toggleServiceDirectUrlDisabledUseCase).setDirectUrlDisabled("app.example.com", true);
     }
 
     @Test

@@ -171,6 +171,14 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                 }
             }
 
+            Set<String> directUrlDisabled = readDirectUrlDisabledDomains(config);
+            if (!directUrlDisabled.isEmpty()) {
+                routes = routes.stream()
+                    .map(r -> directUrlDisabled.contains(r.getDomainName())
+                        ? applyDirectUrlDisabledFlag(r, true) : r)
+                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+            }
+
             log.info("Read {} routes from configuration file", routes.size());
 
         } catch (IOException e) {
@@ -1174,6 +1182,46 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     // --- ForManagingIgnoredServices ---
 
     private static final String IGNORED_KEY = "x-vaier-ignored";
+    private static final String DIRECT_URL_DISABLED_KEY = "x-vaier-direct-url-disabled";
+
+    @Override
+    public void setRouteDirectUrlDisabled(String dnsName, boolean directUrlDisabled) {
+        loadConfig();
+        if (config == null) config = new LinkedHashMap<>();
+        Object raw = config.get(DIRECT_URL_DISABLED_KEY);
+        List<String> disabled = (raw instanceof List<?> list)
+            ? new ArrayList<>(list.stream().map(Object::toString).toList())
+            : new ArrayList<>();
+        boolean changed;
+        if (directUrlDisabled) {
+            changed = !disabled.contains(dnsName) && disabled.add(dnsName);
+        } else {
+            changed = disabled.remove(dnsName);
+        }
+        if (changed) {
+            if (disabled.isEmpty()) config.remove(DIRECT_URL_DISABLED_KEY);
+            else config.put(DIRECT_URL_DISABLED_KEY, disabled);
+            saveConfig();
+        }
+    }
+
+    private Set<String> readDirectUrlDisabledDomains(Map<String, Object> cfg) {
+        if (cfg == null) return Set.of();
+        Object raw = cfg.get(DIRECT_URL_DISABLED_KEY);
+        if (raw instanceof List<?> list) {
+            return list.stream().map(Object::toString).collect(java.util.stream.Collectors.toSet());
+        }
+        return Set.of();
+    }
+
+    private ReverseProxyRoute applyDirectUrlDisabledFlag(ReverseProxyRoute r, boolean disabled) {
+        if (r.isDirectUrlDisabled() == disabled) return r;
+        return new ReverseProxyRoute(
+            r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
+            r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
+            r.getRootRedirectPath(), disabled
+        );
+    }
 
     @Override
     public Set<String> getIgnoredServiceKeys() {

@@ -427,6 +427,13 @@
                                     onclick="showRedirectModal('${service.dnsAddress}', '${(service.rootRedirectPath || '').replace(/'/g, "\\'")}')">
                                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>
                                 </span>`}</span>
+
+                            <span class="detail-label" title="When enabled, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
+                            <span class="detail-value">${service.directUrlDisabled ? 'disabled' : 'enabled'}${service.mandatory ? '' : `
+                                <span class="detail-edit-icon" title="${service.directUrlDisabled ? 'Enable' : 'Disable'} direct LAN URL"
+                                    onclick="toggleDirectUrlDisabled(this, '${service.dnsAddress}', ${service.directUrlDisabled})">
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>
+                                </span>`}</span>
                         </div>
                     </div>
                 </div>`;
@@ -630,6 +637,21 @@
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
                 submitBtn.textContent = 'Publish';
+            }
+        }
+
+        async function toggleDirectUrlDisabled(btn, dnsAddress, currentlyDisabled) {
+            const newDisabled = !currentlyDisabled;
+            try {
+                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ directUrlDisabled: newDisabled })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                await fetchServices();
+            } catch (error) {
+                alert(`Failed to update direct LAN URL setting: ${error.message}`);
             }
         }
 

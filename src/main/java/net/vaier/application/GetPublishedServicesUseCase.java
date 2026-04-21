@@ -17,7 +17,8 @@ public interface GetPublishedServicesUseCase {
         State state,
         boolean authenticated,
         boolean mandatory,
-        String rootRedirectPath
+        String rootRedirectPath,
+        boolean directUrlDisabled
     ){
 
     }

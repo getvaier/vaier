@@ -226,6 +226,27 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
+    void getLaunchpadServices_directUrlDisabledOnRoute_noDirectUrl() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "route", "app.example.com", "10.13.13.6", 6875, "svc",
+            null, null, null, null, null, true
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
+
+        assertThat(result.get(0).directUrl()).isNull();
+    }
+
+    @Test
     void getLaunchpadServices_peerHasNoEndpoint_noDirectUrl() {
         setupOneRoute("app.example.com", "10.13.13.6", 6875);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);

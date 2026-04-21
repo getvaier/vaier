@@ -147,6 +147,48 @@ class TraefikReverseProxyAdapterTest {
         assertThat(routes.getFirst().getAuthInfo()).isNull();
     }
 
+    // --- setRouteDirectUrlDisabled ---
+
+    @Test
+    void setRouteDirectUrlDisabled_persistsFlagThatRoundTripsViaGetRoutes() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        adapter.setRouteDirectUrlDisabled("app.example.com", true);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isDirectUrlDisabled()).isTrue();
+    }
+
+    @Test
+    void setRouteDirectUrlDisabled_false_clearsFlag() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteDirectUrlDisabled("app.example.com", true);
+
+        adapter.setRouteDirectUrlDisabled("app.example.com", false);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isDirectUrlDisabled()).isFalse();
+    }
+
+    @Test
+    void getReverseProxyRoutes_unsetDirectUrlDisabled_defaultsToFalse() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isDirectUrlDisabled()).isFalse();
+    }
+
+    @Test
+    void setRouteDirectUrlDisabled_persistsAcrossAdapterInstances() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteDirectUrlDisabled("app.example.com", true);
+
+        var adapter2 = new TraefikReverseProxyAdapter(
+            tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
+
+        assertThat(adapter2.getReverseProxyRoutes().getFirst().isDirectUrlDisabled()).isTrue();
+    }
+
     // --- getReverseProxyRoutes with empty file ---
 
     @Test

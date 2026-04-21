@@ -95,6 +95,7 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
 
     private String directUrl(PublishedServiceUco s, String callerIp,
                              List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
+        if (s.directUrlDisabled()) return null;
         if (callerIp == null || callerIp.isBlank()) return null;
         PeerConfiguration peer = peers.stream()
             .filter(p -> p.ipAddress() != null && p.ipAddress().equals(s.hostAddress()))
@@ -127,7 +128,8 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
             hostState(route.getAddress(), route.getPort(), localServices, vpnClients),
             route.getAuthInfo() != null,
             mandatory,
-            route.getRootRedirectPath()
+            route.getRootRedirectPath(),
+            route.isDirectUrlDisabled()
         );
     }
 

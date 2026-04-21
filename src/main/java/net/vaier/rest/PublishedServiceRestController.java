@@ -11,6 +11,7 @@ import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
+import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
 import org.springframework.http.MediaType;
@@ -32,6 +33,7 @@ public class PublishedServiceRestController {
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
     private final EditServiceRedirectUseCase editServiceRedirectUseCase;
+    private final ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     private final SseEventPublisher sseEventPublisher;
@@ -74,6 +76,14 @@ public class PublishedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @PatchMapping("/{dnsName:.+}/direct-url-disabled")
+    public ResponseEntity<Void> setDirectUrlDisabled(@PathVariable String dnsName, @RequestBody DirectUrlDisabledRequest request) {
+        log.info("Setting directUrlDisabled={} for {}", request.directUrlDisabled(), dnsName);
+        toggleServiceDirectUrlDisabledUseCase.setDirectUrlDisabled(dnsName, request.directUrlDisabled());
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{subdomain}/status")
     public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
         var status = publishPeerServiceUseCase.getPublishStatus(subdomain);
@@ -109,5 +119,6 @@ public class PublishedServiceRestController {
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}
+    record DirectUrlDisabledRequest(boolean directUrlDisabled) {}
     record IgnoreRequest(String key) {}
 }

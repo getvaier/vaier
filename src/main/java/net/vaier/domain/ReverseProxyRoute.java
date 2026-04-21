@@ -20,16 +20,21 @@ public class ReverseProxyRoute {
     private final TlsConfig tlsConfig;
     private final List<String> middlewares;
     private final String rootRedirectPath;
+    private final boolean directUrlDisabled;
 
-    // Constructor for backward compatibility (no rootRedirectPath)
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service, AuthInfo authInfo) {
-        this(name, domainName, address, port, service, authInfo, null, null, null, null);
+        this(name, domainName, address, port, service, authInfo, null, null, null, null, false);
     }
 
-    // Constructor without rootRedirectPath
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig, List<String> middlewares) {
-        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares, null);
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares, null, false);
+    }
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig, List<String> middlewares,
+                             String rootRedirectPath) {
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares, rootRedirectPath, false);
     }
 
     @AllArgsConstructor
