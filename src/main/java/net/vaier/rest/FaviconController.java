@@ -9,15 +9,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class FaviconController {
 
-    private final FaviconFetcherService faviconFetcherService;
+    private final FaviconFetcher faviconFetcher;
 
-    public FaviconController(FaviconFetcherService faviconFetcherService) {
-        this.faviconFetcherService = faviconFetcherService;
+    public FaviconController(FaviconFetcher faviconFetcher) {
+        this.faviconFetcher = faviconFetcher;
     }
 
     @GetMapping("/favicon")
     public ResponseEntity<byte[]> getFavicon(@RequestParam String host) {
-        return faviconFetcherService.fetch(host)
+        return faviconFetcher.fetch(host)
                 .map(bytes -> ResponseEntity.ok()
                         .contentType(detectContentType(bytes))
                         .body(bytes))

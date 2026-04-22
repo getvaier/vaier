@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 class FaviconControllerTest {
 
     @Mock
-    FaviconFetcherService faviconFetcherService;
+    FaviconFetcher faviconFetcher;
 
     @InjectMocks
     FaviconController controller;
@@ -24,7 +24,7 @@ class FaviconControllerTest {
     @Test
     void returns200WithBytesWhenFaviconFound() {
         byte[] icon = {0, 0, 1, 0};
-        when(faviconFetcherService.fetch("sonarr.example.com")).thenReturn(Optional.of(icon));
+        when(faviconFetcher.fetch("sonarr.example.com")).thenReturn(Optional.of(icon));
 
         ResponseEntity<byte[]> response = controller.getFavicon("sonarr.example.com");
 
@@ -34,7 +34,7 @@ class FaviconControllerTest {
 
     @Test
     void returns404WhenFaviconNotFound() {
-        when(faviconFetcherService.fetch("unknown.example.com")).thenReturn(Optional.empty());
+        when(faviconFetcher.fetch("unknown.example.com")).thenReturn(Optional.empty());
 
         ResponseEntity<byte[]> response = controller.getFavicon("unknown.example.com");
 

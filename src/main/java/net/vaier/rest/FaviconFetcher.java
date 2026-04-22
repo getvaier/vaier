@@ -16,7 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
-public class FaviconFetcherService {
+public class FaviconFetcher {
 
     private static final Pattern LINK_TAG =
             Pattern.compile("<link([^>]+)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
@@ -31,7 +31,7 @@ public class FaviconFetcherService {
     private final HttpClient htmlClient;
     private final HttpClient bytesClient;
 
-    public FaviconFetcherService() {
+    public FaviconFetcher() {
         this.htmlClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(Duration.ofSeconds(5))
