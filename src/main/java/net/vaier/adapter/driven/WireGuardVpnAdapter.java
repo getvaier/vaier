@@ -11,7 +11,6 @@ import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
-import net.vaier.domain.port.ForRestoringVpnPeers;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
@@ -31,7 +30,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpnPeers, ForRestoringVpnPeers {
+public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpnPeers {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -374,60 +373,6 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         } catch (IOException | InterruptedException e) {
             log.error("Error deleting peer", e);
             throw new RuntimeException("Failed to delete peer: " + e.getMessage(), e);
-        }
-    }
-
-    @Override
-    public void restorePeer(ForGettingPeerConfigurations.PeerConfiguration config) {
-        String peerName = config.name();
-        String configContent = config.configContent();
-        String ipAddress = config.ipAddress();
-        String lanCidr = config.lanCidr();
-
-        log.info("Restoring peer {} on interface {}", peerName, wireguardInterface);
-
-        try {
-            String privateKey = extractValue(configContent, "PrivateKey");
-            String presharedKey = extractValue(configContent, "PresharedKey");
-
-            if (privateKey.isEmpty()) {
-                throw new RuntimeException("Cannot restore peer " + peerName + ": PrivateKey not found in config");
-            }
-
-            String publicKey = executeInContainerWithInput(privateKey, "wg", "pubkey").trim();
-            log.info("Derived public key for peer {}: {}", peerName, publicKey);
-
-            Path peerDir = Paths.get(wireguardConfigPath, peerName);
-            Files.createDirectories(peerDir);
-            Files.writeString(peerDir.resolve(peerName + ".conf"), configContent);
-            log.info("Wrote config file for peer {}", peerName);
-
-            String serverAllowedIps = ipAddress + "/32";
-            if (lanCidr != null && !lanCidr.isBlank()) {
-                serverAllowedIps = serverAllowedIps + "," + lanCidr;
-            }
-
-            if (!presharedKey.isEmpty()) {
-                String pskFile = "/tmp/psk_restore_" + System.currentTimeMillis();
-                executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
-                executeInContainer("sh", "-c", String.format(
-                        "wg set %s peer %s preshared-key %s allowed-ips %s",
-                        wireguardInterface, publicKey, pskFile, serverAllowedIps));
-                executeInContainer("rm", "-f", pskFile);
-            } else {
-                executeInContainer("sh", "-c", String.format(
-                        "wg set %s peer %s allowed-ips %s",
-                        wireguardInterface, publicKey, serverAllowedIps));
-            }
-
-            executeInContainer("wg-quick", "save", wireguardInterface);
-            restartWireGuardService();
-
-            log.info("Peer {} restored successfully", peerName);
-
-        } catch (IOException | InterruptedException e) {
-            log.error("Error restoring peer {}", peerName, e);
-            throw new RuntimeException("Failed to restore peer: " + e.getMessage(), e);
         }
     }
 

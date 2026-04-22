@@ -1,81 +1,19 @@
 package net.vaier.integration.controller;
 
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
-import net.vaier.application.ImportConfigurationUseCase.ImportResult;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
-import java.util.List;
-
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class SettingsControllerIT extends VaierWebMvcIntegrationBase {
-
-    @Test
-    void export_returnsJsonAsAttachment() throws Exception {
-        when(exportConfigurationUseCase.exportConfiguration()).thenReturn("{\"version\":\"1\"}");
-
-        mockMvc.perform(get("/settings/export"))
-               .andExpect(status().isOk())
-               .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"vaier-backup.json\""))
-               .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-               .andExpect(content().string("{\"version\":\"1\"}"));
-    }
-
-    @Test
-    void export_returns500WhenExportFails() throws Exception {
-        when(exportConfigurationUseCase.exportConfiguration())
-                .thenThrow(new RuntimeException("file write failed"));
-
-        mockMvc.perform(get("/settings/export"))
-               .andExpect(status().isInternalServerError());
-    }
-
-    @Test
-    void importConfig_returns200WithSuccessResult() throws Exception {
-        String json = "{\"version\":\"1\",\"peers\":[],\"services\":[],\"dnsZones\":[],\"users\":[]}";
-        ImportResult result = new ImportResult(true, "Import completed", List.of());
-        when(importConfigurationUseCase.importConfiguration(json)).thenReturn(result);
-
-        mockMvc.perform(post("/settings/import")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content(json))
-               .andExpect(status().isOk())
-               .andExpect(jsonPath("$.success").value(true))
-               .andExpect(jsonPath("$.message").value("Import completed"));
-    }
-
-    @Test
-    void importConfig_returns400WhenImportFails() throws Exception {
-        String badJson = "not valid json";
-        when(importConfigurationUseCase.importConfiguration(badJson))
-                .thenReturn(new ImportResult(false, "Invalid backup file", List.of()));
-
-        mockMvc.perform(post("/settings/import")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content(badJson))
-               .andExpect(status().isBadRequest())
-               .andExpect(jsonPath("$.success").value(false))
-               .andExpect(jsonPath("$.message").value("Invalid backup file"));
-    }
-
-    @Test
-    void importConfig_includesWarningsInResponse() throws Exception {
-        String json = "{\"version\":\"1\",\"peers\":[],\"services\":[],\"dnsZones\":[],\"users\":[]}";
-        ImportResult result = new ImportResult(true, "Import completed with warnings",
-                List.of("Skipping duplicate user: alice"));
-        when(importConfigurationUseCase.importConfiguration(json)).thenReturn(result);
-
-        mockMvc.perform(post("/settings/import")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content(json))
-               .andExpect(status().isOk())
-               .andExpect(jsonPath("$.warnings[0]").value("Skipping duplicate user: alice"));
-    }
 
     @Test
     void getConfig_returnsAppSettings() throws Exception {

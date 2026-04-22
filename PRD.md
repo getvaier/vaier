@@ -203,16 +203,17 @@ No planned changes.
 
 ---
 
-### 6.7 Backup / Restore ✅ (exists)
+### 6.7 Backup / Restore 🔲 (deferred to V2, tracked in [#153](https://github.com/getvaier/vaier/issues/153))
 
-Export and import the full Vaier configuration as a JSON snapshot.
+Export and import the full Vaier configuration as a snapshot.
 
-**Current capabilities:**
-- **Export** — downloads a JSON file containing all peers, published services, DNS records, and users (with email + displayname so the round-trip restores Authelia entries)
-- **Import** — uploads a JSON backup and restores configuration; shows a real-time SSE log of each step
-- **Version gate** — import rejects backups whose `version` field is outside `SUPPORTED_IMPORT_VERSIONS` (currently `{"1"}`) with a clear error, preventing silent corruption when the schema next changes
-- Round-trip covered by an integration test that seeds peers, services, DNS zones, and users, exports, then imports into a fresh target and asserts every exported entity is restored (user passwords become a one-shot temp password, as designed)
-- Accessible from the Settings page
+**V1 decision:** removed from scope. The earlier V1 implementation shipped a plaintext JSON export containing every peer's WireGuard private key and an import path with shell-injection ([#141](https://github.com/getvaier/vaier/issues/141)) and path-traversal ([#142](https://github.com/getvaier/vaier/issues/142)) risk. Rather than patch those in V1, the REST endpoints and UI have been removed and the feature is re-planned for V2 with encryption-at-rest and hardened restore.
+
+**V2 goals (see #153):**
+- Passphrase-encrypted export (AES-256-GCM, scrypt KDF) by default
+- Hardened restore: argv-style exec throughout, strict input validation at the import boundary
+- Round-trip integration test in the new format
+- UI rework with re-auth / 2FA gate on import
 
 ---
 

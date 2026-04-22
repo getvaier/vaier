@@ -161,12 +161,6 @@ public abstract class VaierWebMvcIntegrationBase {
 
     // --- Settings use cases ---
     @MockBean
-    protected ExportConfigurationUseCase exportConfigurationUseCase;
-
-    @MockBean
-    protected ImportConfigurationUseCase importConfigurationUseCase;
-
-    @MockBean
     protected GetAppSettingsUseCase getAppSettingsUseCase;
 
     @MockBean

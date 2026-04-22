@@ -255,8 +255,6 @@
 </head>
 <body>
     <div class="container">
-        <div id="message"></div>
-
         <!-- AWS Credentials -->
         <div class="settings-section">
             <div class="settings-section-title">AWS Credentials</div>
@@ -336,58 +334,9 @@
             </div>
         </div>
 
-        <div class="settings-section">
-            <div class="settings-section-title">Backup &amp; Restore</div>
-
-            <!-- Export -->
-            <div class="settings-card">
-                <div class="settings-card-info">
-                    <div class="settings-card-title">Export configuration</div>
-                    <div class="settings-card-desc">
-                        Downloads a JSON backup of all peers, services, DNS records, and users.
-                        Use this for disaster recovery or migrating to a new server.
-                    </div>
-                </div>
-                <div class="settings-card-action">
-                    <button class="btn btn-primary" onclick="exportConfig()">Export backup</button>
-                </div>
-            </div>
-
-            <!-- Import -->
-            <div class="settings-card">
-                <div class="settings-card-info">
-                    <div class="settings-card-title">Import configuration</div>
-                    <div class="settings-card-desc">
-                        Restore from a previously exported backup file.
-                        Existing entries are skipped; users are created with temporary passwords.
-                    </div>
-                </div>
-                <div class="settings-card-action">
-                    <div class="import-file-row">
-                        <input type="file" id="importFile" accept=".json,application/json">
-                        <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()">Choose file</button>
-                        <span class="file-label" id="fileLabel">No file chosen</span>
-                        <button class="btn btn-warning" id="importBtn" onclick="importConfig()" disabled>Import</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Log window (hidden until import starts) -->
-            <div id="import-log" class="import-log" style="display:none">
-                <div class="import-log-header">
-                    Import log
-                    <span class="import-log-status" id="logStatus"></span>
-                </div>
-                <div class="import-log-body" id="logBody"></div>
-            </div>
-
-            <div id="warnings-container"></div>
-        </div>
     </div>
 
     <script>
-        let importEventSource = null;
-
         // Load current settings on page load
         async function loadSettings() {
             try {
@@ -501,118 +450,6 @@
         }
 
         loadSettings();
-
-        document.getElementById('importFile').addEventListener('change', e => {
-            const file = e.target.files[0];
-            document.getElementById('fileLabel').textContent = file ? file.name : 'No file chosen';
-            document.getElementById('importBtn').disabled = !file;
-        });
-
-        function exportConfig() {
-            window.location.href = '/settings/export';
-        }
-
-        async function importConfig() {
-            const file = document.getElementById('importFile').files[0];
-            if (!file) return;
-
-            if (!confirm('Import this backup? Existing entries will be skipped, but new entries will be created. Users will receive temporary passwords that must be reset.')) return;
-
-            const importBtn = document.getElementById('importBtn');
-            importBtn.disabled = true;
-            importBtn.textContent = 'Importing…';
-            document.getElementById('warnings-container').innerHTML = '';
-            document.getElementById('message').innerHTML = '';
-
-            // Show log window and clear it
-            const logEl = document.getElementById('import-log');
-            const logBody = document.getElementById('logBody');
-            const logStatus = document.getElementById('logStatus');
-            logEl.style.display = '';
-            logBody.innerHTML = '';
-            logStatus.textContent = 'running…';
-
-            // Open SSE connection for live log
-            if (importEventSource) importEventSource.close();
-            importEventSource = new EventSource('/settings/import/events');
-            importEventSource.addEventListener('log', e => {
-                appendLog(logBody, e.data);
-            });
-
-            // Small delay so the SSE connection is established before the POST fires
-            await new Promise(r => setTimeout(r, 150));
-
-            try {
-                const content = await file.text();
-                const response = await fetch('/settings/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: content
-                });
-
-                const result = await response.json();
-
-                // Small delay to let the last SSE messages arrive
-                await new Promise(r => setTimeout(r, 300));
-                importEventSource.close();
-                importEventSource = null;
-
-                if (result.success) {
-                    logStatus.textContent = 'done';
-                    displayMessage('Import completed successfully.', 'success');
-                    if (result.warnings && result.warnings.length > 0) {
-                        showWarnings(result.warnings);
-                    }
-                    document.getElementById('importFile').value = '';
-                    document.getElementById('fileLabel').textContent = 'No file chosen';
-                } else {
-                    logStatus.textContent = 'failed';
-                    displayMessage(`Import failed: ${result.message}`, 'error');
-                }
-            } catch (err) {
-                if (importEventSource) { importEventSource.close(); importEventSource = null; }
-                logStatus.textContent = 'error';
-                displayMessage(`Import failed: ${err.message}`, 'error');
-            } finally {
-                importBtn.disabled = false;
-                importBtn.textContent = 'Import';
-            }
-        }
-
-        function appendLog(container, line) {
-            const span = document.createElement('span');
-            if (line.includes('-> ok')) {
-                span.className = 'log-line-ok';
-            } else if (line.includes('-> failed') || line.includes('-> error')) {
-                span.className = 'log-line-fail';
-            } else if (line.startsWith('Starting') || line.startsWith('Import complete')) {
-                span.className = 'log-line-header';
-            } else if (line.includes('reset password')) {
-                span.className = 'log-line-warn';
-            }
-            span.textContent = line + '\n';
-            container.appendChild(span);
-            container.scrollTop = container.scrollHeight;
-        }
-
-        function showWarnings(warnings) {
-            const items = warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('');
-            document.getElementById('warnings-container').innerHTML = `
-                <div class="warnings-list">
-                    <div class="warnings-title">Notices</div>
-                    <ul>${items}</ul>
-                </div>`;
-        }
-
-        function displayMessage(message, type) {
-            const el = document.getElementById('message');
-            el.innerHTML = `<div class="${type}">${escapeHtml(message)}</div>`;
-            if (type === 'success') setTimeout(() => el.innerHTML = '', 8000);
-        }
-
-        function escapeHtml(str) {
-            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        }
     </script>
 </body>
 </html>
