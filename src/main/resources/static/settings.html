@@ -291,11 +291,10 @@
         <div class="settings-section">
             <div class="settings-section-title">SMTP Notifier</div>
             <div class="settings-form-card">
-                <div class="settings-form-card-title">Email notifications (Authelia)</div>
+                <div class="settings-form-card-title">Email notifications</div>
                 <div class="settings-form-card-desc">
-                    Configure an SMTP server so Authelia can send password-reset emails.
-                    Saving will regenerate the Authelia configuration.
-                    Leave blank to keep the default filesystem notifier.
+                    Configure an SMTP server so Vaier can send emails — for example password-reset
+                    messages and, later, other notifications. Leave blank to disable outgoing email.
                 </div>
                 <div class="settings-form-row">
                     <div class="settings-form-field">
@@ -313,7 +312,7 @@
                 </div>
                 <div class="settings-form-row" style="margin-top: 0.5rem;">
                     <div class="settings-form-field">
-                        <label>Password</label>
+                        <label>Password <span style="font-weight: normal; opacity: 0.7;">(leave blank to reuse stored)</span></label>
                         <input type="password" id="smtpPassword" placeholder="••••••••" autocomplete="new-password">
                     </div>
                     <div class="settings-form-field">
@@ -321,7 +320,16 @@
                         <input type="text" id="smtpSender" placeholder="noreply@example.com">
                     </div>
                 </div>
-                <div class="settings-form-actions">
+                <div class="settings-form-row" style="margin-top: 1rem; padding: 0.75rem; border: 1px dashed var(--color-border, #3c3c3c); border-radius: 4px; align-items: flex-end;">
+                    <div class="settings-form-field" style="flex: 1;">
+                        <label>Send a test email to</label>
+                        <input type="email" id="smtpTestRecipient" placeholder="you@example.com" autocomplete="email">
+                    </div>
+                    <div style="flex: 0 0 auto;">
+                        <button class="btn btn-secondary" onclick="testSmtp()">Send test email</button>
+                    </div>
+                </div>
+                <div class="settings-form-actions" style="margin-top: 1rem;">
                     <button class="btn btn-primary" onclick="saveSmtp()">Save SMTP settings</button>
                     <span class="settings-form-note" id="smtpNote"></span>
                 </div>
@@ -428,8 +436,8 @@
             const username = document.getElementById('smtpUsername').value.trim();
             const password = document.getElementById('smtpPassword').value;
             const sender = document.getElementById('smtpSender').value.trim();
-            if (!host || !username || !password || !sender) {
-                setNote('smtpNote', 'Host, username, password and sender are required.', 'error');
+            if (!host || !username || !sender) {
+                setNote('smtpNote', 'Host, username and sender are required.', 'error');
                 return;
             }
             setNote('smtpNote', 'Saving…', '');
@@ -440,11 +448,44 @@
                     body: JSON.stringify({ smtpHost: host, smtpPort: port, smtpUsername: username, smtpPassword: password, smtpSender: sender })
                 });
                 if (r.ok) {
-                    setNote('smtpNote', 'Saved. Authelia config regenerated.', 'ok');
+                    setNote('smtpNote', 'SMTP settings saved.', 'ok');
                     document.getElementById('smtpPassword').value = '';
                 } else {
                     const err = await r.json().catch(() => ({ error: r.statusText }));
                     setNote('smtpNote', err.error || 'Save failed.', 'error');
+                }
+            } catch (e) {
+                setNote('smtpNote', e.message, 'error');
+            }
+        }
+
+        async function testSmtp() {
+            const host = document.getElementById('smtpHost').value.trim();
+            const port = parseInt(document.getElementById('smtpPort').value) || 587;
+            const username = document.getElementById('smtpUsername').value.trim();
+            const password = document.getElementById('smtpPassword').value;
+            const sender = document.getElementById('smtpSender').value.trim();
+            const recipient = document.getElementById('smtpTestRecipient').value.trim();
+            if (!host || !username || !sender) {
+                setNote('smtpNote', 'Host, username and sender are required.', 'error');
+                return;
+            }
+            if (!recipient) {
+                setNote('smtpNote', 'Enter a recipient address for the test email.', 'error');
+                return;
+            }
+            setNote('smtpNote', 'Sending test email…', '');
+            try {
+                const r = await fetch('/settings/smtp/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ smtpHost: host, smtpPort: port, smtpUsername: username, smtpPassword: password, smtpSender: sender, recipient: recipient })
+                });
+                if (r.ok) {
+                    setNote('smtpNote', 'Test email sent. Check ' + recipient + '.', 'ok');
+                } else {
+                    const err = await r.json().catch(() => ({ error: r.statusText }));
+                    setNote('smtpNote', err.error || 'Test failed.', 'error');
                 }
             } catch (e) {
                 setNote('smtpNote', e.message, 'error');

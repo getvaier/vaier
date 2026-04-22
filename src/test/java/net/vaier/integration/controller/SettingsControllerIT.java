@@ -138,8 +138,8 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void updateSmtp_returns500WhenFails() throws Exception {
-        doThrow(new RuntimeException("Config write failed"))
+    void updateSmtp_returns400WhenFails() throws Exception {
+        doThrow(new RuntimeException("SMTP AUTH failed"))
                 .when(updateSmtpSettingsUseCase).updateSmtpSettings(any(), anyInt(), any(), any(), any());
 
         mockMvc.perform(put("/settings/smtp")
@@ -153,6 +153,6 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
                              "smtpSender":"noreply@example.com"
                            }
                            """))
-               .andExpect(status().isInternalServerError());
+               .andExpect(status().isBadRequest());
     }
 }

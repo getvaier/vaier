@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.ImportConfigurationUseCase;
 import net.vaier.application.ImportConfigurationUseCase.ImportResult;
+import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
@@ -32,6 +33,7 @@ class SettingsRestControllerTest {
     @Mock GetAppSettingsUseCase getAppSettingsUseCase;
     @Mock UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
     @Mock UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
+    @Mock TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -127,8 +129,8 @@ class SettingsRestControllerTest {
     }
 
     @Test
-    void updateSmtp_returns500WhenFails() {
-        doThrow(new RuntimeException("Config write failed"))
+    void updateSmtp_returns400WhenFails() {
+        doThrow(new RuntimeException("SMTP AUTH failed"))
                 .when(updateSmtpSettingsUseCase).updateSmtpSettings(
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.anyInt(),
@@ -140,6 +142,36 @@ class SettingsRestControllerTest {
                 new SettingsRestController.UpdateSmtpRequest("smtp.example.com", 587,
                         "user@example.com", "pass", "noreply@example.com"));
 
-        assertThat(response.getStatusCode().value()).isEqualTo(500);
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void testSmtp_returns200WhenTestEmailSends() {
+        ResponseEntity<?> response = controller.testSmtp(
+                new SettingsRestController.TestSmtpRequest("smtp.example.com", 587,
+                        "user@example.com", "pass", "noreply@example.com", "admin@example.com"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(testSmtpCredentialsUseCase).sendTestEmail(
+                "smtp.example.com", 587, "user@example.com", "pass",
+                "noreply@example.com", "admin@example.com");
+    }
+
+    @Test
+    void testSmtp_returns400WhenSendFails() {
+        doThrow(new RuntimeException("SMTP AUTH failed: 534"))
+                .when(testSmtpCredentialsUseCase).sendTestEmail(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+
+        ResponseEntity<?> response = controller.testSmtp(
+                new SettingsRestController.TestSmtpRequest("smtp.example.com", 587,
+                        "user@example.com", "badpass", "noreply@example.com", "admin@example.com"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
     }
 }

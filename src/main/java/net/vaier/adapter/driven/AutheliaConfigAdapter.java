@@ -2,18 +2,20 @@ package net.vaier.adapter.driven;
 
 import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForInitialisingUserService;
+import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.Optional;
 import java.util.Properties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class AutheliaConfigAdapter implements ForInitialisingUserService, ForConfiguringSmtpNotifier {
+public class AutheliaConfigAdapter implements ForInitialisingUserService, ForConfiguringSmtpNotifier, ForReadingStoredSmtpPassword {
 
     private final String configurationFile;
     private final String secretsFile;
@@ -82,6 +84,22 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
             throw new RuntimeException("Failed to initialize Authelia configuration", e);
         }
         return true;
+    }
+
+    @Override
+    public Optional<String> readStoredPassword() {
+        File secretsFileObj = new File(this.secretsFile);
+        if (!secretsFileObj.exists()) {
+            return Optional.empty();
+        }
+        Properties secrets = new Properties();
+        try (FileInputStream fis = new FileInputStream(secretsFileObj)) {
+            secrets.load(fis);
+        } catch (IOException e) {
+            log.warn("Failed to read secrets file while looking up smtp_password", e);
+            return Optional.empty();
+        }
+        return Optional.ofNullable(secrets.getProperty("smtp_password"));
     }
 
     @Override

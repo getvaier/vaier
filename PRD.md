@@ -236,29 +236,19 @@ Keep the operator aware when Docker images have newer versions available.
 
 ---
 
-### 6.9 Authelia Email Notifications 🔲 (planned, tracked in [#49](https://github.com/getvaier/vaier/issues/49))
+### 6.9 Email Notifications ✅ (implemented)
 
-Authelia sends emails for password reset and two-factor enrolment flows. Currently the `notifier` in the generated Authelia config is set to `filesystem` — emails are written to a text file (`/config/emails.txt`) instead of being delivered. This means password reset is broken for end users.
+Vaier ships an SMTP notifier that powers Authelia password-reset emails today and is intended to carry other Vaier notifications in future. Settings are stored in `vaier-config.yml`; the password lives in Authelia's `secrets.properties`.
 
-**Requirements:**
-- Replace the filesystem notifier with an SMTP notifier in the generated Authelia config
-- Vaier generates the Authelia config at startup (`AutheliaConfigAdapter`) so the SMTP block needs to be injected there
-- The SMTP settings must be persisted so they survive container restarts (stored in Vaier's config, not passed as one-time env vars)
+**What's implemented:**
+- Settings → *Email notifications* form with host, port, username, password, sender, and a "Send test email to …" recipient field.
+- **Send test email** button does a full AUTH + roundtrip send via Jakarta Mail so misconfigurations surface without touching the auth layer.
+- **Save** verifies credentials against the SMTP server *before* writing the Authelia notifier block or restarting Authelia. On failure the REST endpoint returns HTTP 400 with the upstream SMTP error; Authelia is left untouched.
+- Password field can be left blank on save/test to reuse the stored value, so host/sender/etc. can be edited without retyping the secret.
+- `AutheliaConfigAdapter` generates `notifier: smtp` when a password is stored, otherwise falls back to `notifier: filesystem` so Authelia always has a valid notifier to start.
+- SMTP UI copy is provider-neutral — Authelia is one consumer; future Vaier emails will reuse the same settings.
 
-**Config fields required from the user:**
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| SMTP host | Mail server hostname | `email-smtp.eu-west-1.amazonaws.com` |
-| SMTP port | Usually 587 (STARTTLS) or 465 (SSL) | `587` |
-| SMTP username | Auth username | *(SES SMTP credential or Gmail address)* |
-| SMTP password | Auth password / app password | *(SES SMTP credential or Gmail app password)* |
-| Sender address | The `From:` address | `noreply@yourdomain.com` |
-| Sender name | Display name in the From header | `Vaier` |
-
-**Natural default — AWS SES:** Since the user already has AWS credentials in Vaier for Route53, AWS SES is the obvious first choice. The SMTP endpoint is `email-smtp.{region}.amazonaws.com:587`. Note: SES SMTP credentials are separate from IAM credentials and must be generated in the SES console; Vaier cannot derive them from the existing `VAIER_AWS_KEY`/`VAIER_AWS_SECRET`.
-
-**No lock-in:** Any SMTP provider works (Gmail with app password, Sendgrid, Mailgun, self-hosted Postfix, etc.). The UI should not assume AWS SES — it should present generic SMTP fields with AWS SES as a labelled example.
+**Known gotcha:** Gmail requires an **App Password** (not the account password) when 2FA is on. The pre-save verification catches this cleanly — save is rejected with the Gmail `534 5.7.9 Application-specific password required` message.
 
 ---
 

@@ -175,6 +175,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
 
+    @MockBean
+    protected TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
+
     // --- Docker/server use cases ---
     @MockBean
     protected GetServerInfoUseCase getServerInfoUseCase;

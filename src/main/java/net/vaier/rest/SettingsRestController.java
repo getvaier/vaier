@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.ImportConfigurationUseCase;
 import net.vaier.application.ImportConfigurationUseCase.ImportResult;
+import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.application.service.ImportConfigurationService;
@@ -30,19 +31,22 @@ public class SettingsRestController {
     private final GetAppSettingsUseCase getAppSettingsUseCase;
     private final UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
     private final UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
+    private final TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
 
     public SettingsRestController(ExportConfigurationUseCase exportConfigurationUseCase,
                                   ImportConfigurationUseCase importConfigurationUseCase,
                                   SseEventPublisher sseEventPublisher,
                                   GetAppSettingsUseCase getAppSettingsUseCase,
                                   UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase,
-                                  UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase) {
+                                  UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase,
+                                  TestSmtpCredentialsUseCase testSmtpCredentialsUseCase) {
         this.exportConfigurationUseCase = exportConfigurationUseCase;
         this.importConfigurationUseCase = importConfigurationUseCase;
         this.sseEventPublisher = sseEventPublisher;
         this.getAppSettingsUseCase = getAppSettingsUseCase;
         this.updateAwsCredentialsUseCase = updateAwsCredentialsUseCase;
         this.updateSmtpSettingsUseCase = updateSmtpSettingsUseCase;
+        this.testSmtpCredentialsUseCase = testSmtpCredentialsUseCase;
     }
 
     @GetMapping(value = "/import/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -94,12 +98,26 @@ public class SettingsRestController {
                 request.smtpPassword(), request.smtpSender());
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(new ErrorResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/smtp/test")
+    public ResponseEntity<?> testSmtp(@RequestBody TestSmtpRequest request) {
+        try {
+            testSmtpCredentialsUseCase.sendTestEmail(request.smtpHost(), request.smtpPort(),
+                request.smtpUsername(), request.smtpPassword(),
+                request.smtpSender(), request.recipient());
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
         }
     }
 
     public record UpdateAwsRequest(String awsKey, String awsSecret) {}
     public record UpdateSmtpRequest(String smtpHost, int smtpPort, String smtpUsername,
                                     String smtpPassword, String smtpSender) {}
+    public record TestSmtpRequest(String smtpHost, int smtpPort, String smtpUsername,
+                                  String smtpPassword, String smtpSender, String recipient) {}
     record ErrorResponse(String error) {}
 }

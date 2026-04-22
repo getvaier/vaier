@@ -1,8 +1,10 @@
 package net.vaier.config;
 
+import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -10,6 +12,7 @@ import org.springframework.stereotype.Component;
 public class ConfigResolver {
 
     private final ForPersistingAppConfiguration configPersistence;
+    private final Function<String, String> envLookup;
     private String domain;
     private String awsKey;
     private String awsSecret;
@@ -19,34 +22,36 @@ public class ConfigResolver {
     private String smtpUsername;
     private String smtpSender;
 
+    @Autowired
     public ConfigResolver(ForPersistingAppConfiguration configPersistence) {
+        this(configPersistence, System::getenv);
+    }
+
+    ConfigResolver(ForPersistingAppConfiguration configPersistence, Function<String, String> envLookup) {
         this.configPersistence = configPersistence;
+        this.envLookup = envLookup;
         reload();
     }
 
     public void reload() {
-        configPersistence.load().ifPresentOrElse(
-            config -> {
-                this.domain = config.getDomain();
-                this.awsKey = config.getAwsKey();
-                this.awsSecret = config.getAwsSecret();
-                this.acmeEmail = config.getAcmeEmail();
-                this.smtpHost = config.getSmtpHost();
-                this.smtpPort = config.getSmtpPort();
-                this.smtpUsername = config.getSmtpUsername();
-                this.smtpSender = config.getSmtpSender();
-                log.info("Configuration loaded from file for domain: {}", domain);
-            },
-            () -> {
-                this.domain = System.getenv("VAIER_DOMAIN");
-                this.awsKey = System.getenv("VAIER_AWS_KEY");
-                this.awsSecret = System.getenv("VAIER_AWS_SECRET");
-                this.acmeEmail = System.getenv("ACME_EMAIL");
-                if (domain != null) {
-                    log.info("Configuration loaded from environment variables for domain: {}", domain);
-                }
-            }
-        );
+        VaierConfig config = configPersistence.load().orElseGet(() -> VaierConfig.builder().build());
+        this.domain = firstNonBlank(config.getDomain(), envLookup.apply("VAIER_DOMAIN"));
+        this.awsKey = firstNonBlank(config.getAwsKey(), envLookup.apply("VAIER_AWS_KEY"));
+        this.awsSecret = firstNonBlank(config.getAwsSecret(), envLookup.apply("VAIER_AWS_SECRET"));
+        this.acmeEmail = firstNonBlank(config.getAcmeEmail(), envLookup.apply("ACME_EMAIL"));
+        this.smtpHost = config.getSmtpHost();
+        this.smtpPort = config.getSmtpPort();
+        this.smtpUsername = config.getSmtpUsername();
+        this.smtpSender = config.getSmtpSender();
+        if (domain != null) {
+            log.info("Configuration resolved for domain: {}", domain);
+        }
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) return a;
+        if (b != null && !b.isBlank()) return b;
+        return null;
     }
 
     public String getDomain() { return domain; }

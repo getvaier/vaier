@@ -33,6 +33,7 @@ build/
 wireguard/
 authelia/
 traefik/
+/vaier/
 
 # WireGuard
 wireguard-config/
