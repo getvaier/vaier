@@ -11,7 +11,7 @@
 
 **Self-hosted infrastructure management for homelab developers.**
 
-Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — automatically.
+Vaier wires together WireGuard, Traefik, Authelia, and your DNS provider (AWS Route53 and/or Cloudflare) into a single web UI. Add a Docker container on any VPN peer, pick a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — automatically.
 
 ---
 
@@ -26,7 +26,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Service publishing** | Discover Docker containers on the VPN server and on connected peers. Publish any container as a public HTTPS subdomain in one action. Automatic rollback of the DNS CNAME if the publish flow fails (DNS timeout, Traefik error, or Traefik never picks up the route), and automatic cleanup of published services when a peer is deleted. |
 | **Smart launchpad** | Public `/launchpad.html` tiles link to `https://service.domain` normally, but switch to direct `http://lanAddress:port` when the caller is on the same LAN as the hosting server — bypassing the proxy and auth. Per-service opt-out for apps whose public origin differs from `http://lan:port` (e.g. Vaultwarden). |
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle, editable root path redirect, and per-service direct LAN URL opt-out. |
-| **DNS management** | Full CRUD for AWS Route53 zones and records. |
+| **DNS management** | Full CRUD across AWS Route53 and Cloudflare. Both providers can be active simultaneously — Vaier dispatches per-zone, so migrations from one to the other can run in parallel. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
 | **Email notifications** | SMTP settings in *Settings* power Authelia password-reset emails today and future Vaier notifications. Credentials are verified against the server before saving; a dedicated "Send test email" button delivers a real roundtrip message to any recipient. |
 | **First-run setup wizard** | Web-based wizard at `/setup.html` guides you through domain, AWS credentials, ACME email, and admin account creation — no `.env` file editing required. |
@@ -52,7 +52,11 @@ Vaier runs as part of a five-container Docker Compose stack:
 - A Linux server with a public IP (EC2 t3.small or similar)
 - Docker and Docker Compose installed
 - A domain name you control
-- AWS credentials with Route53 access
+- Credentials for your DNS provider:
+  - **AWS Route53** — access key + secret, or
+  - **Cloudflare** — a scoped API token with `Zone:Read` and `Zone.DNS:Edit`
+
+Both can be configured at once if you're mid-migration.
 
 ### Server ports to open
 
@@ -106,8 +110,9 @@ After completing the wizard, Vaier initializes DNS records, configures Authelia,
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `VAIER_AWS_KEY` | Yes | AWS access key for Route53 |
-| `VAIER_AWS_SECRET` | Yes | AWS secret key for Route53 |
+| `VAIER_AWS_KEY` | One DNS provider required | AWS access key for Route53 |
+| `VAIER_AWS_SECRET` | One DNS provider required | AWS secret key for Route53 |
+| `VAIER_CLOUDFLARE_TOKEN` | One DNS provider required | Cloudflare API token (Zone:Read + Zone.DNS:Edit) |
 | `VAIER_DOMAIN` | Yes | Base domain (e.g. `yourdomain.com`) |
 | `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications |
 | `WIREGUARD_CONFIG_PATH` | No | WireGuard config dir (default: `/wireguard/config`) |

@@ -29,6 +29,7 @@ public class UpdateAwsCredentialsService implements UpdateAwsCredentialsUseCase 
             .domain(current.getDomain())
             .awsKey(awsKey)
             .awsSecret(awsSecret)
+            .cloudflareToken(current.getCloudflareToken())
             .acmeEmail(current.getAcmeEmail())
             .smtpHost(current.getSmtpHost())
             .smtpPort(current.getSmtpPort())

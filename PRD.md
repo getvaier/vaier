@@ -12,7 +12,7 @@ Vaier is a self-hosted infrastructure management tool for developers running a h
 
 The core value proposition: add a new Docker service anywhere on your VPN, select a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — end to end.
 
-Vaier is a personal tool that will be open-sourced. It is not intended to compete with general-purpose infrastructure platforms (Portainer, Coolify, Rancher, etc.). It is opinionated about its stack: WireGuard + Traefik + Authelia + AWS Route53.
+Vaier is a personal tool that will be open-sourced. It is not intended to compete with general-purpose infrastructure platforms (Portainer, Coolify, Rancher, etc.). It is opinionated about its stack: WireGuard + Traefik + Authelia + pluggable DNS (Route53 and Cloudflare).
 
 ---
 
@@ -69,7 +69,7 @@ Each step is done in a different tool, with no feedback loop. Mistakes are silen
 ## 5. Non-Goals
 
 - Not a general-purpose container orchestrator (no Portainer replacement)
-- Not a multi-cloud DNS manager (Route53 only for now)
+- Not a full multi-cloud DNS manager (Route53 and Cloudflare supported; no GCP/Azure/etc.)
 - Not a monitoring platform
 - No multi-server WireGuard topology (single VPN server, multiple peers)
 - No management of the Docker host OS (no package installs, kernel config, etc.)
@@ -168,14 +168,19 @@ A read-only launchpad page listing all published services as a clean grid of til
 
 ### 6.4 DNS Management ✅ (exists)
 
-Direct CRUD for Route53 DNS zones and records.
+Direct CRUD for DNS zones and records, spanning one or more providers simultaneously.
 
 **Current capabilities:**
-- List zones and records
+- List zones and records (unioned across all configured providers)
 - Create/delete zones
 - Create/delete records (all standard types)
+- **Multi-provider:** Route53 and Cloudflare can be active at the same time. A composite adapter dispatches operations to whichever provider owns the target zone, so migrations from one provider to another can happen gradually.
 
-No planned changes — this is a power-user escape hatch for records Vaier doesn't manage automatically.
+Providers activate by presence of credentials:
+- Route53 when `VAIER_AWS_KEY` / `VAIER_AWS_SECRET` are set
+- Cloudflare when `VAIER_CLOUDFLARE_TOKEN` is set (scoped API token with Zone:Read and Zone.DNS:Edit)
+
+Cloudflare zones must exist in the Cloudflare dashboard before Vaier can manage their records (API-based zone creation requires an account_id and is not supported today).
 
 ---
 
@@ -329,7 +334,7 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 
 The following are explicitly out of scope to avoid feature creep and overlap with dedicated tools:
 
-- Cloudflare / other DNS providers
+- Other DNS providers beyond Route53 and Cloudflare (GCP, Azure, etc.)
 - nginx / Caddy as reverse proxy alternatives
 - Keycloak / other OIDC providers
 - Kubernetes

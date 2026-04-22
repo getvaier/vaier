@@ -14,6 +14,7 @@ public class VaierConfig {
     private String domain;
     private String awsKey;
     private String awsSecret;
+    private String cloudflareToken;
     private String acmeEmail;
     private String smtpHost;
     private Integer smtpPort;

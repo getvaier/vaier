@@ -45,6 +45,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
                 .domain((String) data.get("domain"))
                 .awsKey((String) data.get("awsKey"))
                 .awsSecret((String) data.get("awsSecret"))
+                .cloudflareToken((String) data.get("cloudflareToken"))
                 .acmeEmail((String) data.get("acmeEmail"))
                 .smtpHost((String) data.get("smtpHost"))
                 .smtpPort((Integer) data.get("smtpPort"))
@@ -73,6 +74,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
         data.put("domain", config.getDomain());
         data.put("awsKey", config.getAwsKey());
         data.put("awsSecret", config.getAwsSecret());
+        data.put("cloudflareToken", config.getCloudflareToken());
         data.put("acmeEmail", config.getAcmeEmail());
         data.put("smtpHost", config.getSmtpHost());
         data.put("smtpPort", config.getSmtpPort());
