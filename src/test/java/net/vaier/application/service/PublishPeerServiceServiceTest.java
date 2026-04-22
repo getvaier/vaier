@@ -67,7 +67,7 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void publishService_createsCnameDnsRecord() {
-        service.publishService("10.0.0.1", 8080, "app", false, null);
+        service.publishService("10.0.0.1", 8080, "app", false, null, false);
 
         ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);
         verify(forPersistingDnsRecords).addDnsRecord(recordCaptor.capture(), any());
@@ -105,7 +105,7 @@ class PublishPeerServiceServiceTest {
         // publishService adds to pending map; DNS polling runs async but we're testing the sync state
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
 
-        service.publishService("10.0.0.1", 8080, "app", false, null);
+        service.publishService("10.0.0.1", 8080, "app", false, null, false);
 
         // Immediately after publish, route not yet in Traefik → not in routes, but in pending with (false, false)
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
@@ -131,14 +131,14 @@ class PublishPeerServiceServiceTest {
 
     @Test
     void publishService_emitsDnsCreatedEvent() {
-        service.publishService("10.0.0.1", 8080, "app", false, null);
+        service.publishService("10.0.0.1", 8080, "app", false, null, false);
 
         verify(forPublishingEvents).publish("published-services", "publish-dns-created", "app");
     }
 
     @Test
     void getPendingPublications_afterPublish_returnsEntry() {
-        service.publishService("10.0.0.1", 8080, "app", true, null);
+        service.publishService("10.0.0.1", 8080, "app", true, null, false);
         List<PendingPublication> pending = service.getPendingPublications();
         assertThat(pending).hasSize(1);
         assertThat(pending.get(0).subdomain()).isEqualTo("app");
@@ -154,7 +154,7 @@ class PublishPeerServiceServiceTest {
             .thenReturn(List.of())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
 
         InOrder inOrder = inOrder(forPersistingReverseProxyRoutes, forPublishingEvents);
         inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
@@ -168,9 +168,33 @@ class PublishPeerServiceServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
 
         verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
+    }
+
+    @Test
+    void waitForDnsThenActivate_directUrlDisabledTrue_persistsFlagAfterRouteCreated() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, true);
+
+        InOrder inOrder = inOrder(forPersistingReverseProxyRoutes);
+        inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
+        inOrder.verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", true);
+    }
+
+    @Test
+    void waitForDnsThenActivate_directUrlDisabledFalse_doesNotPersistFlag() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+
+        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), anyBoolean());
     }
 
     @Test
@@ -179,7 +203,7 @@ class PublishPeerServiceServiceTest {
         ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 100L);
         ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
 
         verify(forPersistingReverseProxyRoutes, never()).addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any());
     }
@@ -190,7 +214,7 @@ class PublishPeerServiceServiceTest {
         ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 50L);
         ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
 
         verify(forPublishingEvents).publish("published-services", "publish-dns-timeout", "app");
     }
@@ -207,7 +231,7 @@ class PublishPeerServiceServiceTest {
         when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("172.20.0.3")))
             .thenReturn(Optional.of("vaier"));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "172.20.0.3", 8080, false, null);
+        service.waitForDnsThenActivate("app", "app.example.com", "172.20.0.3", 8080, false, null, false);
 
         verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
             "app.example.com", "vaier", 8080, false, null);
@@ -221,7 +245,7 @@ class PublishPeerServiceServiceTest {
         when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("10.13.13.3")))
             .thenReturn(Optional.empty());
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.13.13.3", 8080, false, null);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.13.13.3", 8080, false, null, false);
 
         verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
             "app.example.com", "10.13.13.3", 8080, false, null);

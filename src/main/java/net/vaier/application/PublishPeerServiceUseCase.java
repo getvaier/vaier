@@ -4,7 +4,7 @@ import java.util.List;
 
 public interface PublishPeerServiceUseCase {
 
-    void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath);
+    void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled);
 
     PublishStatus getPublishStatus(String subdomain);
 

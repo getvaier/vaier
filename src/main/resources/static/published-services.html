@@ -269,6 +269,10 @@
                     <input type="checkbox" id="publishRequiresAuth">
                     <label for="publishRequiresAuth">Require Authelia authentication</label>
                 </div>
+                <div class="form-checkbox">
+                    <input type="checkbox" id="publishDirectUrlDisabled">
+                    <label for="publishDirectUrlDisabled" title="When checked, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Disable direct LAN URL</label>
+                </div>
                 <details id="publishAdvanced" style="margin-top:0.75rem;">
                     <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
                     <div class="form-group" style="margin-top:0.6rem;">
@@ -428,12 +432,14 @@
                                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>
                                 </span>`}</span>
 
-                            <span class="detail-label" title="When enabled, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
-                            <span class="detail-value">${service.directUrlDisabled ? 'disabled' : 'enabled'}${service.mandatory ? '' : `
-                                <span class="detail-edit-icon" title="${service.directUrlDisabled ? 'Enable' : 'Disable'} direct LAN URL"
-                                    onclick="toggleDirectUrlDisabled(this, '${service.dnsAddress}', ${service.directUrlDisabled})">
-                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>
-                                </span>`}</span>
+                            <span class="detail-label" title="When checked, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Disable direct LAN URL</span>
+                            <span class="detail-value">
+                                <input type="checkbox" id="dulDisabled-${id}"
+                                    ${service.directUrlDisabled ? 'checked' : ''}
+                                    ${service.mandatory ? 'disabled' : ''}
+                                    style="accent-color:var(--accent);cursor:${service.mandatory ? 'not-allowed' : 'pointer'}"
+                                    onchange="setDirectUrlDisabled('${service.dnsAddress}', this.checked)">
+                            </span>
                         </div>
                     </div>
                 </div>`;
@@ -535,6 +541,7 @@
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceName} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;
+            document.getElementById('publishDirectUrlDisabled').checked = false;
             document.getElementById('publishAdvanced').open = !!rootRedirectPath;
             document.getElementById('publishModal').classList.add('active');
             document.getElementById('publishSubdomain').focus();
@@ -602,8 +609,9 @@
             const address          = document.getElementById('publishAddress').value;
             const port             = parseInt(document.getElementById('publishPort').value);
             const rootRedirectPath = document.getElementById('publishRootRedirectPath').value || null;
-            const subdomain        = document.getElementById('publishSubdomain').value.trim();
-            const requiresAuth     = document.getElementById('publishRequiresAuth').checked;
+            const subdomain          = document.getElementById('publishSubdomain').value.trim();
+            const requiresAuth       = document.getElementById('publishRequiresAuth').checked;
+            const directUrlDisabled  = document.getElementById('publishDirectUrlDisabled').checked;
 
             if (!subdomain) { alert('Please enter a subdomain'); return; }
 
@@ -623,7 +631,7 @@
                 const response = await fetch('/published-services/publish', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath })
+                    body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath, directUrlDisabled })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -640,13 +648,12 @@
             }
         }
 
-        async function toggleDirectUrlDisabled(btn, dnsAddress, currentlyDisabled) {
-            const newDisabled = !currentlyDisabled;
+        async function setDirectUrlDisabled(dnsAddress, disabled) {
             try {
                 const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ directUrlDisabled: newDisabled })
+                    body: JSON.stringify({ directUrlDisabled: disabled })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 await fetchServices();

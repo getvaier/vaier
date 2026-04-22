@@ -50,13 +50,14 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                              "port":8080,
                              "subdomain":"app",
                              "requiresAuth":true,
-                             "rootRedirectPath":"/dashboard"
+                             "rootRedirectPath":"/dashboard",
+                             "directUrlDisabled":true
                            }
                            """))
                .andExpect(status().isOk());
 
         verify(publishPeerServiceUseCase).publishService(
-                "10.13.13.2", 8080, "app", true, "/dashboard");
+                "10.13.13.2", 8080, "app", true, "/dashboard", true);
     }
 
     @Test
@@ -74,7 +75,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(publishPeerServiceUseCase).publishService("10.13.13.2", 8080, "app", false, null);
+        verify(publishPeerServiceUseCase).publishService("10.13.13.2", 8080, "app", false, null, false);
     }
 
     @Test

@@ -55,8 +55,11 @@ public class PublishedServiceRestController {
 
     @PostMapping("/publish")
     public ResponseEntity<Void> publishService(@RequestBody PublishRequest request) {
-        log.info("Publishing service: {}:{} as {}.* (auth={})", request.address(), request.port(), request.subdomain(), request.requiresAuth());
-        publishPeerServiceUseCase.publishService(request.address(), request.port(), request.subdomain(), request.requiresAuth(), request.rootRedirectPath());
+        log.info("Publishing service: {}:{} as {}.* (auth={}, directUrlDisabled={})",
+            request.address(), request.port(), request.subdomain(), request.requiresAuth(), request.directUrlDisabled());
+        publishPeerServiceUseCase.publishService(
+            request.address(), request.port(), request.subdomain(),
+            request.requiresAuth(), request.rootRedirectPath(), request.directUrlDisabled());
         return ResponseEntity.ok().build();
     }
 
@@ -115,7 +118,7 @@ public class PublishedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
-    record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {}
+    record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}

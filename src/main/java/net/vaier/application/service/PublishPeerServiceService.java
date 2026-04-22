@@ -43,11 +43,11 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
     private final Map<String, PendingState> pendingPublishes = new ConcurrentHashMap<>();
 
     @Override
-    public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath) {
+    public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
         String fqdn = subdomain + "." + configResolver.getDomain();
         String serverFqdn = "vaier." + configResolver.getDomain();
 
-        log.info("Publishing service: {} -> {}:{} (auth: {})", fqdn, address, port, requiresAuth);
+        log.info("Publishing service: {} -> {}:{} (auth: {}, directUrlDisabled: {})", fqdn, address, port, requiresAuth, directUrlDisabled);
 
         DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
         DnsZone zone = new DnsZone(configResolver.getDomain());
@@ -58,7 +58,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
         pendingPublicationsService.track(address, port);
         forPublishingEvents.publish("published-services", "publish-dns-created", subdomain);
 
-        CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath));
+        CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath, directUrlDisabled));
     }
 
     @Override
@@ -81,7 +81,7 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
             .toList();
     }
 
-    void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath) {
+    void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
         long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             if (forResolvingDns.isResolvable(fqdn)) {
@@ -93,6 +93,9 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                     log.info("Normalized backend address {} -> {} for {}", address, persistedAddress, fqdn);
                 }
                 forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, persistedAddress, port, requiresAuth, rootRedirectPath);
+                if (directUrlDisabled) {
+                    forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(fqdn, true);
+                }
                 log.info("Created Traefik route for {}", fqdn);
                 waitForTraefikRoute(fqdn);
                 pendingPublicationsService.untrack(address, port);
