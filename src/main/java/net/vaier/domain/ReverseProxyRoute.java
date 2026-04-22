@@ -3,6 +3,11 @@ package net.vaier.domain;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
+import net.vaier.domain.DnsRecord.DnsRecordType;
+import net.vaier.domain.Server.State;
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForResolvingPeerNames;
+
 import java.util.List;
 import java.util.Map;
 
@@ -56,6 +61,68 @@ public class ReverseProxyRoute {
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig, List<String> middlewares,
                              String rootRedirectPath) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares, rootRedirectPath, false);
+    }
+
+    public DnsState dnsState(List<DnsRecord> allDnsRecords) {
+        boolean found = allDnsRecords.stream()
+            .filter(r -> r.name().equals(domainName))
+            .anyMatch(r -> r.type() == DnsRecordType.CNAME || r.type() == DnsRecordType.A);
+        return found ? DnsState.OK : DnsState.NON_EXISTING;
+    }
+
+    public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients) {
+        if (localServices.stream().anyMatch(s -> s.isRunning() && s.listensOnPort(port))) return State.OK;
+        if (vpnClients.stream().anyMatch(p -> p.hasAllowedIpStartingWith(address) && p.isConnected())) return State.OK;
+        return State.UNREACHABLE;
+    }
+
+    public String displayName(String baseDomain, List<DockerService> localServices,
+                              List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver) {
+        String subdomain = extractSubdomain(baseDomain);
+        String server = resolveServerName(vpnClients, peerNameResolver);
+        if (!"local".equals(server) && subdomain.endsWith("." + server)) {
+            subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
+        }
+        return subdomain + " @ " + server;
+    }
+
+    public String directUrl(String callerIp, List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
+        if (directUrlDisabled) return null;
+        if (callerIp == null || callerIp.isBlank()) return null;
+        PeerConfiguration peer = peers.stream()
+            .filter(p -> p.ipAddress() != null && p.ipAddress().equals(address))
+            .findFirst().orElse(null);
+        if (peer == null) return null;
+        String lanAddress = peer.lanAddress();
+        if (lanAddress == null || lanAddress.isBlank()) return null;
+
+        String peerEndpointIp = vpnClients.stream()
+            .filter(c -> c.hasAllowedIpStartingWith(peer.ipAddress()))
+            .map(VpnClient::endpointIp)
+            .filter(ip -> ip != null && !ip.isBlank())
+            .findFirst().orElse(null);
+        if (peerEndpointIp == null) return null;
+        if (!peerEndpointIp.equals(callerIp)) return null;
+
+        return "http://" + lanAddress + ":" + port;
+    }
+
+    private String extractSubdomain(String baseDomain) {
+        if (baseDomain != null && domainName.endsWith("." + baseDomain)) {
+            return domainName.substring(0, domainName.length() - baseDomain.length() - 1);
+        }
+        return domainName;
+    }
+
+    private String resolveServerName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver) {
+        // Check VPN peers first — a peer IP is unambiguous, whereas port-only local
+        // matching can produce false positives when a local container happens to use the same port.
+        boolean isPeer = vpnClients.stream().anyMatch(p -> p.hasAllowedIpStartingWith(address));
+        if (isPeer) {
+            String peerName = peerNameResolver.resolvePeerNameByIp(address);
+            return peerName.equals(address) ? address : peerName;
+        }
+        return "local";
     }
 
     @AllArgsConstructor

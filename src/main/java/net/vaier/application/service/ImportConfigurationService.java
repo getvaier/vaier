@@ -16,14 +16,16 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 public class ImportConfigurationService implements ImportConfigurationUseCase {
 
     public static final String IMPORT_TOPIC = "settings-import";
+
+    static final Set<String> SUPPORTED_IMPORT_VERSIONS = Set.of("1");
 
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final AddDnsRecordUseCase addDnsRecordUseCase;
@@ -61,6 +63,14 @@ public class ImportConfigurationService implements ImportConfigurationUseCase {
         } catch (Exception e) {
             log.error("Invalid backup JSON: {}", e.getMessage());
             return new ImportResult(false, "Invalid backup file: " + e.getMessage(), List.of());
+        }
+
+        String version = backup.version();
+        if (version == null || !SUPPORTED_IMPORT_VERSIONS.contains(version)) {
+            String msg = "Unsupported backup version: " + version
+                    + " (supported: " + SUPPORTED_IMPORT_VERSIONS + ")";
+            log.warn(msg);
+            return new ImportResult(false, msg, List.of());
         }
 
         List<String> warnings = new ArrayList<>();
@@ -159,8 +169,14 @@ public class ImportConfigurationService implements ImportConfigurationUseCase {
         emit("[users] " + users.size() + " user(s)");
         for (var user : users) {
             try {
-                String tempPassword = UUID.randomUUID().toString();
-                addUserUseCase.addUser(user.username(), tempPassword, null, user.username());
+                String tempPassword = UUID.randomUUID().toString() + "A1";
+                String email = (user.email() == null || user.email().isBlank())
+                        ? user.username() + "@placeholder.invalid"
+                        : user.email();
+                String displayname = (user.displayname() == null || user.displayname().isBlank())
+                        ? user.username()
+                        : user.displayname();
+                addUserUseCase.addUser(user.username(), tempPassword, email, displayname);
                 emit("[users] " + user.username() + " -> created (reset password required)");
                 warnings.add("User '" + user.username()
                         + "' was created with a temporary password — please reset it");

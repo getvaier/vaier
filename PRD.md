@@ -146,6 +146,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 - **Root redirect path UI** — collapsible "Advanced" section in the publish modal with an optional root path redirect input, wired to the `rootRedirectPath` API field. Redirect path is also editable on published services via a modal.
 - **Service cleanup on peer deletion** — when a VPN peer is deleted, all published services routing to that peer's IP are automatically removed (DNS + Traefik routes)
 - **Published services page cleanup** — consolidated host/status rows, hide discoverable section when empty, replaced fragile optimistic auth toggle with server-side refresh
+- **Publish rollback on failure** — if DNS propagation times out, Traefik route creation throws, or Traefik never picks up the new route, Vaier removes the CNAME (and, where applicable, the Traefik route) so no orphan records remain in Route53. Emits `publish-rolled-back` on the `published-services` SSE topic.
 
 ---
 
@@ -207,8 +208,10 @@ No planned changes.
 Export and import the full Vaier configuration as a JSON snapshot.
 
 **Current capabilities:**
-- **Export** — downloads a JSON file containing all peers, published services, DNS records, and users
+- **Export** — downloads a JSON file containing all peers, published services, DNS records, and users (with email + displayname so the round-trip restores Authelia entries)
 - **Import** — uploads a JSON backup and restores configuration; shows a real-time SSE log of each step
+- **Version gate** — import rejects backups whose `version` field is outside `SUPPORTED_IMPORT_VERSIONS` (currently `{"1"}`) with a clear error, preventing silent corruption when the schema next changes
+- Round-trip covered by an integration test that seeds peers, services, DNS zones, and users, exports, then imports into a fresh target and asserts every exported entity is restored (user passwords become a one-shot temp password, as designed)
 - Accessible from the Settings page
 
 ---

@@ -219,6 +219,65 @@ class PublishPeerServiceServiceTest {
         verify(forPublishingEvents).publish("published-services", "publish-dns-timeout", "app");
     }
 
+    @Test
+    void waitForDnsThenActivate_dnsNeverResolves_deletesCnameAndEmitsRollback() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(false);
+        ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 50L);
+        ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+
+        verify(forPersistingDnsRecords).deleteDnsRecord(
+            eq("app.example.com."),
+            eq(net.vaier.domain.DnsRecord.DnsRecordType.CNAME),
+            any(net.vaier.domain.DnsZone.class));
+        verify(forPublishingEvents).publish("published-services", "publish-rolled-back", "app");
+    }
+
+    @Test
+    void waitForDnsThenActivate_traefikAddThrows_deletesCnameAndEmitsRollback() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
+        doThrow(new RuntimeException("traefik boom")).when(forPersistingReverseProxyRoutes)
+            .addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any());
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+
+        verify(forPersistingDnsRecords).deleteDnsRecord(
+            eq("app.example.com."),
+            eq(net.vaier.domain.DnsRecord.DnsRecordType.CNAME),
+            any(net.vaier.domain.DnsZone.class));
+        verify(forPublishingEvents).publish("published-services", "publish-rolled-back", "app");
+    }
+
+    @Test
+    void waitForDnsThenActivate_traefikNeverPicksUpRoute_deletesRouteAndCnameAndEmitsRollback() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        ReflectionTestUtils.setField(service, "traefikActivationTimeoutMillis", 50L);
+        ReflectionTestUtils.setField(service, "traefikActivationRetryIntervalMillis", 10L);
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+
+        verify(forPersistingReverseProxyRoutes).deleteReverseProxyRouteByDnsName("app.example.com");
+        verify(forPersistingDnsRecords).deleteDnsRecord(
+            eq("app.example.com."),
+            eq(net.vaier.domain.DnsRecord.DnsRecordType.CNAME),
+            any(net.vaier.domain.DnsZone.class));
+        verify(forPublishingEvents).publish("published-services", "publish-rolled-back", "app");
+    }
+
+    @Test
+    void waitForDnsThenActivate_happyPath_doesNotEmitRollback() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+
+        verify(forPublishingEvents, never()).publish(anyString(), eq("publish-rolled-back"), anyString());
+        verify(forPersistingDnsRecords, never()).deleteDnsRecord(anyString(), any(), any());
+    }
+
     private ReverseProxyRoute routeWithDomain(String domain) {
         return new ReverseProxyRoute("route", domain, "10.0.0.1", 8080, "svc", null);
     }

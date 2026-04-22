@@ -202,6 +202,48 @@ class ImportConfigurationServiceTest {
     }
 
     @Test
+    void importConfiguration_unsupportedVersion_returnsFailureWithVersionInMessage() {
+        String json = """
+                {
+                  "version": "999",
+                  "exportedAt": "2030-01-01T00:00:00Z",
+                  "settings": {},
+                  "peers": [],
+                  "services": [],
+                  "dnsZones": [],
+                  "users": []
+                }
+                """;
+
+        ImportResult result = service.importConfiguration(json);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.message()).contains("999");
+        verify(forRestoringVpnPeers, never()).restorePeer(any());
+        verify(addReverseProxyRouteUseCase, never()).addReverseProxyRoute(any());
+        verify(addUserUseCase, never()).addUser(any(), any(), any(), any());
+    }
+
+    @Test
+    void importConfiguration_missingVersion_returnsFailure() {
+        String json = """
+                {
+                  "exportedAt": "2026-04-07T12:00:00Z",
+                  "settings": {},
+                  "peers": [],
+                  "services": [],
+                  "dnsZones": [],
+                  "users": []
+                }
+                """;
+
+        ImportResult result = service.importConfiguration(json);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.message().toLowerCase()).contains("version");
+    }
+
+    @Test
     void importConfiguration_handlesEmptyBackup() {
         String json = """
                 {

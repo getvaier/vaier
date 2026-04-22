@@ -11,6 +11,7 @@ import net.vaier.application.CreatePeerUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
+import net.vaier.domain.WireGuardPeerConfig;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -152,7 +153,7 @@ public class VpnService implements CreatePeerUseCase {
             Files.createDirectories(peerDir);
 
             // Step 7: Create client configuration file
-            String clientConfig = generateClientConfig(
+            String clientConfig = WireGuardPeerConfig.generate(
                     privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, lanAddress, vpnSubnet);
 
             Path peerConfigPath = peerDir.resolve(peerName + ".conf");
@@ -263,50 +264,6 @@ public class VpnService implements CreatePeerUseCase {
 
         String serverPort = System.getenv().getOrDefault("SERVERPORT", ServiceNames.DEFAULT_WG_PORT);
         return serverUrl + ":" + serverPort;
-    }
-
-    static String generateClientConfig(String privateKey, String ipAddress, String serverPublicKey,
-                                       String presharedKey, String serverEndpoint,
-                                       PeerType peerType, String lanCidr, String lanAddress, String vpnSubnet) {
-        String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
-        if (lanCidr != null && !lanCidr.isBlank() && peerType == PeerType.UBUNTU_SERVER) {
-            allowedIps = allowedIps + ", " + lanCidr;
-        }
-
-        String vaierJson = buildVaierJson(peerType, lanCidr, lanAddress);
-
-        String dnsLine = peerType.isServerType()
-                ? ""
-                : "DNS = 172.20.0.53\n";
-
-        return String.format("""
-                # VAIER: %s
-                [Interface]
-                PrivateKey = %s
-                Address = %s/32
-                %s
-                [Peer]
-                PublicKey = %s
-                PresharedKey = %s
-                Endpoint = %s
-                AllowedIPs = %s
-                PersistentKeepalive = 25
-                """, vaierJson, privateKey, ipAddress, dnsLine,
-                serverPublicKey, presharedKey, serverEndpoint, allowedIps);
-    }
-
-    static String buildVaierJson(PeerType peerType, String lanCidr, String lanAddress) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
-        boolean serverType = peerType == PeerType.UBUNTU_SERVER;
-        if (serverType && lanCidr != null && !lanCidr.isBlank()) {
-            sb.append(",\"lanCidr\":\"").append(lanCidr).append("\"");
-        }
-        if (serverType && lanAddress != null && !lanAddress.isBlank()) {
-            sb.append(",\"lanAddress\":\"").append(lanAddress).append("\"");
-        }
-        sb.append("}");
-        return sb.toString();
     }
 
     private void addPeerToServer(String interfaceName, String publicKey, String presharedKey,

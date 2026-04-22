@@ -89,7 +89,7 @@ public class ExportConfigurationService implements ExportConfigurationUseCase {
 
     private List<UserDto> exportUsers() {
         return forPersistingUsers.getUsers().stream()
-                .map(u -> new UserDto(u.getName()))
+                .map(u -> new UserDto(u.getName(), u.getEmail(), u.getDisplayname()))
                 .toList();
     }
 
@@ -125,5 +125,7 @@ public class ExportConfigurationService implements ExportConfigurationUseCase {
 
     public record DnsRecordDto(String name, String type, Long ttl, List<String> values) {}
 
-    public record UserDto(String username) {}
+    public record UserDto(String username, String email, String displayname) {
+        public UserDto(String username) { this(username, null, null); }
+    }
 }

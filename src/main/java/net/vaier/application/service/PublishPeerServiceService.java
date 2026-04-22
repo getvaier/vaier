@@ -37,6 +37,8 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
 
     private long dnsTimeoutMillis = 120_000;
     private long dnsRetryIntervalMillis = 3_000;
+    private long traefikActivationTimeoutMillis = 15_000;
+    private long traefikActivationRetryIntervalMillis = 500;
 
     private record PendingState(boolean requiresAuth, boolean dnsPropagated) {}
 
@@ -92,12 +94,22 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
                 if (!persistedAddress.equals(address)) {
                     log.info("Normalized backend address {} -> {} for {}", address, persistedAddress, fqdn);
                 }
-                forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, persistedAddress, port, requiresAuth, rootRedirectPath);
+                try {
+                    forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, persistedAddress, port, requiresAuth, rootRedirectPath);
+                } catch (Exception e) {
+                    log.error("Failed to write Traefik route for {}: {}", fqdn, e.getMessage(), e);
+                    rollback(subdomain, fqdn, address, port, false);
+                    return;
+                }
                 if (directUrlDisabled) {
                     forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(fqdn, true);
                 }
                 log.info("Created Traefik route for {}", fqdn);
-                waitForTraefikRoute(fqdn);
+                if (!waitForTraefikRoute(fqdn)) {
+                    log.warn("Traefik did not pick up route for {}; rolling back", fqdn);
+                    rollback(subdomain, fqdn, address, port, true);
+                    return;
+                }
                 pendingPublicationsService.untrack(address, port);
                 pendingPublishes.remove(subdomain);
                 publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
@@ -109,24 +121,44 @@ public class PublishPeerServiceService implements PublishPeerServiceUseCase {
             try { Thread.sleep(dnsRetryIntervalMillis); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
         log.warn("DNS propagation timed out for {} after {}s — Traefik route NOT written to avoid invalid certificate", fqdn, dnsTimeoutMillis / 1000);
+        forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
+        rollback(subdomain, fqdn, address, port, false);
+    }
+
+    private void rollback(String subdomain, String fqdn, String address, int port, boolean removeRoute) {
+        if (removeRoute) {
+            try {
+                forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);
+            } catch (Exception e) {
+                log.warn("Failed to remove Traefik route during rollback for {}: {}", fqdn, e.getMessage());
+            }
+        }
+        try {
+            forPersistingDnsRecords.deleteDnsRecord(fqdn + ".", DnsRecordType.CNAME,
+                new DnsZone(configResolver.getDomain()));
+            log.info("Rolled back CNAME for {}", fqdn);
+        } catch (Exception e) {
+            log.warn("Failed to remove CNAME during rollback for {}: {}", fqdn, e.getMessage());
+        }
         pendingPublicationsService.untrack(address, port);
         pendingPublishes.remove(subdomain);
-        forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
+        forPublishingEvents.publish("published-services", "publish-rolled-back", subdomain);
         forPublishingEvents.publish("published-services", "service-updated", subdomain);
     }
 
-    private void waitForTraefikRoute(String fqdn) {
-        long deadline = System.currentTimeMillis() + 15_000;
+    private boolean waitForTraefikRoute(String fqdn) {
+        long deadline = System.currentTimeMillis() + traefikActivationTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             boolean active = forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
                 .anyMatch(r -> r.getDomainName().equals(fqdn));
             if (active) {
                 log.info("Traefik picked up route for {}", fqdn);
-                return;
+                return true;
             }
             log.debug("Waiting for Traefik to pick up route for {}", fqdn);
-            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            try { Thread.sleep(traefikActivationRetryIntervalMillis); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
         }
-        log.warn("Traefik did not pick up route for {} within 15s, proceeding anyway", fqdn);
+        return false;
     }
 }

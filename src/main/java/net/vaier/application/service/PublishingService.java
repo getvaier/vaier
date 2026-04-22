@@ -3,15 +3,12 @@ package net.vaier.application.service;
 import net.vaier.application.PublishingConstants;
 import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.config.ConfigResolver;
-import net.vaier.config.ServiceNames;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.domain.DnsRecord;
-import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
-import net.vaier.domain.Server.State;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -83,36 +80,17 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
     public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp) {
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
+        List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         return getPublishedServices().stream()
             .filter(s -> s.dnsState() == DnsState.OK)
-            .map(s -> new LaunchpadServiceUco(
-                s.dnsAddress(),
-                s.hostAddress(),
-                s.state(),
-                directUrl(s, callerIp, peers, vpnClients)))
+            .map(s -> {
+                ReverseProxyRoute route = routes.stream()
+                    .filter(r -> r.getDomainName().equals(s.dnsAddress()))
+                    .findFirst().orElse(null);
+                String directUrl = route == null ? null : route.directUrl(callerIp, peers, vpnClients);
+                return new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress(), s.state(), directUrl);
+            })
             .toList();
-    }
-
-    private String directUrl(PublishedServiceUco s, String callerIp,
-                             List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
-        if (s.directUrlDisabled()) return null;
-        if (callerIp == null || callerIp.isBlank()) return null;
-        PeerConfiguration peer = peers.stream()
-            .filter(p -> p.ipAddress() != null && p.ipAddress().equals(s.hostAddress()))
-            .findFirst().orElse(null);
-        if (peer == null) return null;
-        String lanAddress = peer.lanAddress();
-        if (lanAddress == null || lanAddress.isBlank()) return null;
-
-        String peerEndpointIp = vpnClients.stream()
-            .filter(c -> c.hasAllowedIpStartingWith(peer.ipAddress()))
-            .map(VpnClient::endpointIp)
-            .filter(ip -> ip != null && !ip.isBlank())
-            .findFirst().orElse(null);
-        if (peerEndpointIp == null) return null;
-        if (!peerEndpointIp.equals(callerIp)) return null;
-
-        return "http://" + lanAddress + ":" + s.hostPort();
     }
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
@@ -120,64 +98,16 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
         boolean mandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
             .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
         return new PublishedServiceUco(
-            displayName(route, localServices, vpnClients),
+            route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames),
             route.getDomainName(),
-            dnsState(route.getDomainName(), allDnsRecords),
+            route.dnsState(allDnsRecords),
             route.getAddress(),
             route.getPort(),
-            hostState(route.getAddress(), route.getPort(), localServices, vpnClients),
+            route.hostState(localServices, vpnClients),
             route.getAuthInfo() != null,
             mandatory,
             route.getRootRedirectPath(),
             route.isDirectUrlDisabled()
         );
-    }
-
-    private String displayName(ReverseProxyRoute route, List<DockerService> localServices,
-                               List<VpnClient> vpnClients) {
-        String subdomain = extractSubdomain(route.getDomainName());
-        String server = resolveServer(route.getAddress(), route.getPort(), localServices, vpnClients);
-        // Strip server name from subdomain suffix: "openhab.colina27" + "colina27" → "openhab"
-        if (!"local".equals(server) && subdomain.endsWith("." + server)) {
-            subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
-        }
-        return subdomain + " @ " + server;
-    }
-
-    private String extractSubdomain(String dnsAddress) {
-        String domain = configResolver.getDomain();
-        if (domain != null && dnsAddress.endsWith("." + domain)) {
-            return dnsAddress.substring(0, dnsAddress.length() - domain.length() - 1);
-        }
-        return dnsAddress;
-    }
-
-    private String resolveServer(String address, int port, List<DockerService> localServices,
-                                 List<VpnClient> vpnClients) {
-        // Check VPN peers first — a peer IP is unambiguous, whereas port-only local
-        // matching can produce false positives when a local container happens to use the same port.
-        boolean isPeer = vpnClients.stream()
-            .anyMatch(p -> p.hasAllowedIpStartingWith(address));
-        if (isPeer) {
-            String peerName = forResolvingPeerNames.resolvePeerNameByIp(address);
-            return peerName.equals(address) ? address : peerName;
-        }
-        return "local";
-    }
-
-
-
-    private DnsState dnsState(String dnsAddress, List<DnsRecord> allDnsRecords) {
-        boolean found = allDnsRecords.stream()
-            .filter(r -> r.name().equals(dnsAddress))
-            .anyMatch(r -> r.type() == DnsRecordType.CNAME || r.type() == DnsRecordType.A);
-        return found ? DnsState.OK : DnsState.NON_EXISTING;
-    }
-
-    private State hostState(String hostAddress, int hostPort, List<DockerService> localServices,
-                             List<VpnClient> vpnClients) {
-        if (localServices.stream().anyMatch(s -> s.isRunning() && s.listensOnPort(hostPort))) return State.OK;
-        if (vpnClients.stream().anyMatch(p -> p.hasAllowedIpStartingWith(hostAddress) && p.isConnected())) return State.OK;
-        return State.UNREACHABLE;
     }
 }

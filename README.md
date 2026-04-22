@@ -23,13 +23,13 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | Feature | Description |
 |---------|-------------|
 | **VPN peer management** | Create and delete WireGuard peers. Download peer config as a `.conf` file, QR code (mobile), docker-compose, or a one-shot bash setup script. Server peers can record a LAN address (editable inline) so the launchpad can link directly to services on the local network. |
-| **Service publishing** | Discover Docker containers on the VPN server and on connected peers. Publish any container as a public HTTPS subdomain in one action. Automatic cleanup of published services when a peer is deleted. |
+| **Service publishing** | Discover Docker containers on the VPN server and on connected peers. Publish any container as a public HTTPS subdomain in one action. Automatic rollback of the DNS CNAME if the publish flow fails (DNS timeout, Traefik error, or Traefik never picks up the route), and automatic cleanup of published services when a peer is deleted. |
 | **Smart launchpad** | Public `/launchpad.html` tiles link to `https://service.domain` normally, but switch to direct `http://lanAddress:port` when the caller is on the same LAN as the hosting server — bypassing the proxy and auth. Per-service opt-out for apps whose public origin differs from `http://lan:port` (e.g. Vaultwarden). |
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle, editable root path redirect, and per-service direct LAN URL opt-out. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
 | **Email notifications** | SMTP settings in *Settings* power Authelia password-reset emails today and future Vaier notifications. Credentials are verified against the server before saving; a dedicated "Send test email" button delivers a real roundtrip message to any recipient. |
-| **Backup / restore** | Export full configuration (peers, services, DNS records, users) as a JSON snapshot. Import restores everything with a real-time progress log. |
+| **Backup / restore** | Export full configuration (peers, services, DNS records, users with email + displayname) as a versioned JSON snapshot. Import rejects unsupported versions with a clear error and restores everything with a real-time progress log. |
 | **First-run setup wizard** | Web-based wizard at `/setup.html` guides you through domain, AWS credentials, ACME email, and admin account creation — no `.env` file editing required. |
 
 ---
