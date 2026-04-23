@@ -16,7 +16,6 @@ public interface GetPublishedServicesUseCase {
         int hostPort,
         State state,
         boolean authenticated,
-        boolean mandatory,
         String rootRedirectPath,
         boolean directUrlDisabled
     ){

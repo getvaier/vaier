@@ -21,7 +21,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
         when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(
                 new PublishedServiceUco(
                         "app", "app.example.com", DnsState.OK,
-                        "10.13.13.2", 8080, State.OK, false, false, null, false)
+                        "10.13.13.2", 8080, State.OK, false, null, false)
         ));
 
         mockMvc.perform(get("/published-services/discover"))

@@ -207,33 +207,38 @@ class PublishingServiceTest {
     }
 
     @Test
-    void getPublishedServices_regularService_mandatoryIsFalse() {
-        setupOneRoute("app.example.com", "10.0.0.1", 8080);
-        setupNoDnsRecords();
-        setupEmptyVpnClients();
-        setupEmptyLocalServices();
-
-        assertThat(service.getPublishedServices().get(0).mandatory()).isFalse();
-    }
-
-    @Test
-    void getPublishedServices_vaierService_mandatoryIsTrue() {
+    void getPublishedServices_vaierInfrastructureRouter_isExcluded() {
         setupOneRoute(ServiceNames.VAIER + ".example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getPublishedServices().get(0).mandatory()).isTrue();
+        assertThat(service.getPublishedServices()).isEmpty();
     }
 
     @Test
-    void getPublishedServices_authService_mandatoryIsTrue() {
+    void getPublishedServices_autheliaInfrastructureRouter_isExcluded() {
         setupOneRoute("login.example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        assertThat(service.getPublishedServices().get(0).mandatory()).isTrue();
+        assertThat(service.getPublishedServices()).isEmpty();
+    }
+
+    @Test
+    void getPublishedServices_mixOfInfraAndUserRoutes_returnsOnlyUserRoutes() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            route(ServiceNames.VAIER + ".example.com", "vaier", 8080),
+            route("login.example.com", "authelia", 9091),
+            route("app.example.com", "10.0.0.1", 8080)
+        ));
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        assertThat(service.getPublishedServices()).hasSize(1);
+        assertThat(service.getPublishedServices().get(0).dnsAddress()).isEqualTo("app.example.com");
     }
 
     @Test

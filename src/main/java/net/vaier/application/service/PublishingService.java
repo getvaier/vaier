@@ -71,9 +71,15 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
         List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.local());
 
         cache = routes.stream()
+            .filter(r -> !isInfrastructureRouter(r))
             .map(r -> toUco(r, allDnsRecords, vpnClients, localServices))
             .toList();
         return cache;
+    }
+
+    private boolean isInfrastructureRouter(ReverseProxyRoute route) {
+        return PublishingConstants.MANDATORY_SUBDOMAINS.stream()
+            .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
     }
 
     @Override
@@ -95,8 +101,6 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices) {
-        boolean mandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
-            .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
         return new PublishedServiceUco(
             route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames),
             route.getDomainName(),
@@ -105,7 +109,6 @@ public class PublishingService implements GetPublishedServicesUseCase, GetLaunch
             route.getPort(),
             route.hostState(localServices, vpnClients),
             route.getAuthInfo() != null,
-            mandatory,
             route.getRootRedirectPath(),
             route.isDirectUrlDisabled()
         );

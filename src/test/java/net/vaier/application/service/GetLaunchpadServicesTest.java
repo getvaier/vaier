@@ -122,6 +122,29 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
+    void getLaunchpadServices_excludesMandatoryInfrastructureRouters() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            route("vaier.example.com", "vaier", 8080),
+            route("login.example.com", "authelia", 9091),
+            route("app.example.com", "10.0.0.1", 8080)
+        ));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("vaier.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("login.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("app.example.com", DnsRecordType.CNAME, 300L, List.of())
+        ));
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).dnsAddress()).isEqualTo("app.example.com");
+    }
+
+    @Test
     void getLaunchpadServices_multipleRoutes_returnsOnlyDnsOk() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("published.example.com", "10.0.0.1", 8080),
