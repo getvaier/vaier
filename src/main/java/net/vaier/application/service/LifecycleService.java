@@ -9,6 +9,7 @@ import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -23,6 +24,7 @@ public class LifecycleService {
     private final ForRestartingContainers containerRestarter;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForInitialisingVpnRouting forInitialisingVpnRouting;
+    private final ForWritingBootstrapCredentials bootstrapCredentialsWriter;
     private final SetupStateHolder setupStateHolder;
     private final ConfigResolver configResolver;
 
@@ -32,6 +34,7 @@ public class LifecycleService {
         ForRestartingContainers containerRestarter,
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForInitialisingVpnRouting forInitialisingVpnRouting,
+        ForWritingBootstrapCredentials bootstrapCredentialsWriter,
         SetupStateHolder setupStateHolder,
         ConfigResolver configResolver
     ) {
@@ -40,6 +43,7 @@ public class LifecycleService {
         this.containerRestarter = containerRestarter;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.forInitialisingVpnRouting = forInitialisingVpnRouting;
+        this.bootstrapCredentialsWriter = bootstrapCredentialsWriter;
         this.setupStateHolder = setupStateHolder;
         this.configResolver = configResolver;
     }
@@ -62,6 +66,7 @@ public class LifecycleService {
             forPersistingUsers,
             forPersistingDnsRecords,
             containerRestarter,
+            bootstrapCredentialsWriter,
             configResolver.getDomain(),
             ServiceNames.DEFAULT_ADMIN_USERNAME,
             ServiceNames.AUTHELIA,

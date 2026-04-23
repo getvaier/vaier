@@ -7,6 +7,7 @@ import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -23,6 +24,7 @@ class LifecycleServiceTest {
     @Mock ForRestartingContainers containerRestarter;
     @Mock ForPersistingDnsRecords forPersistingDnsRecords;
     @Mock ForInitialisingVpnRouting forInitialisingVpnRouting;
+    @Mock ForWritingBootstrapCredentials bootstrapCredentialsWriter;
     @Mock SetupStateHolder setupStateHolder;
     @Mock ConfigResolver configResolver;
     @Mock ApplicationReadyEvent event;
@@ -31,8 +33,8 @@ class LifecycleServiceTest {
         return new LifecycleService(
             forInitialisingUserService, forPersistingUsers,
             containerRestarter, forPersistingDnsRecords,
-            forInitialisingVpnRouting, setupStateHolder,
-            configResolver
+            forInitialisingVpnRouting, bootstrapCredentialsWriter,
+            setupStateHolder, configResolver
         );
     }
 

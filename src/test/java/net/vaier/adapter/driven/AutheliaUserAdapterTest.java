@@ -8,7 +8,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -255,5 +257,39 @@ class AutheliaUserAdapterTest {
     void updateDisplayName_throwsWhenFileDoesNotExist() {
         assertThatThrownBy(() -> adapter.updateDisplayName("alice", "New"))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    // --- secret file permissions ---
+
+    @Test
+    void addUser_writesUsersFileWithOwnerOnlyPermissions() throws IOException {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+
+        Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("users_database.yml"));
+        assertThat(perms).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+    }
+
+    @Test
+    void changePassword_keepsUsersFileLockedDown() throws IOException {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+
+        adapter.changePassword("alice", "newsecret");
+
+        Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("users_database.yml"));
+        assertThat(perms).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+    }
+
+    @Test
+    void deleteUser_keepsUsersFileLockedDown() throws IOException {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("bob", "secret", "bob@example.com", "Bob");
+
+        adapter.deleteUser("bob");
+
+        Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("users_database.yml"));
+        assertThat(perms).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
     }
 }

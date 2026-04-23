@@ -85,6 +85,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
         } catch (IOException e) {
             throw new RuntimeException("Failed to save vaier configuration", e);
         }
+        SecureFilePermissions.lockDownFile(file.toPath());
     }
 
     @Override

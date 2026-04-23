@@ -7,7 +7,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -130,6 +132,22 @@ class VaierConfigFileAdapterTest {
         assertThat(loaded.get().getSmtpPort()).isEqualTo(587);
         assertThat(loaded.get().getSmtpUsername()).isEqualTo("user@example.com");
         assertThat(loaded.get().getSmtpSender()).isEqualTo("noreply@example.com");
+    }
+
+    @Test
+    void save_writesConfigFileWithOwnerOnlyPermissions() throws IOException {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("AKID")
+            .awsSecret("secret")
+            .acmeEmail("admin@example.com")
+            .build();
+
+        adapter().save(config);
+
+        Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("vaier-config.yml"));
+        assertThat(perms).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
     }
 
     @Test

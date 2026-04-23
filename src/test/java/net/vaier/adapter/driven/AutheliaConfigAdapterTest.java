@@ -6,7 +6,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Properties;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -163,6 +165,33 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
+    void initialiseConfiguration_embedsRedisPasswordFromSecretFile() throws IOException {
+        Files.writeString(tempDir.resolve("redis-password"), "supersecret\n");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("password: supersecret");
+    }
+
+    @Test
+    void initialiseConfiguration_omitsRedisPasswordWhenSecretFileMissing() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        // redis: block exists but no password line under it
+        assertThat(content).contains("redis:");
+        // No "password: ..." inside session.redis (smtp_password may appear elsewhere only if smtp set)
+        int redisIndex = content.indexOf("redis:");
+        int storageIndex = content.indexOf("storage:", redisIndex);
+        String redisBlock = content.substring(redisIndex, storageIndex);
+        assertThat(redisBlock).doesNotContain("password:");
+    }
+
+    @Test
     void initialiseConfiguration_usesFilesystemNotifierByDefault() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
@@ -199,6 +228,29 @@ class AutheliaConfigAdapterTest {
             props.load(fis);
         }
         assertThat(props.getProperty("smtp_password")).isEqualTo("mypassword");
+    }
+
+    @Test
+    void initialiseConfiguration_writesSecretsFileWithOwnerOnlyPermissions() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("secrets.properties"));
+        assertThat(perms).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+    }
+
+    @Test
+    void updateSmtpConfig_keepsSecretsFileLockedDown() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+        init.initialiseConfiguration();
+
+        init.updateSmtpConfig("smtp.example.com", 587, "user@example.com", "pass", "sender@example.com");
+
+        Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("secrets.properties"));
+        assertThat(perms).containsExactlyInAnyOrder(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
     }
 
     @Test

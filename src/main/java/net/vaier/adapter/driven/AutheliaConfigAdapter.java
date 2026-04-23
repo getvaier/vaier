@@ -19,6 +19,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
 
     private final String configurationFile;
     private final String secretsFile;
+    private final String redisPasswordFile;
     private final String vaierDomain;
 
     private String smtpHost;
@@ -32,6 +33,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
         String domain = configResolver.getDomain() != null ? configResolver.getDomain() : "";
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
+        this.redisPasswordFile = configPath + "/redis-password";
         this.vaierDomain = domain;
         this.smtpHost = configResolver.getSmtpHost();
         this.smtpPort = configResolver.getSmtpPort() != null ? configResolver.getSmtpPort() : 587;
@@ -42,6 +44,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
     AutheliaConfigAdapter(String configPath, String vaierDomain) {
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
+        this.redisPasswordFile = configPath + "/redis-password";
         this.vaierDomain = vaierDomain;
         this.smtpHost = null;
         this.smtpPort = 587;
@@ -130,6 +133,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
             log.error("Failed to update secrets file with smtp_password", e);
             throw new RuntimeException("Failed to save SMTP password to secrets", e);
         }
+        SecureFilePermissions.lockDownFile(secretsFileObj.toPath());
     }
 
     private String generateConfig() {
@@ -148,6 +152,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
         String encryptionKey = secrets.getProperty("encryption_key");
 
         String notifierBlock = buildNotifierBlock(secrets);
+        String redisBlock = buildRedisBlock();
 
         return String.format("""
                 ###############################################################
@@ -175,6 +180,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                   redis:
                     host: redis
                     port: 6379
+                    %s
                 storage:
                   encryption_key: %s
                   local:
@@ -207,12 +213,30 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
             sessionSecret,              // session secret
             baseDomain,                 // session cookie domain
             vaierFullDomain,            // authelia_url
+            redisBlock,                 // optional session.redis.password
             encryptionKey,              // storage encryption_key
             regexBaseDomain,            // domain_regex favicon bypass (dots escaped)
             vaierFullDomain,            // vaier full domain for bypass rule
             vaierFullDomain,            // vaier full domain for one_factor rule
             notifierBlock               // notifier block (smtp or filesystem)
         );
+    }
+
+    private String buildRedisBlock() {
+        File pwFile = new File(redisPasswordFile);
+        if (!pwFile.exists()) {
+            return "";
+        }
+        try {
+            String pw = java.nio.file.Files.readString(pwFile.toPath()).trim();
+            if (pw.isEmpty()) {
+                return "";
+            }
+            return "password: " + pw;
+        } catch (IOException e) {
+            log.warn("Failed to read redis password file at {}", redisPasswordFile, e);
+            return "";
+        }
     }
 
     private String buildNotifierBlock(Properties secrets) {
@@ -266,6 +290,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
             log.error("Failed to save secrets file", e);
             throw new RuntimeException("Failed to save secrets", e);
         }
+        SecureFilePermissions.lockDownFile(secretsFile.toPath());
 
         return secrets;
     }

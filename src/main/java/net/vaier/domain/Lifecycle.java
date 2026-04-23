@@ -9,6 +9,7 @@ import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.domain.port.ForWritingBootstrapCredentials;
 
 @Slf4j
 public class Lifecycle {
@@ -17,6 +18,7 @@ public class Lifecycle {
     private final ForPersistingUsers forPersistingUsers;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForRestartingContainers containerRestarter;
+    private final ForWritingBootstrapCredentials bootstrapCredentialsWriter;
     private final String vaierDomain;
     private final String defaultAdminUsername;
     private final String autheliaContainerName;
@@ -28,6 +30,7 @@ public class Lifecycle {
         ForPersistingUsers forPersistingUsers,
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForRestartingContainers containerRestarter,
+        ForWritingBootstrapCredentials bootstrapCredentialsWriter,
         String vaierDomain,
         String defaultAdminUsername,
         String autheliaContainerName,
@@ -38,6 +41,7 @@ public class Lifecycle {
         this.forPersistingUsers = forPersistingUsers;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.containerRestarter = containerRestarter;
+        this.bootstrapCredentialsWriter = bootstrapCredentialsWriter;
         this.vaierDomain = vaierDomain;
         this.defaultAdminUsername = defaultAdminUsername;
         this.autheliaContainerName = autheliaContainerName;
@@ -57,11 +61,13 @@ public class Lifecycle {
         if (!forPersistingUsers.isDatabaseInitialised()) {
             String password = generateRandomPassword();
             forPersistingUsers.addUser(defaultAdminUsername, password, "", "Admin");
+            String passwordFilePath = bootstrapCredentialsWriter
+                .writeBootstrapPassword(defaultAdminUsername, password);
             log.info("==========================================================");
             log.info("ADMIN USER CREATED");
             log.info("Username: {}", defaultAdminUsername);
-            log.info("Password: {}", password);
-            log.info("PLEASE CHANGE THIS PASSWORD IMMEDIATELY");
+            log.info("Bootstrap password written to: {}", passwordFilePath);
+            log.info("Read the password, log in, change it, then delete the file.");
             log.info("==========================================================");
             adminCreated = true;
         }

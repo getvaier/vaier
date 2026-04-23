@@ -141,6 +141,29 @@ After completing the wizard, Vaier initializes DNS records, configures Authelia,
 
 ---
 
+## Secrets on disk
+
+Vaier writes new secret files at mode `600` (`rw-------`). For an upgraded deployment you should also tighten the existing files and the surrounding directories on the host:
+
+```bash
+chmod 600 .env production.env 2>/dev/null
+chmod -R go-rwx vaier/ authelia/ wireguard/ traefik/
+```
+
+Files Vaier creates and protects:
+
+| File | Contents |
+|------|----------|
+| `vaier/config/vaier-config.yml` | AWS Route53 credentials, SMTP settings |
+| `authelia/config/secrets.properties` | Authelia JWT/session/encryption secrets, SMTP password |
+| `authelia/config/users_database.yml` | Authelia users with Argon2 password hashes |
+| `authelia/config/redis-password` | Auto-generated Redis password (created by the `redis-init` container) |
+| `authelia/config/.bootstrap-admin-password` | One-time bootstrap admin password (delete after first login) |
+
+The `.env` file you create yourself — keep it at mode `600`.
+
+---
+
 ## Adding a VPN peer
 
 Peers are created from the Vaier UI. When creating a peer, select its type — the type determines the WireGuard config defaults and which download options are shown:

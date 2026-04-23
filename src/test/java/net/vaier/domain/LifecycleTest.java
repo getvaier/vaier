@@ -4,6 +4,7 @@ import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -22,9 +23,11 @@ class LifecycleTest {
     @Mock ForPersistingUsers forPersistingUsers;
     @Mock ForPersistingDnsRecords forPersistingDnsRecords;
     @Mock ForRestartingContainers containerRestarter;
+    @Mock ForWritingBootstrapCredentials bootstrapCredentialsWriter;
 
     private Lifecycle lifecycle() {
         return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter,
+                bootstrapCredentialsWriter,
                 "test.example.com", "admin", "authelia", "vaier", "login");
     }
 
@@ -39,6 +42,31 @@ class LifecycleTest {
         verify(forPersistingUsers).addUser(eq("admin"), passwordCaptor.capture(), any(), any());
         assertThat(passwordCaptor.getValue()).isNotEqualTo("admin");
         assertThat(passwordCaptor.getValue()).hasSizeGreaterThanOrEqualTo(12);
+    }
+
+    @Test
+    void initUsers_writesBootstrapPasswordToFileInsteadOfLogging() {
+        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
+        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(false);
+
+        lifecycle().initUsers();
+
+        ArgumentCaptor<String> usernameCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> passwordCaptor = ArgumentCaptor.forClass(String.class);
+        verify(bootstrapCredentialsWriter)
+            .writeBootstrapPassword(usernameCaptor.capture(), passwordCaptor.capture());
+        assertThat(usernameCaptor.getValue()).isEqualTo("admin");
+        assertThat(passwordCaptor.getValue()).hasSizeGreaterThanOrEqualTo(12);
+    }
+
+    @Test
+    void initUsers_doesNotWriteBootstrapPasswordWhenAdminAlreadyExists() {
+        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
+        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
+
+        lifecycle().initUsers();
+
+        verify(bootstrapCredentialsWriter, never()).writeBootstrapPassword(any(), any());
     }
 
     @Test

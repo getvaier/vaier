@@ -87,7 +87,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/config:/traefik/config
@@ -99,12 +98,31 @@ services:
     networks:
       - vaier-network
 
+  redis-init:
+    image: busybox
+    container_name: redis-init
+    command:
+      - sh
+      - -c
+      - |
+        test -s /secrets/redis-password && exit 0
+        umask 077
+        od -An -tx1 -N 32 /dev/urandom | tr -d ' \n' > /secrets/redis-password
+    volumes:
+      - ./authelia/config:/secrets
+    restart: "no"
+
   redis:
     image: redis:alpine
     container_name: redis
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /secrets/redis-password)\""]
+    depends_on:
+      redis-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     volumes:
       - ./authelia/redis:/data
+      - ./authelia/config:/secrets:ro
     networks:
       - vaier-network
 
@@ -147,6 +165,7 @@ services:
       - wireguard
       - traefik
       - authelia
+      - redis-init
     volumes:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config

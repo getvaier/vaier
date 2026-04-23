@@ -157,6 +157,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
             // Clear password from memory
             argon2.wipeArray(password.toCharArray());
         }
+        SecureFilePermissions.lockDownFile(usersDbFile.toPath());
 
     }
 
@@ -204,6 +205,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
             log.error("Failed to write Authelia users database file: " + usersDbFile, e);
             throw new RuntimeException("Failed to write users database", e);
         }
+        SecureFilePermissions.lockDownFile(usersDbFile.toPath());
     }
 
     @Override
@@ -251,6 +253,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
             log.error("Failed to write Authelia users database file: " + usersDbFile, e);
             throw new RuntimeException("Failed to write users database", e);
         }
+        SecureFilePermissions.lockDownFile(usersDbFile.toPath());
     }
 
     @Override
@@ -296,6 +299,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
             // Clear password from memory
             argon2.wipeArray(newPassword.toCharArray());
         }
+        SecureFilePermissions.lockDownFile(usersDbFile.toPath());
     }
 
 }
