@@ -8,6 +8,7 @@ import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
+import net.vaier.domain.port.ForPublishingAutheliaAssets;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForWritingBootstrapCredentials;
 
@@ -19,6 +20,7 @@ public class Lifecycle {
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForRestartingContainers containerRestarter;
     private final ForWritingBootstrapCredentials bootstrapCredentialsWriter;
+    private final ForPublishingAutheliaAssets autheliaAssetsPublisher;
     private final String vaierDomain;
     private final String defaultAdminUsername;
     private final String autheliaContainerName;
@@ -31,6 +33,7 @@ public class Lifecycle {
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForRestartingContainers containerRestarter,
         ForWritingBootstrapCredentials bootstrapCredentialsWriter,
+        ForPublishingAutheliaAssets autheliaAssetsPublisher,
         String vaierDomain,
         String defaultAdminUsername,
         String autheliaContainerName,
@@ -42,6 +45,7 @@ public class Lifecycle {
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.containerRestarter = containerRestarter;
         this.bootstrapCredentialsWriter = bootstrapCredentialsWriter;
+        this.autheliaAssetsPublisher = autheliaAssetsPublisher;
         this.vaierDomain = vaierDomain;
         this.defaultAdminUsername = defaultAdminUsername;
         this.autheliaContainerName = autheliaContainerName;
@@ -55,6 +59,7 @@ public class Lifecycle {
     }
 
     void initUsers() {
+        autheliaAssetsPublisher.publishAssets();
         boolean configChanged = forInitialisingUserService.initialiseConfiguration();
 
         boolean adminCreated = false;

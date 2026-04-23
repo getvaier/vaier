@@ -198,6 +198,7 @@ Manage Authelia users from the Vaier UI.
 **Current capabilities:**
 - List / create / delete users
 - Change passwords (Argon2 hashing)
+- Authelia login / 2FA pages inherit Vaier's dark theme and logo via `theme: dark` + `asset_path: /config/assets`; the Vaier container publishes `logo.png` into the Authelia assets directory at startup so the hand-off between `vaier.<domain>` and `login.<domain>` reads as one product.
 
 No planned changes.
 

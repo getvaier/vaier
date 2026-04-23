@@ -3,6 +3,7 @@ package net.vaier.domain;
 import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
+import net.vaier.domain.port.ForPublishingAutheliaAssets;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import org.junit.jupiter.api.Test;
@@ -24,10 +25,11 @@ class LifecycleTest {
     @Mock ForPersistingDnsRecords forPersistingDnsRecords;
     @Mock ForRestartingContainers containerRestarter;
     @Mock ForWritingBootstrapCredentials bootstrapCredentialsWriter;
+    @Mock ForPublishingAutheliaAssets autheliaAssetsPublisher;
 
     private Lifecycle lifecycle() {
         return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter,
-                bootstrapCredentialsWriter,
+                bootstrapCredentialsWriter, autheliaAssetsPublisher,
                 "test.example.com", "admin", "authelia", "vaier", "login");
     }
 
@@ -107,5 +109,17 @@ class LifecycleTest {
         lifecycle().initUsers();
 
         verify(containerRestarter, never()).restartContainer(any());
+    }
+
+    @Test
+    void initUsers_publishesBrandingAssetsBeforeAutheliaRestart() {
+        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(true);
+        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
+
+        lifecycle().initUsers();
+
+        var inOrder = inOrder(autheliaAssetsPublisher, containerRestarter);
+        inOrder.verify(autheliaAssetsPublisher).publishAssets();
+        inOrder.verify(containerRestarter).restartContainer("authelia");
     }
 }

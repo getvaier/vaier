@@ -30,6 +30,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
 | **Email notifications** | SMTP settings in *Settings* power Authelia password-reset emails today and future Vaier notifications. Credentials are verified against the server before saving; a dedicated "Send test email" button delivers a real roundtrip message to any recipient. |
 | **First-run setup wizard** | Web-based wizard at `/setup.html` guides you through domain, AWS credentials, ACME email, and admin account creation — no `.env` file editing required. |
+| **Consistent branding** | Authelia login and 2FA pages share Vaier's dark theme and logo, so the hand-off from `vaier.<domain>` to `login.<domain>` doesn't feel like a different app. |
 
 ---
 

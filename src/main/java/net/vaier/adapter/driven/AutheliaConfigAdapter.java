@@ -138,6 +138,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
 
     private String generateConfig() {
         String vaierFullDomain = "vaier." + vaierDomain;
+        String autheliaFullDomain = "login." + vaierDomain;
         // Extract base domain from vaier domain (e.g., "vaier.eilertsen.family" -> "eilertsen.family")
         String baseDomain = vaierFullDomain.contains(".")
             ? vaierFullDomain.substring(vaierFullDomain.indexOf('.') + 1)
@@ -160,6 +161,8 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                 ###############################################################
                 server:
                   address: tcp://0.0.0.0:9091
+                  asset_path: /config/assets
+                theme: dark
                 log:
                   level: info
                 identity_validation:
@@ -175,6 +178,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                   cookies:
                     - domain: %s
                       authelia_url: https://%s
+                      default_redirection_url: https://%s
                   expiration: 3600 # 1 hour
                   inactivity: 300 # 5 minutes
                   redis:
@@ -212,7 +216,8 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
             baseDomain,                 // totp issuer
             sessionSecret,              // session secret
             baseDomain,                 // session cookie domain
-            vaierFullDomain,            // authelia_url
+            autheliaFullDomain,         // authelia_url (login portal)
+            vaierFullDomain,            // default_redirection_url (vaier launchpad)
             redisBlock,                 // optional session.redis.password
             encryptionKey,              // storage encryption_key
             regexBaseDomain,            // domain_regex favicon bypass (dots escaped)

@@ -35,7 +35,7 @@ class AutheliaConfigAdapterTest {
 
         String content = Files.readString(tempDir.resolve("configuration.yml"));
         assertThat(content).contains("domain: example.com");
-        assertThat(content).contains("authelia_url: https://vaier.example.com");
+        assertThat(content).contains("authelia_url: https://login.example.com");
     }
 
     @Test
@@ -189,6 +189,45 @@ class AutheliaConfigAdapterTest {
         int storageIndex = content.indexOf("storage:", redisIndex);
         String redisBlock = content.substring(redisIndex, storageIndex);
         assertThat(redisBlock).doesNotContain("password:");
+    }
+
+    @Test
+    void initialiseConfiguration_setsDefaultRedirectionUrlToVaierLaunchpad() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        int sessionIndex = content.indexOf("session:");
+        int storageIndex = content.indexOf("\nstorage:", sessionIndex);
+        String sessionBlock = content.substring(sessionIndex, storageIndex);
+        assertThat(sessionBlock).contains("default_redirection_url: https://vaier.example.com");
+    }
+
+    @Test
+    void initialiseConfiguration_setsDarkThemeToMatchVaierUi() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        int serverIndex = content.indexOf("server:");
+        int nextTopLevelIndex = content.indexOf("\nlog:", serverIndex);
+        String serverBlock = content.substring(serverIndex, nextTopLevelIndex);
+        assertThat(serverBlock).contains("theme: dark");
+    }
+
+    @Test
+    void initialiseConfiguration_pointsAssetPathAtMountedAssetsDirectory() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        int serverIndex = content.indexOf("server:");
+        int nextTopLevelIndex = content.indexOf("\nlog:", serverIndex);
+        String serverBlock = content.substring(serverIndex, nextTopLevelIndex);
+        assertThat(serverBlock).contains("asset_path: /config/assets");
     }
 
     @Test

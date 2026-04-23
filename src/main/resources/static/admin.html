@@ -151,9 +151,7 @@
                 const me = await res.json();
                 if (!me.username) return;
                 const name = me.displayname || me.username;
-                const logout = me.logoutUrl
-                    ? me.logoutUrl + '?rd=' + encodeURIComponent(window.location.href)
-                    : '#';
+                const logout = me.logoutUrl || '#';
                 userEl.innerHTML = `
                     <a href="/mypage.html" class="display-name" title="${name}">${name}</a>
                     <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>

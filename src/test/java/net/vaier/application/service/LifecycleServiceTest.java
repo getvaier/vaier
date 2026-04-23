@@ -6,6 +6,7 @@ import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
+import net.vaier.domain.port.ForPublishingAutheliaAssets;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ class LifecycleServiceTest {
     @Mock ForPersistingDnsRecords forPersistingDnsRecords;
     @Mock ForInitialisingVpnRouting forInitialisingVpnRouting;
     @Mock ForWritingBootstrapCredentials bootstrapCredentialsWriter;
+    @Mock ForPublishingAutheliaAssets autheliaAssetsPublisher;
     @Mock SetupStateHolder setupStateHolder;
     @Mock ConfigResolver configResolver;
     @Mock ApplicationReadyEvent event;
@@ -34,7 +36,7 @@ class LifecycleServiceTest {
             forInitialisingUserService, forPersistingUsers,
             containerRestarter, forPersistingDnsRecords,
             forInitialisingVpnRouting, bootstrapCredentialsWriter,
-            setupStateHolder, configResolver
+            autheliaAssetsPublisher, setupStateHolder, configResolver
         );
     }
 
