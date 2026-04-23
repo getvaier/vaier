@@ -115,54 +115,32 @@ body {
 }
 
 .topbar-user .display-name {
+    display: inline-flex;
+    align-items: center;
     font-size: 0.78rem;
     color: var(--text-muted);
     white-space: nowrap;
     max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-right: 4px;
-}
-
-/* Page tabs — in-page secondary nav (used on admin) */
-.page-tabs {
-    display: flex;
-    gap: 0;
-    padding: 0 1rem;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    scrollbar-width: none;
-    flex-shrink: 0;
-}
-
-.page-tabs::-webkit-scrollbar { display: none; }
-
-.page-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 10px 14px;
-    color: var(--text-muted);
+    padding: 6px 10px;
+    border-radius: 3px;
+    border: 1px solid transparent;
     text-decoration: none;
-    font-size: 0.82rem;
-    border: none;
-    background: none;
-    border-bottom: 2px solid transparent;
-    white-space: nowrap;
     cursor: pointer;
-    font-family: inherit;
-    margin-bottom: -1px;
 }
 
-.page-tab:hover { color: var(--text); text-decoration: none; }
+.topbar-user a.display-name:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+    text-decoration: none;
+}
 
-.page-tab.active {
+.topbar-user a.display-name.active {
     color: var(--accent);
-    border-bottom-color: var(--accent);
+    background: var(--bg-card);
+    border-color: var(--border);
 }
-
-.page-tab svg { width: 15px; height: 15px; flex-shrink: 0; }
 
 /* Page header — IDE tab/breadcrumb bar */
 .page-header {
@@ -536,10 +514,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
     .topbar-nav { gap: 0; }
     .topbar-item { padding: 6px 10px; gap: 0; }
     .topbar-item .link-label { display: none; }
-    .topbar-user .display-name { display: none; }
-    .page-tabs { padding: 0 6px; }
-    .page-tab { padding: 10px 12px; gap: 0; }
-    .page-tab .tab-label { display: none; }
+    .topbar-user .display-name { max-width: 90px; padding: 6px 8px; }
 
     .page-header {
         height: auto;
