@@ -20,6 +20,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
     private final String configurationFile;
     private final String secretsFile;
     private final String redisPasswordFile;
+    private final String dbFile;
     private final String vaierDomain;
 
     private String smtpHost;
@@ -34,6 +35,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
         this.redisPasswordFile = configPath + "/redis-password";
+        this.dbFile = configPath + "/db.sqlite";
         this.vaierDomain = domain;
         this.smtpHost = configResolver.getSmtpHost();
         this.smtpPort = configResolver.getSmtpPort() != null ? configResolver.getSmtpPort() : 587;
@@ -45,6 +47,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
         this.configurationFile = configPath + "/configuration.yml";
         this.secretsFile = configPath + "/secrets.properties";
         this.redisPasswordFile = configPath + "/redis-password";
+        this.dbFile = configPath + "/db.sqlite";
         this.vaierDomain = vaierDomain;
         this.smtpHost = null;
         this.smtpPort = 587;
@@ -282,6 +285,18 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
         secrets.setProperty("jwt_secret", generateSecureSecret(32));
         secrets.setProperty("session_secret", generateSecureSecret(32));
         secrets.setProperty("encryption_key", generateSecureSecret(64));
+
+        // The authelia-init one-shot boots Authelia with a placeholder
+        // encryption key so the container stays up on a fresh stack. That
+        // makes Authelia create /config/db.sqlite encrypted with the
+        // placeholder key. Now that we are replacing the placeholder key
+        // with a real random one, the stale DB must go or Authelia will
+        // crash-loop on its next restart with "encryption key does not
+        // appear to be valid for this database".
+        File placeholderDb = new File(this.dbFile);
+        if (placeholderDb.exists() && placeholderDb.delete()) {
+            log.info("Removed placeholder-encrypted Authelia DB at {}", placeholderDb.getAbsolutePath());
+        }
 
         // Save secrets
         File parentDir = secretsFile.getParentFile();

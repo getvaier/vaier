@@ -303,6 +303,34 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
+    void initialiseConfiguration_deletesPlaceholderDbOnFirstRunSecretGeneration() throws IOException {
+        // authelia-init wrote a placeholder configuration.yml with a known key and
+        // Authelia then encrypted db.sqlite with that key. Vaier's first run
+        // generates real secrets and must drop the stale DB or Authelia will
+        // crash-loop on the next restart (#165).
+        Files.writeString(tempDir.resolve("db.sqlite"), "placeholder-encrypted-content");
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        assertThat(tempDir.resolve("db.sqlite")).doesNotExist();
+        assertThat(tempDir.resolve("secrets.properties")).exists();
+    }
+
+    @Test
+    void initialiseConfiguration_preservesDbWhenSecretsAlreadyExist() throws IOException {
+        AutheliaConfigAdapter first = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+        first.initialiseConfiguration(); // generates secrets
+        Files.writeString(tempDir.resolve("db.sqlite"), "real-db-content");
+
+        AutheliaConfigAdapter second = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+        second.initialiseConfiguration();
+
+        assertThat(tempDir.resolve("db.sqlite")).exists();
+        assertThat(Files.readString(tempDir.resolve("db.sqlite"))).isEqualTo("real-db-content");
+    }
+
+    @Test
     void updateSmtpConfig_preservesExistingSecrets() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
         init.initialiseConfiguration(); // generates jwt_secret, session_secret, encryption_key

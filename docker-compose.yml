@@ -81,7 +81,7 @@ services:
       - --entrypoints.websecure.address=:443
       - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
       - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=route53
-      - --certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=30
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.propagation.delaybeforechecks=30
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
       - --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme/acme.json
     environment:
@@ -255,6 +255,7 @@ services:
       - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${VAIER_DOMAIN}
       - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
       - traefik.http.middlewares.vaier-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
+      - traefik.http.middlewares.vaier-auth.forwardauth.maxResponseBodySize=65536
       - traefik.http.services.vaier.loadbalancer.server.port=8080
     networks:
       - vaier-network
