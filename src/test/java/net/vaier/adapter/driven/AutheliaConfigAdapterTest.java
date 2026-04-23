@@ -97,6 +97,16 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
+    void initialiseConfiguration_enablesWatchOnFileAuthBackend() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("watch: true");
+    }
+
+    @Test
     void initialiseConfiguration_launchpadPathsBypassAuthentication() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 

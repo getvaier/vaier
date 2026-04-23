@@ -171,6 +171,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                 authentication_backend:
                   file:
                     path: /config/users_database.yml
+                    watch: true
                 totp:
                   issuer: %s
                 session:
