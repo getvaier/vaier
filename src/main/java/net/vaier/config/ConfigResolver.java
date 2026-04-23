@@ -16,7 +16,6 @@ public class ConfigResolver {
     private String domain;
     private String awsKey;
     private String awsSecret;
-    private String cloudflareToken;
     private String acmeEmail;
     private String smtpHost;
     private Integer smtpPort;
@@ -39,7 +38,6 @@ public class ConfigResolver {
         this.domain = firstNonBlank(config.getDomain(), envLookup.apply("VAIER_DOMAIN"));
         this.awsKey = firstNonBlank(config.getAwsKey(), envLookup.apply("VAIER_AWS_KEY"));
         this.awsSecret = firstNonBlank(config.getAwsSecret(), envLookup.apply("VAIER_AWS_SECRET"));
-        this.cloudflareToken = firstNonBlank(config.getCloudflareToken(), envLookup.apply("VAIER_CLOUDFLARE_TOKEN"));
         this.acmeEmail = firstNonBlank(config.getAcmeEmail(), envLookup.apply("ACME_EMAIL"));
         this.smtpHost = config.getSmtpHost();
         this.smtpPort = config.getSmtpPort();
@@ -59,7 +57,6 @@ public class ConfigResolver {
     public String getDomain() { return domain; }
     public String getAwsKey() { return awsKey; }
     public String getAwsSecret() { return awsSecret; }
-    public String getCloudflareToken() { return cloudflareToken; }
     public String getAcmeEmail() { return acmeEmail; }
     public String getSmtpHost() { return smtpHost; }
     public Integer getSmtpPort() { return smtpPort; }

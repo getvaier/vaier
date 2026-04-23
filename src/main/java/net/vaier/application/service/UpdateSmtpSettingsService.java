@@ -43,7 +43,6 @@ public class UpdateSmtpSettingsService implements UpdateSmtpSettingsUseCase {
             .domain(current.getDomain())
             .awsKey(current.getAwsKey())
             .awsSecret(current.getAwsSecret())
-            .cloudflareToken(current.getCloudflareToken())
             .acmeEmail(current.getAcmeEmail())
             .smtpHost(host)
             .smtpPort(port)
