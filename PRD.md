@@ -257,25 +257,14 @@ Vaier ships an SMTP notifier that powers Authelia password-reset emails today an
 
 ---
 
-### 6.10 First-Run Setup Wizard ✅ (implemented, tracked in [#48](https://github.com/getvaier/vaier/issues/48))
+### 6.10 First-Run Setup Wizard ⚠️ (deprecated as a Getting Started path, tracked in [#48](https://github.com/getvaier/vaier/issues/48), [#161](https://github.com/getvaier/vaier/issues/161))
 
-Currently Vaier requires four environment variables before it can start (`VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, `ACME_EMAIL`). This is a barrier for new users who need to edit a `.env` file they may not know how to create, and it makes adding new required config (like SMTP credentials for 6.9) increasingly painful.
+The in-app wizard at `/setup.html` exists in the code but is no longer part of the Getting Started flow. A tester walking through the README on 2026-04-23 found that the wizard is unreachable when the four required env vars are already populated, and not documented anywhere for the case when they are not. README step 5 was rewritten to "first login" (cat the bootstrap password file, change the admin password, delete the file). The wizard plumbing (`/setup.html`, `SetupRedirectFilter`, `/api/setup/*`) remains in place for now but is scheduled for removal in a follow-up unless a clear use case emerges.
 
-**Goal:** replace the mandatory `.env` file with a web-based first-run wizard. `docker compose up -d` with no `.env` file should produce a running — but unconfigured — Vaier instance that redirects the user to a setup page.
+### 6.11 Zero-touch first-run DNS + Authelia boot ✅ (implemented 2026-04-23, closes [#163](https://github.com/getvaier/vaier/issues/163), [#164](https://github.com/getvaier/vaier/issues/164))
 
-**Wizard flow:**
-
-1. **Detect unconfigured state** — on startup, if required config is missing, Vaier serves a setup page instead of the normal UI. The setup page is accessible without Authelia (Authelia itself cannot be configured yet).
-2. **Step 1 — Domain** — enter base domain (e.g. `yourdomain.com`). Vaier derives `vaier.yourdomain.com` for its own URL and `auth.yourdomain.com` for Authelia.
-3. **Step 2 — AWS credentials** — AWS access key and secret for Route53. Vaier can test the credentials live (list zones) before proceeding.
-4. **Step 3 — Let's Encrypt** — email address for ACME certificate notifications.
-5. **Step 4 — Email (SMTP)** — SMTP settings for Authelia email delivery (see 6.9). Optional: can be skipped and configured later from Settings.
-6. **Step 5 — Admin account** — create the first Authelia user (username + password). Vaier already auto-creates an `admin` user on first run; this step lets the user set their own credentials instead.
-7. **Done** — Vaier writes config to a persisted file, restarts Authelia with the new config, and redirects to the normal UI.
-
-**Config persistence:** settings are written to a YAML file (e.g. `vaier-config.yml`) mounted into the container. This file takes precedence over env vars, so env vars still work for automated/CI deployments. If both are present, the config file wins.
-
-**`.env` file is not removed** — it remains valid and documented. The wizard is an alternative path, not a replacement. Users who prefer env vars (e.g. for scripted deployments) should continue to use them.
+- **Auto-creates `vaier.<domain>` on first boot.** Vaier resolves the server's public address in order: `VAIER_PUBLIC_HOST` (CNAME target) → `VAIER_PUBLIC_IP` (A target) → EC2 IMDSv2 `public-hostname` (CNAME). If none resolve and the record is already missing, Vaier logs a clear instruction and exits the lifecycle step without crash-looping — the rest of the stack stays up so the operator can fix .env and restart.
+- **`authelia-init` one-shot container** mirrors the `redis-init` pattern: writes a minimum-viable `configuration.yml` + `placeholder_users.yml` into `./authelia/config` before Authelia starts, so the Authelia container no longer crash-loops against its own default template on the first `docker compose up -d`. Vaier overwrites the placeholder config on its own first start and restarts Authelia.
 
 ---
 
@@ -307,14 +296,12 @@ Currently Vaier requires four environment variables before it can start (`VAIER_
 2. Containers with available updates show an "update available" badge
 3. Developer updates container manually on the peer host
 
-### 7.5 First-time setup (no .env file)
+### 7.5 First-time setup
 
-1. User runs `docker compose up -d` with no `.env` file
-2. Vaier starts and detects missing required config
-3. Browser opens Vaier URL — redirected to the setup wizard
-4. User steps through: domain → AWS credentials (tested live) → ACME email → SMTP → admin account
-5. Vaier writes config, initialises Authelia, redirects to normal UI
-6. Full stack is operational — no file editing required
+1. User creates `.env` with `VAIER_DOMAIN`, `ACME_EMAIL`, `VAIER_AWS_KEY`, `VAIER_AWS_SECRET` (and optionally `VAIER_PUBLIC_HOST` / `VAIER_PUBLIC_IP` when not on EC2)
+2. `docker compose up -d` — `authelia-init` writes placeholder Authelia config, the stack comes up without Authelia crash-looping
+3. Vaier auto-creates `vaier.<domain>` (and `login.<domain>`) records in Route53, writes the real Authelia config, and bootstraps an admin user whose one-time password is written to `authelia/config/.bootstrap-admin-password`
+4. User reads the bootstrap password, logs in at `https://vaier.<domain>`, changes it, and deletes the file
 
 ## 8. Technical Constraints
 
@@ -346,7 +333,7 @@ Vaier is "done enough" when:
 2. All VPN peers can be managed (create, configure, delete) without editing any WireGuard config file
 3. A launchpad page exists that works as a browser home page showing all services and their status
 4. The operator is notified when container images have updates available
-5. The full stack can be installed from scratch with `docker compose up -d` — either via a `.env` file or the first-run setup wizard, with no manual config file editing required
+5. The full stack can be installed from scratch with `docker compose up -d` and a minimal `.env` file, with no further manual config file editing required
 
 ---
 

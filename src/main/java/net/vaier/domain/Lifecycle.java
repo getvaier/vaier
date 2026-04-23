@@ -9,6 +9,8 @@ import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForPublishingAutheliaAssets;
+import net.vaier.domain.port.ForResolvingPublicHost;
+import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForWritingBootstrapCredentials;
 
@@ -21,6 +23,7 @@ public class Lifecycle {
     private final ForRestartingContainers containerRestarter;
     private final ForWritingBootstrapCredentials bootstrapCredentialsWriter;
     private final ForPublishingAutheliaAssets autheliaAssetsPublisher;
+    private final ForResolvingPublicHost publicHostResolver;
     private final String vaierDomain;
     private final String defaultAdminUsername;
     private final String autheliaContainerName;
@@ -34,6 +37,7 @@ public class Lifecycle {
         ForRestartingContainers containerRestarter,
         ForWritingBootstrapCredentials bootstrapCredentialsWriter,
         ForPublishingAutheliaAssets autheliaAssetsPublisher,
+        ForResolvingPublicHost publicHostResolver,
         String vaierDomain,
         String defaultAdminUsername,
         String autheliaContainerName,
@@ -46,6 +50,7 @@ public class Lifecycle {
         this.containerRestarter = containerRestarter;
         this.bootstrapCredentialsWriter = bootstrapCredentialsWriter;
         this.autheliaAssetsPublisher = autheliaAssetsPublisher;
+        this.publicHostResolver = publicHostResolver;
         this.vaierDomain = vaierDomain;
         this.defaultAdminUsername = defaultAdminUsername;
         this.autheliaContainerName = autheliaContainerName;
@@ -106,14 +111,19 @@ public class Lifecycle {
         String vaierHost = vaierSubdomain + "." + vaierDomain;
         String authHost = authSubdomain + "." + vaierDomain;
 
-        DnsRecord dnsRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
+        List<DnsRecord> records = forPersistingDnsRecords.getDnsRecords(dnsZone);
+
+        Optional<DnsRecord> vaierRecord = records.stream()
             .filter(record -> record.name().equals(vaierHost))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException("DNS record not found for " + vaierHost));
+            .findFirst();
 
-        log.info("DNS record found: " + dnsRecord.name());
+        if (vaierRecord.isPresent()) {
+            log.info("DNS record found: " + vaierRecord.get().name());
+        } else if (!ensureVaierRecord(vaierHost, dnsZone)) {
+            return;
+        }
 
-        Optional<DnsRecord> authRecord = forPersistingDnsRecords.getDnsRecords(dnsZone).stream()
+        Optional<DnsRecord> authRecord = records.stream()
             .filter(record -> record.name().equals(authHost))
             .findFirst();
 
@@ -124,5 +134,26 @@ public class Lifecycle {
         } else {
             log.info("Found " + authHost + " CNAME record");
         }
+    }
+
+    private boolean ensureVaierRecord(String vaierHost, DnsZone dnsZone) {
+        Optional<PublicHost> resolved = publicHostResolver.resolve();
+        if (resolved.isEmpty()) {
+            log.warn("==========================================================");
+            log.warn("DNS record missing for {} and this server's public address", vaierHost);
+            log.warn("could not be determined automatically.");
+            log.warn("Create the record manually in Route53, or set");
+            log.warn("VAIER_PUBLIC_HOST (CNAME target) or VAIER_PUBLIC_IP (A target)");
+            log.warn("in .env and restart the stack.");
+            log.warn("==========================================================");
+            return false;
+        }
+        PublicHost publicHost = resolved.get();
+        forPersistingDnsRecords.addDnsRecord(
+            new DnsRecord(vaierHost, publicHost.type(), 300L, List.of(publicHost.value())),
+            dnsZone
+        );
+        log.info("Added {} {} record → {}", vaierHost, publicHost.type(), publicHost.value());
+        return true;
     }
 }

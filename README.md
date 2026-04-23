@@ -29,7 +29,6 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users from the UI (create, delete, change password). |
 | **Email notifications** | SMTP settings in *Settings* power Authelia password-reset emails today and future Vaier notifications. Credentials are verified against the server before saving; a dedicated "Send test email" button delivers a real roundtrip message to any recipient. |
-| **First-run setup wizard** | Web-based wizard at `/setup.html` guides you through domain, AWS credentials, ACME email, and admin account creation — no `.env` file editing required. |
 | **Consistent branding** | Authelia login and 2FA pages share Vaier's dark theme and logo, so the hand-off from `vaier.<domain>` to `login.<domain>` doesn't feel like a different app. |
 
 ---
@@ -94,17 +93,25 @@ For other platforms or manual installation steps, see the [official Docker insta
 ### 2. Create a folder and download the compose file
 
 ```bash
-mkdir vaier && cd vaier
+mkdir -p vaier && cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
 ```
 
-### 3. Create a one-line `.env` file
+### 3. Create the `.env` file
 
 ```bash
-echo "VAIER_DOMAIN=yourdomain.com" > .env
+cat > .env <<'EOF'
+VAIER_DOMAIN=yourdomain.com
+ACME_EMAIL=you@yourdomain.com
+VAIER_AWS_KEY=AKIA...
+VAIER_AWS_SECRET=...
+EOF
+chmod 600 .env
 ```
 
-Then create an A record for `vaier.yourdomain.com` pointing to your server's public IP.
+All four values are required. The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`.
+
+Vaier auto-creates the `vaier.yourdomain.com` and `login.yourdomain.com` records in Route53 on first boot. On EC2, the public hostname is detected from instance metadata. On other hosts, set `VAIER_PUBLIC_HOST` (CNAME target) or `VAIER_PUBLIC_IP` (A record target) in `.env`.
 
 ### 4. Start the stack
 
@@ -112,17 +119,19 @@ Then create an A record for `vaier.yourdomain.com` pointing to your server's pub
 docker compose up -d
 ```
 
-### 5. Open the setup page
+### 5. First login
 
-Navigate to `https://vaier.yourdomain.com` in your browser. The setup wizard opens automatically and walks you through:
+Once `docker compose ps` shows every service as `Up`, read the one-time admin password Vaier wrote to disk:
 
-1. **AWS Credentials** — access key and secret with Route53 permissions (validated live)
-2. **ACME Email** — for Let's Encrypt certificate notifications
-3. **Admin Account** — first Authelia user (username + password)
+```bash
+cat authelia/config/.bootstrap-admin-password
+```
 
-After completing the wizard, Vaier initializes DNS records, configures Authelia, and starts all services.
+Open `https://vaier.yourdomain.com` in your browser, log in as `admin` with that password, change it from *Settings → Users*, then delete the bootstrap file:
 
-> **Existing deployments**: If you already have a `.env` file with `VAIER_AWS_KEY`, `VAIER_AWS_SECRET`, `VAIER_DOMAIN`, and `ACME_EMAIL`, Vaier continues to work with those environment variables — the setup wizard is skipped automatically.
+```bash
+rm authelia/config/.bootstrap-admin-password
+```
 
 ---
 
@@ -134,6 +143,8 @@ After completing the wizard, Vaier initializes DNS records, configures Authelia,
 | `VAIER_AWS_SECRET` | Yes | AWS secret key for Route53 |
 | `VAIER_DOMAIN` | Yes | Base domain (e.g. `yourdomain.com`) |
 | `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications |
+| `VAIER_PUBLIC_HOST` | No | Public hostname of this server; used as the CNAME target for `vaier.<domain>` when not on EC2 |
+| `VAIER_PUBLIC_IP` | No | Public IPv4 of this server; used as an A-record target for `vaier.<domain>` when not on EC2 |
 | `WIREGUARD_CONFIG_PATH` | No | WireGuard config dir (default: `/wireguard/config`) |
 | `WIREGUARD_CONTAINER_NAME` | No | WireGuard container name (default: `wireguard`) |
 | `TRAEFIK_CONFIG_PATH` | No | Traefik dynamic config dir (default: `/traefik/config`) |

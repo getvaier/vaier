@@ -9,6 +9,7 @@ import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForPublishingAutheliaAssets;
+import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class LifecycleService {
     private final ForInitialisingVpnRouting forInitialisingVpnRouting;
     private final ForWritingBootstrapCredentials bootstrapCredentialsWriter;
     private final ForPublishingAutheliaAssets autheliaAssetsPublisher;
+    private final ForResolvingPublicHost publicHostResolver;
     private final SetupStateHolder setupStateHolder;
     private final ConfigResolver configResolver;
 
@@ -38,6 +40,7 @@ public class LifecycleService {
         ForInitialisingVpnRouting forInitialisingVpnRouting,
         ForWritingBootstrapCredentials bootstrapCredentialsWriter,
         ForPublishingAutheliaAssets autheliaAssetsPublisher,
+        ForResolvingPublicHost publicHostResolver,
         SetupStateHolder setupStateHolder,
         ConfigResolver configResolver
     ) {
@@ -48,6 +51,7 @@ public class LifecycleService {
         this.forInitialisingVpnRouting = forInitialisingVpnRouting;
         this.bootstrapCredentialsWriter = bootstrapCredentialsWriter;
         this.autheliaAssetsPublisher = autheliaAssetsPublisher;
+        this.publicHostResolver = publicHostResolver;
         this.setupStateHolder = setupStateHolder;
         this.configResolver = configResolver;
     }
@@ -72,6 +76,7 @@ public class LifecycleService {
             containerRestarter,
             bootstrapCredentialsWriter,
             autheliaAssetsPublisher,
+            publicHostResolver,
             configResolver.getDomain(),
             ServiceNames.DEFAULT_ADMIN_USERNAME,
             ServiceNames.AUTHELIA,

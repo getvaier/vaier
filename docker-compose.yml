@@ -68,6 +68,10 @@ services:
         ip route add 10.13.13.0/24 via "$$WG_IP" 2>/dev/null || true
         exec traefik "$$0" "$$@"
     command:
+      - --log.level=INFO
+      - --log.format=json
+      - --accesslog=true
+      - --accesslog.format=json
       - --api.insecure=true
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
@@ -78,11 +82,11 @@ services:
       - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
       - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=route53
       - --certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=30
-      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
       - --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme/acme.json
     environment:
-      - AWS_ACCESS_KEY_ID=${VAIER_AWS_KEY}
-      - AWS_SECRET_ACCESS_KEY=${VAIER_AWS_SECRET}
+      - AWS_ACCESS_KEY_ID=${VAIER_AWS_KEY:-}
+      - AWS_SECRET_ACCESS_KEY=${VAIER_AWS_SECRET:-}
       - AWS_REGION=us-east-1
     ports:
       - "80:80"
@@ -126,6 +130,62 @@ services:
     networks:
       - vaier-network
 
+  authelia-init:
+    image: busybox
+    container_name: authelia-init
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        umask 077
+        if [ ! -f /config/configuration.yml ]; then
+          cat > /config/configuration.yml <<'EOF'
+        # Placeholder Authelia config written by authelia-init so Authelia
+        # does not crash-loop on the first boot before Vaier takes over.
+        # Vaier overwrites this on first start and restarts the container.
+        server:
+          address: tcp://0.0.0.0:9091
+        log:
+          level: info
+        identity_validation:
+          reset_password:
+            jwt_secret: bootstrap-placeholder-jwt-secret-replace-on-first-run
+        authentication_backend:
+          file:
+            path: /config/placeholder_users.yml
+            watch: true
+        session:
+          secret: bootstrap-placeholder-session-secret-replace-on-first-run
+          cookies:
+            - domain: placeholder.local
+              authelia_url: https://login.placeholder.local
+        storage:
+          encryption_key: bootstrap-placeholder-storage-encryption-key-replace
+          local:
+            path: /config/db.sqlite
+        access_control:
+          default_policy: one_factor
+        notifier:
+          filesystem:
+            filename: /config/emails.txt
+        EOF
+        fi
+        if [ ! -f /config/placeholder_users.yml ]; then
+          cat > /config/placeholder_users.yml <<'EOF'
+        users:
+          placeholder:
+            disabled: true
+            displayname: Placeholder
+            password: "$$argon2id$$v=19$$m=65536,t=3,p=4$$BpLnfgDsc2WD8F2q$$o/vzA4myCqZZ36qUqYhEZkdTw7KPnhxcNVkB8WHc6VI"
+            email: placeholder@placeholder.local
+            groups: []
+        EOF
+        fi
+    volumes:
+      - ./authelia/config:/config
+    restart: "no"
+
   authelia:
     image: authelia/authelia:latest
     container_name: authelia
@@ -134,7 +194,10 @@ services:
     volumes:
       - ./authelia/config:/config
     depends_on:
-      - redis
+      authelia-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     restart: unless-stopped
     labels:
       - traefik.enable=true
@@ -152,9 +215,11 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      VAIER_AWS_KEY: ${VAIER_AWS_KEY}
-      VAIER_AWS_SECRET: ${VAIER_AWS_SECRET}
-      VAIER_DOMAIN: ${VAIER_DOMAIN}
+      VAIER_AWS_KEY: ${VAIER_AWS_KEY:-}
+      VAIER_AWS_SECRET: ${VAIER_AWS_SECRET:-}
+      VAIER_DOMAIN: ${VAIER_DOMAIN:-}
+      VAIER_PUBLIC_HOST: ${VAIER_PUBLIC_HOST:-}
+      VAIER_PUBLIC_IP: ${VAIER_PUBLIC_IP:-}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
