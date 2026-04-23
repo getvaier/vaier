@@ -67,14 +67,37 @@ Vaier runs as part of a five-container Docker Compose stack:
 
 ## Quick start
 
-### 1. Create a folder and download the compose file
+### 1. Install Docker
+
+On a fresh Linux server, install Docker Engine and the Compose plugin using the official convenience script:
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+To run `docker` without `sudo`, add your user to the `docker` group and re-login:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Verify the install:
+
+```bash
+docker --version
+docker compose version
+```
+
+For other platforms or manual installation steps, see the [official Docker install docs](https://docs.docker.com/engine/install/).
+
+### 2. Create a folder and download the compose file
 
 ```bash
 mkdir vaier && cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
 ```
 
-### 2. Create a one-line `.env` file
+### 3. Create a one-line `.env` file
 
 ```bash
 echo "VAIER_DOMAIN=yourdomain.com" > .env
@@ -82,13 +105,13 @@ echo "VAIER_DOMAIN=yourdomain.com" > .env
 
 Then create an A record for `vaier.yourdomain.com` pointing to your server's public IP.
 
-### 3. Start the stack
+### 4. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-### 4. Open the setup page
+### 5. Open the setup page
 
 Navigate to `https://vaier.yourdomain.com` in your browser. The setup wizard opens automatically and walks you through:
 
