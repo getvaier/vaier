@@ -47,6 +47,60 @@ Vaier runs as part of a five-container Docker Compose stack:
 
 ---
 
+## How it fits together
+
+Every published service resolves to the single Vaier server via Route53, terminates TLS at Traefik, optionally passes Authelia forward-auth, and is proxied over a WireGuard tunnel to the container running on a peer.
+
+The launchpad is aware of where the request is coming from: off-LAN users hit the **global** `https://service.<domain>` URL, while users on the same LAN as the hosting peer are handed the **local** `http://lan-address:port` URL that bypasses Traefik and Authelia entirely.
+
+```mermaid
+flowchart TB
+    browser([User browser on launchpad])
+
+    subgraph route53["AWS Route53 — hosted zone for &lt;VAIER_DOMAIN&gt;"]
+        direction LR
+        rec1["vaier.&lt;domain&gt;<br/>A → server public IP"]
+        rec2["login.&lt;domain&gt;<br/>CNAME → vaier"]
+        rec3["app-a / app-b / app-c / app-e<br/>CNAME → vaier"]
+    end
+
+    subgraph server["Vaier VPN Server — single public IP"]
+        direction TB
+        traefik["Traefik<br/>TLS + routing"]
+        authelia["Authelia<br/>forward-auth"]
+        vaier_app["Vaier<br/>orchestrator + /launchpad.html"]
+        wg["WireGuard gateway<br/>wg0: 10.13.13.1/24"]
+
+        traefik --> authelia
+        traefik --> wg
+    end
+
+    subgraph homelabA["Homelab A — LAN 192.168.1.0/24"]
+        c1["VPN Client 1 · Ubuntu + Docker<br/>wg 10.13.13.2 · lan 192.168.1.50<br/>app-a:3000, app-b:5000"]
+        c2["VPN Client 2 · Ubuntu + Docker<br/>wg 10.13.13.3 · lan 192.168.1.51<br/>app-c:8000"]
+    end
+
+    subgraph homelabB["Homelab B"]
+        c3["VPN Client 3 · Windows + Docker<br/>wg 10.13.13.4<br/>app-e:9000"]
+    end
+
+    browser -->|"DNS lookup"| route53
+    browser ==>|"GLOBAL · off-LAN caller<br/>https://app-a.&lt;domain&gt; :443"| traefik
+    browser -.->|"LOCAL · on-LAN caller<br/>http://192.168.1.50:3000<br/>(bypasses Traefik + Authelia)"| c1
+
+    wg <-->|WG tunnel| c1
+    wg <-->|WG tunnel| c2
+    wg <-->|WG tunnel| c3
+
+    vaier_app -.->|writes CNAMEs| route53
+    vaier_app -.->|writes Traefik config| traefik
+    vaier_app -.->|writes peer configs| wg
+```
+
+Publishing a service is one click in Vaier: pick a container, pick a subdomain, and Vaier writes the Route53 CNAME, the Traefik router, and (optionally) the Authelia middleware — which is the whole reason that DNS box sits at the top of the diagram.
+
+---
+
 ## Prerequisites
 
 - A Linux server with a public IP (EC2 t3.small or similar)
