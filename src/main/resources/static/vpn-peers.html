@@ -15,8 +15,8 @@
         }
 
         .peer-header {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: 1fr auto;
             align-items: center;
             padding: 0.6rem 1rem;
             cursor: pointer;
@@ -26,7 +26,8 @@
         .peer-header:hover { background: var(--bg-hover); }
 
         .peer-header-left {
-            display: flex;
+            display: grid;
+            grid-template-columns: auto 10rem 1fr;
             align-items: center;
             gap: 0.6rem;
             min-width: 0;
@@ -36,6 +37,9 @@
             font-size: 0.85rem;
             font-weight: 500;
             color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .peer-ip-badge {
@@ -46,12 +50,10 @@
             padding: 0.1rem 0.4rem;
             border-radius: 2px;
             border: 1px solid var(--border);
+            justify-self: start;
         }
 
-        .peer-status-text {
-            font-size: 0.72rem;
-            color: var(--text-dim);
-        }
+        .status-neutral { background: var(--text-dim); }
 
         .peer-actions {
             display: flex;
@@ -82,13 +84,6 @@
             display: grid;
             gap: 0.4rem;
             margin-top: 0.75rem;
-        }
-
-        .connection-status {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            font-size: 0.78rem;
         }
 
         /* Config preview */
@@ -241,8 +236,8 @@
 
         /* Mobile */
         @media (max-width: 600px) {
-            .peer-header { flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 0.75rem; }
-            .peer-header-left { flex: 1 1 100%; flex-wrap: wrap; }
+            .peer-header { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
+            .peer-header-left { display: flex; flex: 1 1 100%; flex-wrap: wrap; }
             .peer-actions { flex: 1 1 100%; flex-wrap: wrap; }
             .peer-body { padding: 0 0.75rem 0.75rem; }
         }
@@ -456,7 +451,9 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key}')">
                     <div class="peer-header-left">
+                        <span class="status-dot status-neutral"></span>
                         <span class="peer-name">local</span>
+                        <span></span>
                     </div>
                     <div class="peer-actions">
                         <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
@@ -475,7 +472,6 @@
             const currentTime   = Math.floor(Date.now() / 1000);
             const isConnected   = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
             const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
-            const statusText    = isConnected ? 'connected' : 'disconnected';
             const vpnIp      = peer.allowedIps.split('/')[0];
             const id         = cardId(peer.name);
             const isExpanded = expandedPeers.has(peer.name);
@@ -504,7 +500,6 @@
                         <span class="status-dot ${statusClass}" id="hdr-dot-${id}"></span>
                         <span class="peer-name">${peer.name}</span>
                         <span class="peer-ip-badge">${vpnIp}</span>
-                        <span class="peer-status-text" id="hdr-status-${id}">${statusText}</span>
                     </div>
                     <div class="peer-actions">
                         ${outdatedBadge}
@@ -520,13 +515,6 @@
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
-                        <div class="detail-row">
-                            <span class="detail-label">Status</span>
-                            <div class="connection-status">
-                                <span class="status-dot ${statusClass}" id="dot-${id}"></span>
-                                <span style="font-family:var(--mono);font-size:0.78rem" id="status-${id}">${statusText}</span>
-                            </div>
-                        </div>
                         <div class="detail-row">
                             <span class="detail-label">IP Address</span>
                             <span class="detail-value">${vpnIp}</span>
@@ -571,14 +559,15 @@
         function displayPeers(peers) {
             const container = document.getElementById('peers-container');
 
+            const byName = (a, b) => a.name.localeCompare(b.name);
             const servers = peers.filter(p => {
                 const t = p.peerType || 'UBUNTU_SERVER';
                 return t === 'UBUNTU_SERVER' || t === 'WINDOWS_SERVER';
-            });
+            }).sort(byName);
             const clients = peers.filter(p => {
                 const t = p.peerType || 'UBUNTU_SERVER';
                 return t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT';
-            });
+            }).sort(byName);
 
             let html = `<div class="section-header">Servers</div>`;
             html += renderLocalCard();
@@ -852,19 +841,12 @@
                     const handshake = parseInt(s.latestHandshake);
                     const connected = handshake > 0 && (now - handshake) < 180;
                     const statusClass = connected ? 'status-connected' : 'status-disconnected';
-                    const statusText  = connected ? 'connected' : 'disconnected';
 
-                    const hdrDot    = document.getElementById('hdr-dot-'    + id);
-                    const hdrStatus = document.getElementById('hdr-status-' + id);
-                    const dot       = document.getElementById('dot-'        + id);
-                    const status    = document.getElementById('status-'     + id);
-                    const rxtx      = document.getElementById('rxtx-'       + id);
+                    const hdrDot = document.getElementById('hdr-dot-' + id);
+                    const rxtx   = document.getElementById('rxtx-'    + id);
 
-                    if (hdrDot)    { hdrDot.className    = 'status-dot ' + statusClass; }
-                    if (hdrStatus) { hdrStatus.textContent = statusText; }
-                    if (dot)       { dot.className        = 'status-dot ' + statusClass; }
-                    if (status)    { status.textContent   = statusText; }
-                    if (rxtx)      { rxtx.textContent     = formatBytes(s.transferRx) + ' / ' + formatBytes(s.transferTx); }
+                    if (hdrDot) { hdrDot.className    = 'status-dot ' + statusClass; }
+                    if (rxtx)   { rxtx.textContent    = formatBytes(s.transferRx) + ' / ' + formatBytes(s.transferTx); }
                 });
             } catch (err) {
                 console.error('Failed to apply peers-stats update:', err);
