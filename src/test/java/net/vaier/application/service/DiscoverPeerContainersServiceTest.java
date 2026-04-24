@@ -5,6 +5,7 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
@@ -248,5 +249,94 @@ class DiscoverPeerContainersServiceTest {
     private DockerService dockerService(String name, int port) {
         return new DockerService("id123", name, "image:latest", "latest",
             List.of(new DockerService.PortMapping(port, port, "tcp", "0.0.0.0")), List.of(), "running");
+    }
+
+    private DockerService wireguardContainer(String image) {
+        return new DockerService("wg-id", "wireguard-client", image, "",
+            List.of(), List.of(), "running");
+    }
+
+    @Test
+    void discoverAll_peerWithMatchingWireguardImage_wireguardOutdatedIsFalse() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(wireguardContainer(WireguardClientImage.EXPECTED)));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result.get(0).wireguardOutdated()).isFalse();
+    }
+
+    @Test
+    void discoverAll_alwaysReportsExpectedWireguardImageOnReachablePeers() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(wireguardContainer("lscr.io/linuxserver/wireguard:1.0.20210914-ls42")));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result.get(0).wireguardExpectedImage()).isEqualTo(WireguardClientImage.EXPECTED);
+    }
+
+    @Test
+    void discoverAll_peerWithOlderWireguardImage_wireguardOutdatedIsTrue() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(wireguardContainer("lscr.io/linuxserver/wireguard:1.0.20210914-ls42")));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result.get(0).wireguardOutdated()).isTrue();
+    }
+
+    @Test
+    void discoverAll_peerWithLatestTagWireguard_wireguardOutdatedIsTrue() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(wireguardContainer("lscr.io/linuxserver/wireguard:latest")));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result.get(0).wireguardOutdated()).isTrue();
+    }
+
+    @Test
+    void discoverAll_peerWithNoWireguardContainer_wireguardOutdatedIsFalse() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(dockerService("app", 8080)));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result.get(0).wireguardOutdated()).isFalse();
+    }
+
+    @Test
+    void discoverAll_unreachablePeer_wireguardOutdatedIsFalse() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.3/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.3")).thenReturn("bob");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.3"))
+            .thenReturn(Optional.of(peerConfig("bob", "10.13.13.3", PeerType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenThrow(new RuntimeException("Connection refused"));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result.get(0).wireguardOutdated()).isFalse();
     }
 }

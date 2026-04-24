@@ -88,6 +88,7 @@ Manage WireGuard peers through the UI without touching config files.
 - Generate peer config (file download, QR code, docker-compose template, bash setup script)
 - View peer connection status (latest handshake, transfer stats)
 - View per-peer container list via Docker API
+- Detect peers running an older wireguard image than the server — surface a "wireguard out of date" badge on the peer card so the operator knows to re-download the client compose and redeploy on the peer
 
 **Config distribution options (all currently implemented):**
 - **WireGuard config file** — download as `.conf` for native clients

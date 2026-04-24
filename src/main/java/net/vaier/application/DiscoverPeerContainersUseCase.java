@@ -12,6 +12,8 @@ public interface DiscoverPeerContainersUseCase {
             String peerName,
             String vpnIp,
             String status,
-            List<DockerService> containers
+            List<DockerService> containers,
+            boolean wireguardOutdated,
+            String wireguardExpectedImage
     ) {}
 }

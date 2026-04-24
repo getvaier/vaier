@@ -7,6 +7,7 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
@@ -46,7 +47,7 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
 
             if (!isPeerConnected(client)) {
                 log.debug("Skipping Docker discovery for disconnected peer {} ({})", peerName, vpnIp);
-                results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of()));
+                results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of(), false, WireguardClientImage.EXPECTED));
                 continue;
             }
 
@@ -54,14 +55,21 @@ public class DiscoverPeerContainersService implements DiscoverPeerContainersUseC
                 Server server = new Server(vpnIp, 2375, false);
                 List<DockerService> containers = forGettingServerInfo.getServicesWithExposedPorts(server);
                 log.info("Discovered {} containers on peer {} ({})", containers.size(), peerName, vpnIp);
-                results.add(new PeerContainers(peerName, vpnIp, "OK", containers));
+                results.add(new PeerContainers(peerName, vpnIp, "OK", containers, isWireguardOutdated(containers), WireguardClientImage.EXPECTED));
             } catch (Exception e) {
                 log.warn("Failed to query Docker on peer {} ({}): {}", peerName, vpnIp, e.getMessage());
-                results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of()));
+                results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of(), false, WireguardClientImage.EXPECTED));
             }
         }
 
         return results;
+    }
+
+    private boolean isWireguardOutdated(List<DockerService> containers) {
+        return containers.stream()
+                .map(DockerService::image)
+                .filter(WireguardClientImage::isWireguardImage)
+                .anyMatch(image -> !WireguardClientImage.matchesExpected(image));
     }
 
     private boolean isPeerConnected(VpnClient peer) {

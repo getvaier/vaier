@@ -161,11 +161,11 @@ class GetPublishableServicesServiceTest {
     // --- helpers ---
 
     private PeerContainers unreachablePeer(String name, String ip) {
-        return new PeerContainers(name, ip, "UNREACHABLE", List.of());
+        return new PeerContainers(name, ip, "UNREACHABLE", List.of(), false, "");
     }
 
     private PeerContainers okPeer(String name, String ip, List<DockerService> containers) {
-        return new PeerContainers(name, ip, "OK", containers);
+        return new PeerContainers(name, ip, "OK", containers, false, "");
     }
 
     private DockerService container(String name, int port, String type) {

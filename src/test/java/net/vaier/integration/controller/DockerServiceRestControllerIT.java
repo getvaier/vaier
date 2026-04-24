@@ -119,7 +119,7 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
                 new PeerContainers("peer1", "10.13.13.2", "OK", List.of(
                         new DockerService("c1", "svc", "img:1.0", "1.0",
                                 List.of(), List.of(), "running")
-                ))
+                ), false, "lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110")
         ));
 
         mockMvc.perform(get("/docker-services/peers"))
@@ -127,7 +127,8 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(jsonPath("$[0].peerName").value("peer1"))
                .andExpect(jsonPath("$[0].vpnIp").value("10.13.13.2"))
                .andExpect(jsonPath("$[0].status").value("OK"))
-               .andExpect(jsonPath("$[0].containers[0].containerName").value("svc"));
+               .andExpect(jsonPath("$[0].containers[0].containerName").value("svc"))
+               .andExpect(jsonPath("$[0].wireguardOutdated").value(false));
     }
 
     @Test
@@ -142,7 +143,7 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void discoverPeerContainers_returnsUnreachablePeerEntry() throws Exception {
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
-                new PeerContainers("peer2", "10.13.13.3", "UNREACHABLE", List.of())
+                new PeerContainers("peer2", "10.13.13.3", "UNREACHABLE", List.of(), false, "lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110")
         ));
 
         mockMvc.perform(get("/docker-services/peers"))

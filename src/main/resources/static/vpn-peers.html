@@ -491,6 +491,11 @@
                     return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
                 return renderServiceList(services.containers);
             })();
+            const outdated = !!(services && services.wireguardOutdated);
+            const expectedImage = services && services.wireguardExpectedImage;
+            const outdatedBadge = outdated
+                ? `<span class="badge badge-warning" title="This peer is running an older WireGuard image than the server. To upgrade, edit the 'image:' tag on the peer's docker-compose.yml to '${expectedImage}' and run 'docker compose up -d' — don't overwrite the whole file with 'compose' if the peer has customizations (network_mode, volumes, TZ).">wireguard out of date</span>`
+                : '';
 
             return `
             <div class="peer-card">
@@ -502,6 +507,7 @@
                         <span class="peer-status-text" id="hdr-status-${id}">${statusText}</span>
                     </div>
                     <div class="peer-actions">
+                        ${outdatedBadge}
                         <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();viewPeerConfig('${peer.name}')">config</button>
                         ${isServer ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadDockerCompose('${peer.name}')">compose</button>` : ''}
                         ${peerType === 'UBUNTU_SERVER' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadSetupScript('${peer.name}')">script</button>` : ''}
