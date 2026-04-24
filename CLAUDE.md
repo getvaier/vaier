@@ -41,8 +41,17 @@ Swagger UI: `http://localhost:8080/swagger-ui.html` (local) or `http://localhost
 | Pattern | Example |
 |---------|---------|
 | Port interfaces | `For*` (e.g., `ForGettingVpnClients`, `ForPersistingDnsRecords`) |
-| Use cases | `*UseCase` interface + `*Service` implementation |
+| Use case interfaces | `*UseCase` — one per use case, narrow (e.g., `CreatePeerUseCase`, `DeletePeerUseCase`) |
+| Service implementations | `*Service` — **one per domain concept**, implements many `*UseCase` interfaces (e.g., `VpnService`, `UserService`, `PublishingService`) |
 | Adapters | `*Adapter` (e.g., `Route53DnsAdapter`, `WireGuardVpnAdapter`) |
+
+### One service per domain, not per use case
+
+Keep `*UseCase` interfaces narrow and one-per-use-case — they are the ports controllers depend on, and narrow interfaces keep controller tests small. But group their **implementations** by domain concept: `VpnService`, `UserService`, `DnsService`, `ReverseProxyService`, `ContainerService`, `SettingsService`, `PublishingService`, `SetupService`. One `@Service` class implements every use case in its domain.
+
+When adding a new use case, do NOT create a new `*Service` class unless the use case belongs to a genuinely new domain. Add the method to the existing domain service.
+
+Cross-domain orchestration (e.g., `VpnService.deletePeer` cascading into `PublishingService.deleteService` when a peer with published services is removed) must go via the `*UseCase` interface, never a direct class-to-class dependency. This preserves the hex boundary and avoids circular dependencies.
 
 ### Key Integrations
 

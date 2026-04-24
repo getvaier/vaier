@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.AddReverseProxyRouteUseCase.ReverseProxyRouteUco;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -11,6 +12,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
@@ -141,5 +145,25 @@ class ReverseProxyServiceTest {
                 .hasMessageContaining("dnsName");
 
         verifyNoInteractions(forPersistingReverseProxyRoutes);
+    }
+
+    // --- get ---
+
+    @Test
+    void getReverseProxyRoutes_returnsPortResult() {
+        List<ReverseProxyRoute> routes = List.of(
+            new ReverseProxyRoute("route", "app.example.com", "10.0.0.1", 8080, "svc", null),
+            new ReverseProxyRoute("route", "db.example.com", "10.0.0.2", 5432, "svc", null)
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(routes);
+
+        assertThat(service.getReverseProxyRoutes()).isSameAs(routes);
+    }
+
+    @Test
+    void getReverseProxyRoutes_emptyList_returnsEmpty() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+
+        assertThat(service.getReverseProxyRoutes()).isEmpty();
     }
 }

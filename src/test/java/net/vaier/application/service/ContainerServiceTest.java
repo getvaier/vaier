@@ -1,8 +1,13 @@
 package net.vaier.application.service;
 
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
+import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.PeerType;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireguardClientImage;
@@ -11,9 +16,9 @@ import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -23,27 +28,72 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class DiscoverPeerContainersServiceTest {
+class ContainerServiceTest {
 
-    @Mock
-    ForGettingVpnClients forGettingVpnClients;
+    private static final String VAIER_NETWORK = "vaier-network";
+    private static final String GATEWAY_IP = "172.20.0.1";
 
-    @Mock
-    ForResolvingPeerNames forResolvingPeerNames;
+    @Mock ForGettingServerInfo forGettingServerInfo;
+    @Mock ForGettingVpnClients forGettingVpnClients;
+    @Mock ForResolvingPeerNames forResolvingPeerNames;
+    @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
 
-    @Mock
-    ForGettingServerInfo forGettingServerInfo;
+    ContainerService service;
 
-    @Mock
-    ForGettingPeerConfigurations forGettingPeerConfigurations;
+    @BeforeEach
+    void setUp() {
+        service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
+            forResolvingPeerNames, forGettingPeerConfigurations, VAIER_NETWORK, GATEWAY_IP);
+    }
 
-    @InjectMocks
-    DiscoverPeerContainersService service;
+    // --- discover (local) ---
+
+    @Test
+    void discover_usesLocalDockerSocket() {
+        List<DockerService> expected = List.of(dockerService("my-app", 8080));
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+            argThat(s -> s.dockerHostUrl().equals("unix:///var/run/docker.sock"))
+        )).thenReturn(expected);
+
+        assertThat(service.discover()).isSameAs(expected);
+    }
+
+    @Test
+    void discover_returnsEmptyListWhenNoServicesRunning() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+            argThat(s -> s.dockerHostUrl().equals("unix:///var/run/docker.sock"))
+        )).thenReturn(List.of());
+
+        assertThat(service.discover()).isEmpty();
+    }
+
+    @Test
+    void discover_propagatesExceptionFromAdapter() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+            argThat(s -> s.dockerHostUrl().equals("unix:///var/run/docker.sock"))
+        )).thenThrow(new RuntimeException("socket not found"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> service.discover());
+    }
+
+    // --- getServicesWithExposedPorts ---
+
+    @Test
+    void getServicesWithExposedPorts_delegatesToPort() {
+        Server server = new Server("10.13.13.2", 2375, false);
+        DockerService dockerService = mock(DockerService.class);
+        when(forGettingServerInfo.getServicesWithExposedPorts(server)).thenReturn(List.of(dockerService));
+
+        assertThat(service.getServicesWithExposedPorts(server)).containsExactly(dockerService);
+    }
+
+    // --- discoverAll (peer containers) ---
 
     @Test
     void discoverAll_noClients_returnsEmpty() {
@@ -233,29 +283,6 @@ class DiscoverPeerContainersServiceTest {
         assertThat(result.get(0).status()).isEqualTo("OK");
     }
 
-    private VpnClient client(String allowedIps) {
-        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
-        return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", recentHandshake, "0", "0");
-    }
-
-    private VpnClient disconnectedClient(String allowedIps) {
-        return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", "0", "0", "0");
-    }
-
-    private PeerConfiguration peerConfig(String name, String ip, PeerType type) {
-        return new PeerConfiguration(name, ip, "", type, null);
-    }
-
-    private DockerService dockerService(String name, int port) {
-        return new DockerService("id123", name, "image:latest", "latest",
-            List.of(new DockerService.PortMapping(port, port, "tcp", "0.0.0.0")), List.of(), "running");
-    }
-
-    private DockerService wireguardContainer(String image) {
-        return new DockerService("wg-id", "wireguard-client", image, "",
-            List.of(), List.of(), "running");
-    }
-
     @Test
     void discoverAll_peerWithMatchingWireguardImage_wireguardOutdatedIsFalse() {
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
@@ -338,5 +365,192 @@ class DiscoverPeerContainersServiceTest {
         List<PeerContainers> result = service.discoverAll();
 
         assertThat(result.get(0).wireguardOutdated()).isFalse();
+    }
+
+    // --- getUnpublishedLocalServices ---
+
+    @Test
+    void getUnpublishedLocalServices_excludesWireguardContainer() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class)))
+            .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD, 51820, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_excludesAutheliaContainer() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer(ServiceNames.AUTHELIA, 9091, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_excludesRedisContainer() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer(ServiceNames.REDIS, 6379, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_excludesVaierContainer() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer(ServiceNames.VAIER, 8080, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_excludesWireguardMasqueradeContainer() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD_MASQUERADE, 8080, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_traefikOnPort8080_includedWithDashboardRedirect() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer(ServiceNames.TRAEFIK, 8080, "tcp")));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).containerName()).isEqualTo(ServiceNames.TRAEFIK);
+        assertThat(result.get(0).port()).isEqualTo(8080);
+        assertThat(result.get(0).rootRedirectPath()).isEqualTo("/dashboard/");
+        assertThat(result.get(0).source()).isEqualTo(PublishableSource.LOCAL);
+    }
+
+    @Test
+    void getUnpublishedLocalServices_traefikOnPort80_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer("traefik", 80, "tcp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_unknownContainerTcpPort_includedWithNullRedirectPath() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).containerName()).isEqualTo("my-app");
+        assertThat(result.get(0).port()).isEqualTo(3000);
+        assertThat(result.get(0).rootRedirectPath()).isNull();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_udpPort_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer("my-app", 3000, "udp")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_alreadyPublishedRoute_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
+        List<ReverseProxyRoute> existingRoutes = List.of(route("my-app", 3000));
+
+        assertThat(service.getUnpublishedLocalServices(existingRoutes)).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_dockerThrows_returnsEmptyList() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenThrow(new RuntimeException("Docker socket unavailable"));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_containerOnVaierNetwork_usesContainerNameAndPrivatePort() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
+                List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
+                List.of(VAIER_NETWORK), "running")));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).address()).isEqualTo("my-app");
+        assertThat(result.get(0).port()).isEqualTo(3001);
+    }
+
+    @Test
+    void getUnpublishedLocalServices_containerOnOtherNetworkWithPublicPort_usesGatewayAndPublicPort() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
+                List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
+                List.of("uptime-kuma_default"), "running")));
+
+        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).address()).isEqualTo(GATEWAY_IP);
+        assertThat(result.get(0).port()).isEqualTo(3001);
+        assertThat(result.get(0).containerName()).isEqualTo("uptime-kuma");
+    }
+
+    @Test
+    void getUnpublishedLocalServices_containerOnOtherNetworkWithoutPublicPort_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
+                List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
+                List.of("some-other-network"), "running")));
+
+        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+    }
+
+    @Test
+    void getUnpublishedLocalServices_crossNetworkContainerAlreadyPublished_excluded() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
+                List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
+                List.of("uptime-kuma_default"), "running")));
+        List<ReverseProxyRoute> existingRoutes = List.of(route(GATEWAY_IP, 3001));
+
+        assertThat(service.getUnpublishedLocalServices(existingRoutes)).isEmpty();
+    }
+
+    // --- helpers ---
+
+    private VpnClient client(String allowedIps) {
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", recentHandshake, "0", "0");
+    }
+
+    private VpnClient disconnectedClient(String allowedIps) {
+        return new VpnClient("pubkey", allowedIps, "1.2.3.4", "51820", "0", "0", "0");
+    }
+
+    private PeerConfiguration peerConfig(String name, String ip, PeerType type) {
+        return new PeerConfiguration(name, ip, "", type, null);
+    }
+
+    private DockerService dockerService(String name, int port) {
+        return new DockerService("id123", name, "image:latest", "latest",
+            List.of(new PortMapping(port, port, "tcp", "0.0.0.0")), List.of(), "running");
+    }
+
+    private DockerService wireguardContainer(String image) {
+        return new DockerService("wg-id", "wireguard-client", image, "",
+            List.of(), List.of(), "running");
+    }
+
+    private DockerService localContainer(String name, int port, String type) {
+        return new DockerService("id", name, "image:latest", "latest",
+            List.of(new PortMapping(port, null, type, "0.0.0.0")),
+            List.of(VAIER_NETWORK), "running");
+    }
+
+    private ReverseProxyRoute route(String address, int port) {
+        return new ReverseProxyRoute("route", "app.example.com", address, port, "svc", null);
     }
 }

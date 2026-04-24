@@ -3,20 +3,28 @@ package net.vaier.application.service;
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
+import net.vaier.application.GetUsersUseCase;
 import net.vaier.application.UpdateUserDisplayNameUseCase;
 import net.vaier.application.UpdateUserEmailUseCase;
 import net.vaier.domain.User;
 import net.vaier.domain.port.ForPersistingUsers;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePasswordUseCase,
-        UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase {
+        UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase, GetUsersUseCase {
 
     private final ForPersistingUsers forPersistingUsers;
 
     public UserService(ForPersistingUsers forPersistingUsers) {
         this.forPersistingUsers = forPersistingUsers;
+    }
+
+    @Override
+    public List<User> getUsers() {
+        return forPersistingUsers.getUsers();
     }
 
     @Override
