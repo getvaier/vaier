@@ -80,6 +80,17 @@ The `docker-compose.yml` runs five services on a custom bridge network (`172.20.
 4. **Redis** — Session store for Authelia
 5. **Vaier** — This Spring Boot app (port 8888 externally, 8080 internally)
 
+### Sub-image version pinning
+
+All upstream images in `docker-compose.yml` are pinned to specific versions (no floating `:latest` tags). The generated WireGuard client compose (`DockerComposeGeneratorAdapter`) must pin the same wireguard version as the server — a drift-check test enforces this.
+
+**When bumping a pinned version:**
+1. Look up the latest stable release for each image (check the upstream's GitHub releases / Docker Hub tags — skip pre-release, rc, beta tags).
+2. **Ask the dev before bumping** — never bump unilaterally. Explain which images have newer releases and what changed.
+3. Only bump if the dev confirms, and only bump one image at a time unless asked otherwise.
+4. After bumping, run `mvn test` and deploy the full stack with `docker compose up -d` to confirm nothing broke before committing.
+5. Bump the Maven `project.version` in the same change (per issue #167 policy: Vaier release cuts only when sub-image deps change).
+
 ## Required Environment Variables
 
 | Variable | Description |
@@ -94,7 +105,8 @@ The `docker-compose.yml` runs five services on a custom bridge network (`172.20.
 Always build the Docker image locally with the correct tag before deploying:
 
 ```bash
-docker build -t getvaier/vaier:latest .                  # Build image (matches docker-compose.yml image tag)
+docker build --build-arg VAIER_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout) \
+  -t getvaier/vaier:latest .                             # Build image (matches docker-compose.yml image tag)
 docker compose up -d --force-recreate vaier              # Deploy
 ```
 
@@ -124,7 +136,8 @@ The two documents must always reflect the actual state of the codebase. Stale do
 After any code change, build and deploy to the local Docker Compose stack:
 
 ```bash
-docker build -t getvaier/vaier:latest .
+docker build --build-arg VAIER_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout) \
+  -t getvaier/vaier:latest .
 docker compose up -d --force-recreate vaier
 ```
 

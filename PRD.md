@@ -306,6 +306,7 @@ The in-app wizard at `/setup.html` exists in the code but is no longer part of t
 ## 8. Technical Constraints
 
 - **Stack is fixed:** WireGuard (linuxserver), Traefik, Authelia, Redis, AWS Route53
+- **Sub-image versions are pinned** in `docker-compose.yml`; bumps are deliberate, tested, and released with a new Vaier version (no floating `:latest` tags for upstream images)
 - **No database:** all state is file-based (WireGuard/Traefik/Authelia configs) or cloud-based (Route53)
 - **Single WireGuard server:** multi-server mesh is out of scope
 - **Java 21 / Spring Boot 3.5.5:** backend language and framework are fixed

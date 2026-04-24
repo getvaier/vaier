@@ -3,6 +3,11 @@ package net.vaier.adapter.driven;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DockerComposeGeneratorAdapterTest {
@@ -18,8 +23,24 @@ class DockerComposeGeneratorAdapterTest {
         assertThat(result)
             .contains("services:")
             .contains("wireguard-client:")
-            .contains("image: lscr.io/linuxserver/wireguard:latest")
-            .contains("container_name: wireguard-client");
+            .contains("image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110")
+            .contains("container_name: wireguard-client")
+            .doesNotContain("wireguard:latest");
+    }
+
+    @Test
+    void generateWireguardClientDockerCompose_pinsWireguardImageToSameVersionAsServer() throws Exception {
+        // Drift guard: client image must match the server's docker-compose.yml wireguard pin.
+        String serverCompose = Files.readString(Path.of("docker-compose.yml"));
+        Matcher m = Pattern.compile("image:\\s*(lscr\\.io/linuxserver/wireguard:\\S+)").matcher(serverCompose);
+        assertThat(m.find()).as("server docker-compose.yml should declare a wireguard image").isTrue();
+        String serverImage = m.group(1);
+        assertThat(serverImage).as("server wireguard must be pinned, not :latest").doesNotEndWith(":latest");
+
+        String clientCompose = adapter.generateWireguardClientDockerCompose(
+            new DockerComposeConfig("alice", "vpn.example.com", "51820"));
+
+        assertThat(clientCompose).contains("image: " + serverImage);
     }
 
     @Test

@@ -8,6 +8,9 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class DockerComposeGeneratorAdapter implements ForGeneratingDockerComposeFiles {
 
+    // Keep in sync with the wireguard image pin in the server's docker-compose.yml.
+    static final String WIREGUARD_IMAGE = "lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110";
+
     @Override
     public String generateWireguardClientDockerCompose(DockerComposeConfig config) {
         log.debug("Generating docker-compose for peer: {}", config.peerName());
@@ -15,7 +18,7 @@ public class DockerComposeGeneratorAdapter implements ForGeneratingDockerCompose
         return String.format("""
                 services:
                   wireguard-client:
-                    image: lscr.io/linuxserver/wireguard:latest
+                    image: %s
                     container_name: wireguard-client
                     cap_add:
                       - NET_ADMIN
@@ -39,6 +42,6 @@ public class DockerComposeGeneratorAdapter implements ForGeneratingDockerCompose
                 # 4. Verify connection: docker exec wireguard-client wg show
                 #
                 # Server: %s:%s
-                """, config.peerName(), config.peerName(), config.serverUrl(), config.serverPort());
+                """, WIREGUARD_IMAGE, config.peerName(), config.peerName(), config.serverUrl(), config.serverPort());
     }
 }

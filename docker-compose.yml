@@ -7,7 +7,7 @@ networks:
 
 services:
   wireguard:
-    image: lscr.io/linuxserver/wireguard:latest
+    image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
     container_name: wireguard
     cap_add:
       - NET_ADMIN
@@ -35,7 +35,7 @@ services:
       - vaier-network
 
   wireguard-masquerade:
-    image: lscr.io/linuxserver/wireguard:latest
+    image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
     container_name: wireguard-masquerade
     network_mode: "service:wireguard"
     cap_add:
@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
 
   traefik:
-    image: traefik:latest
+    image: traefik:v3.6.14
     container_name: traefik
     cap_add:
       - NET_ADMIN
@@ -103,7 +103,7 @@ services:
       - vaier-network
 
   redis-init:
-    image: busybox
+    image: busybox:1.37.0
     container_name: redis-init
     command:
       - sh
@@ -117,7 +117,7 @@ services:
     restart: "no"
 
   redis:
-    image: redis:alpine
+    image: redis:8.6.2-alpine
     container_name: redis
     command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /secrets/redis-password)\""]
     depends_on:
@@ -131,7 +131,7 @@ services:
       - vaier-network
 
   authelia-init:
-    image: busybox
+    image: busybox:1.37.0
     container_name: authelia-init
     command:
       - sh
@@ -187,7 +187,7 @@ services:
     restart: "no"
 
   authelia:
-    image: authelia/authelia:latest
+    image: authelia/authelia:4.39.19
     container_name: authelia
     environment:
       - TZ=Europe/Oslo

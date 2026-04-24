@@ -275,7 +275,8 @@ Swagger UI: `http://localhost:8080/swagger-ui.html`
 
 ```bash
 mvn clean package -DskipTests
-docker build -t getvaier/vaier:latest .
+docker build --build-arg VAIER_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout) \
+  -t getvaier/vaier:latest .
 docker compose up -d --force-recreate vaier
 ```
 
