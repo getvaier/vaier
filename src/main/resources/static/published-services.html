@@ -27,7 +27,8 @@
         .service-header:hover { background: var(--bg-hover); }
 
         .service-header-left {
-            display: flex;
+            display: grid;
+            grid-template-columns: auto 10rem 8rem 1fr;
             align-items: center;
             gap: 0.6rem;
             min-width: 0;
@@ -38,11 +39,17 @@
             font-weight: 500;
             color: var(--text);
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        .service-name .at-server {
+        .service-peer {
+            font-size: 0.82rem;
             color: var(--text-muted);
             font-weight: 400;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .service-link {
@@ -140,31 +147,20 @@
             border: 1px solid var(--border);
             border-radius: 2px;
             padding: 0.6rem 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            margin-bottom: 0.4rem;
-        }
-
-        .discoverable-info {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr auto;
             align-items: center;
             gap: 1rem;
-            flex-wrap: wrap;
-        }
-
-        .discoverable-name {
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: var(--text);
+            margin-bottom: 0.5rem;
         }
 
         .discoverable-meta {
-            font-size: 0.75rem;
+            font-size: 0.78rem;
             color: var(--text-muted);
             font-family: var(--mono);
         }
+
+        .status-neutral { background: var(--text-dim); }
 
         /* Publish progress */
         .progress-step {
@@ -180,11 +176,11 @@
         /* Mobile */
         @media (max-width: 600px) {
             .service-header { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
-            .service-header-left { flex-wrap: wrap; }
+            .service-header-left { display: flex; flex-wrap: wrap; }
             .service-actions { justify-content: start; }
             .service-body { padding: 0 0.75rem 0.75rem; }
             .service-details { grid-template-columns: 70px 1fr; gap: 0.3rem 0.5rem; }
-            .discoverable-card { flex-direction: column; align-items: flex-start; }
+            .discoverable-card { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
             .section-header { margin: 1.25rem 0 0.5rem; }
         }
     </style>
@@ -205,13 +201,13 @@
 
         <div id="discoverable-section">
             <div class="section-header">
-                <span class="section-title">Discoverable services</span>
+                <span class="section-title">Discovered services</span>
                 <div style="display:flex;gap:0.75rem;align-items:center">
                     <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.75rem;color:var(--text-muted);cursor:pointer;user-select:none" title="Toggle visibility of ignored services">
                         <input id="showIgnoredChk" type="checkbox" style="accent-color:var(--accent);cursor:pointer" onchange="toggleShowIgnored()">
                         Show ignored
                     </label>
-                    <button class="btn btn-secondary btn-small" title="Re-scan for discoverable services" onclick="refreshPublishable()">Refresh</button>
+                    <button class="btn btn-secondary btn-small" title="Re-scan for discovered services" onclick="refreshPublishable()">Refresh</button>
                 </div>
             </div>
             <div id="publishable-container"></div>
@@ -373,7 +369,7 @@
                 return;
             }
 
-            const html = services.map(service => {
+            const html = services.slice().sort((a, b) => a.name.localeCompare(b.name)).map(service => {
                 const dnsOk  = service.dnsState === 'OK';
                 const hostOk = service.state === 'OK';
                 const id         = cardId(service.name);
@@ -387,16 +383,16 @@
 
                 // Parse "subdomain @ server" display name
                 const nameParts = service.name.split(' @ ');
-                const displayName = nameParts.length === 2
-                    ? `${nameParts[0]} <span class="at-server">@ ${nameParts[1]}</span>`
-                    : service.name;
+                const shortName = nameParts[0];
+                const peerName  = nameParts.length === 2 ? nameParts[1] : '';
 
                 return `
                 <div class="service-card">
                     <div class="service-header" onclick="toggleService('${service.name.replace(/'/g, "\\'")}')">
                         <div class="service-header-left">
                             <span class="status-dot ${dotClass}"></span>
-                            <span class="service-name">${displayName}</span>
+                            <span class="service-name">${shortName}</span>
+                            <span class="service-peer">${peerName}</span>
                             ${dnsOk && !isSelf
                                 ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}" onclick="event.stopPropagation()">${service.dnsAddress}</a>`
                                 : `<span style="font-size:0.75rem;color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`}
@@ -464,22 +460,19 @@
             lastPublishableServices = services;
             const container = document.getElementById('publishable-container');
             const section = document.getElementById('discoverable-section');
-            const visible = showIgnored ? services : services.filter(s => !s.ignored);
+            const visible = (showIgnored ? services : services.filter(s => !s.ignored))
+                .slice()
+                .sort((a, b) => a.containerName.localeCompare(b.containerName));
             if (visible.length === 0) {
-                container.innerHTML = '<div class="loading">No discoverable services</div>';
+                container.innerHTML = '<div class="loading">No discovered services</div>';
                 return;
             }
 
             const html = visible.map(s => {
                 const isLocal = s.source === 'LOCAL';
-                const meta = isLocal
-                    ? `this server · ${s.address}:${s.port}`
-                    : `${s.peerName} · ${s.address}:${s.port}`;
-                const sourceBadge = isLocal
-                    ? '<span class="badge badge-warning">local</span>'
-                    : `<span class="badge badge-success">${s.peerName}</span>`;
+                const sourceLabel = isLocal ? 'local' : s.peerName;
                 const key = ignoreKey(s);
-                const nameStyle = s.ignored ? 'opacity:0.45' : '';
+                const dimStyle = s.ignored ? 'opacity:0.55' : '';
                 const actionButtons = s.ignored
                     ? `<button class="btn btn-success btn-small" title="Show this service again in the list" onclick="unignoreService('${key}')">Unignore</button>`
                     : `<button class="btn btn-primary btn-small"
@@ -487,7 +480,7 @@
                         data-address="${s.address}"
                         data-port="${s.port}"
                         data-container="${s.containerName}"
-                        data-source="${isLocal ? 'this server' : s.peerName}"
+                        data-source="${isLocal ? 'local' : s.peerName}"
                         data-redirect="${s.rootRedirectPath || ''}"
                         onclick="showPublishModalFromBtn(this)">
                         + Publish
@@ -495,10 +488,11 @@
                     <button class="btn btn-warning btn-small" title="Hide this service from the list" onclick="ignoreService('${key}')">Ignore</button>`;
                 return `
                 <div class="discoverable-card">
-                    <div class="discoverable-info" style="${nameStyle}">
-                        ${sourceBadge}
-                        <span class="discoverable-name">${s.containerName}</span>
-                        <span class="discoverable-meta">${meta}</span>
+                    <div class="service-header-left" style="${dimStyle}">
+                        <span class="status-dot status-neutral"></span>
+                        <span class="service-name">${s.containerName}</span>
+                        <span class="service-peer">${sourceLabel}</span>
+                        <span class="discoverable-meta">${s.address}:${s.port}</span>
                     </div>
                     <div style="display:flex;gap:0.4rem;align-items:center">
                         ${actionButtons}
@@ -535,7 +529,7 @@
             document.getElementById('publishAddress').value          = address;
             document.getElementById('publishPort').value             = port;
             document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
-            document.getElementById('publishSubdomain').value        = sourceName === 'this server' ? containerName : `${containerName}.${sourceName}`;
+            document.getElementById('publishSubdomain').value        = sourceName === 'local' ? containerName : `${containerName}.${sourceName}`;
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceName} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;

@@ -132,13 +132,13 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 **Publish flow (confirmed UX):**
 
 1. User sees two lists on the published services page:
-   - **Discoverable** — containers with exposed TCP ports not yet published, found on local host and reachable VPN peers
+   - **Discovered** — containers with exposed TCP ports not yet published, found on local host and reachable VPN peers
    - **Active** — published services with their DNS/reachability state
-2. Clicking **+ Add** on a discoverable service opens a modal: subdomain input + auth toggle
-3. On submit, the modal closes immediately and the service moves into a **Processing** list that sits between the discoverable and active lists
+2. Clicking **+ Add** on a discovered service opens a modal: subdomain input + auth toggle
+3. On submit, the modal closes immediately and the service moves into a **Processing** list that sits between the discovered and active lists
 4. The processing card shows live progress steps: DNS record created → DNS propagated → Traefik route active
 5. When the Traefik route is confirmed active, the processing card disappears and the service appears in the active list
-6. The discoverable list hides the service as soon as it enters processing (server-side, not client-side)
+6. The discovered list hides the service as soon as it enters processing (server-side, not client-side)
 7. Both active and processing lists are driven by SSE — no polling from the browser
 8. Processing state survives page refresh (backed by in-memory server state, not persisted to disk)
 9. Duplicate submissions are rejected: attempting to add a service already in active or processing shows an error
@@ -146,7 +146,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 **Also implemented:**
 - **Root redirect path UI** — collapsible "Advanced" section in the publish modal with an optional root path redirect input, wired to the `rootRedirectPath` API field. Redirect path is also editable on published services via a modal.
 - **Service cleanup on peer deletion** — when a VPN peer is deleted, all published services routing to that peer's IP are automatically removed (DNS + Traefik routes)
-- **Published services page cleanup** — consolidated host/status rows, hide discoverable section when empty, replaced fragile optimistic auth toggle with server-side refresh
+- **Published services page cleanup** — consolidated host/status rows, hide discovered section when empty, replaced fragile optimistic auth toggle with server-side refresh
 - **Publish rollback on failure** — if DNS propagation times out, Traefik route creation throws, or Traefik never picks up the new route, Vaier removes the CNAME (and, where applicable, the Traefik route) so no orphan records remain in Route53. Emits `publish-rolled-back` on the `published-services` SSE topic.
 
 ---
@@ -275,7 +275,7 @@ The in-app wizard at `/setup.html` exists in the code but is no longer part of t
 
 1. Peer is already connected to VPN (created via Vaier)
 2. Developer starts a Docker container on the peer
-3. In Vaier → Services, the container appears in the **Discoverable** list automatically
+3. In Vaier → Services, the container appears in the **Discovered** list automatically
 4. Developer clicks **+ Add**, enters a subdomain, toggles auth if needed, clicks **Add Service**
 5. Modal closes immediately; service moves to the **Processing** list with live progress steps
 6. Vaier creates: DNS CNAME → waits for propagation → Traefik route → (optional) Authelia middleware
