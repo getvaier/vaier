@@ -72,7 +72,7 @@ public class ReverseProxyRoute {
 
     public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients) {
         if (localServices.stream().anyMatch(s -> s.isRunning() && s.listensOnPort(port))) return State.OK;
-        if (vpnClients.stream().anyMatch(p -> p.hasAllowedIpStartingWith(address) && p.isConnected())) return State.OK;
+        if (vpnClients.stream().anyMatch(p -> p.containsAddress(address) && p.isConnected())) return State.OK;
         return State.UNREACHABLE;
     }
 
@@ -97,7 +97,7 @@ public class ReverseProxyRoute {
         if (lanAddress == null || lanAddress.isBlank()) return null;
 
         String peerEndpointIp = vpnClients.stream()
-            .filter(c -> c.hasAllowedIpStartingWith(peer.ipAddress()))
+            .filter(c -> c.containsAddress(peer.ipAddress()))
             .map(VpnClient::endpointIp)
             .filter(ip -> ip != null && !ip.isBlank())
             .findFirst().orElse(null);
@@ -117,7 +117,7 @@ public class ReverseProxyRoute {
     private String resolveServerName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver) {
         // Check VPN peers first — a peer IP is unambiguous, whereas port-only local
         // matching can produce false positives when a local container happens to use the same port.
-        boolean isPeer = vpnClients.stream().anyMatch(p -> p.hasAllowedIpStartingWith(address));
+        boolean isPeer = vpnClients.stream().anyMatch(p -> p.containsAddress(address));
         if (isPeer) {
             String peerName = peerNameResolver.resolvePeerNameByIp(address);
             return peerName.equals(address) ? address : peerName;
