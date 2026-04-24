@@ -97,8 +97,6 @@ flowchart TB
     vaier_app -.->|writes peer configs| wg
 ```
 
-Publishing a service is one click in Vaier: pick a container, pick a subdomain, and Vaier writes the Route53 CNAME, the Traefik router, and (optionally) the Authelia middleware — which is the whole reason that DNS box sits at the top of the diagram.
-
 ---
 
 ## Prerequisites
