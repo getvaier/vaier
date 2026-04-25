@@ -77,7 +77,7 @@ class SetupServiceTest {
         assertThat(saved.getAcmeEmail()).isEqualTo(VALID_EMAIL);
 
         verify(setupStateHolder).markConfigured();
-        verify(forPersistingUsers).addUser(VALID_USERNAME, VALID_PASSWORD, "", VALID_USERNAME);
+        verify(forPersistingUsers).addUser(VALID_USERNAME, VALID_PASSWORD, "", VALID_USERNAME, List.of("admins"));
     }
 
     @Test

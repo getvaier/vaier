@@ -48,7 +48,7 @@ class LifecycleTest {
         lifecycle().initUsers();
 
         ArgumentCaptor<String> passwordCaptor = ArgumentCaptor.forClass(String.class);
-        verify(forPersistingUsers).addUser(eq("admin"), passwordCaptor.capture(), any(), any());
+        verify(forPersistingUsers).addUser(eq("admin"), passwordCaptor.capture(), any(), any(), any());
         assertThat(passwordCaptor.getValue()).isNotEqualTo("admin");
         assertThat(passwordCaptor.getValue()).hasSizeGreaterThanOrEqualTo(12);
     }
@@ -85,7 +85,7 @@ class LifecycleTest {
 
         lifecycle().initUsers();
 
-        verify(forPersistingUsers, never()).addUser(any(), any(), any(), any());
+        verify(forPersistingUsers, never()).addUser(any(), any(), any(), any(), any());
     }
 
     @Test

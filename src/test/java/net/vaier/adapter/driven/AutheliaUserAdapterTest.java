@@ -55,8 +55,8 @@ class AutheliaUserAdapterTest {
 
     @Test
     void getUsers_returnsUsersFromFile() {
-        adapter.addUser("alice", "password123", "alice@example.com", "Alice");
-        adapter.addUser("bob", "password456", "bob@example.com", "Bob");
+        adapter.addUser("alice", "password123", "alice@example.com", "Alice", List.of("admins"));
+        adapter.addUser("bob", "password456", "bob@example.com", "Bob", List.of("family"));
 
         List<User> users = adapter.getUsers();
 
@@ -66,7 +66,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void getUsers_returnsDisplaynameEmailAndGroups() {
-        adapter.addUser("alice", "password123", "alice@example.com", "Alice Example");
+        adapter.addUser("alice", "password123", "alice@example.com", "Alice Example", List.of("admins", "family"));
 
         List<User> users = adapter.getUsers();
 
@@ -74,14 +74,14 @@ class AutheliaUserAdapterTest {
         User alice = users.getFirst();
         assertThat(alice.getDisplayname()).isEqualTo("Alice Example");
         assertThat(alice.getEmail()).isEqualTo("alice@example.com");
-        assertThat(alice.getGroups()).containsExactly("admins");
+        assertThat(alice.getGroups()).containsExactly("admins", "family");
     }
 
     // --- addUser ---
 
     @Test
     void addUser_createsFileWithCorrectStructure() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice Example");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice Example", List.of("admins"));
 
         List<User> users = adapter.getUsers();
         assertThat(users).hasSize(1);
@@ -90,7 +90,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void addUser_hashesPasswordWithArgon2() throws IOException {
-        adapter.addUser("alice", "mysecret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "mysecret", "alice@example.com", "Alice", List.of("admins"));
 
         String fileContent = Files.readString(tempDir.resolve("users_database.yml"));
         assertThat(fileContent).contains("$argon2id$");
@@ -98,16 +98,32 @@ class AutheliaUserAdapterTest {
     }
 
     @Test
-    void addUser_placesUserInAdminsGroup() throws IOException {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+    void addUser_persistsProvidedGroups() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("family", "media"));
 
-        String fileContent = Files.readString(tempDir.resolve("users_database.yml"));
-        assertThat(fileContent).contains("admins");
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getGroups()).containsExactly("family", "media");
+    }
+
+    @Test
+    void addUser_persistsEmptyGroups() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of());
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getGroups()).isEmpty();
+    }
+
+    @Test
+    void addUser_treatsNullGroupsAsEmpty() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", null);
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getGroups()).isEmpty();
     }
 
     @Test
     void addUser_usesUsernameAsDisplaynameWhenNull() throws IOException {
-        adapter.addUser("alice", "secret", "alice@example.com", null);
+        adapter.addUser("alice", "secret", "alice@example.com", null, List.of("admins"));
 
         String fileContent = Files.readString(tempDir.resolve("users_database.yml"));
         assertThat(fileContent).contains("alice");
@@ -115,9 +131,9 @@ class AutheliaUserAdapterTest {
 
     @Test
     void addUser_throwsWhenUserAlreadyExists() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
-        assertThatThrownBy(() -> adapter.addUser("alice", "other", "other@example.com", "Alice2"))
+        assertThatThrownBy(() -> adapter.addUser("alice", "other", "other@example.com", "Alice2", List.of()))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("User already exists");
     }
@@ -126,8 +142,8 @@ class AutheliaUserAdapterTest {
 
     @Test
     void deleteUser_removesExistingUser() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
-        adapter.addUser("bob", "secret", "bob@example.com", "Bob");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+        adapter.addUser("bob", "secret", "bob@example.com", "Bob", List.of("admins"));
 
         adapter.deleteUser("alice");
 
@@ -136,7 +152,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void deleteUser_throwsWhenUserNotFound() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
         assertThatThrownBy(() -> adapter.deleteUser("nobody"))
                 .isInstanceOf(RuntimeException.class)
@@ -153,7 +169,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void changePassword_updatesPasswordHash() throws IOException {
-        adapter.addUser("alice", "oldpassword", "alice@example.com", "Alice");
+        adapter.addUser("alice", "oldpassword", "alice@example.com", "Alice", List.of("admins"));
         String before = Files.readString(tempDir.resolve("users_database.yml"));
 
         adapter.changePassword("alice", "newpassword");
@@ -167,7 +183,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void changePassword_throwsWhenUserNotFound() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
         assertThatThrownBy(() -> adapter.changePassword("nobody", "newpass"))
                 .isInstanceOf(RuntimeException.class)
@@ -178,7 +194,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void updateEmail_changesEmailForExistingUser() {
-        adapter.addUser("alice", "secret", "old@example.com", "Alice");
+        adapter.addUser("alice", "secret", "old@example.com", "Alice", List.of("admins"));
 
         adapter.updateEmail("alice", "new@example.com");
 
@@ -188,7 +204,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void updateEmail_preservesPasswordAndOtherFields() throws IOException {
-        adapter.addUser("alice", "secret", "old@example.com", "Alice");
+        adapter.addUser("alice", "secret", "old@example.com", "Alice", List.of("admins", "family"));
         String before = Files.readString(tempDir.resolve("users_database.yml"));
         int hashIndex = before.indexOf("$argon2id$");
         String hashBefore = before.substring(hashIndex, before.indexOf('\n', hashIndex));
@@ -199,12 +215,12 @@ class AutheliaUserAdapterTest {
         assertThat(after).contains(hashBefore);
         User alice = adapter.getUsers().getFirst();
         assertThat(alice.getDisplayname()).isEqualTo("Alice");
-        assertThat(alice.getGroups()).containsExactly("admins");
+        assertThat(alice.getGroups()).containsExactly("admins", "family");
     }
 
     @Test
     void updateEmail_throwsWhenUserNotFound() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
         assertThatThrownBy(() -> adapter.updateEmail("nobody", "x@example.com"))
                 .isInstanceOf(RuntimeException.class)
@@ -221,7 +237,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void updateDisplayName_changesDisplayNameForExistingUser() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Old Name");
+        adapter.addUser("alice", "secret", "alice@example.com", "Old Name", List.of("admins"));
 
         adapter.updateDisplayName("alice", "New Name");
 
@@ -231,7 +247,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void updateDisplayName_preservesPasswordAndEmail() throws IOException {
-        adapter.addUser("alice", "secret", "alice@example.com", "Old Name");
+        adapter.addUser("alice", "secret", "alice@example.com", "Old Name", List.of("admins"));
         String before = Files.readString(tempDir.resolve("users_database.yml"));
         int hashIndex = before.indexOf("$argon2id$");
         String hashBefore = before.substring(hashIndex, before.indexOf('\n', hashIndex));
@@ -246,7 +262,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void updateDisplayName_throwsWhenUserNotFound() {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
         assertThatThrownBy(() -> adapter.updateDisplayName("nobody", "New"))
                 .isInstanceOf(RuntimeException.class)
@@ -259,11 +275,58 @@ class AutheliaUserAdapterTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    // --- setUserGroups ---
+
+    @Test
+    void setUserGroups_replacesGroupsForExistingUser() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+
+        adapter.setUserGroups("alice", List.of("family", "media"));
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getGroups()).containsExactly("family", "media");
+    }
+
+    @Test
+    void setUserGroups_canSetEmptyList() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+
+        adapter.setUserGroups("alice", List.of());
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getGroups()).isEmpty();
+    }
+
+    @Test
+    void setUserGroups_preservesOtherFields() throws IOException {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+        String before = Files.readString(tempDir.resolve("users_database.yml"));
+        int hashIndex = before.indexOf("$argon2id$");
+        String hashBefore = before.substring(hashIndex, before.indexOf('\n', hashIndex));
+
+        adapter.setUserGroups("alice", List.of("family"));
+
+        String after = Files.readString(tempDir.resolve("users_database.yml"));
+        assertThat(after).contains(hashBefore);
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getDisplayname()).isEqualTo("Alice");
+        assertThat(alice.getEmail()).isEqualTo("alice@example.com");
+    }
+
+    @Test
+    void setUserGroups_throwsWhenUserNotFound() {
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+
+        assertThatThrownBy(() -> adapter.setUserGroups("nobody", List.of("admins")))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("User not found");
+    }
+
     // --- secret file permissions ---
 
     @Test
     void addUser_writesUsersFileWithOwnerOnlyPermissions() throws IOException {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
         Set<PosixFilePermission> perms = Files.getPosixFilePermissions(tempDir.resolve("users_database.yml"));
         assertThat(perms).containsExactlyInAnyOrder(
@@ -272,7 +335,7 @@ class AutheliaUserAdapterTest {
 
     @Test
     void changePassword_keepsUsersFileLockedDown() throws IOException {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
 
         adapter.changePassword("alice", "newsecret");
 
@@ -283,8 +346,8 @@ class AutheliaUserAdapterTest {
 
     @Test
     void deleteUser_keepsUsersFileLockedDown() throws IOException {
-        adapter.addUser("alice", "secret", "alice@example.com", "Alice");
-        adapter.addUser("bob", "secret", "bob@example.com", "Bob");
+        adapter.addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+        adapter.addUser("bob", "secret", "bob@example.com", "Bob", List.of("admins"));
 
         adapter.deleteUser("bob");
 

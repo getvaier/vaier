@@ -68,7 +68,7 @@ public class SetupService implements CheckSetupStatusUseCase, ValidateAwsCredent
         configPersistence.save(config);
         log.info("Configuration saved for domain: {}", domain);
 
-        forPersistingUsers.addUser(adminUsername, adminPassword, "", adminUsername);
+        forPersistingUsers.addUser(adminUsername, adminPassword, "", adminUsername, java.util.List.of("admins"));
         log.info("Admin user '{}' created", adminUsername);
 
         setupStateHolder.markConfigured();

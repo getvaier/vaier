@@ -41,22 +41,34 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
         mockMvc.perform(post("/users")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
-                           {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice"}
+                           {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice","groups":["admins"]}
                            """))
                .andExpect(status().isOk());
 
-        verify(addUserUseCase).addUser("alice", "secret", "alice@example.com", "Alice");
+        verify(addUserUseCase).addUser("alice", "secret", "alice@example.com", "Alice", List.of("admins"));
+    }
+
+    @Test
+    void addUser_passesGroupsFromRequest() throws Exception {
+        mockMvc.perform(post("/users")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice","groups":["family","media"]}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(addUserUseCase).addUser("alice", "secret", "alice@example.com", "Alice", List.of("family", "media"));
     }
 
     @Test
     void addUser_returns400WhenUserAlreadyExists() throws Exception {
         doThrow(new RuntimeException("User already exists: alice"))
-                .when(addUserUseCase).addUser(eq("alice"), any(), any(), any());
+                .when(addUserUseCase).addUser(eq("alice"), any(), any(), any(), any());
 
         mockMvc.perform(post("/users")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
-                           {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice"}
+                           {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice","groups":["admins"]}
                            """))
                .andExpect(status().isBadRequest());
     }
@@ -64,12 +76,12 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void addUser_returns400WhenPasswordMissing() throws Exception {
         doThrow(new IllegalArgumentException("password must not be blank"))
-                .when(addUserUseCase).addUser(eq("alice"), isNull(), any(), any());
+                .when(addUserUseCase).addUser(eq("alice"), isNull(), any(), any(), any());
 
         mockMvc.perform(post("/users")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
-                           {"username":"alice","email":"alice@example.com","displayname":"Alice"}
+                           {"username":"alice","email":"alice@example.com","displayname":"Alice","groups":["admins"]}
                            """))
                .andExpect(status().isBadRequest());
     }
@@ -77,12 +89,12 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void addUser_returns400WhenUsernameMissing() throws Exception {
         doThrow(new IllegalArgumentException("username must not be blank"))
-                .when(addUserUseCase).addUser(isNull(), any(), any(), any());
+                .when(addUserUseCase).addUser(isNull(), any(), any(), any(), any());
 
         mockMvc.perform(post("/users")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
-                           {"password":"secret","email":"alice@example.com","displayname":"Alice"}
+                           {"password":"secret","email":"alice@example.com","displayname":"Alice","groups":["admins"]}
                            """))
                .andExpect(status().isBadRequest());
     }
@@ -218,6 +230,70 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
                        .content("""
                            {"displayname":""}
                            """))
+               .andExpect(status().isBadRequest());
+    }
+
+    // --- groups endpoints ---
+
+    @Test
+    void getGroups_returnsListOfGroups() throws Exception {
+        when(getGroupsUseCase.getGroups()).thenReturn(List.of("admins", "family", "media"));
+
+        mockMvc.perform(get("/groups"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$[0]").value("admins"))
+               .andExpect(jsonPath("$[1]").value("family"))
+               .andExpect(jsonPath("$[2]").value("media"));
+    }
+
+    @Test
+    void getGroups_returnsEmptyList() throws Exception {
+        when(getGroupsUseCase.getGroups()).thenReturn(List.of());
+
+        mockMvc.perform(get("/groups"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void updateUserGroups_returns200OnSuccess() throws Exception {
+        mockMvc.perform(put("/users/alice/groups")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"groups":["admins","family"]}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(updateUserGroupsUseCase).updateUserGroups("alice", List.of("admins", "family"));
+    }
+
+    @Test
+    void updateUserGroups_returns400WhenUserNotFound() throws Exception {
+        doThrow(new RuntimeException("User not found: alice"))
+                .when(updateUserGroupsUseCase).updateUserGroups(eq("alice"), any());
+
+        mockMvc.perform(put("/users/alice/groups")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"groups":["admins"]}
+                           """))
+               .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void deleteGroup_returns200OnSuccess() throws Exception {
+        mockMvc.perform(delete("/groups/family"))
+               .andExpect(status().isOk());
+
+        verify(deleteGroupUseCase).deleteGroup("family");
+    }
+
+    @Test
+    void deleteGroup_returns400WhenInvalid() throws Exception {
+        doThrow(new IllegalArgumentException("group name must not be blank"))
+                .when(deleteGroupUseCase).deleteGroup("");
+
+        mockMvc.perform(delete("/groups/ "))
                .andExpect(status().isBadRequest());
     }
 }

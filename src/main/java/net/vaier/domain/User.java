@@ -46,4 +46,10 @@ public class User {
             throw new IllegalArgumentException("displayname must not be blank");
         }
     }
+
+    public static void validateGroupName(String groupName) {
+        if (groupName == null || groupName.isBlank()) {
+            throw new IllegalArgumentException("group name must not be blank");
+        }
+    }
 }

@@ -199,9 +199,12 @@ Manage Authelia users from the Vaier UI.
 **Current capabilities:**
 - List / create / delete users
 - Change passwords (Argon2 hashing)
+- Update display name and email per user
+- Choose group(s) when creating a user (no more hardcoded `admins`); edit a user's groups inline; delete a group across all users in one action ([#84](https://github.com/getvaier/vaier/issues/84))
 - Authelia login / 2FA pages inherit Vaier's dark theme and logo via `theme: dark` + `asset_path: /config/assets`; the Vaier container publishes `logo.png` into the Authelia assets directory at startup so the hand-off between `vaier.<domain>` and `login.<domain>` reads as one product.
 
-No planned changes.
+**Planned next:**
+- Wire groups into Authelia `access_control` rules (per-service group gating, two-factor escalation per group) — see [#84](https://github.com/getvaier/vaier/issues/84) follow-up. Today every logged-in user reaches every published service.
 
 ---
 

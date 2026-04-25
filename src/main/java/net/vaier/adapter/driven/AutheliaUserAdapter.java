@@ -92,7 +92,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
     }
 
     @Override
-    public void addUser(String username, String password, String email, String displayname) {
+    public void addUser(String username, String password, String email, String displayname, List<String> groups) {
         File usersDbFile = new File(usersDbPath);
         Map<String, Object> config;
 
@@ -138,11 +138,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         userEntry.put("password", hashedPassword);
         userEntry.put("displayname", displayname != null ? displayname : username);
         userEntry.put("email", email);
-
-        // Add user to admins group by default
-        List<String> groups = new ArrayList<>();
-        groups.add("admins");
-        userEntry.put("groups", groups);
+        userEntry.put("groups", groups != null ? new ArrayList<>(groups) : new ArrayList<>());
 
         usersMap.put(username, userEntry);
 
@@ -218,7 +214,14 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         updateUserField(username, "displayname", displayname, "display name");
     }
 
-    private void updateUserField(String username, String fieldKey, String value, String logLabel) {
+    @Override
+    public void setUserGroups(String username, List<String> groups) {
+        updateUserField(username, "groups",
+                groups != null ? new ArrayList<>(groups) : new ArrayList<>(),
+                "groups");
+    }
+
+    private void updateUserField(String username, String fieldKey, Object value, String logLabel) {
         File usersDbFile = new File(usersDbPath);
 
         if (!usersDbFile.exists()) {

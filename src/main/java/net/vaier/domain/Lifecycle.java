@@ -70,7 +70,7 @@ public class Lifecycle {
         boolean adminCreated = false;
         if (!forPersistingUsers.isDatabaseInitialised()) {
             String password = generateRandomPassword();
-            forPersistingUsers.addUser(defaultAdminUsername, password, "", "Admin");
+            forPersistingUsers.addUser(defaultAdminUsername, password, "", "Admin", java.util.List.of("admins"));
             String passwordFilePath = bootstrapCredentialsWriter
                 .writeBootstrapPassword(defaultAdminUsername, password);
             log.info("==========================================================");

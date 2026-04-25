@@ -32,7 +32,7 @@ class AutheliaUserAdapterIT {
 
     @Test
     void addUser_thenGetUsers_returnsAddedUser() {
-        adapter.addUser("alice", "password123", "alice@example.com", "Alice Smith");
+        adapter.addUser("alice", "password123", "alice@example.com", "Alice Smith", List.of("admins"));
 
         List<User> users = adapter.getUsers();
 
@@ -45,9 +45,9 @@ class AutheliaUserAdapterIT {
 
     @Test
     void addThreeUsers_deleteMiddleOne_remainingTwoSurvive() {
-        adapter.addUser("alice", "pass1", "alice@example.com", "Alice");
-        adapter.addUser("bob", "pass2", "bob@example.com", "Bob");
-        adapter.addUser("charlie", "pass3", "charlie@example.com", "Charlie");
+        adapter.addUser("alice", "pass1", "alice@example.com", "Alice", List.of("admins"));
+        adapter.addUser("bob", "pass2", "bob@example.com", "Bob", List.of("admins"));
+        adapter.addUser("charlie", "pass3", "charlie@example.com", "Charlie", List.of("admins"));
 
         adapter.deleteUser("bob");
 
@@ -59,7 +59,7 @@ class AutheliaUserAdapterIT {
 
     @Test
     void changePassword_updatesStoredHash() throws IOException {
-        adapter.addUser("alice", "oldpassword", "alice@example.com", "Alice");
+        adapter.addUser("alice", "oldpassword", "alice@example.com", "Alice", List.of("admins"));
 
         String fileContentBefore = Files.readString(tempDir.resolve("users_database.yml"));
 
@@ -71,7 +71,7 @@ class AutheliaUserAdapterIT {
 
     @Test
     void changePasswordTwice_secondHashDiffersFromFirst() throws IOException {
-        adapter.addUser("alice", "original", "alice@example.com", "Alice");
+        adapter.addUser("alice", "original", "alice@example.com", "Alice", List.of("admins"));
         adapter.changePassword("alice", "first-new");
         String afterFirstChange = Files.readString(tempDir.resolve("users_database.yml"));
 
@@ -87,7 +87,7 @@ class AutheliaUserAdapterIT {
         AutheliaUserAdapter nestedAdapter = new AutheliaUserAdapter(
                 nestedDir.resolve("users_database.yml").toString());
 
-        nestedAdapter.addUser("alice", "pass", "alice@example.com", "Alice");
+        nestedAdapter.addUser("alice", "pass", "alice@example.com", "Alice", List.of("admins"));
 
         assertThat(Files.exists(nestedDir.resolve("users_database.yml"))).isTrue();
         assertThat(nestedAdapter.getUsers()).hasSize(1);
@@ -95,16 +95,16 @@ class AutheliaUserAdapterIT {
 
     @Test
     void addUser_throwsWhenUserAlreadyExists() {
-        adapter.addUser("alice", "pass", "alice@example.com", "Alice");
+        adapter.addUser("alice", "pass", "alice@example.com", "Alice", List.of("admins"));
 
-        assertThatThrownBy(() -> adapter.addUser("alice", "pass2", "a@b.com", "Alice"))
+        assertThatThrownBy(() -> adapter.addUser("alice", "pass2", "a@b.com", "Alice", List.of("admins")))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("alice");
     }
 
     @Test
     void deleteUser_throwsWhenUserNotFound() {
-        adapter.addUser("alice", "pass", "alice@example.com", "Alice");
+        adapter.addUser("alice", "pass", "alice@example.com", "Alice", List.of("admins"));
 
         assertThatThrownBy(() -> adapter.deleteUser("bob"))
                 .isInstanceOf(RuntimeException.class)
@@ -121,22 +121,32 @@ class AutheliaUserAdapterIT {
     void isDatabaseInitialised_falseBeforeAdd_trueAfterAdd() {
         assertThat(adapter.isDatabaseInitialised()).isFalse();
 
-        adapter.addUser("alice", "pass", "alice@example.com", "Alice");
+        adapter.addUser("alice", "pass", "alice@example.com", "Alice", List.of("admins"));
 
         assertThat(adapter.isDatabaseInitialised()).isTrue();
     }
 
     @Test
-    void multipleAddDelete_fileRemainsValidYaml() throws IOException {
-        adapter.addUser("a", "p1", "a@e.com", "A");
-        adapter.addUser("b", "p2", "b@e.com", "B");
-        adapter.addUser("c", "p3", "c@e.com", "C");
+    void multipleAddDelete_fileRemainsValidYaml() {
+        adapter.addUser("a", "p1", "a@e.com", "A", List.of("admins"));
+        adapter.addUser("b", "p2", "b@e.com", "B", List.of("admins"));
+        adapter.addUser("c", "p3", "c@e.com", "C", List.of("admins"));
         adapter.deleteUser("a");
         adapter.deleteUser("c");
-        adapter.addUser("d", "p4", "d@e.com", "D");
+        adapter.addUser("d", "p4", "d@e.com", "D", List.of("admins"));
 
         List<User> users = adapter.getUsers();
         assertThat(users).hasSize(2);
         assertThat(users).extracting(User::getName).containsExactlyInAnyOrder("b", "d");
+    }
+
+    @Test
+    void setUserGroups_thenGetUsers_reflectsNewGroups() {
+        adapter.addUser("alice", "pass", "alice@example.com", "Alice", List.of("admins"));
+
+        adapter.setUserGroups("alice", List.of("family", "media"));
+
+        User alice = adapter.getUsers().getFirst();
+        assertThat(alice.getGroups()).containsExactly("family", "media");
     }
 }

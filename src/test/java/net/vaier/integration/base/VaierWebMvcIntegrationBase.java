@@ -80,6 +80,15 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected UpdateUserDisplayNameUseCase updateUserDisplayNameUseCase;
 
+    @MockBean
+    protected GetGroupsUseCase getGroupsUseCase;
+
+    @MockBean
+    protected UpdateUserGroupsUseCase updateUserGroupsUseCase;
+
+    @MockBean
+    protected DeleteGroupUseCase deleteGroupUseCase;
+
     // --- DNS use cases ---
     @MockBean
     protected GetDnsInfoUseCase getDnsInfoUseCase;

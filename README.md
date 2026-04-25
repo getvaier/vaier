@@ -27,7 +27,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Smart launchpad** | Public `/launchpad.html` tiles link to `https://service.domain` normally, but switch to direct `http://lanAddress:port` when the caller is on the same LAN as the hosting server — bypassing the proxy and auth. Per-service opt-out for apps whose public origin differs from `http://lan:port` (e.g. Vaultwarden). |
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle, editable root path redirect, and per-service direct LAN URL opt-out. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
-| **User management** | Manage Authelia users from the UI (create, delete, change password). |
+| **User management** | Manage Authelia users from the UI (create, delete, change password, edit groups). Group membership is set per user and can be reused as a foundation for Authelia access-control rules — *Manage groups* lists every group in use and lets you delete one in a single action. |
 | **Email notifications** | SMTP settings in *Settings* power Authelia password-reset emails today and future Vaier notifications. Credentials are verified against the server before saving; a dedicated "Send test email" button delivers a real roundtrip message to any recipient. |
 | **Consistent branding** | Authelia login and 2FA pages share Vaier's dark theme and logo, so the hand-off from `vaier.<domain>` to `login.<domain>` doesn't feel like a different app. |
 

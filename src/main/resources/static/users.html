@@ -89,6 +89,47 @@
             margin-top: 0.75rem;
         }
 
+        .groups-edit-row {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .groups-edit-row .form-input {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .groups-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 0.5rem;
+        }
+
+        .group-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.4rem 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            margin-bottom: 0.3rem;
+            background: var(--bg-card);
+        }
+
+        .group-name {
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+
+        .group-empty {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            padding: 0.5rem;
+        }
+
         @media (max-width: 600px) {
             .user-header { flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 0.75rem; }
             .user-header-left { flex: 1 1 100%; }
@@ -100,6 +141,9 @@
 <body>
     <div class="container">
         <div id="message"></div>
+        <div class="groups-toolbar">
+            <button class="btn btn-small btn-secondary" onclick="showManageGroupsModal()">Manage groups</button>
+        </div>
         <div id="users-container">
             <div class="loading">Loading users…</div>
         </div>
@@ -127,6 +171,10 @@
                 <div class="form-group">
                     <label class="form-label">Password</label>
                     <input type="password" class="form-input" id="newPassword" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Groups <span style="color:var(--text-muted);font-weight:normal">(comma-separated)</span></label>
+                    <input type="text" class="form-input" id="newGroups" value="admins" placeholder="admins, family">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('addUserModal')">Cancel</button>
@@ -171,6 +219,39 @@
         </div>
     </div>
 
+    <!-- Manage Groups Modal -->
+    <div id="manageGroupsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Manage Groups</div>
+            <div id="manageGroupsError" style="display:none"></div>
+            <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem">
+                Deleting a group removes it from every user.
+            </p>
+            <div id="manageGroupsList">
+                <div class="loading">Loading…</div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('manageGroupsModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Group Confirmation Modal -->
+    <div id="deleteGroupModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Delete Group</div>
+            <div id="deleteGroupError" style="display:none"></div>
+            <p style="font-size:0.85rem;color:var(--text-muted)">
+                Remove group <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="deleteGroupName"></code> from all users?
+            </p>
+            <p style="font-size:0.78rem;color:var(--red);margin-top:0.5rem;">This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('deleteGroupModal')">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmDeleteGroup()">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let users = [];
         const expandedUsers = new Set();
@@ -212,6 +293,11 @@
             return d.innerHTML;
         }
 
+        function parseGroupsInput(value) {
+            if (!value) return [];
+            return value.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        }
+
         function displayUsers() {
             const container = document.getElementById('users-container');
             if (users.length === 0) {
@@ -224,7 +310,7 @@
                 const isExpanded = expandedUsers.has(user.name);
                 const displayname = user.displayname || user.name;
                 const email = user.email || '';
-                const groups = (user.groups || []).join(', ') || 'none';
+                const groupsValue = (user.groups || []).join(', ');
                 return `
                 <div class="user-card">
                     <div class="user-header" onclick="toggleUser('${user.name.replace(/'/g, "\\'")}')">
@@ -255,7 +341,13 @@
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Groups</span>
-                                <span class="detail-value">${escapeHtml(groups)}</span>
+                                <span class="detail-value">
+                                    <div class="groups-edit-row">
+                                        <input type="text" class="form-input" id="groups-input-${id}"
+                                               value="${escapeHtml(groupsValue)}" placeholder="admins, family">
+                                        <button class="btn btn-small btn-secondary" onclick="saveUserGroups('${user.name.replace(/'/g, "\\'")}')">Save</button>
+                                    </div>
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -263,6 +355,27 @@
             }).join('');
 
             container.innerHTML = html;
+        }
+
+        async function saveUserGroups(username) {
+            const input = document.getElementById('groups-input-' + cardId(username));
+            const groups = parseGroupsInput(input.value);
+            try {
+                const response = await fetch(`/users/${username}/groups`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groups })
+                });
+                const message = await response.text();
+                if (response.ok) {
+                    displayMessage(message, 'success');
+                    fetchUsers();
+                } else {
+                    displayMessage(message, 'error');
+                }
+            } catch (error) {
+                displayMessage(`Failed to update groups: ${error.message}`, 'error');
+            }
         }
 
         function displayMessage(message, type) {
@@ -299,9 +412,68 @@
             document.getElementById(modalId).classList.remove('active');
         }
 
+        async function showManageGroupsModal() {
+            clearModalError('manageGroupsError');
+            document.getElementById('manageGroupsModal').classList.add('active');
+            await renderGroupsList();
+        }
+
+        async function renderGroupsList() {
+            const list = document.getElementById('manageGroupsList');
+            list.innerHTML = '<div class="loading">Loading…</div>';
+            try {
+                const response = await fetch('/groups');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const groups = await response.json();
+                if (!groups.length) {
+                    list.innerHTML = '<div class="group-empty">No groups in use.</div>';
+                    return;
+                }
+                list.innerHTML = groups.map(g => `
+                    <div class="group-row">
+                        <span class="group-name">${escapeHtml(g)}</span>
+                        <button class="btn btn-small btn-danger" onclick="deleteGroup('${g.replace(/'/g, "\\'")}')">Delete</button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                list.innerHTML = `<div class="error">Failed to load groups: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        let groupToDelete = null;
+
+        function deleteGroup(groupName) {
+            groupToDelete = groupName;
+            clearModalError('deleteGroupError');
+            document.getElementById('deleteGroupName').textContent = groupName;
+            document.getElementById('deleteGroupModal').classList.add('active');
+        }
+
+        async function confirmDeleteGroup() {
+            if (!groupToDelete) return;
+            const name = groupToDelete;
+            clearModalError('deleteGroupError');
+            try {
+                const response = await fetch(`/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                const message = await response.text();
+                if (response.ok) {
+                    closeModal('deleteGroupModal');
+                    displayMessage(message, 'success');
+                    groupToDelete = null;
+                    await renderGroupsList();
+                    fetchUsers();
+                } else {
+                    showModalError('deleteGroupError', message);
+                }
+            } catch (error) {
+                showModalError('deleteGroupError', `Failed to delete group: ${error.message}`);
+            }
+        }
+
         document.getElementById('addUserForm').addEventListener('submit', async e => {
             e.preventDefault();
             clearModalError('addUserError');
+            const groups = parseGroupsInput(document.getElementById('newGroups').value);
             try {
                 const response = await fetch('/users', {
                     method: 'POST',
@@ -311,6 +483,7 @@
                         displayname: document.getElementById('newDisplayname').value,
                         email:       document.getElementById('newEmail').value,
                         password:    document.getElementById('newPassword').value,
+                        groups
                     })
                 });
                 const message = await response.text();
@@ -318,6 +491,7 @@
                     displayMessage(message, 'success');
                     closeModal('addUserModal');
                     document.getElementById('addUserForm').reset();
+                    document.getElementById('newGroups').value = 'admins';
                     fetchUsers();
                 } else {
                     showModalError('addUserError', message);
