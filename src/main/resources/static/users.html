@@ -101,6 +101,62 @@
             min-width: 200px;
         }
 
+        .groups-picker {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+            min-height: 1.6rem;
+            align-items: center;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.15rem 0.45rem;
+            background: #0e639c;
+            color: #fff;
+            border-radius: 2px;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+        }
+
+        .chip-remove {
+            background: none;
+            border: 0;
+            color: #fff;
+            cursor: pointer;
+            padding: 0;
+            font-size: 0.95rem;
+            line-height: 1;
+            opacity: 0.8;
+        }
+
+        .chip-remove:hover { opacity: 1; }
+
+        .chip-empty {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .chip-input-row {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+        }
+
+        .chip-input-row .form-input {
+            flex: 1;
+            min-width: 0;
+        }
+
         .groups-toolbar {
             display: flex;
             justify-content: flex-end;
@@ -173,8 +229,8 @@
                     <input type="password" class="form-input" id="newPassword" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Groups <span style="color:var(--text-muted);font-weight:normal">(comma-separated)</span></label>
-                    <input type="text" class="form-input" id="newGroups" value="admins" placeholder="admins, family">
+                    <label class="form-label">Groups</label>
+                    <div id="newGroupsPicker"></div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('addUserModal')">Cancel</button>
@@ -254,7 +310,9 @@
 
     <script>
         let users = [];
+        let allGroups = [];
         const expandedUsers = new Set();
+        const pickers = new Map();
 
         async function fetchUsers() {
             try {
@@ -265,6 +323,89 @@
             } catch (error) {
                 displayMessage(`Failed to load users: ${error.message}`, 'error');
             }
+        }
+
+        async function fetchAllGroups() {
+            try {
+                const response = await fetch('/groups');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                allGroups = await response.json();
+            } catch (error) {
+                allGroups = [];
+            }
+        }
+
+        function knownGroupsUnion(extra) {
+            const set = new Set(allGroups);
+            (extra || []).forEach(g => set.add(g));
+            return [...set].sort();
+        }
+
+        function mountGroupsPicker(containerId, pickerId, initial) {
+            pickers.set(pickerId, { selected: new Set(initial) });
+            const options = knownGroupsUnion(initial)
+                .map(g => `<option value="${escapeHtml(g)}">`).join('');
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = `
+                <div class="groups-picker">
+                    <div class="chip-list" id="chips-${pickerId}"></div>
+                    <div class="chip-input-row">
+                        <input type="text" class="form-input chip-input" id="chip-input-${pickerId}"
+                               list="groups-datalist-${pickerId}" placeholder="Add group…"
+                               autocomplete="off">
+                        <button type="button" class="btn btn-small btn-secondary"
+                                onclick="addChip('${pickerId}')">Add</button>
+                    </div>
+                    <datalist id="groups-datalist-${pickerId}">${options}</datalist>
+                </div>`;
+            const input = document.getElementById('chip-input-' + pickerId);
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addChip(pickerId);
+                }
+            });
+            renderChips(pickerId);
+        }
+
+        function renderChips(pickerId) {
+            const state = pickers.get(pickerId);
+            const list = document.getElementById('chips-' + pickerId);
+            if (!state || !list) return;
+            if (state.selected.size === 0) {
+                list.innerHTML = '<span class="chip-empty">No groups</span>';
+                return;
+            }
+            list.innerHTML = [...state.selected].sort().map(g => {
+                const safe = g.replace(/'/g, "\\'");
+                return `<span class="chip">${escapeHtml(g)}<button type="button" class="chip-remove"
+                        onclick="removeChip('${pickerId}','${safe}')">×</button></span>`;
+            }).join('');
+        }
+
+        function addChip(pickerId) {
+            const input = document.getElementById('chip-input-' + pickerId);
+            if (!input) return;
+            const value = (input.value || '').trim();
+            if (!value) return;
+            const state = pickers.get(pickerId);
+            if (!state) return;
+            state.selected.add(value);
+            input.value = '';
+            renderChips(pickerId);
+        }
+
+        function removeChip(pickerId, group) {
+            const state = pickers.get(pickerId);
+            if (!state) return;
+            state.selected.delete(group);
+            renderChips(pickerId);
+        }
+
+        function getPickerGroups(pickerId) {
+            const state = pickers.get(pickerId);
+            return state ? [...state.selected] : [];
         }
 
         function cardId(name) {
@@ -293,11 +434,6 @@
             return d.innerHTML;
         }
 
-        function parseGroupsInput(value) {
-            if (!value) return [];
-            return value.split(',').map(s => s.trim()).filter(s => s.length > 0);
-        }
-
         function displayUsers() {
             const container = document.getElementById('users-container');
             if (users.length === 0) {
@@ -310,7 +446,6 @@
                 const isExpanded = expandedUsers.has(user.name);
                 const displayname = user.displayname || user.name;
                 const email = user.email || '';
-                const groupsValue = (user.groups || []).join(', ');
                 return `
                 <div class="user-card">
                     <div class="user-header" onclick="toggleUser('${user.name.replace(/'/g, "\\'")}')">
@@ -343,8 +478,7 @@
                                 <span class="detail-label">Groups</span>
                                 <span class="detail-value">
                                     <div class="groups-edit-row">
-                                        <input type="text" class="form-input" id="groups-input-${id}"
-                                               value="${escapeHtml(groupsValue)}" placeholder="admins, family">
+                                        <div id="groups-picker-${id}" style="flex:1;min-width:200px"></div>
                                         <button class="btn btn-small btn-secondary" onclick="saveUserGroups('${user.name.replace(/'/g, "\\'")}')">Save</button>
                                     </div>
                                 </span>
@@ -355,11 +489,15 @@
             }).join('');
 
             container.innerHTML = html;
+
+            users.forEach(user => {
+                const id = cardId(user.name);
+                mountGroupsPicker('groups-picker-' + id, 'user-' + id, user.groups || []);
+            });
         }
 
         async function saveUserGroups(username) {
-            const input = document.getElementById('groups-input-' + cardId(username));
-            const groups = parseGroupsInput(input.value);
+            const groups = getPickerGroups('user-' + cardId(username));
             try {
                 const response = await fetch(`/users/${username}/groups`, {
                     method: 'PUT',
@@ -369,6 +507,7 @@
                 const message = await response.text();
                 if (response.ok) {
                     displayMessage(message, 'success');
+                    await fetchAllGroups();
                     fetchUsers();
                 } else {
                     displayMessage(message, 'error');
@@ -397,8 +536,10 @@
             el.textContent = '';
         }
 
-        function showAddUserModal() {
+        async function showAddUserModal() {
             clearModalError('addUserError');
+            await fetchAllGroups();
+            mountGroupsPicker('newGroupsPicker', 'new-user', ['admins']);
             document.getElementById('addUserModal').classList.add('active');
         }
 
@@ -460,6 +601,7 @@
                     closeModal('deleteGroupModal');
                     displayMessage(message, 'success');
                     groupToDelete = null;
+                    await fetchAllGroups();
                     await renderGroupsList();
                     fetchUsers();
                 } else {
@@ -473,7 +615,7 @@
         document.getElementById('addUserForm').addEventListener('submit', async e => {
             e.preventDefault();
             clearModalError('addUserError');
-            const groups = parseGroupsInput(document.getElementById('newGroups').value);
+            const groups = getPickerGroups('new-user');
             try {
                 const response = await fetch('/users', {
                     method: 'POST',
@@ -491,7 +633,7 @@
                     displayMessage(message, 'success');
                     closeModal('addUserModal');
                     document.getElementById('addUserForm').reset();
-                    document.getElementById('newGroups').value = 'admins';
+                    await fetchAllGroups();
                     fetchUsers();
                 } else {
                     showModalError('addUserError', message);
@@ -558,7 +700,7 @@
             if (e.target.classList.contains('modal')) e.target.classList.remove('active');
         });
 
-        fetchUsers();
+        fetchAllGroups().then(fetchUsers);
     </script>
 </body>
 </html>
