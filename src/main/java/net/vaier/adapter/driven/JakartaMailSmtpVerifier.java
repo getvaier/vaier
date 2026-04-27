@@ -7,15 +7,17 @@ import jakarta.mail.Session;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
+import java.util.List;
 import java.util.Properties;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.domain.port.ForSendingNotificationEmail;
 import net.vaier.domain.port.ForSendingTestEmail;
 import net.vaier.domain.port.ForVerifyingSmtpCredentials;
 import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class JakartaMailSmtpVerifier implements ForVerifyingSmtpCredentials, ForSendingTestEmail {
+public class JakartaMailSmtpVerifier implements ForVerifyingSmtpCredentials, ForSendingTestEmail, ForSendingNotificationEmail {
 
     @Override
     public void verify(String host, int port, String username, String password) {
@@ -56,6 +58,33 @@ public class JakartaMailSmtpVerifier implements ForVerifyingSmtpCredentials, For
         } catch (MessagingException e) {
             log.warn("SMTP test email failed for {}@{}:{} → {} — {}", username, host, port, recipient, e.getMessage());
             throw new InvalidSmtpCredentialsException(summarize(e), e);
+        }
+    }
+
+    @Override
+    public void sendEmail(String host, int port, String username, String password,
+                          String sender, List<String> recipients, String subject, String body) {
+        if (recipients == null || recipients.isEmpty()) {
+            return;
+        }
+        Session session = Session.getInstance(smtpProps(host, port));
+        try (Transport transport = session.getTransport("smtp")) {
+            transport.connect(host, port, username, password);
+
+            MimeMessage message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(sender != null && !sender.isBlank() ? sender : username));
+            message.setRecipients(Message.RecipientType.TO,
+                    InternetAddress.parse(String.join(",", recipients)));
+            message.setSubject(subject);
+            message.setText(body);
+            transport.sendMessage(message, message.getAllRecipients());
+            log.info("Sent notification email to {} via {}", recipients, host);
+        } catch (NoSuchProviderException e) {
+            throw new IllegalStateException("SMTP provider not available", e);
+        } catch (MessagingException e) {
+            log.warn("Notification email failed for {}@{}:{} → {} — {}",
+                    username, host, port, recipients, e.getMessage());
+            throw new RuntimeException(summarize(e), e);
         }
     }
 
