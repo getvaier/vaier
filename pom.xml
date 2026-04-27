@@ -136,6 +136,13 @@
             <artifactId>jakarta.mail</artifactId>
             <version>2.0.3</version>
         </dependency>
+
+        <!-- IP geolocation (MMDB lookups; reads DB-IP Lite or any MaxMind-format DB) -->
+        <dependency>
+            <groupId>com.maxmind.geoip2</groupId>
+            <artifactId>geoip2</artifactId>
+            <version>4.2.1</version>
+        </dependency>
     </dependencies>
 
     <build>

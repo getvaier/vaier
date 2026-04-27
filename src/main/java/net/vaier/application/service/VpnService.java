@@ -16,20 +16,26 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
+import net.vaier.domain.DnsRecord.DnsRecordType;
+import net.vaier.domain.GeoLocation;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
+import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingPublicHost;
+import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -52,7 +58,8 @@ public class VpnService implements
     ResolveVpnPeerNameUseCase,
     GetPeerConfigUseCase,
     GeneratePeerSetupScriptUseCase,
-    GenerateDockerComposeUseCase {
+    GenerateDockerComposeUseCase,
+    GetServerLocationUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -74,6 +81,8 @@ public class VpnService implements
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGeneratingDockerComposeFiles dockerComposeGenerator;
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
+    private final ForResolvingPublicHost forResolvingPublicHost;
+    private final ForGeolocatingIps forGeolocatingIps;
     private DockerClient dockerClient;
 
     public VpnService(ConfigResolver configResolver,
@@ -83,7 +92,9 @@ public class VpnService implements
                       ForDeletingVpnPeers vpnPeerDeleter,
                       ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
                       ForGeneratingDockerComposeFiles dockerComposeGenerator,
-                      DeletePublishedServiceUseCase deletePublishedServiceUseCase) {
+                      DeletePublishedServiceUseCase deletePublishedServiceUseCase,
+                      ForResolvingPublicHost forResolvingPublicHost,
+                      ForGeolocatingIps forGeolocatingIps) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -92,6 +103,8 @@ public class VpnService implements
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.dockerComposeGenerator = dockerComposeGenerator;
         this.deletePublishedServiceUseCase = deletePublishedServiceUseCase;
+        this.forResolvingPublicHost = forResolvingPublicHost;
+        this.forGeolocatingIps = forGeolocatingIps;
     }
 
     @PostConstruct
@@ -155,6 +168,54 @@ public class VpnService implements
     @Override
     public List<VpnClient> getClients() {
         return forGettingVpnClients.getClients();
+    }
+
+    // --- GetServerLocationUseCase ---
+
+    @Override
+    public Optional<ServerLocation> getServerLocation() {
+        // Display label: prefer the human-friendly host name (CNAME or A record) the operator sees.
+        String displayHost = forResolvingPublicHost.resolve().map(PublicHost::value).orElse(null);
+
+        // For geolocation we need the actual public IP. On EC2 the public hostname resolves to a
+        // private VPC IP via split-horizon DNS, so we ask the port for a direct public IP first.
+        Optional<String> publicIp = forResolvingPublicHost.resolvePublicIp();
+        if (publicIp.isEmpty()) {
+            // Fall back to DNS-resolving the public host (works off-EC2 when DNS is honest).
+            Optional<PublicHost> host = forResolvingPublicHost.resolve();
+            if (host.isPresent()) {
+                String value = host.get().value();
+                String resolved = host.get().type() == DnsRecordType.A ? value : resolveHostnameToIp(value);
+                if (resolved != null) publicIp = Optional.of(resolved);
+            }
+        }
+        if (publicIp.isEmpty()) {
+            // Last resort: resolve vaier.<domain> via DNS.
+            String domain = configResolver.getDomain();
+            if (domain != null && !domain.isBlank()) {
+                String fallbackHost = "vaier." + domain;
+                String resolved = resolveHostnameToIp(fallbackHost);
+                if (resolved != null) {
+                    publicIp = Optional.of(resolved);
+                    if (displayHost == null) displayHost = fallbackHost;
+                }
+            }
+        }
+        if (publicIp.isEmpty()) return Optional.empty();
+        if (displayHost == null) displayHost = publicIp.get();
+
+        final String label = displayHost;
+        return forGeolocatingIps.locate(publicIp.get())
+            .map(geo -> new ServerLocation(label, geo.latitude(), geo.longitude(), geo.city(), geo.country()));
+    }
+
+    private String resolveHostnameToIp(String hostname) {
+        try {
+            return java.net.InetAddress.getByName(hostname).getHostAddress();
+        } catch (java.net.UnknownHostException e) {
+            log.debug("Could not resolve public host {} to an IP: {}", hostname, e.getMessage());
+            return null;
+        }
     }
 
     // --- ResolveVpnPeerNameUseCase ---

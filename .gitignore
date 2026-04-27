@@ -34,6 +34,7 @@ wireguard/
 authelia/
 traefik/
 /vaier/
+/geoip/
 
 # WireGuard
 wireguard-config/

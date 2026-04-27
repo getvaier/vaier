@@ -6,8 +6,13 @@ import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import net.vaier.application.GetServerLocationUseCase;
+import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.domain.GeoLocation;
+import net.vaier.domain.VpnClient;
+import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,10 +20,14 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class VpnPeerRestControllerTest {
@@ -32,6 +41,8 @@ class VpnPeerRestControllerTest {
     @Mock GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock SseEventPublisher sseEventPublisher;
+    @Mock ForGeolocatingIps forGeolocatingIps;
+    @Mock GetServerLocationUseCase getServerLocationUseCase;
 
     @InjectMocks VpnPeerRestController controller;
 
@@ -76,5 +87,82 @@ class VpnPeerRestControllerTest {
         verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void listPeers_includesGeolocationFieldsWhenLookupSucceeds() {
+        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
+        when(vpnClientService.getClients()).thenReturn(List.of(client));
+        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+        when(forGeolocatingIps.locate("203.0.113.10"))
+            .thenReturn(Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway")));
+
+        var response = controller.listPeers();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        var body = response.getBody();
+        assertThat(body).hasSize(1);
+        var peer = body.get(0);
+        assertThat(peer.name()).isEqualTo("alice");
+        assertThat(peer.latitude()).isEqualTo(59.91);
+        assertThat(peer.longitude()).isEqualTo(10.74);
+        assertThat(peer.city()).isEqualTo("Oslo");
+        assertThat(peer.country()).isEqualTo("Norway");
+    }
+
+    @Test
+    void listPeers_geolocationFieldsAreNullWhenLookupFails() {
+        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
+        when(vpnClientService.getClients()).thenReturn(List.of(client));
+        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+        when(forGeolocatingIps.locate("203.0.113.10")).thenReturn(Optional.empty());
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.latitude()).isNull();
+        assertThat(peer.longitude()).isNull();
+        assertThat(peer.city()).isNull();
+        assertThat(peer.country()).isNull();
+    }
+
+    @Test
+    void listPeers_skipsGeolocationLookupWhenEndpointIsBlank() {
+        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", "0", "0", "0");
+        when(vpnClientService.getClients()).thenReturn(List.of(client));
+        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.latitude()).isNull();
+        assertThat(peer.longitude()).isNull();
+        verify(forGeolocatingIps, never()).locate(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void getServerLocation_returnsLocationWhenResolved() {
+        when(getServerLocationUseCase.getServerLocation())
+            .thenReturn(Optional.of(new ServerLocation("vaier.example.com", 59.91, 10.74, "Oslo", "Norway")));
+
+        var response = controller.getServerLocation();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        var body = response.getBody();
+        assertThat(body.publicHost()).isEqualTo("vaier.example.com");
+        assertThat(body.latitude()).isEqualTo(59.91);
+        assertThat(body.longitude()).isEqualTo(10.74);
+        assertThat(body.city()).isEqualTo("Oslo");
+        assertThat(body.country()).isEqualTo("Norway");
+    }
+
+    @Test
+    void getServerLocation_returns404WhenUnavailable() {
+        when(getServerLocationUseCase.getServerLocation()).thenReturn(Optional.empty());
+
+        var response = controller.getServerLocation();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
     }
 }

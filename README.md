@@ -22,7 +22,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 
 | Feature | Description |
 |---------|-------------|
-| **VPN peer management** | Create and delete WireGuard peers. Download peer config as a `.conf` file, QR code (mobile), docker-compose, or a one-shot bash setup script. Server peers can record a LAN address (editable inline) so the launchpad can link directly to services on the local network. Each peer card shows a "last seen" timestamp derived from the latest WireGuard handshake. Server peers running an older wireguard image than the server get a "wireguard out of date" badge on the peer card — click `compose` to download the updated template and redeploy on the peer. |
+| **VPN peer management** | Create and delete WireGuard peers. Download peer config as a `.conf` file, QR code (mobile), docker-compose, or a one-shot bash setup script. Server peers can record a LAN address (editable inline) so the launchpad can link directly to services on the local network. Each peer card shows a "last seen" timestamp derived from the latest WireGuard handshake. The Machines page has a **List / Map** tab switcher: the Map tab shows a Leaflet/OpenStreetMap world map with a marker for the Vaier server itself plus markers for every connected peer, geolocated from the public endpoint IP via a locally-hosted DB-IP database. Server peers plot at their own egress; mobile/Windows-client peers plot twice — a dotted "approx. ISP" marker at the carrier IP and a firm marker stacked at the Vaier server (where their internet traffic surfaces because their `AllowedIPs = 0.0.0.0/0` routes through the VPN). Co-located markers cluster with a count and expand on zoom; popups show on hover; markers are colored to match the connection-status dot in the list and update live via SSE. Server peers running an older wireguard image than the server get a "wireguard out of date" badge on the peer card — click `compose` to download the updated template and redeploy on the peer. |
 | **Service publishing** | Discover Docker containers on the VPN server and on connected peers. Publish any container as a public HTTPS subdomain in one action. Automatic rollback of the DNS CNAME if the publish flow fails (DNS timeout, Traefik error, or Traefik never picks up the route), and automatic cleanup of published services when a peer is deleted. |
 | **Smart launchpad** | Public `/launchpad.html` tiles link to `https://service.domain` normally, but switch to direct `http://lanAddress:port` when the caller is on the same LAN as the hosting server — bypassing the proxy and auth. Per-service opt-out for apps whose public origin differs from `http://lan:port` (e.g. Vaultwarden). |
 | **Reverse proxy** | Automatically generates Traefik dynamic config. Per-service Authelia authentication toggle, editable root path redirect, and per-service direct LAN URL opt-out. |
@@ -310,6 +310,10 @@ The Apache License 2.0 (below) contains the full warranty disclaimer and limitat
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
+
+## Attribution
+
+IP geolocation on the Machines page is provided by [DB-IP](https://db-ip.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `geoip-init` container downloads the latest DB-IP City Lite database to a local volume on first boot and refreshes it monthly.
 
 ---
 

@@ -209,6 +209,40 @@ services:
     networks:
       - vaier-network
 
+  geoip-init:
+    image: alpine:3.20
+    container_name: geoip-init
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        DEST=/geoip/dbip-city-lite.mmdb
+        MARKER=/geoip/.month
+        MONTH=$$(date +%Y-%m)
+        if [ -f "$$DEST" ] && [ "$$(cat $$MARKER 2>/dev/null)" = "$$MONTH" ]; then
+          echo "DB-IP MMDB already current for $$MONTH"
+          exit 0
+        fi
+        apk add --no-cache wget >/dev/null
+        URL=https://download.db-ip.com/free/dbip-city-lite-$$MONTH.mmdb.gz
+        echo "Downloading $$URL"
+        if ! wget -q -O /tmp/db.mmdb.gz "$$URL"; then
+          PREV=$$(date -d "$$MONTH-01 -1 day" +%Y-%m 2>/dev/null || date +%Y-%m)
+          echo "Current month not published, falling back to $$PREV"
+          wget -q -O /tmp/db.mmdb.gz "https://download.db-ip.com/free/dbip-city-lite-$$PREV.mmdb.gz" || {
+            echo "WARN: could not download geolocation DB; peer map will be empty"
+            exit 0
+          }
+        fi
+        gunzip -c /tmp/db.mmdb.gz > "$$DEST"
+        echo "$$MONTH" > "$$MARKER"
+        rm -f /tmp/db.mmdb.gz
+        echo "Geolocation DB ready at $$DEST"
+    volumes:
+      - ./geoip:/geoip
+    restart: "no"
+
   vaier:
     image: getvaier/vaier:latest
     container_name: vaier
@@ -231,11 +265,13 @@ services:
       - traefik
       - authelia
       - redis-init
+      - geoip-init
     volumes:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config
       - ./authelia/config:/authelia/config
       - ./vaier/config:/vaier/config
+      - ./geoip:/geoip:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
     labels:

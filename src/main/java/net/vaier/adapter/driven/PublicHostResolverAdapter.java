@@ -43,7 +43,7 @@ public class PublicHostResolverAdapter implements ForResolvingPublicHost {
             log.info("Resolved public host from VAIER_PUBLIC_IP: {}", envIp);
             return Optional.of(new PublicHost(envIp, DnsRecordType.A));
         }
-        Optional<String> ec2Hostname = fetchEc2PublicHostname();
+        Optional<String> ec2Hostname = fetchEc2Metadata("public-hostname");
         if (ec2Hostname.isPresent()) {
             log.info("Resolved public host from EC2 instance metadata: {}", ec2Hostname.get());
             return Optional.of(new PublicHost(ec2Hostname.get(), DnsRecordType.CNAME));
@@ -51,7 +51,14 @@ public class PublicHostResolverAdapter implements ForResolvingPublicHost {
         return Optional.empty();
     }
 
-    private Optional<String> fetchEc2PublicHostname() {
+    @Override
+    public Optional<String> resolvePublicIp() {
+        String envIp = trimToNull(envLookup.apply("VAIER_PUBLIC_IP"));
+        if (envIp != null) return Optional.of(envIp);
+        return fetchEc2Metadata("public-ipv4");
+    }
+
+    private Optional<String> fetchEc2Metadata(String path) {
         try {
             HttpRequest tokenReq = HttpRequest.newBuilder()
                 .uri(URI.create(IMDS_BASE + "/api/token"))
@@ -68,7 +75,7 @@ public class PublicHostResolverAdapter implements ForResolvingPublicHost {
                 return Optional.empty();
             }
             HttpRequest metaReq = HttpRequest.newBuilder()
-                .uri(URI.create(IMDS_BASE + "/meta-data/public-hostname"))
+                .uri(URI.create(IMDS_BASE + "/meta-data/" + path))
                 .timeout(IMDS_TIMEOUT)
                 .header("X-aws-ec2-metadata-token", token)
                 .GET()
@@ -77,8 +84,8 @@ public class PublicHostResolverAdapter implements ForResolvingPublicHost {
             if (metaResp.statusCode() != 200) {
                 return Optional.empty();
             }
-            String hostname = metaResp.body().trim();
-            return hostname.isEmpty() ? Optional.empty() : Optional.of(hostname);
+            String value = metaResp.body().trim();
+            return value.isEmpty() ? Optional.empty() : Optional.of(value);
         } catch (Exception e) {
             log.debug("EC2 instance metadata not reachable: {}", e.getMessage());
             return Optional.empty();

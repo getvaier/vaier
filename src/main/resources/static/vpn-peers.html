@@ -5,6 +5,74 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Machines</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
+    <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.Default.css">
+    <script src="vendor/leaflet/leaflet.js"></script>
+    <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
+    <style>
+        #peer-map {
+            height: calc(100vh - 14rem);
+            min-height: 320px;
+            margin-bottom: 0.4rem;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg);
+        }
+        .map-attribution {
+            font-size: 0.65rem;
+            color: var(--text-dim);
+            margin-bottom: 1rem;
+            text-align: right;
+        }
+        .map-attribution a { color: var(--text-muted); text-decoration: none; }
+        .map-attribution a:hover { color: var(--text); }
+
+        .tab-nav {
+            display: flex;
+            gap: 0.25rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1rem;
+        }
+        .tab-button {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            padding: 0.5rem 0.9rem;
+            text-transform: uppercase;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .tab-button:hover { color: var(--text-muted); }
+        .tab-button.active {
+            color: var(--text);
+            border-bottom-color: var(--green);
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* MarkerCluster bubble styling — high-contrast for the dark theme */
+        .marker-cluster-small,
+        .marker-cluster-medium,
+        .marker-cluster-large {
+            background-color: rgba(78, 201, 176, 0.25);
+        }
+        .marker-cluster-small div,
+        .marker-cluster-medium div,
+        .marker-cluster-large div {
+            background-color: #4ec9b0;
+            color: #1e1e1e;
+            font-weight: 700;
+            font-size: 0.78rem;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+        }
+        .marker-cluster span { line-height: inherit; }
+    </style>
     <style>
         .peer-card {
             background: var(--bg-card);
@@ -273,8 +341,18 @@
     <div class="container">
         <div id="error-message"></div>
         <div id="success-message"></div>
-        <div id="peers-container">
-            <div class="loading">Loading machines…</div>
+        <div class="tab-nav">
+            <button class="tab-button active" data-tab="list" onclick="switchTab('list')">List</button>
+            <button class="tab-button"        data-tab="map"  onclick="switchTab('map')">Map</button>
+        </div>
+        <div class="tab-panel active" id="tab-panel-list">
+            <div id="peers-container">
+                <div class="loading">Loading machines…</div>
+            </div>
+        </div>
+        <div class="tab-panel" id="tab-panel-map">
+            <div id="peer-map"></div>
+            <div class="map-attribution">IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a></div>
         </div>
     </div>
     <button class="fab" onclick="showCreatePeerModal()" aria-label="Add Machine" title="Add Machine">+</button>
@@ -646,6 +724,7 @@
             }
 
             container.innerHTML = html;
+            refreshPeerMap();
         }
 
         function showCreatePeerModal() {
@@ -894,8 +973,176 @@
             }
         };
 
+        let _peerMap = null;
+        let _markersClusterGroup = null;
+        let _serverLocation = null;
+        let _activeTab = 'list';
+
+        function switchTab(tab) {
+            _activeTab = tab;
+            document.querySelectorAll('.tab-button').forEach(b => {
+                b.classList.toggle('active', b.dataset.tab === tab);
+            });
+            document.querySelectorAll('.tab-panel').forEach(p => {
+                p.classList.toggle('active', p.id === 'tab-panel-' + tab);
+            });
+            const fab = document.querySelector('.fab');
+            if (fab) fab.style.display = tab === 'list' ? '' : 'none';
+            // Leaflet needs to recompute size when its container becomes visible.
+            if (tab === 'map' && _peerMap) {
+                setTimeout(() => { _peerMap.invalidateSize(); refreshPeerMap(); }, 0);
+            }
+        }
+
+        const COLOR_CONNECTED    = '#4ec9b0'; // matches --green / status-connected dot
+        const COLOR_DISCONNECTED = '#f48771'; // matches --red   / status-disconnected dot
+
+        function setupPeerMap() {
+            if (typeof L === 'undefined') return;
+            L.Icon.Default.mergeOptions({
+                iconUrl: 'vendor/leaflet/images/marker-icon.png',
+                iconRetinaUrl: 'vendor/leaflet/images/marker-icon-2x.png',
+                shadowUrl: 'vendor/leaflet/images/marker-shadow.png'
+            });
+            _peerMap = L.map('peer-map', { worldCopyJump: true, zoomControl: true })
+                .setView([20, 0], 1);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 18
+            }).addTo(_peerMap);
+            _markersClusterGroup = L.markerClusterGroup({
+                showCoverageOnHover: false,
+                spiderfyOnMaxZoom: true,
+                maxClusterRadius: 30
+            });
+            _peerMap.addLayer(_markersClusterGroup);
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            }[c]));
+        }
+
+        function bindHoverPopup(marker, html) {
+            marker.bindPopup(html, { closeButton: false, autoPan: false });
+            marker.on('mouseover', e => e.target.openPopup());
+            marker.on('mouseout',  e => e.target.closePopup());
+        }
+
+        function isPeerConnected(peer) {
+            const h = parseInt(peer.latestHandshake);
+            if (isNaN(h) || h <= 0) return false;
+            return (Math.floor(Date.now() / 1000) - h) < 180;
+        }
+
+        function makeFirmDot(latlng, color, opts) {
+            const radius = (opts && opts.radius) || 7;
+            const weight = (opts && opts.weight) || 2;
+            return L.circleMarker(latlng, {
+                radius,
+                color: '#1e1e1e',
+                weight,
+                fillColor: color,
+                fillOpacity: 1
+            });
+        }
+
+        function makeWeakDot(latlng, color) {
+            // Dashed outline, low fill opacity — communicates "approximate / carrier egress"
+            return L.circleMarker(latlng, {
+                radius: 6,
+                color: color,
+                weight: 1.5,
+                dashArray: '3 3',
+                fillColor: color,
+                fillOpacity: 0.18
+            });
+        }
+
+        function isClientType(peer) {
+            const t = peer.peerType || 'UBUNTU_SERVER';
+            return t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT';
+        }
+
+        function refreshPeerMap() {
+            if (!_peerMap || !_markersClusterGroup) return;
+            _markersClusterGroup.clearLayers();
+
+            const allCoords = [];
+
+            peers.forEach(p => {
+                if (p.latitude == null || p.longitude == null) return;
+                const color = isPeerConnected(p) ? COLOR_CONNECTED : COLOR_DISCONNECTED;
+                const carrierPlace = [p.city, p.country].filter(Boolean).join(', ');
+
+                if (isClientType(p)) {
+                    // Weak marker at the carrier IP — "where the device connects from"
+                    const carrierPopup = `<strong>${escapeHtml(p.name)}</strong><br>`
+                        + `<span style="color:#888;font-size:0.85em">connecting from</span><br>`
+                        + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(p.endpointIp)}</span>`
+                        + (carrierPlace ? `<br>${escapeHtml(carrierPlace)}` : '')
+                        + `<br><span style="color:#888;font-size:0.78em">approx. ISP location</span>`;
+                    const weak = makeWeakDot([p.latitude, p.longitude], color);
+                    bindHoverPopup(weak, carrierPopup);
+                    _markersClusterGroup.addLayer(weak);
+                    allCoords.push([p.latitude, p.longitude]);
+
+                    // Firm marker at the server — "where the device's internet traffic surfaces"
+                    if (_serverLocation) {
+                        const surfacePlace = [_serverLocation.city, _serverLocation.country].filter(Boolean).join(', ');
+                        const surfacePopup = `<strong>${escapeHtml(p.name)}</strong><br>`
+                            + `<span style="color:#888;font-size:0.85em">internet via Vaier</span>`
+                            + (surfacePlace ? `<br>${escapeHtml(surfacePlace)}` : '');
+                        const firm = makeFirmDot([_serverLocation.latitude, _serverLocation.longitude], color);
+                        bindHoverPopup(firm, surfacePopup);
+                        _markersClusterGroup.addLayer(firm);
+                    }
+                } else {
+                    // Server peer: single firm marker at its own endpoint
+                    const popup = `<strong>${escapeHtml(p.name)}</strong><br>`
+                        + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(p.endpointIp)}</span>`
+                        + (carrierPlace ? `<br>${escapeHtml(carrierPlace)}` : '');
+                    const firm = makeFirmDot([p.latitude, p.longitude], color);
+                    bindHoverPopup(firm, popup);
+                    _markersClusterGroup.addLayer(firm);
+                    allCoords.push([p.latitude, p.longitude]);
+                }
+            });
+
+            if (_serverLocation) {
+                const place = [_serverLocation.city, _serverLocation.country].filter(Boolean).join(', ');
+                const popup = `<strong>Vaier server</strong><br>`
+                    + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(_serverLocation.publicHost)}</span>`
+                    + (place ? `<br>${escapeHtml(place)}` : '');
+                const m = makeFirmDot([_serverLocation.latitude, _serverLocation.longitude], COLOR_CONNECTED, { radius: 10, weight: 3 });
+                bindHoverPopup(m, popup);
+                _markersClusterGroup.addLayer(m);
+                allCoords.push([_serverLocation.latitude, _serverLocation.longitude]);
+            }
+
+            if (allCoords.length > 0) {
+                const bounds = L.latLngBounds(allCoords);
+                _peerMap.fitBounds(bounds.pad(0.3), { maxZoom: 5 });
+            }
+        }
+
+        async function fetchServerLocation() {
+            if (!_peerMap) return;
+            try {
+                const res = await fetch('/vpn/peers/server-location');
+                if (!res.ok) return;
+                _serverLocation = await res.json();
+                refreshPeerMap();
+            } catch (e) {
+                console.error('Failed to load server location:', e);
+            }
+        }
+
+        setupPeerMap();
         fetchPeers();
         fetchLocalServices();
+        fetchServerLocation();
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());
@@ -903,6 +1150,7 @@
             try {
                 const stats = JSON.parse(e.data);
                 const now = Math.floor(Date.now() / 1000);
+                let mapNeedsRefresh = false;
                 stats.forEach(s => {
                     const id = s.name.replace(/[^a-zA-Z0-9]/g, '_');
                     const handshake = parseInt(s.latestHandshake);
@@ -924,7 +1172,18 @@
                             + (tier > 0 ? ' (' + lastSeenRelative(s.latestHandshake) + ')' : '');
                     }
                     if (lastSeenDetail) { lastSeenDetail.textContent = lastSeenAbsolute(s.latestHandshake); }
+
+                    // Sync the in-memory peers array so map markers reflect live connection state.
+                    const cached = peers.find(p => p.name === s.name);
+                    if (cached) {
+                        const wasConnected = isPeerConnected(cached);
+                        cached.latestHandshake = s.latestHandshake;
+                        cached.transferRx = s.transferRx;
+                        cached.transferTx = s.transferTx;
+                        if (wasConnected !== connected) mapNeedsRefresh = true;
+                    }
                 });
+                if (mapNeedsRefresh) refreshPeerMap();
             } catch (err) {
                 console.error('Failed to apply peers-stats update:', err);
             }

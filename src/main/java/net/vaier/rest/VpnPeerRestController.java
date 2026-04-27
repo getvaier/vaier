@@ -5,13 +5,18 @@ import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
+import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.GeoLocation;
+import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.VpnClient;
+
+import java.util.Optional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +45,8 @@ public class VpnPeerRestController {
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final SseEventPublisher sseEventPublisher;
+    private final ForGeolocatingIps forGeolocatingIps;
+    private final GetServerLocationUseCase getServerLocationUseCase;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
@@ -61,6 +68,9 @@ public class VpnPeerRestController {
                                 .orElse(PeerType.UBUNTU_SERVER);
                         String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
                         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
+                        Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
+                            ? forGeolocatingIps.locate(client.endpointIp())
+                            : Optional.empty();
                         return new VpnPeerResponse(
                                 peerName,
                                 client.publicKey(),
@@ -72,7 +82,11 @@ public class VpnPeerRestController {
                                 client.transferTx(),
                                 peerType.name(),
                                 lanCidr,
-                                lanAddress
+                                lanAddress,
+                                geo.map(GeoLocation::latitude).orElse(null),
+                                geo.map(GeoLocation::longitude).orElse(null),
+                                geo.map(GeoLocation::city).orElse(null),
+                                geo.map(GeoLocation::country).orElse(null)
                         );
                     })
                     .toList();
@@ -81,6 +95,24 @@ public class VpnPeerRestController {
             log.error("Failed to fetch VPN peers: {}", e.getMessage(), e);
             // Return empty list instead of error to prevent constant error messages
             return ResponseEntity.ok(List.of());
+        }
+    }
+
+    @GetMapping("/server-location")
+    public ResponseEntity<ServerLocationResponse> getServerLocation() {
+        try {
+            return getServerLocationUseCase.getServerLocation()
+                .map(loc -> ResponseEntity.ok(new ServerLocationResponse(
+                    loc.publicHost(),
+                    loc.latitude(),
+                    loc.longitude(),
+                    loc.city(),
+                    loc.country()
+                )))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (Exception e) {
+            log.error("Failed to fetch server location: {}", e.getMessage(), e);
+            return ResponseEntity.notFound().build();
         }
     }
 
@@ -268,7 +300,11 @@ public class VpnPeerRestController {
             String transferTx,
             String peerType,
             String lanCidr,
-            String lanAddress
+            String lanAddress,
+            Double latitude,
+            Double longitude,
+            String city,
+            String country
     ) {}
 
     public record CreatePeerRequest(
@@ -295,6 +331,14 @@ public class VpnPeerRestController {
             String ipAddress,
             String configFile,
             String peerType
+    ) {}
+
+    public record ServerLocationResponse(
+            String publicHost,
+            double latitude,
+            double longitude,
+            String city,
+            String country
     ) {}
 
 }

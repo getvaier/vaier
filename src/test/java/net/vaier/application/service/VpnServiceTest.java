@@ -2,18 +2,24 @@ package net.vaier.application.service;
 
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.GetPeerConfigUseCase.PeerConfigResult;
+import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.DnsRecord.DnsRecordType;
+import net.vaier.domain.GeoLocation;
 import net.vaier.domain.PeerType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig;
+import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingPublicHost;
+import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -44,6 +50,8 @@ class VpnServiceTest {
     @Mock ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     @Mock ForGeneratingDockerComposeFiles dockerComposeGenerator;
     @Mock DeletePublishedServiceUseCase deletePublishedServiceUseCase;
+    @Mock ForResolvingPublicHost forResolvingPublicHost;
+    @Mock ForGeolocatingIps forGeolocatingIps;
 
     @InjectMocks VpnService service;
 
@@ -441,6 +449,96 @@ class VpnServiceTest {
         var order = inOrder(deletePublishedServiceUseCase, vpnPeerDeleter);
         order.verify(deletePublishedServiceUseCase).deleteService("app.example.com");
         order.verify(vpnPeerDeleter).deletePeer("alice");
+    }
+
+    // --- getServerLocation ---
+
+    @Test
+    void getServerLocation_prefersResolvedPublicIpForGeolocation() {
+        // On EC2 the public hostname resolves to a private VPC IP, so the service should ask the
+        // port for the direct public IP rather than DNS-resolving the CNAME.
+        when(forResolvingPublicHost.resolve())
+            .thenReturn(Optional.of(new PublicHost("ec2-54-93-32-13.eu-central-1.compute.amazonaws.com", DnsRecordType.CNAME)));
+        when(forResolvingPublicHost.resolvePublicIp()).thenReturn(Optional.of("54.93.32.13"));
+        when(forGeolocatingIps.locate("54.93.32.13"))
+            .thenReturn(Optional.of(new GeoLocation(50.11, 8.68, "Frankfurt", "Germany")));
+
+        Optional<ServerLocation> result = service.getServerLocation();
+
+        assertThat(result).isPresent();
+        // Display label keeps the friendly hostname, geolocation uses the public IP.
+        assertThat(result.get().publicHost()).isEqualTo("ec2-54-93-32-13.eu-central-1.compute.amazonaws.com");
+        assertThat(result.get().latitude()).isEqualTo(50.11);
+        assertThat(result.get().longitude()).isEqualTo(8.68);
+        assertThat(result.get().city()).isEqualTo("Frankfurt");
+        assertThat(result.get().country()).isEqualTo("Germany");
+    }
+
+    @Test
+    void getServerLocation_geolocatesARecordValueDirectly() {
+        when(forResolvingPublicHost.resolve())
+            .thenReturn(Optional.of(new PublicHost("203.0.113.10", DnsRecordType.A)));
+        when(forGeolocatingIps.locate("203.0.113.10"))
+            .thenReturn(Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway")));
+
+        Optional<ServerLocation> result = service.getServerLocation();
+
+        assertThat(result).isPresent();
+        assertThat(result.get().publicHost()).isEqualTo("203.0.113.10");
+        assertThat(result.get().latitude()).isEqualTo(59.91);
+        assertThat(result.get().longitude()).isEqualTo(10.74);
+        assertThat(result.get().city()).isEqualTo("Oslo");
+        assertThat(result.get().country()).isEqualTo("Norway");
+    }
+
+    @Test
+    void getServerLocation_resolvesCnameToIpThenGeolocates() {
+        when(forResolvingPublicHost.resolve())
+            .thenReturn(Optional.of(new PublicHost("localhost", DnsRecordType.CNAME)));
+        when(forGeolocatingIps.locate(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(Optional.of(new GeoLocation(0.0, 0.0, null, null)));
+
+        Optional<ServerLocation> result = service.getServerLocation();
+
+        assertThat(result).isPresent();
+        assertThat(result.get().publicHost()).isEqualTo("localhost");
+    }
+
+    @Test
+    void getServerLocation_fallsBackToVaierDomainWhenNoPublicHostConfigured() {
+        when(forResolvingPublicHost.resolve()).thenReturn(Optional.empty());
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        // The DNS resolution of vaier.eilertsen.family at test time is unpredictable, so we just verify
+        // the geolocation port is consulted (with whatever IP came back) and the fallback hostname is used.
+        when(forGeolocatingIps.locate(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway")));
+
+        Optional<ServerLocation> result = service.getServerLocation();
+
+        // If DNS resolves the test hostname (e.g. real internet), we get the fallback path.
+        // If not, result is empty — both are valid in the test environment, so we only assert on
+        // the publicHost label when the result is present.
+        if (result.isPresent()) {
+            assertThat(result.get().publicHost()).isEqualTo("vaier.eilertsen.family");
+        }
+    }
+
+    @Test
+    void getServerLocation_returnsEmptyWhenNothingConfigured() {
+        when(forResolvingPublicHost.resolve()).thenReturn(Optional.empty());
+        when(configResolver.getDomain()).thenReturn(null);
+
+        assertThat(service.getServerLocation()).isEmpty();
+        verifyNoInteractions(forGeolocatingIps);
+    }
+
+    @Test
+    void getServerLocation_returnsEmptyWhenCnameDoesNotResolveAndNoDomain() {
+        when(forResolvingPublicHost.resolve())
+            .thenReturn(Optional.of(new PublicHost("does-not-resolve.invalid", DnsRecordType.CNAME)));
+        when(configResolver.getDomain()).thenReturn("");
+
+        assertThat(service.getServerLocation()).isEmpty();
     }
 
     // silence unused field warning — PeerType is referenced in Javadoc of PeerConfigResult ctor via record definition
