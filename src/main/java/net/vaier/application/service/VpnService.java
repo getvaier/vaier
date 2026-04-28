@@ -607,6 +607,12 @@ public class VpnService implements
         sb.append("  cd \"$INSTALL_DIR\" && docker compose down 2>/dev/null || true\n");
         sb.append("fi\n");
         sb.append("\n");
+        // wireguard-client runs network_mode: host, so wg0 lives in the host netns.
+        // docker compose down does not invoke wg-quick down, so wg0 leaks across reruns —
+        // the new container then fails with "wg-quick: wg0 already exists".
+        sb.append("# --- Clean up orphaned wg0 interface from any previous run ---\n");
+        sb.append("sudo ip link delete wg0 2>/dev/null || true\n");
+        sb.append("\n");
         sb.append("# --- Create directory structure ---\n");
         sb.append("echo \"Setting up $INSTALL_DIR...\"\n");
         sb.append("mkdir -p \"$INSTALL_DIR/wireguard-client/config/wg_confs\"\n");

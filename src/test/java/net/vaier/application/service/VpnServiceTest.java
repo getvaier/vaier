@@ -425,6 +425,32 @@ class VpnServiceTest {
         assertThat(script).contains("image: " + serverImage);
     }
 
+    // --- generateSetupScript: rerun cleanup for orphaned wg0 ---
+
+    @Test
+    void generateSetupScript_deletesOrphanedWg0InterfaceBeforeStartingContainer() {
+        // Re-running the install script must clean up a leftover host-netns wg0 interface
+        // (linuxserver/wireguard runs network_mode: host and doesn't run wg-quick down on
+        // container shutdown). Without this cleanup the new container fails with
+        // "wg-quick: wg0 already exists" and the tunnel is left orphaned with no driver.
+        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
+            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("ip link delete wg0 2>/dev/null || true");
+
+        int downIdx       = script.indexOf("docker compose down");
+        int linkDeleteIdx = script.indexOf("ip link delete wg0");
+        int composeUpIdx  = script.lastIndexOf("docker_compose_up");
+        assertThat(downIdx).as("docker compose down should appear in script").isGreaterThanOrEqualTo(0);
+        assertThat(composeUpIdx).as("docker_compose_up should appear in script").isGreaterThanOrEqualTo(0);
+        assertThat(linkDeleteIdx)
+            .as("wg0 cleanup must run after docker compose down and before docker_compose_up")
+            .isBetween(downIdx, composeUpIdx);
+    }
+
     // --- deletePeer ---
 
     @Test
