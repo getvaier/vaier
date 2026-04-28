@@ -204,6 +204,69 @@ class TraefikReverseProxyAdapterTest {
         assertThat(content.stripLeading()).startsWith("http:");
     }
 
+    // --- addLanReverseProxyRoute (#175) ---
+
+    @Test
+    void addLanReverseProxyRoute_writesHttpsBackendUrlForHttpsProtocol() throws IOException {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "https", false, false);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("url: https://192.168.3.50:5000");
+    }
+
+    @Test
+    void addLanReverseProxyRoute_writesHttpBackendUrlForHttpProtocol() throws IOException {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("url: http://192.168.3.50:5000");
+    }
+
+    @Test
+    void addLanReverseProxyRoute_persistsLanServiceMarkerInYaml() throws IOException {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("x-vaier-lan-service");
+        assertThat(content).contains("nas.example.com");
+    }
+
+    @Test
+    void addLanReverseProxyRoute_roundTripsAsLanTypedRoute() {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "https", false, false);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getDomainName()).isEqualTo("nas.example.com");
+        assertThat(route.getAddress()).isEqualTo("192.168.3.50");
+        assertThat(route.getPort()).isEqualTo(5000);
+        assertThat(route.isLanService()).isTrue();
+        assertThat(route.getProtocol()).isEqualTo("https");
+    }
+
+    @Test
+    void addLanReverseProxyRoute_withRequiresAuth_addsAuthMiddleware() throws IOException {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", true, false);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
+    }
+
+    @Test
+    void addLanReverseProxyRoute_withDirectUrlDisabled_persistsFlag() {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, true);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isDirectUrlDisabled()).isTrue();
+    }
+
+    @Test
+    void addReverseProxyRoute_nonLanRoute_isLanServiceIsFalseOnReadBack() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isLanService()).isFalse();
+    }
+
     // --- ForManagingIgnoredServices ---
 
     @Test

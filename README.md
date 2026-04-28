@@ -252,6 +252,14 @@ After creating a peer, download its config and connect. Vaier shows the peer's h
 
 The service is live at `https://subdomain.yourdomain.com`.
 
+### Publishing a LAN service (no Docker required)
+
+For LAN-only devices that don't run Docker — NAS appliances, printers, IPMI, off-the-shelf gear — publish directly to a LAN host through a relay peer:
+
+1. On the relay peer, set `lanCidr` (e.g. `192.168.3.0/24`) so Vaier knows which LAN sits behind it
+2. In Vaier → Services → **+ Publish LAN service**, enter subdomain, target IP (must fall inside a relay's `lanCidr`), port, and protocol (`http` / `https`)
+3. Vaier creates the DNS CNAME and a Traefik route whose backend is `http(s)://<lan-ip>:<port>`. Cryptokey routing on `wg0` plus the relay's `ip_forward` + iptables rules forward traffic from the Vaier server through the relay onto its LAN.
+
 ---
 
 ## Roadmap

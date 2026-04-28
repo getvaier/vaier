@@ -8,6 +8,7 @@ import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
+import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
@@ -29,6 +30,7 @@ public class PublishedServiceRestController {
 
     private final GetPublishedServicesUseCase getPublishedServicesUseCase;
     private final PublishPeerServiceUseCase publishPeerServiceUseCase;
+    private final PublishLanServiceUseCase publishLanServiceUseCase;
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
@@ -61,6 +63,22 @@ public class PublishedServiceRestController {
             request.address(), request.port(), request.subdomain(),
             request.requiresAuth(), request.rootRedirectPath(), request.directUrlDisabled());
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/lan")
+    public ResponseEntity<Void> publishLanService(@RequestBody PublishLanRequest request) {
+        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={})",
+            request.protocol(), request.host(), request.port(), request.subdomain(),
+            request.requireAuth(), request.directUrlDisabled());
+        try {
+            publishLanServiceUseCase.publishLanService(
+                request.subdomain(), request.host(), request.port(), request.protocol(),
+                request.requireAuth(), request.directUrlDisabled());
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("LAN publish rejected: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
     }
 
     @PatchMapping("/{dnsName:.+}/auth")
@@ -119,6 +137,7 @@ public class PublishedServiceRestController {
     }
 
     record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {}
+    record PublishLanRequest(String subdomain, String host, int port, String protocol, boolean requireAuth, boolean directUrlDisabled) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}

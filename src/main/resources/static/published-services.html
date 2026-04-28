@@ -61,10 +61,9 @@
         .service-link:hover { color: var(--accent-hover); }
 
         .service-actions {
-            display: grid;
-            grid-template-columns: auto 28px 16px;
+            display: flex;
             align-items: center;
-            justify-items: center;
+            justify-content: flex-end;
             gap: 0.3rem;
             flex-shrink: 0;
         }
@@ -207,6 +206,7 @@
                         <input id="showIgnoredChk" type="checkbox" style="accent-color:var(--accent);cursor:pointer" onchange="toggleShowIgnored()">
                         Show ignored
                     </label>
+                    <button class="btn btn-primary btn-small" title="Publish a LAN host (e.g. NAS, IPMI) reachable through a relay peer — no Docker required" onclick="showPublishLanModal()">+ Publish LAN service</button>
                     <button class="btn btn-secondary btn-small" title="Re-scan for discovered services" onclick="refreshPublishable()">Refresh</button>
                 </div>
             </div>
@@ -242,6 +242,50 @@
                 <div class="modal-actions">
                     <button class="btn btn-secondary" id="redirectCancelBtn" onclick="hideRedirectModal()">Cancel</button>
                     <button class="btn btn-primary" id="redirectSubmitBtn" onclick="submitRedirect()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Publish LAN Modal -->
+    <div id="publishLanModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Publish LAN Service</div>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.6rem">
+                Expose a LAN host (NAS, IPMI, printer, etc.) through a relay peer. The target IP must be inside a relay peer's <code style="color:var(--text)">lanCidr</code>.
+            </p>
+            <div id="publishLanForm">
+                <div class="form-group">
+                    <label class="form-label" for="publishLanSubdomain">Subdomain</label>
+                    <input type="text" id="publishLanSubdomain" class="form-input" placeholder="e.g. nas">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="publishLanHost">Target host (LAN IP)</label>
+                    <input type="text" id="publishLanHost" class="form-input" placeholder="e.g. 192.168.3.50" oninput="updateRelayHint()">
+                    <span id="publishLanRelayHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="publishLanPort">Target port</label>
+                    <input type="number" id="publishLanPort" class="form-input" min="1" max="65535" placeholder="e.g. 5000">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="publishLanProtocol">Protocol</label>
+                    <select id="publishLanProtocol" class="form-input">
+                        <option value="http">http</option>
+                        <option value="https">https</option>
+                    </select>
+                </div>
+                <div class="form-checkbox">
+                    <input type="checkbox" id="publishLanRequiresAuth">
+                    <label for="publishLanRequiresAuth">Require Authelia authentication</label>
+                </div>
+                <div class="form-checkbox">
+                    <input type="checkbox" id="publishLanDirectUrlDisabled">
+                    <label for="publishLanDirectUrlDisabled" title="When checked, the launchpad never links to the direct LAN URL.">Disable direct LAN URL</label>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="publishLanCancelBtn" onclick="hidePublishLanModal()">Cancel</button>
+                    <button class="btn btn-primary"   id="publishLanSubmitBtn" onclick="submitPublishLan()">Publish</button>
                 </div>
             </div>
         </div>
@@ -378,6 +422,9 @@
                 const authBadge  = service.authenticated
                     ? '<span class="badge badge-success">auth</span>'
                     : '<span class="badge badge-warning">no-auth</span>';
+                const lanBadge   = service.isLanService
+                    ? '<span class="badge badge-warning" title="LAN service routed through a relay peer">LAN</span>'
+                    : '';
                 const serviceUrl = `https://${service.dnsAddress}`;
                 const isSelf = service.dnsAddress.startsWith('vaier.');
 
@@ -398,6 +445,7 @@
                                 : `<span style="font-size:0.75rem;color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`}
                         </div>
                         <div class="service-actions">
+                            ${lanBadge}
                             ${authBadge}
                             <button class="btn btn-small btn-danger" onclick="event.stopPropagation();showDeleteModal('${service.dnsAddress}')">
                                 <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 3 13 13"/><polyline points="13 3 3 13"/></svg>
@@ -595,6 +643,107 @@
                     if (p.dnsPropagated) setProcessingStep(p.subdomain, 'dns-propagate', true);
                 });
             } catch (e) { /* ignore */ }
+        }
+
+        let _relayPeers = [];
+
+        async function loadRelayPeers() {
+            try {
+                const response = await fetch('/vpn/peers');
+                if (!response.ok) return;
+                const peers = await response.json();
+                _relayPeers = peers.filter(p => p.lanCidr && p.lanCidr.trim());
+            } catch (e) { /* ignore */ }
+        }
+
+        function ipInCidr(ip, cidr) {
+            const [base, prefixStr] = cidr.split('/');
+            const prefix = parseInt(prefixStr);
+            const toInt = a => a.split('.').reduce((acc, b) => (acc << 8) + parseInt(b), 0) >>> 0;
+            try {
+                const baseInt = toInt(base);
+                const ipInt = toInt(ip);
+                if (prefix === 0) return true;
+                const mask = (~0 << (32 - prefix)) >>> 0;
+                return (baseInt & mask) === (ipInt & mask);
+            } catch (e) { return false; }
+        }
+
+        function findRelayForHost(host) {
+            if (!host) return null;
+            return _relayPeers.find(p => ipInCidr(host, p.lanCidr));
+        }
+
+        function updateRelayHint() {
+            const host = document.getElementById('publishLanHost').value.trim();
+            const hint = document.getElementById('publishLanRelayHint');
+            if (!host) { hint.textContent = ''; return; }
+            const relay = findRelayForHost(host);
+            if (relay) {
+                hint.textContent = `Routes via ${relay.name} (${relay.lanCidr})`;
+                hint.style.color = 'var(--text-muted)';
+            } else {
+                hint.textContent = `${host} is not inside any relay peer's lanCidr — set lanCidr on a relay first.`;
+                hint.style.color = 'var(--red)';
+            }
+        }
+
+        function showPublishLanModal() {
+            loadRelayPeers();
+            document.getElementById('publishLanSubdomain').value = '';
+            document.getElementById('publishLanHost').value = '';
+            document.getElementById('publishLanPort').value = '';
+            document.getElementById('publishLanProtocol').value = 'http';
+            document.getElementById('publishLanRequiresAuth').checked = false;
+            document.getElementById('publishLanDirectUrlDisabled').checked = false;
+            document.getElementById('publishLanRelayHint').textContent = '';
+            document.getElementById('publishLanModal').classList.add('active');
+            document.getElementById('publishLanSubdomain').focus();
+        }
+
+        function hidePublishLanModal() {
+            document.getElementById('publishLanModal').classList.remove('active');
+        }
+
+        async function submitPublishLan() {
+            const subdomain = document.getElementById('publishLanSubdomain').value.trim();
+            const host      = document.getElementById('publishLanHost').value.trim();
+            const port      = parseInt(document.getElementById('publishLanPort').value);
+            const protocol  = document.getElementById('publishLanProtocol').value;
+            const requireAuth        = document.getElementById('publishLanRequiresAuth').checked;
+            const directUrlDisabled  = document.getElementById('publishLanDirectUrlDisabled').checked;
+
+            if (!subdomain) { alert('Please enter a subdomain'); return; }
+            if (!host)      { alert('Please enter a target host'); return; }
+            if (!port || port < 1 || port > 65535) { alert('Please enter a valid port (1-65535)'); return; }
+
+            const submitBtn = document.getElementById('publishLanSubmitBtn');
+            const cancelBtn = document.getElementById('publishLanCancelBtn');
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+            submitBtn.textContent = 'Publishing…';
+
+            try {
+                const response = await fetch('/published-services/lan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subdomain, host, port, protocol, requireAuth, directUrlDisabled })
+                });
+                if (response.status === 400) {
+                    alert(`The target host ${host} is not inside any relay peer's lanCidr. Set lanCidr on a relay first.`);
+                    return;
+                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                hidePublishLanModal();
+                addProcessingCard(subdomain, requireAuth, false);
+            } catch (error) {
+                alert(`Failed to publish LAN service: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                cancelBtn.disabled = false;
+                submitBtn.textContent = 'Publish';
+            }
         }
 
         async function submitPublish() {

@@ -28,6 +28,7 @@ import net.vaier.domain.PeerType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
+import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeolocatingIps;
@@ -662,7 +663,7 @@ public class VpnService implements
         sb.append("cat > \"$INSTALL_DIR/docker-compose.yml\" << 'COMPOSE'\n");
         sb.append("services:\n");
         sb.append("  wireguard-client:\n");
-        sb.append("    image: lscr.io/linuxserver/wireguard:latest\n");
+        sb.append("    image: ").append(WireguardClientImage.EXPECTED).append("\n");
         sb.append("    container_name: wireguard-client\n");
         sb.append("    cap_add:\n");
         sb.append("      - NET_ADMIN\n");

@@ -243,6 +243,91 @@ class ReverseProxyRouteTest {
         assertThat(route.directUrl(null, List.of(), List.of())).isNull();
     }
 
+    // --- LAN service routes (#175) ---
+
+    @Test
+    void isLanService_defaultsFalseForNonLanConstructor() {
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.2", 8080);
+
+        assertThat(route.isLanService()).isFalse();
+        assertThat(route.getProtocol()).isNull();
+    }
+
+    @Test
+    void lanRoute_carriesIsLanServiceFlagAndProtocol() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "nas-router", "nas.example.com", "192.168.3.50", 5000, "https", "nas-service");
+
+        assertThat(route.isLanService()).isTrue();
+        assertThat(route.getProtocol()).isEqualTo("https");
+        assertThat(route.getDomainName()).isEqualTo("nas.example.com");
+        assertThat(route.getAddress()).isEqualTo("192.168.3.50");
+        assertThat(route.getPort()).isEqualTo(5000);
+    }
+
+    @Test
+    void directUrl_lanServiceMatchingRelay_returnsTargetHostUrl() {
+        // For LAN services, the launchpad direct URL points at the target host:port itself.
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "nas-router", "nas.example.com", "192.168.3.50", 5000, "https", "nas-service");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient relayClient = connectedPeerWithEndpoint("10.13.13.5/32", "203.0.113.5");
+
+        assertThat(route.directUrl("203.0.113.5", List.of(relay), List.of(relayClient)))
+            .isEqualTo("https://192.168.3.50:5000");
+    }
+
+    @Test
+    void directUrl_lanServiceCallerOffNetwork_returnsNull() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "nas-router", "nas.example.com", "192.168.3.50", 5000, "http", "nas-service");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient relayClient = connectedPeerWithEndpoint("10.13.13.5/32", "203.0.113.5");
+
+        assertThat(route.directUrl("198.51.100.1", List.of(relay), List.of(relayClient))).isNull();
+    }
+
+    @Test
+    void directUrl_lanServiceWithRootRedirectPath_appendsItToUrl() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "nut-apalveien5-router", "nut.apalveien5.example.com", "192.168.3.3", 3001, "nut-svc",
+            null, null, null, null, "/devices/ups", false, true, "http");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient relayClient = connectedPeerWithEndpoint("10.13.13.5/32", "203.0.113.5");
+
+        assertThat(route.directUrl("203.0.113.5", List.of(relay), List.of(relayClient)))
+            .isEqualTo("http://192.168.3.3:3001/devices/ups");
+    }
+
+    @Test
+    void directUrl_peerServiceWithRootRedirectPath_appendsItToLanUrl() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "nut-router", "nut.example.com", "10.13.13.2", 3001, "nut-svc",
+            null, null, null, null, "/devices/ups", false);
+        PeerConfiguration peer = new PeerConfiguration("s", "10.13.13.2", "",
+            PeerType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10");
+        VpnClient peerClient = connectedPeerWithEndpoint("10.13.13.2/32", "203.0.113.5");
+
+        assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
+            .isEqualTo("http://192.168.1.10:3001/devices/ups");
+    }
+
+    @Test
+    void displayName_lanService_usesRelayPeerNameAsServer() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "nut-router", "nut.apalveien5.example.com", "192.168.3.3", 3001, "http", "nut-svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        ForResolvingPeerNames resolver = ip -> ip;
+
+        String name = route.displayName("example.com", List.of(), List.of(), resolver, List.of(relay));
+
+        assertThat(name).isEqualTo("nut @ apalveien5");
+    }
+
     // --- helpers ---
 
     private static ReverseProxyRoute route(String domain, String address, int port) {

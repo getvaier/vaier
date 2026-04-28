@@ -66,6 +66,12 @@ services:
       - |
         WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
         ip route add 10.13.13.0/24 via "$$WG_IP" 2>/dev/null || true
+        # LAN routes via relay peers — scan VAIER metadata in peer configs.
+        for f in /wireguard-config/*/*.conf; do
+          [ -f "$$f" ] || continue
+          cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+          [ -n "$$cidr" ] && ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
+        done
         exec traefik "$$0" "$$@"
     command:
       - --log.level=INFO
@@ -95,12 +101,46 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/config:/traefik/config
       - ./traefik/acme:/traefik/acme
+      - ./wireguard/config:/wireguard-config:ro
     restart: unless-stopped
     depends_on:
       - wireguard
       - authelia
     networks:
       - vaier-network
+
+  traefik-lan-routes:
+    image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
+    container_name: traefik-lan-routes
+    network_mode: "service:traefik"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./wireguard/config:/wireguard-config:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        # Keep Traefik's route table in sync with relay peers' lanCidr metadata.
+        # Re-scans every 15s so newly-set lanCidrs are picked up without a Traefik restart.
+        while true; do
+          WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
+          if [ -n "$$WG_IP" ]; then
+            for f in /wireguard-config/*/*.conf; do
+              [ -f "$$f" ] || continue
+              cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+              if [ -n "$$cidr" ]; then
+                ip route show "$$cidr" 2>/dev/null | grep -q "via $$WG_IP" || \
+                  ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
+              fi
+            done
+          fi
+          sleep 15
+        done
+    depends_on:
+      - traefik
+      - wireguard
+    restart: unless-stopped
 
   redis-init:
     image: busybox:1.37.0

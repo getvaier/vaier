@@ -155,6 +155,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 - **Service cleanup on peer deletion** — when a VPN peer is deleted, all published services routing to that peer's IP are automatically removed (DNS + Traefik routes)
 - **Published services page cleanup** — consolidated host/status rows, hide discovered section when empty, replaced fragile optimistic auth toggle with server-side refresh
 - **Publish rollback on failure** — if DNS propagation times out, Traefik route creation throws, or Traefik never picks up the new route, Vaier removes the CNAME (and, where applicable, the Traefik route) so no orphan records remain in Route53. Emits `publish-rolled-back` on the `published-services` SSE topic.
+- **LAN service publishing** ✅ (closes [#175](https://github.com/getvaier/vaier/issues/175)) — expose a LAN host (NAS, IPMI, printer, IoT) reachable through a relay peer's `lanCidr`, no Docker container required. The publish flow validates that the target IP falls inside some relay peer's `lanCidr`, writes a DNS CNAME and a Traefik route whose backend is `http(s)://<lan-ip>:<port>`. Cryptokey routing on `wg0` and the relay's #170 forwarding deliver packets to the LAN host. Surfaces with a small "LAN" badge in the published-services list and uses the target host as the launchpad direct-URL shortcut for on-LAN callers.
 
 ---
 

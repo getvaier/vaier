@@ -17,8 +17,14 @@ public interface GetPublishedServicesUseCase {
         State state,
         boolean authenticated,
         String rootRedirectPath,
-        boolean directUrlDisabled
+        boolean directUrlDisabled,
+        boolean isLanService
     ){
-
+        public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
+                                   int hostPort, State state, boolean authenticated,
+                                   String rootRedirectPath, boolean directUrlDisabled) {
+            this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
+                rootRedirectPath, directUrlDisabled, false);
+        }
     }
 }

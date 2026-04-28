@@ -391,6 +391,40 @@ class VpnServiceTest {
         assertThat(script).doesNotContain("MASQUERADE");
     }
 
+    // --- generateSetupScript: wireguard image pinning (drift guard, #175) ---
+
+    @Test
+    void generateSetupScript_pinsWireguardImageNotLatest() {
+        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
+            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script)
+            .contains("image: " + net.vaier.domain.WireguardClientImage.EXPECTED)
+            .doesNotContain("wireguard:latest");
+    }
+
+    @Test
+    void generateSetupScript_pinsWireguardImageToSameVersionAsServer() throws Exception {
+        // Drift guard: install-script wireguard image must match the server's docker-compose.yml pin.
+        String serverCompose = java.nio.file.Files.readString(java.nio.file.Path.of("docker-compose.yml"));
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+            "image:\\s*(lscr\\.io/linuxserver/wireguard:\\S+)").matcher(serverCompose);
+        assertThat(m.find()).as("server docker-compose.yml should declare a wireguard image").isTrue();
+        String serverImage = m.group(1);
+        assertThat(serverImage).as("server wireguard must be pinned, not :latest").doesNotEndWith(":latest");
+
+        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
+            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("image: " + serverImage);
+    }
+
     // --- deletePeer ---
 
     @Test

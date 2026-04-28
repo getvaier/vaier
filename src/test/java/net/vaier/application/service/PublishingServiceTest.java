@@ -668,6 +668,53 @@ class PublishingServiceTest {
             "app.example.com", "10.13.13.3", 8080, false, null);
     }
 
+    // --- publishLanService (#175) ---
+
+    @Test
+    void publishLanService_targetIpOutsideEveryRelayLanCidr_throws() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
+                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+
+        assertThrows(IllegalArgumentException.class, () ->
+            service.publishLanService("nas", "10.99.99.99", 5000, "http", false, false)
+        );
+        verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
+        verify(forPersistingReverseProxyRoutes, never()).addLanReverseProxyRoute(
+            anyString(), anyString(), anyInt(), anyString(), anyBoolean(), anyBoolean());
+    }
+
+    @Test
+    void publishLanService_targetIpInsideRelayLanCidr_createsCnameDnsRecord() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
+                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+
+        service.publishLanService("nas", "192.168.3.50", 5000, "https", false, false);
+
+        ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);
+        verify(forPersistingDnsRecords).addDnsRecord(recordCaptor.capture(), any());
+        DnsRecord record = recordCaptor.getValue();
+        assertThat(record.name()).isEqualTo("nas.example.com.");
+        assertThat(record.type()).isEqualTo(DnsRecordType.CNAME);
+        assertThat(record.values()).containsExactly("vaier.example.com.");
+    }
+
+    @Test
+    void publishLanService_targetIpInsideRelayLanCidr_writesLanTraefikRouteAfterDnsPropagates() {
+        when(forResolvingDns.isResolvable("nas.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("nas.example.com")));
+
+        service.waitForLanDnsThenActivate(
+            "nas", "nas.example.com", "192.168.3.50", 5000, "https", true, true);
+
+        verify(forPersistingReverseProxyRoutes).addLanReverseProxyRoute(
+            "nas.example.com", "192.168.3.50", 5000, "https", true, true);
+    }
+
     // --- deleteService ---
 
     @Test

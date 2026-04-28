@@ -3,6 +3,7 @@ package net.vaier.domain;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
+
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -11,7 +12,6 @@ import net.vaier.domain.port.ForResolvingPeerNames;
 import java.util.List;
 import java.util.Map;
 
-@AllArgsConstructor
 @Getter
 @ToString
 public class ReverseProxyRoute {
@@ -30,6 +30,40 @@ public class ReverseProxyRoute {
     private final List<String> middlewares;
     private final String rootRedirectPath;
     private final boolean directUrlDisabled;
+    private final boolean isLanService;
+    private final String protocol;
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
+                             List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
+                             boolean isLanService, String protocol) {
+        this.name = name;
+        this.domainName = domainName;
+        this.address = address;
+        this.port = port;
+        this.service = service;
+        this.authInfo = authInfo;
+        this.entryPoints = entryPoints;
+        this.tlsConfig = tlsConfig;
+        this.middlewares = middlewares;
+        this.rootRedirectPath = rootRedirectPath;
+        this.directUrlDisabled = directUrlDisabled;
+        this.isLanService = isLanService;
+        this.protocol = protocol;
+    }
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
+                             List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled) {
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
+             rootRedirectPath, directUrlDisabled, false, null);
+    }
+
+    public static ReverseProxyRoute lanRoute(String name, String domainName, String host, int port,
+                                             String protocol, String service) {
+        return new ReverseProxyRoute(name, domainName, host, port, service, null, null, null, null,
+            null, false, true, protocol);
+    }
 
     public static void validateForPublication(String dnsName, String address, int port) {
         validateDnsName(dnsName);
@@ -76,10 +110,27 @@ public class ReverseProxyRoute {
         return State.UNREACHABLE;
     }
 
+    public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients,
+                           List<PeerConfiguration> peers) {
+        if (isLanService) {
+            PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
+            if (relay == null) return State.UNREACHABLE;
+            return vpnClients.stream().anyMatch(p -> p.containsAddress(relay.ipAddress()) && p.isConnected())
+                ? State.OK : State.UNREACHABLE;
+        }
+        return hostState(localServices, vpnClients);
+    }
+
     public String displayName(String baseDomain, List<DockerService> localServices,
                               List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver) {
+        return displayName(baseDomain, localServices, vpnClients, peerNameResolver, List.of());
+    }
+
+    public String displayName(String baseDomain, List<DockerService> localServices,
+                              List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
+                              List<PeerConfiguration> peers) {
         String subdomain = extractSubdomain(baseDomain);
-        String server = resolveServerName(vpnClients, peerNameResolver);
+        String server = resolveServerName(vpnClients, peerNameResolver, peers);
         if (!"local".equals(server) && subdomain.endsWith("." + server)) {
             subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
         }
@@ -89,12 +140,13 @@ public class ReverseProxyRoute {
     public String directUrl(String callerIp, List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
         if (directUrlDisabled) return null;
         if (callerIp == null || callerIp.isBlank()) return null;
-        PeerConfiguration peer = peers.stream()
-            .filter(p -> p.ipAddress() != null && p.ipAddress().equals(address))
-            .findFirst().orElse(null);
+
+        PeerConfiguration peer = isLanService
+            ? findRelayWhoseLanContains(peers, address)
+            : peers.stream()
+                .filter(p -> p.ipAddress() != null && p.ipAddress().equals(address))
+                .findFirst().orElse(null);
         if (peer == null) return null;
-        String lanAddress = peer.lanAddress();
-        if (lanAddress == null || lanAddress.isBlank()) return null;
 
         String peerEndpointIp = vpnClients.stream()
             .filter(c -> c.containsAddress(peer.ipAddress()))
@@ -104,7 +156,24 @@ public class ReverseProxyRoute {
         if (peerEndpointIp == null) return null;
         if (!peerEndpointIp.equals(callerIp)) return null;
 
-        return "http://" + lanAddress + ":" + port;
+        String suffix = (rootRedirectPath == null || rootRedirectPath.isBlank()) ? "" : rootRedirectPath;
+        if (isLanService) {
+            String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol;
+            return scheme + "://" + address + ":" + port + suffix;
+        }
+        String lanAddress = peer.lanAddress();
+        if (lanAddress == null || lanAddress.isBlank()) return null;
+        return "http://" + lanAddress + ":" + port + suffix;
+    }
+
+    private static PeerConfiguration findRelayWhoseLanContains(List<PeerConfiguration> peers, String ip) {
+        return peers.stream()
+            .filter(p -> p.lanCidr() != null && !p.lanCidr().isBlank())
+            .filter(p -> {
+                try { return Cidr.parse(p.lanCidr()).contains(ip); }
+                catch (IllegalArgumentException e) { return false; }
+            })
+            .findFirst().orElse(null);
     }
 
     private String extractSubdomain(String baseDomain) {
@@ -114,7 +183,13 @@ public class ReverseProxyRoute {
         return domainName;
     }
 
-    private String resolveServerName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver) {
+    private String resolveServerName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
+                                     List<PeerConfiguration> peers) {
+        if (isLanService) {
+            PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
+            if (relay != null && relay.name() != null) return relay.name();
+            return "local";
+        }
         // Check VPN peers first — a peer IP is unambiguous, whereas port-only local
         // matching can produce false positives when a local container happens to use the same port.
         boolean isPeer = vpnClients.stream().anyMatch(p -> p.containsAddress(address));

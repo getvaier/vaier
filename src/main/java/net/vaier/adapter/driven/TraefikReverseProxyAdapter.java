@@ -172,10 +172,19 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             }
 
             Set<String> directUrlDisabled = readDirectUrlDisabledDomains(config);
-            if (!directUrlDisabled.isEmpty()) {
+            Map<String, String> lanMarkers = readLanServiceMarkers(config);
+            if (!directUrlDisabled.isEmpty() || !lanMarkers.isEmpty()) {
                 routes = routes.stream()
-                    .map(r -> directUrlDisabled.contains(r.getDomainName())
-                        ? applyDirectUrlDisabledFlag(r, true) : r)
+                    .map(r -> {
+                        ReverseProxyRoute current = r;
+                        if (directUrlDisabled.contains(r.getDomainName())) {
+                            current = applyDirectUrlDisabledFlag(current, true);
+                        }
+                        if (lanMarkers.containsKey(r.getDomainName())) {
+                            current = applyLanServiceMarker(current, lanMarkers.get(r.getDomainName()));
+                        }
+                        return current;
+                    })
                     .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
             }
 
@@ -856,6 +865,87 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
+     * Add a Traefik route that forwards to a LAN backend (no Docker container).
+     * The backend URL uses the supplied protocol (http or https) and the LAN host:port
+     * directly. Persists an {@code x-vaier-lan-service} marker so reads can identify
+     * this route as a LAN-typed one.
+     */
+    @Override
+    public void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
+                                        boolean requiresAuth, boolean directUrlDisabled) {
+        loadConfig();
+        if (config == null) config = new LinkedHashMap<>();
+
+        String routerName = generateRouterName(dnsName);
+        String serviceName = generateServiceName(dnsName);
+
+        Map<String, Object> http = getOrCreateNestedMap(config, "http");
+        Map<String, Object> routers = getOrCreateNestedMapOrdered(http, "routers");
+        Map<String, Object> services = getOrCreateNestedMapOrdered(http, "services");
+
+        Map<String, Object> routerConfig = new LinkedHashMap<>();
+        routerConfig.put("rule", "Host(`" + dnsName + "`)");
+        List<String> entryPoints = new ArrayList<>();
+        entryPoints.add(ServiceNames.ENTRY_POINT_WEBSECURE);
+        routerConfig.put("entryPoints", entryPoints);
+        routerConfig.put("service", serviceName);
+        Map<String, Object> tlsMap = new LinkedHashMap<>();
+        tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
+        routerConfig.put("tls", tlsMap);
+        if (requiresAuth) routerConfig.put("middlewares", new ArrayList<>(List.of(ServiceNames.AUTH_MIDDLEWARE)));
+        routers.put(routerName, routerConfig);
+
+        Map<String, Object> serviceConfig = new LinkedHashMap<>();
+        Map<String, Object> loadBalancer = new LinkedHashMap<>();
+        List<Map<String, Object>> servers = new ArrayList<>();
+        Map<String, Object> server = new LinkedHashMap<>();
+        String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol;
+        server.put("url", scheme + "://" + host + ":" + port);
+        servers.add(server);
+        loadBalancer.put("servers", servers);
+        serviceConfig.put("loadBalancer", loadBalancer);
+        services.put(serviceName, serviceConfig);
+
+        if (requiresAuth) ensureAuthMiddlewareExists(http);
+
+        addLanServiceMarker(dnsName, scheme);
+        if (directUrlDisabled) {
+            // setRouteDirectUrlDisabled does its own loadConfig+saveConfig, so save first.
+            saveConfig();
+            setRouteDirectUrlDisabled(dnsName, true);
+            return;
+        }
+
+        saveConfig();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addLanServiceMarker(String dnsName, String protocol) {
+        Object raw = config.get(LAN_SERVICE_KEY);
+        Map<String, String> markers = (raw instanceof Map<?, ?> m)
+            ? new LinkedHashMap<>((Map<String, String>) m)
+            : new LinkedHashMap<>();
+        markers.put(dnsName, protocol);
+        config.put(LAN_SERVICE_KEY, markers);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> readLanServiceMarkers(Map<String, Object> cfg) {
+        if (cfg == null) return Map.of();
+        Object raw = cfg.get(LAN_SERVICE_KEY);
+        if (raw instanceof Map<?, ?> m) {
+            Map<String, String> result = new LinkedHashMap<>();
+            for (var e : m.entrySet()) {
+                if (e.getKey() != null && e.getValue() != null) {
+                    result.put(e.getKey().toString(), e.getValue().toString());
+                }
+            }
+            return result;
+        }
+        return Map.of();
+    }
+
+    /**
      * Generate router name from DNS name.
      * Example: "portainer.eilertsen.family" -> "portainer-router"
      * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-router"
@@ -1001,7 +1091,27 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         // Do NOT remove middlewares as they are typically shared (e.g., auth-middleware)
 
+        removeLanServiceMarker(deriveDnsNameFromRouter(routeName));
+
         saveConfig();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void removeLanServiceMarker(String dnsName) {
+        if (dnsName == null || config == null) return;
+        Object raw = config.get(LAN_SERVICE_KEY);
+        if (!(raw instanceof Map<?, ?> m)) return;
+        Map<String, Object> markers = new LinkedHashMap<>((Map<String, Object>) m);
+        if (markers.remove(dnsName) != null) {
+            if (markers.isEmpty()) config.remove(LAN_SERVICE_KEY);
+            else config.put(LAN_SERVICE_KEY, markers);
+        }
+    }
+
+    private String deriveDnsNameFromRouter(String routerName) {
+        if (routerName == null) return null;
+        if (!routerName.endsWith("-router")) return null;
+        return routerName.substring(0, routerName.length() - "-router".length()).replace("-", ".");
     }
 
     /**
@@ -1183,6 +1293,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
     private static final String IGNORED_KEY = "x-vaier-ignored";
     private static final String DIRECT_URL_DISABLED_KEY = "x-vaier-direct-url-disabled";
+    private static final String LAN_SERVICE_KEY = "x-vaier-lan-service";
 
     @Override
     public void setRouteDirectUrlDisabled(String dnsName, boolean directUrlDisabled) {
@@ -1219,7 +1330,15 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return new ReverseProxyRoute(
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
-            r.getRootRedirectPath(), disabled
+            r.getRootRedirectPath(), disabled, r.isLanService(), r.getProtocol()
+        );
+    }
+
+    private ReverseProxyRoute applyLanServiceMarker(ReverseProxyRoute r, String protocol) {
+        return new ReverseProxyRoute(
+            r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
+            r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
+            r.getRootRedirectPath(), r.isDirectUrlDisabled(), true, protocol
         );
     }
 

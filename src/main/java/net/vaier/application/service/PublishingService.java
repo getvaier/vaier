@@ -9,6 +9,7 @@ import net.vaier.application.GetLocalDockerServicesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
+import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
@@ -20,6 +21,7 @@ import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
 import net.vaier.domain.DnsZone;
+import net.vaier.domain.Cidr;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
@@ -50,6 +52,7 @@ public class PublishingService implements
     GetLaunchpadServicesUseCase,
     PublishedServicesCacheInvalidator,
     PublishPeerServiceUseCase,
+    PublishLanServiceUseCase,
     DeletePublishedServiceUseCase,
     GetPublishableServicesUseCase,
     ToggleServiceAuthUseCase,
@@ -160,16 +163,18 @@ public class PublishingService implements
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices) {
+        var peers = forGettingPeerConfigurations.getAllPeerConfigs();
         return new PublishedServiceUco(
-            route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames),
+            route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames, peers),
             route.getDomainName(),
             route.dnsState(allDnsRecords),
             route.getAddress(),
             route.getPort(),
-            route.hostState(localServices, vpnClients),
+            route.hostState(localServices, vpnClients, peers),
             route.getAuthInfo() != null,
             route.getRootRedirectPath(),
-            route.isDirectUrlDisabled()
+            route.isDirectUrlDisabled(),
+            route.isLanService()
         );
     }
 
@@ -212,6 +217,102 @@ public class PublishingService implements
         return pendingPublishes.entrySet().stream()
             .map(e -> new PendingPublication(e.getKey(), e.getValue().requiresAuth(), e.getValue().dnsPropagated()))
             .toList();
+    }
+
+    // --- PublishLanServiceUseCase ---
+
+    @Override
+    public void publishLanService(String subdomain, String host, int port, String protocol,
+                                  boolean requiresAuth, boolean directUrlDisabled) {
+        ReverseProxyRoute.validateForPublication(subdomain + "." + configResolver.getDomain(), host, port);
+        String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol.toLowerCase();
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            throw new IllegalArgumentException("protocol must be http or https (was " + protocol + ")");
+        }
+
+        if (!hostInsideAnyRelayLanCidr(host)) {
+            throw new IllegalArgumentException(
+                "Target host " + host + " is not inside any relay peer's lanCidr. " +
+                "Set lanCidr on the relay peer first.");
+        }
+
+        String fqdn = subdomain + "." + configResolver.getDomain();
+        String serverFqdn = "vaier." + configResolver.getDomain();
+        log.info("Publishing LAN service: {} -> {}://{}:{} (auth: {}, directUrlDisabled: {})",
+            fqdn, scheme, host, port, requiresAuth, directUrlDisabled);
+
+        DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
+        DnsZone zone = new DnsZone(configResolver.getDomain());
+        forPersistingDnsRecords.addDnsRecord(cname, zone);
+        log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
+
+        pendingPublishes.put(subdomain, new PendingState(requiresAuth, false));
+        forPublishingEvents.publish("published-services", "publish-dns-created", subdomain);
+
+        CompletableFuture.runAsync(() ->
+            waitForLanDnsThenActivate(subdomain, fqdn, host, port, scheme, requiresAuth, directUrlDisabled));
+    }
+
+    private boolean hostInsideAnyRelayLanCidr(String host) {
+        return forGettingPeerConfigurations.getAllPeerConfigs().stream()
+            .map(PeerConfiguration::lanCidr)
+            .filter(c -> c != null && !c.isBlank())
+            .anyMatch(c -> {
+                try { return Cidr.parse(c).contains(host); }
+                catch (IllegalArgumentException e) { return false; }
+            });
+    }
+
+    void waitForLanDnsThenActivate(String subdomain, String fqdn, String host, int port, String protocol,
+                                   boolean requiresAuth, boolean directUrlDisabled) {
+        long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            if (forResolvingDns.isResolvable(fqdn)) {
+                log.info("DNS propagated for {}, activating Traefik LAN route", fqdn);
+                pendingPublishes.compute(subdomain, (k, v) -> new PendingState(v != null && v.requiresAuth(), true));
+                forPublishingEvents.publish("published-services", "publish-dns-propagated", subdomain);
+                try {
+                    forPersistingReverseProxyRoutes.addLanReverseProxyRoute(
+                        fqdn, host, port, protocol, requiresAuth, directUrlDisabled);
+                } catch (Exception e) {
+                    log.error("Failed to write Traefik LAN route for {}: {}", fqdn, e.getMessage(), e);
+                    rollbackLan(subdomain, fqdn, false);
+                    return;
+                }
+                if (!waitForTraefikRoute(fqdn)) {
+                    log.warn("Traefik did not pick up LAN route for {}; rolling back", fqdn);
+                    rollbackLan(subdomain, fqdn, true);
+                    return;
+                }
+                pendingPublishes.remove(subdomain);
+                invalidatePublishedServicesCache();
+                forPublishingEvents.publish("published-services", "publish-traefik-active", subdomain);
+                forPublishingEvents.publish("published-services", "service-updated", subdomain);
+                return;
+            }
+            try { Thread.sleep(dnsRetryIntervalMillis); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+        }
+        log.warn("DNS propagation timed out for {} after {}s", fqdn, dnsTimeoutMillis / 1000);
+        forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
+        rollbackLan(subdomain, fqdn, false);
+    }
+
+    private void rollbackLan(String subdomain, String fqdn, boolean removeRoute) {
+        if (removeRoute) {
+            try { forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn); }
+            catch (Exception e) { log.warn("Failed to remove Traefik route during LAN rollback for {}: {}", fqdn, e.getMessage()); }
+        }
+        try {
+            forPersistingDnsRecords.deleteDnsRecord(fqdn + ".", DnsRecordType.CNAME,
+                new DnsZone(configResolver.getDomain()));
+            log.info("Rolled back CNAME for {}", fqdn);
+        } catch (Exception e) {
+            log.warn("Failed to remove CNAME during LAN rollback for {}: {}", fqdn, e.getMessage());
+        }
+        pendingPublishes.remove(subdomain);
+        invalidatePublishedServicesCache();
+        forPublishingEvents.publish("published-services", "publish-rolled-back", subdomain);
+        forPublishingEvents.publish("published-services", "service-updated", subdomain);
     }
 
     void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
