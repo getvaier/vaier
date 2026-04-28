@@ -317,6 +317,76 @@ class VpnServiceTest {
         assertThat(script).doesNotContain("10.13.13.0/24");
     }
 
+    // --- generateSetupScript: relay-peer LAN forwarding (#170) ---
+
+    @Test
+    void generateSetupScript_lanCidrSet_enablesIpForwardingSysctl() {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
+            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
+                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null))
+        );
+
+        String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).contains("sysctl -w net.ipv4.ip_forward=1");
+        assertThat(script).contains("net.ipv4.ip_forward=1");
+        assertThat(script).contains("/etc/sysctl.d/99-wireguard.conf");
+    }
+
+    @Test
+    void generateSetupScript_lanCidrSet_addsMasqueradeAndForwardRulesIdempotently() {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
+            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
+                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null))
+        );
+
+        String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
+
+        // POSTROUTING MASQUERADE for vpn -> lan
+        assertThat(script).contains(
+            "iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
+        assertThat(script).contains(
+            "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
+        // FORWARD vpn -> lan
+        assertThat(script).contains(
+            "iptables -C FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
+        assertThat(script).contains(
+            "iptables -A FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
+        // FORWARD lan -> vpn (RELATED,ESTABLISHED only)
+        assertThat(script).contains(
+            "iptables -C FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
+        assertThat(script).contains(
+            "iptables -A FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
+    }
+
+    @Test
+    void generateSetupScript_lanCidrAbsent_omitsForwardingBlock() {
+        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
+            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).doesNotContain("net.ipv4.ip_forward=1");
+        assertThat(script).doesNotContain("MASQUERADE");
+        assertThat(script).doesNotContain("FORWARD");
+    }
+
+    @Test
+    void generateSetupScript_lanCidrBlank_omitsForwardingBlock() {
+        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
+            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config",
+                PeerType.UBUNTU_SERVER, "   ", null))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).doesNotContain("net.ipv4.ip_forward=1");
+        assertThat(script).doesNotContain("MASQUERADE");
+    }
+
     // --- deletePeer ---
 
     @Test

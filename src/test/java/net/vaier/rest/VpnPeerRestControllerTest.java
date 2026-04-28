@@ -90,6 +90,49 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
+    void updateLanCidr_updatesAndReturnsNoContent() {
+        var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
+
+        var response = controller.updateLanCidr("apalveien5", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", "192.168.3.0/24");
+        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void updateLanCidr_blankClearsLanCidr() {
+        var request = new VpnPeerRestController.UpdateLanCidrRequest("");
+
+        var response = controller.updateLanCidr("apalveien5", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", "");
+    }
+
+    @Test
+    void updateLanCidr_nullBodyIsTreatedAsClear() {
+        var response = controller.updateLanCidr("apalveien5", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", null);
+    }
+
+    @Test
+    void updateLanCidr_returns404WhenPeerNotFound() {
+        doThrow(new IllegalArgumentException("Peer not found: ghost"))
+            .when(forUpdatingPeerConfigurations).updateLanCidr("ghost", "192.168.3.0/24");
+        var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
+
+        var response = controller.updateLanCidr("ghost", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
     void listPeers_includesGeolocationFieldsWhenLookupSucceeds() {
         VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
         when(vpnClientService.getClients()).thenReturn(List.of(client));

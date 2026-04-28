@@ -266,7 +266,8 @@ public class VpnService implements
         return getPeerConfig(peerName).map(peerConfig -> {
             String vpnIp = peerConfig.ipAddress();
             String wgConfig = peerConfig.configContent();
-            return generateScript(peerName, vpnIp, serverUrl, serverPort, wgConfig);
+            String lanCidr = peerConfig.lanCidr();
+            return generateScript(peerName, vpnIp, serverUrl, serverPort, wgConfig, lanCidr);
         });
     }
 
@@ -521,7 +522,8 @@ public class VpnService implements
         return "";
     }
 
-    private String generateScript(String peerName, String vpnIp, String serverUrl, String serverPort, String wgConfig) {
+    private String generateScript(String peerName, String vpnIp, String serverUrl, String serverPort,
+                                  String wgConfig, String lanCidr) {
         var sb = new StringBuilder();
         sb.append("#!/bin/bash\n");
         sb.append("set -euo pipefail\n");
@@ -593,6 +595,28 @@ public class VpnService implements
         sb.append("# --- Set sysctl on host (cannot use container sysctls with host network mode) ---\n");
         sb.append("sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1\n");
         sb.append("echo 'net.ipv4.conf.all.src_valid_mark=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
+
+        if (lanCidr != null && !lanCidr.isBlank()) {
+            String lan = lanCidr.trim();
+            sb.append("\n");
+            sb.append("# --- Relay peer: forward VPN traffic to LAN ").append(lan).append(" ---\n");
+            sb.append("sudo sysctl -w net.ipv4.ip_forward=1\n");
+            sb.append("grep -qxF 'net.ipv4.ip_forward=1' /etc/sysctl.d/99-wireguard.conf 2>/dev/null \\\n");
+            sb.append("  || echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
+            sb.append("sudo iptables -t nat -C POSTROUTING -s ").append(vpnSubnet).append(" -d ").append(lan)
+                .append(" -j MASQUERADE 2>/dev/null \\\n");
+            sb.append("  || sudo iptables -t nat -A POSTROUTING -s ").append(vpnSubnet).append(" -d ").append(lan)
+                .append(" -j MASQUERADE\n");
+            sb.append("sudo iptables -C FORWARD -s ").append(vpnSubnet).append(" -d ").append(lan)
+                .append(" -j ACCEPT 2>/dev/null \\\n");
+            sb.append("  || sudo iptables -A FORWARD -s ").append(vpnSubnet).append(" -d ").append(lan)
+                .append(" -j ACCEPT\n");
+            sb.append("sudo iptables -C FORWARD -s ").append(lan).append(" -d ").append(vpnSubnet)
+                .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\\n");
+            sb.append("  || sudo iptables -A FORWARD -s ").append(lan).append(" -d ").append(vpnSubnet)
+                .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT\n");
+        }
+
         sb.append("\n");
         sb.append("# --- Write docker-compose.yml ---\n");
         sb.append("cat > \"$INSTALL_DIR/docker-compose.yml\" << 'COMPOSE'\n");

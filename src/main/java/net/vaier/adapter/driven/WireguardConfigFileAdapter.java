@@ -221,6 +221,35 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         }
     }
 
+    @Override
+    public void updateLanCidr(String peerName, String lanCidr) {
+        Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
+        if (!Files.exists(peerConfigPath)) {
+            throw new IllegalArgumentException("Peer not found: " + peerName);
+        }
+        try {
+            String content = Files.readString(peerConfigPath);
+            VaierMetadata existing = extractVaierMetadata(content);
+            String normalized = (lanCidr == null || lanCidr.isBlank()) ? null : lanCidr.trim();
+            VaierMetadata updated = new VaierMetadata(
+                existing.peerType() != null ? existing.peerType() : PeerType.UBUNTU_SERVER.name(),
+                normalized,
+                existing.lanAddress());
+            String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
+
+            String rewritten;
+            if (content.contains("# VAIER:")) {
+                rewritten = content.replaceAll("(?m)^# VAIER:.*$", java.util.regex.Matcher.quoteReplacement(newLine));
+            } else {
+                rewritten = newLine + "\n" + content;
+            }
+            Files.writeString(peerConfigPath, rewritten);
+            log.info("Updated lanCidr for peer {} to {}", peerName, normalized);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to update lanCidr for peer " + peerName + ": " + e.getMessage(), e);
+        }
+    }
+
     private PeerType parsePeerType(String value) {
         if (value == null) return PeerType.UBUNTU_SERVER;
         try {

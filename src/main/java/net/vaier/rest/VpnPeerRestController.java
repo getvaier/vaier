@@ -177,6 +177,25 @@ public class VpnPeerRestController {
         }
     }
 
+    @PatchMapping("/{peerName}/lan-cidr")
+    public ResponseEntity<Void> updateLanCidr(
+            @PathVariable String peerName,
+            @RequestBody(required = false) UpdateLanCidrRequest request) {
+        String lanCidr = request != null ? request.lanCidr() : null;
+        log.info("Updating LAN CIDR for peer {} to {}", peerName, lanCidr);
+        try {
+            forUpdatingPeerConfigurations.updateLanCidr(peerName, lanCidr);
+            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Peer not found for lan-cidr update: {}", peerName);
+            return ResponseEntity.notFound().build();
+        } catch (Exception e) {
+            log.error("Failed to update lan cidr for peer {}: {}", peerName, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     @GetMapping("/{peerIdentifier}/config")
     public ResponseEntity<PeerConfigResponse> getPeerConfig(@PathVariable String peerIdentifier) {
         log.info("Fetching config for peer: {}", peerIdentifier);
@@ -324,6 +343,10 @@ public class VpnPeerRestController {
 
     public record UpdateLanAddressRequest(
             String lanAddress
+    ) {}
+
+    public record UpdateLanCidrRequest(
+            String lanCidr
     ) {}
 
     public record PeerConfigResponse(

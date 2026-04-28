@@ -39,12 +39,19 @@ class WireGuardPeerConfigTest {
     }
 
     @Test
-    void generate_ubuntuServerWithLanCidr_appendsLanCidrToAllowedIps() {
+    void generate_ubuntuServerWithLanCidr_keepsLanCidrOutOfClientSideAllowedIps() {
+        // Regression: appending lanCidr to the relay's *client-side* AllowedIPs makes wg-quick
+        // install a route for that CIDR via wg0, hijacking the relay's own LAN. The lanCidr only
+        // belongs in the server-side wg0.conf [Peer] entry (set by VpnService.addPeerToServer)
+        // so the VPN server can route LAN-bound traffic to the relay; the relay then forwards it
+        // via its own LAN NIC using ip_forward + iptables NAT (issue #170).
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
                 "vpn.example.com:51820", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24");
 
-        assertThat(config).contains("AllowedIPs = 10.13.13.0/24, 192.168.1.0/24");
+        assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
+        assertThat(config).doesNotContain("AllowedIPs = 10.13.13.0/24, 192.168.1.0/24");
+        // lanCidr still recorded in metadata so addPeerToServer / install-script forwarding pick it up
         assertThat(config).contains("\"peerType\":\"UBUNTU_SERVER\"");
         assertThat(config).contains("\"lanCidr\":\"192.168.1.0/24\"");
     }

@@ -683,6 +683,19 @@
                         </div>
                         ${isServer ? `
                         <div class="detail-row">
+                            <span class="detail-label">LAN CIDR</span>
+                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                <input type="text" id="lan-cidr-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                       value="${peer.lanCidr || ''}"
+                                       data-original="${peer.lanCidr || ''}"
+                                       placeholder="e.g. 192.168.1.0/24"
+                                       oninput="onLanCidrInput('${peer.name.replace(/'/g, "\\'")}')">
+                                <button class="btn btn-primary" id="lan-cidr-save-${id}"
+                                        style="flex-shrink:0" disabled
+                                        onclick="saveLanCidr('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                            </span>
+                        </div>
+                        <div class="detail-row">
                             <span class="detail-label">LAN address</span>
                             <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
                                 <input type="text" id="lan-addr-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
@@ -808,6 +821,36 @@
             } catch (error) {
                 displayError(`Failed to save LAN address: ${error.message}`);
                 onLanAddressInput(peerName);
+            }
+        }
+
+        function onLanCidrInput(peerName) {
+            const id = cardId(peerName);
+            const input = document.getElementById(`lan-cidr-${id}`);
+            const btn = document.getElementById(`lan-cidr-save-${id}`);
+            if (!input || !btn) return;
+            btn.disabled = input.value.trim() === (input.dataset.original || '');
+        }
+
+        async function saveLanCidr(peerName) {
+            const id = cardId(peerName);
+            const input = document.getElementById(`lan-cidr-${id}`);
+            const btn = document.getElementById(`lan-cidr-save-${id}`);
+            const lanCidr = input.value.trim();
+            btn.disabled = true;
+            try {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}/lan-cidr`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lanCidr })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                input.dataset.original = lanCidr;
+                displaySuccess(`LAN CIDR saved for "${peerName}"`);
+                fetchPeers();
+            } catch (error) {
+                displayError(`Failed to save LAN CIDR: ${error.message}`);
+                onLanCidrInput(peerName);
             }
         }
 

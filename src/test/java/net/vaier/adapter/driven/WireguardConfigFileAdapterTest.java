@@ -243,6 +243,61 @@ class WireguardConfigFileAdapterTest {
             () -> adapter.updateLanAddress("ghost", "192.168.3.121"));
     }
 
+    // --- updateLanCidr ---
+
+    @Test
+    void updateLanCidr_writesLanCidrIntoVaierMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        adapter.updateLanCidr("apalveien5", "192.168.3.0/24");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+    }
+
+    @Test
+    void updateLanCidr_preservesExistingLanAddress() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanAddress\":\"192.168.3.121\"}");
+
+        adapter.updateLanCidr("apalveien5", "192.168.3.0/24");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
+        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
+    }
+
+    @Test
+    void updateLanCidr_blankClearsExistingValue() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\"}");
+
+        adapter.updateLanCidr("apalveien5", "");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.lanCidr()).isNull();
+    }
+
+    @Test
+    void updateLanCidr_addsVaierCommentWhenMissing() throws IOException {
+        createPeerConf("apalveien5", "10.13.13.6");
+
+        adapter.updateLanCidr("apalveien5", "192.168.3.0/24");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+    }
+
+    @Test
+    void updateLanCidr_throwsWhenPeerDoesNotExist() {
+        assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+            () -> adapter.updateLanCidr("ghost", "192.168.3.0/24"));
+    }
+
     // --- getAllPeerConfigs ---
 
     @Test
