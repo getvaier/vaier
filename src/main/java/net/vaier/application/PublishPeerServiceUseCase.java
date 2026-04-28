@@ -10,7 +10,7 @@ public interface PublishPeerServiceUseCase {
 
     List<PendingPublication> getPendingPublications();
 
-    enum PublishableSource { LOCAL, PEER }
+    enum PublishableSource { LOCAL, PEER, LAN_DOCKER_HOST }
 
     record PublishableService(
         PublishableSource source,

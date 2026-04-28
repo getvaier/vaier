@@ -1,5 +1,7 @@
 package net.vaier.rest;
 
+import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
+import net.vaier.application.DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers;
 import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
@@ -20,13 +22,16 @@ public class DockerServiceRestController {
     private final GetServerInfoUseCase getServerInfoUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
+    private final DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase;
 
     public DockerServiceRestController(GetServerInfoUseCase getServerInfoUseCase,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
-                                       DiscoverLocalContainersUseCase discoverLocalContainersUseCase) {
+                                       DiscoverLocalContainersUseCase discoverLocalContainersUseCase,
+                                       DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase) {
         this.getServerInfoUseCase = getServerInfoUseCase;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverLocalContainersUseCase = discoverLocalContainersUseCase;
+        this.discoverLanDockerHostContainersUseCase = discoverLanDockerHostContainersUseCase;
     }
 
     @GetMapping
@@ -56,6 +61,15 @@ public class DockerServiceRestController {
     public ResponseEntity<List<PeerContainers>> discoverPeerContainers() {
         try {
             return ResponseEntity.ok(discoverPeerContainersUseCase.discoverAll());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/lan-docker-hosts")
+    public ResponseEntity<List<LanDockerHostContainers>> discoverLanDockerHostContainers() {
+        try {
+            return ResponseEntity.ok(discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers());
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }

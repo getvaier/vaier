@@ -1,8 +1,11 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
 import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.GetLanDockerHostsUseCase;
+import net.vaier.application.GetLanDockerHostsUseCase.LanDockerHostView;
 import net.vaier.application.GetLocalDockerServicesUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
@@ -32,6 +35,7 @@ import java.util.Set;
 public class ContainerService implements
     DiscoverLocalContainersUseCase,
     DiscoverPeerContainersUseCase,
+    DiscoverLanDockerHostContainersUseCase,
     GetServerInfoUseCase,
     GetLocalDockerServicesUseCase {
 
@@ -50,6 +54,7 @@ public class ContainerService implements
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
+    private final GetLanDockerHostsUseCase getLanDockerHostsUseCase;
     private final String vaierNetworkName;
     private final String dockerGatewayIp;
 
@@ -57,8 +62,10 @@ public class ContainerService implements
     public ContainerService(ForGettingServerInfo forGettingServerInfo,
                             ForGettingVpnClients forGettingVpnClients,
                             ForResolvingPeerNames forResolvingPeerNames,
-                            ForGettingPeerConfigurations forGettingPeerConfigurations) {
+                            ForGettingPeerConfigurations forGettingPeerConfigurations,
+                            GetLanDockerHostsUseCase getLanDockerHostsUseCase) {
         this(forGettingServerInfo, forGettingVpnClients, forResolvingPeerNames, forGettingPeerConfigurations,
+            getLanDockerHostsUseCase,
             System.getenv().getOrDefault("VAIER_NETWORK_NAME", "vaier-network"),
             System.getenv().getOrDefault("VAIER_DOCKER_GATEWAY", "172.20.0.1"));
     }
@@ -67,12 +74,14 @@ public class ContainerService implements
                      ForGettingVpnClients forGettingVpnClients,
                      ForResolvingPeerNames forResolvingPeerNames,
                      ForGettingPeerConfigurations forGettingPeerConfigurations,
+                     GetLanDockerHostsUseCase getLanDockerHostsUseCase,
                      String vaierNetworkName,
                      String dockerGatewayIp) {
         this.forGettingServerInfo = forGettingServerInfo;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
+        this.getLanDockerHostsUseCase = getLanDockerHostsUseCase;
         this.vaierNetworkName = vaierNetworkName;
         this.dockerGatewayIp = dockerGatewayIp;
     }
@@ -123,6 +132,34 @@ public class ContainerService implements
         }
 
         return results;
+    }
+
+    @Override
+    public List<LanDockerHostContainers> discoverAllLanDockerHostContainers() {
+        return getLanDockerHostsUseCase.getAll().stream()
+            .map(this::scrapeLanDockerHost)
+            .toList();
+    }
+
+    private LanDockerHostContainers scrapeLanDockerHost(LanDockerHostView view) {
+        var host = view.host();
+        if (view.relayPeerName() == null) {
+            log.debug("Skipping LAN Docker host {} ({}) — no relay peer covers its lanCidr", host.name(), host.hostIp());
+            return new LanDockerHostContainers(host.name(), host.hostIp(), host.port(),
+                null, "UNREACHABLE", List.of());
+        }
+        try {
+            Server server = new Server(host.hostIp(), host.port(), false);
+            List<DockerService> containers = forGettingServerInfo.getServicesWithExposedPorts(server);
+            log.info("Discovered {} containers on LAN Docker host {} ({}) via relay {}",
+                containers.size(), host.name(), host.hostIp(), view.relayPeerName());
+            return new LanDockerHostContainers(host.name(), host.hostIp(), host.port(),
+                view.relayPeerName(), "OK", containers);
+        } catch (Exception e) {
+            log.warn("Failed to query Docker on LAN host {} ({}): {}", host.name(), host.hostIp(), e.getMessage());
+            return new LanDockerHostContainers(host.name(), host.hostIp(), host.port(),
+                view.relayPeerName(), "UNREACHABLE", List.of());
+        }
     }
 
     @Override

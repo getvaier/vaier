@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
@@ -73,6 +74,7 @@ public class PublishingService implements
     private final ForManagingIgnoredServices forManagingIgnoredServices;
     private final PendingPublicationsService pendingPublicationsService;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
+    private final DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase;
     private final GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
 
     private volatile List<PublishedServiceUco> cache = null;
@@ -98,6 +100,7 @@ public class PublishingService implements
                              ForManagingIgnoredServices forManagingIgnoredServices,
                              PendingPublicationsService pendingPublicationsService,
                              DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
+                             DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase,
                              GetLocalDockerServicesUseCase getLocalDockerServicesUseCase) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
@@ -111,6 +114,7 @@ public class PublishingService implements
         this.forManagingIgnoredServices = forManagingIgnoredServices;
         this.pendingPublicationsService = pendingPublicationsService;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
+        this.discoverLanDockerHostContainersUseCase = discoverLanDockerHostContainersUseCase;
         this.getLocalDockerServicesUseCase = getLocalDockerServicesUseCase;
     }
 
@@ -457,6 +461,21 @@ public class PublishingService implements
             )
             .forEach(publishable::add);
 
+        discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers().stream()
+            .filter(host -> "OK".equals(host.status()))
+            .flatMap(host -> host.containers().stream()
+                .flatMap(container -> container.ports().stream()
+                    .filter(p -> "tcp".equals(p.type()))
+                    .filter(p -> p.publicPort() != null)
+                    .filter(p -> existingRoutes.stream()
+                        .noneMatch(r -> r.getAddress().equals(host.hostIp()) && r.getPort() == p.publicPort()))
+                    .filter(p -> !pendingPublicationsService.isPending(host.hostIp(), p.publicPort()))
+                    .map(p -> new PublishableService(PublishableSource.LAN_DOCKER_HOST, host.hostName(),
+                        host.hostIp(), container.containerName(), p.publicPort(), null, false))
+                )
+            )
+            .forEach(publishable::add);
+
         getLocalDockerServicesUseCase.getUnpublishedLocalServices(existingRoutes).stream()
             .filter(s -> !pendingPublicationsService.isPending(s.address(), s.port()))
             .forEach(publishable::add);
@@ -468,9 +487,10 @@ public class PublishingService implements
     }
 
     static String ignoreKey(PublishableService s) {
-        return s.source() == PublishableSource.PEER
-            ? s.peerName() + "/" + s.containerName() + ":" + s.port()
-            : s.containerName() + ":" + s.port();
+        return switch (s.source()) {
+            case PEER, LAN_DOCKER_HOST -> s.peerName() + "/" + s.containerName() + ":" + s.port();
+            case LOCAL                 -> s.containerName() + ":" + s.port();
+        };
     }
 
     // --- ToggleServiceAuthUseCase ---

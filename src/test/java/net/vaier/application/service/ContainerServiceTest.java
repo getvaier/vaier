@@ -1,8 +1,12 @@
 package net.vaier.application.service;
 
+import net.vaier.application.DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.application.GetLanDockerHostsUseCase;
+import net.vaier.application.GetLanDockerHostsUseCase.LanDockerHostView;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
+import net.vaier.domain.LanDockerHost;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
@@ -43,13 +47,15 @@ class ContainerServiceTest {
     @Mock ForGettingVpnClients forGettingVpnClients;
     @Mock ForResolvingPeerNames forResolvingPeerNames;
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
+    @Mock GetLanDockerHostsUseCase getLanDockerHostsUseCase;
 
     ContainerService service;
 
     @BeforeEach
     void setUp() {
         service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
-            forResolvingPeerNames, forGettingPeerConfigurations, VAIER_NETWORK, GATEWAY_IP);
+            forResolvingPeerNames, forGettingPeerConfigurations, getLanDockerHostsUseCase,
+            VAIER_NETWORK, GATEWAY_IP);
     }
 
     // --- discover (local) ---
@@ -532,6 +538,64 @@ class ContainerServiceTest {
 
     private PeerConfiguration peerConfig(String name, String ip, PeerType type) {
         return new PeerConfiguration(name, ip, "", type, null);
+    }
+
+    // --- discoverAllLanDockerHostContainers (#177) ---
+
+    @Test
+    void discoverAllLanDockerHostContainers_emptyWhenNoHostsRegistered() {
+        when(getLanDockerHostsUseCase.getAll()).thenReturn(List.of());
+
+        assertThat(service.discoverAllLanDockerHostContainers()).isEmpty();
+    }
+
+    @Test
+    void discoverAllLanDockerHostContainers_relayResolved_scrapesDockerSocket() {
+        when(getLanDockerHostsUseCase.getAll()).thenReturn(List.of(
+            new LanDockerHostView(new LanDockerHost("nas", "192.168.3.50", 2375), "apalveien5")
+        ));
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+            argThat(s -> s.dockerHostUrl().equals("tcp://192.168.3.50:2375"))
+        )).thenReturn(List.of(dockerService("plex", 32400)));
+
+        var results = service.discoverAllLanDockerHostContainers();
+
+        assertThat(results).hasSize(1);
+        var hostContainers = results.get(0);
+        assertThat(hostContainers.hostName()).isEqualTo("nas");
+        assertThat(hostContainers.hostIp()).isEqualTo("192.168.3.50");
+        assertThat(hostContainers.relayPeerName()).isEqualTo("apalveien5");
+        assertThat(hostContainers.status()).isEqualTo("OK");
+        assertThat(hostContainers.containers()).hasSize(1);
+    }
+
+    @Test
+    void discoverAllLanDockerHostContainers_relayUnknown_marksUnreachableAndDoesNotScrape() {
+        when(getLanDockerHostsUseCase.getAll()).thenReturn(List.of(
+            new LanDockerHostView(new LanDockerHost("nas", "192.168.3.50", 2375), null)
+        ));
+
+        var results = service.discoverAllLanDockerHostContainers();
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).status()).isEqualTo("UNREACHABLE");
+        assertThat(results.get(0).containers()).isEmpty();
+        verify(forGettingServerInfo, never()).getServicesWithExposedPorts(any());
+    }
+
+    @Test
+    void discoverAllLanDockerHostContainers_dockerScrapeFails_marksUnreachable() {
+        when(getLanDockerHostsUseCase.getAll()).thenReturn(List.of(
+            new LanDockerHostView(new LanDockerHost("nas", "192.168.3.50", 2375), "apalveien5")
+        ));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenThrow(new RuntimeException("connection refused"));
+
+        var results = service.discoverAllLanDockerHostContainers();
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).status()).isEqualTo("UNREACHABLE");
+        assertThat(results.get(0).relayPeerName()).isEqualTo("apalveien5");
     }
 
     private DockerService dockerService(String name, int port) {

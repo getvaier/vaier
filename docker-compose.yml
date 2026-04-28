@@ -142,6 +142,40 @@ services:
       - wireguard
     restart: unless-stopped
 
+  vaier-lan-routes:
+    image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
+    container_name: vaier-lan-routes
+    network_mode: "service:vaier"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./wireguard/config:/wireguard-config:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        # Mirrors traefik-lan-routes for the vaier netns: keeps relay lanCidr
+        # routes injected so Vaier can scrape Docker sockets on LAN Docker hosts
+        # (#177) and reach lan-published backends end-to-end.
+        while true; do
+          WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
+          if [ -n "$$WG_IP" ]; then
+            for f in /wireguard-config/*/*.conf; do
+              [ -f "$$f" ] || continue
+              cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+              if [ -n "$$cidr" ]; then
+                ip route show "$$cidr" 2>/dev/null | grep -q "via $$WG_IP" || \
+                  ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
+              fi
+            done
+          fi
+          sleep 15
+        done
+    depends_on:
+      - vaier
+      - wireguard
+    restart: unless-stopped
+
   redis-init:
     image: busybox:1.37.0
     container_name: redis-init

@@ -357,6 +357,34 @@
     </div>
     <button class="fab" onclick="showCreatePeerModal()" aria-label="Add Machine" title="Add Machine">+</button>
 
+    <!-- Add LAN Docker Host Modal -->
+    <div id="lanDockerHostModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Add LAN Docker host</div>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.6rem">
+                A Docker host on a relay peer's LAN. Vaier scrapes its Docker socket through the relay.
+                The host IP must fall inside some relay peer's <code style="color:var(--text)">lanCidr</code>.
+            </p>
+            <div class="form-group">
+                <label class="form-label" for="lanDockerHostName">Name</label>
+                <input type="text" id="lanDockerHostName" class="form-input" placeholder="e.g. nas">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="lanDockerHostIp">Host IP</label>
+                <input type="text" id="lanDockerHostIp" class="form-input" placeholder="e.g. 192.168.3.50" oninput="updateLanDockerHostHint()">
+                <span id="lanDockerHostHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="lanDockerHostPort">Docker API port</label>
+                <input type="number" id="lanDockerHostPort" class="form-input" min="1" max="65535" value="2375">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="lanDockerHostCancelBtn" onclick="hideLanDockerHostModal()">Cancel</button>
+                <button class="btn btn-primary"   id="lanDockerHostSubmitBtn" onclick="createLanDockerHost()">Add Host</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Create Peer Modal -->
     <div id="createPeerModal" class="modal">
         <div class="modal-content">
@@ -435,6 +463,8 @@
         let peers = [];
         let peerServices = {};
         let localServices = [];
+        let lanDockerHosts = [];
+        let lanDockerHostServices = {};
         let lastFetchSuccessful = false;
 
         const expandedPeers = new Set();
@@ -488,6 +518,28 @@
                 }
             } catch (error) {
                 console.error('Failed to load local services:', error);
+            }
+        }
+
+        async function fetchLanDockerHosts() {
+            try {
+                const response = await fetch('/lan-docker-hosts');
+                if (response.ok) {
+                    lanDockerHosts = await response.json();
+                    displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load LAN Docker hosts:', error);
+            }
+            try {
+                const response = await fetch('/docker-services/lan-docker-hosts');
+                if (response.ok) {
+                    const services = await response.json();
+                    lanDockerHostServices = Object.fromEntries(services.map(s => [s.hostName, s]));
+                    displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load LAN Docker host services:', error);
             }
         }
 
@@ -579,6 +631,51 @@
                         <span>name</span><span>version</span>
                     </div>
                     ${rows}
+                </div>
+            </div>`;
+        }
+
+        function renderLanDockerHostCard(host) {
+            const key = 'lan-docker:' + host.name;
+            const id  = cardId(key);
+            const isExpanded = expandedPeers.has(key);
+            const services = lanDockerHostServices[host.name];
+            const reachable = services && services.status === 'OK';
+            const statusClass = reachable ? 'status-connected' : 'status-disconnected';
+            const relayLabel = host.relayPeerName
+                ? `via ${host.relayPeerName}`
+                : `<span style="color:var(--red)">no relay covers ${host.hostIp}</span>`;
+            const servicesHtml = (() => {
+                if (!host.relayPeerName)
+                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">no relay peer covers this host's IP</span></div>`;
+                if (!services || services.status === 'UNREACHABLE')
+                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
+                return renderServiceList(services.containers);
+            })();
+
+            return `
+            <div class="peer-card">
+                <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
+                    <div class="peer-header-left">
+                        <span class="status-dot ${statusClass}"></span>
+                        <span class="peer-name">${host.name}</span>
+                        <span class="peer-ip-badge">${host.hostIp}:${host.port}</span>
+                        <span style="display:inline-flex;align-items:center;gap:0.5rem;min-width:0">
+                            <span class="badge badge-warning" title="Docker host on a relay peer's LAN — not itself a VPN peer">LAN docker</span>
+                            <span style="font-size:0.75rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${relayLabel}</span>
+                        </span>
+                    </div>
+                    <div class="peer-actions">
+                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation();deleteLanDockerHost('${host.name.replace(/'/g, "\\'")}')" title="Remove this LAN Docker host">
+                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 3 13 13"/><polyline points="13 3 3 13"/></svg>
+                        </button>
+                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    </div>
+                </div>
+                <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
+                    <div class="peer-details">
+                        ${servicesHtml}
+                    </div>
                 </div>
             </div>`;
         }
@@ -731,6 +828,21 @@
             html += renderLocalCard();
             html += servers.map(renderPeerCard).join('');
 
+            if (lanDockerHosts.length > 0) {
+                const sortedLan = [...lanDockerHosts].sort(byName);
+                html += `<div class="section-header">LAN Docker hosts
+                    <button class="btn btn-primary btn-small" style="margin-left:0.6rem" title="Register a Docker host on a relay peer's LAN — Vaier scrapes its socket through the relay" onclick="showLanDockerHostModal()">+ Add LAN Docker host</button>
+                </div>`;
+                html += sortedLan.map(renderLanDockerHostCard).join('');
+            } else {
+                html += `<div class="section-header">LAN Docker hosts
+                    <button class="btn btn-primary btn-small" style="margin-left:0.6rem" title="Register a Docker host on a relay peer's LAN — Vaier scrapes its socket through the relay" onclick="showLanDockerHostModal()">+ Add LAN Docker host</button>
+                </div>`;
+                html += `<div style="padding:0.6rem 0.4rem;color:var(--text-dim);font-size:0.85rem">
+                    No LAN Docker hosts registered. Add one to discover containers on a Docker host that lives on a relay peer's LAN.
+                </div>`;
+            }
+
             if (clients.length > 0) {
                 html += `<div class="section-header">Clients</div>`;
                 html += clients.map(renderPeerCard).join('');
@@ -758,6 +870,97 @@
 
         function hideCreatePeerModal() {
             document.getElementById('createPeerModal').classList.remove('active');
+        }
+
+        function showLanDockerHostModal() {
+            document.getElementById('lanDockerHostName').value = '';
+            document.getElementById('lanDockerHostIp').value = '';
+            document.getElementById('lanDockerHostPort').value = '2375';
+            document.getElementById('lanDockerHostHint').textContent = '';
+            document.getElementById('lanDockerHostModal').classList.add('active');
+            document.getElementById('lanDockerHostName').focus();
+        }
+
+        function hideLanDockerHostModal() {
+            document.getElementById('lanDockerHostModal').classList.remove('active');
+        }
+
+        function ipInCidrJs(ip, cidr) {
+            const [base, prefixStr] = (cidr || '').split('/');
+            const prefix = parseInt(prefixStr);
+            if (!base || isNaN(prefix)) return false;
+            const toInt = a => a.split('.').reduce((acc, b) => (acc << 8) + parseInt(b), 0) >>> 0;
+            try {
+                const baseInt = toInt(base);
+                const ipInt   = toInt(ip);
+                if (prefix === 0) return true;
+                const mask = (~0 << (32 - prefix)) >>> 0;
+                return (baseInt & mask) === (ipInt & mask);
+            } catch (e) { return false; }
+        }
+
+        function updateLanDockerHostHint() {
+            const ip   = document.getElementById('lanDockerHostIp').value.trim();
+            const hint = document.getElementById('lanDockerHostHint');
+            if (!ip) { hint.textContent = ''; return; }
+            const relayPeers = peers.filter(p => p.lanCidr && p.lanCidr.trim());
+            const relay = relayPeers.find(p => ipInCidrJs(ip, p.lanCidr));
+            if (relay) {
+                hint.textContent = `Routes via ${relay.name} (${relay.lanCidr})`;
+                hint.style.color = 'var(--text-muted)';
+            } else {
+                hint.textContent = `${ip} is not inside any relay peer's lanCidr — set lanCidr on a relay first.`;
+                hint.style.color = 'var(--red)';
+            }
+        }
+
+        async function createLanDockerHost() {
+            const name   = document.getElementById('lanDockerHostName').value.trim();
+            const hostIp = document.getElementById('lanDockerHostIp').value.trim();
+            const port   = parseInt(document.getElementById('lanDockerHostPort').value);
+            if (!name)   { displayError('Please enter a name'); return; }
+            if (!hostIp) { displayError('Please enter a host IP'); return; }
+            if (!port || port < 1 || port > 65535) { displayError('Please enter a valid port (1-65535)'); return; }
+
+            const submitBtn = document.getElementById('lanDockerHostSubmitBtn');
+            const cancelBtn = document.getElementById('lanDockerHostCancelBtn');
+            submitBtn.disabled = true;
+            cancelBtn.disabled = true;
+            submitBtn.textContent = 'Adding…';
+
+            try {
+                const response = await fetch('/lan-docker-hosts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, hostIp, port })
+                });
+                if (response.status === 400) {
+                    displayError(`${hostIp} is not inside any relay peer's lanCidr. Set lanCidr on a relay first.`);
+                    return;
+                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                hideLanDockerHostModal();
+                displaySuccess(`LAN Docker host "${name}" added`);
+                fetchLanDockerHosts();
+            } catch (error) {
+                displayError(`Failed to add LAN Docker host: ${error.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                cancelBtn.disabled = false;
+                submitBtn.textContent = 'Add Host';
+            }
+        }
+
+        async function deleteLanDockerHost(name) {
+            if (!confirm(`Remove LAN Docker host "${name}"? Published services routing through it will keep working — only discovery stops.`)) return;
+            try {
+                const response = await fetch(`/lan-docker-hosts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                displaySuccess(`LAN Docker host "${name}" removed`);
+                fetchLanDockerHosts();
+            } catch (error) {
+                displayError(`Failed to remove LAN Docker host: ${error.message}`);
+            }
         }
 
         async function createPeer() {
@@ -1185,6 +1388,7 @@
         setupPeerMap();
         fetchPeers();
         fetchLocalServices();
+        fetchLanDockerHosts();
         fetchServerLocation();
 
         const _sse = new EventSource('/vpn/peers/events');

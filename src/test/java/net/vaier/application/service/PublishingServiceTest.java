@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
 import net.vaier.application.GetLocalDockerServicesUseCase;
@@ -84,6 +85,9 @@ class PublishingServiceTest {
 
     @Mock
     DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
+
+    @Mock
+    DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase;
 
     @Mock
     GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
