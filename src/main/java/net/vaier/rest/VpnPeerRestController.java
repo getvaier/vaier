@@ -8,6 +8,7 @@ import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.port.ForGeolocatingIps;
@@ -43,6 +44,7 @@ public class VpnPeerRestController {
     private final DeletePeerUseCase deletePeerUseCase;
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
+    private final UpdateLanCidrUseCase updateLanCidrUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final SseEventPublisher sseEventPublisher;
     private final ForGeolocatingIps forGeolocatingIps;
@@ -184,12 +186,15 @@ public class VpnPeerRestController {
         String lanCidr = request != null ? request.lanCidr() : null;
         log.info("Updating LAN CIDR for peer {} to {}", peerName, lanCidr);
         try {
-            forUpdatingPeerConfigurations.updateLanCidr(peerName, lanCidr);
+            updateLanCidrUseCase.updateLanCidr(peerName, lanCidr);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             log.warn("Peer not found for lan-cidr update: {}", peerName);
             return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            log.warn("LAN CIDR conflict for peer {}: {}", peerName, e.getMessage());
+            return ResponseEntity.status(409).build();
         } catch (Exception e) {
             log.error("Failed to update lan cidr for peer {}: {}", peerName, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();

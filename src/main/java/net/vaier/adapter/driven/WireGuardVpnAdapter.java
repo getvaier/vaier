@@ -11,6 +11,7 @@ import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
@@ -30,7 +31,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpnPeers {
+public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpnPeers, ForUpdatingServerAllowedIps {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -319,6 +320,29 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
             }
         }
         return "";
+    }
+
+    @Override
+    public void setPeerAllowedIps(String peerIpAddress, String allowedIps) {
+        log.info("Updating server-side AllowedIPs for peer at {} to: {}", peerIpAddress, allowedIps);
+        try {
+            String publicKey = findPeerPublicKeyByIp(wireguardInterface, peerIpAddress);
+            if (publicKey == null || publicKey.isEmpty()) {
+                throw new RuntimeException("No peer found on " + wireguardInterface + " with VPN IP " + peerIpAddress);
+            }
+
+            String setCommand = String.format("wg set %s peer %s allowed-ips %s",
+                wireguardInterface, publicKey, allowedIps);
+            log.debug("Executing: {}", setCommand);
+            executeInContainer("sh", "-c", setCommand);
+
+            // Persist live runtime state to wg0.conf so it survives a container restart.
+            executeInContainer("wg-quick", "save", wireguardInterface);
+            log.info("Persisted new AllowedIPs for peer at {}", peerIpAddress);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new RuntimeException("Failed to update AllowedIPs for peer at " + peerIpAddress + ": " + e.getMessage(), e);
+        }
     }
 
     @Override

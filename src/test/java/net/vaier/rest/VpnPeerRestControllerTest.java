@@ -10,6 +10,7 @@ import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGeolocatingIps;
@@ -39,6 +40,7 @@ class VpnPeerRestControllerTest {
     @Mock DeletePeerUseCase deletePeerUseCase;
     @Mock GenerateDockerComposeUseCase generateDockerComposeUseCase;
     @Mock GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
+    @Mock UpdateLanCidrUseCase updateLanCidrUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock SseEventPublisher sseEventPublisher;
     @Mock ForGeolocatingIps forGeolocatingIps;
@@ -96,7 +98,7 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanCidr("apalveien5", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
-        verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", "192.168.3.0/24");
+        verify(updateLanCidrUseCase).updateLanCidr("apalveien5", "192.168.3.0/24");
         verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
     }
 
@@ -107,7 +109,7 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanCidr("apalveien5", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
-        verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", "");
+        verify(updateLanCidrUseCase).updateLanCidr("apalveien5", "");
     }
 
     @Test
@@ -115,18 +117,32 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanCidr("apalveien5", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
-        verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", null);
+        verify(updateLanCidrUseCase).updateLanCidr("apalveien5", null);
     }
 
     @Test
     void updateLanCidr_returns404WhenPeerNotFound() {
         doThrow(new IllegalArgumentException("Peer not found: ghost"))
-            .when(forUpdatingPeerConfigurations).updateLanCidr("ghost", "192.168.3.0/24");
+            .when(updateLanCidrUseCase).updateLanCidr("ghost", "192.168.3.0/24");
         var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
 
         var response = controller.updateLanCidr("ghost", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
+        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void updateLanCidr_returns409WhenAnotherPeerOwnsTheCidr() {
+        doThrow(new IllegalStateException("LAN CIDR 192.168.3.0/24 already owned by peer nuc02"))
+            .when(updateLanCidrUseCase).updateLanCidr("apalveien5", "192.168.3.0/24");
+        var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
+
+        var response = controller.updateLanCidr("apalveien5", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
         verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());

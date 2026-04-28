@@ -19,6 +19,7 @@ import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -36,6 +37,8 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
+import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -59,7 +62,8 @@ public class VpnService implements
     GetPeerConfigUseCase,
     GeneratePeerSetupScriptUseCase,
     GenerateDockerComposeUseCase,
-    GetServerLocationUseCase {
+    GetServerLocationUseCase,
+    UpdateLanCidrUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -83,6 +87,8 @@ public class VpnService implements
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final ForResolvingPublicHost forResolvingPublicHost;
     private final ForGeolocatingIps forGeolocatingIps;
+    private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
+    private final ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     private DockerClient dockerClient;
 
     public VpnService(ConfigResolver configResolver,
@@ -94,7 +100,9 @@ public class VpnService implements
                       ForGeneratingDockerComposeFiles dockerComposeGenerator,
                       DeletePublishedServiceUseCase deletePublishedServiceUseCase,
                       ForResolvingPublicHost forResolvingPublicHost,
-                      ForGeolocatingIps forGeolocatingIps) {
+                      ForGeolocatingIps forGeolocatingIps,
+                      ForUpdatingPeerConfigurations forUpdatingPeerConfigurations,
+                      ForUpdatingServerAllowedIps forUpdatingServerAllowedIps) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -105,6 +113,8 @@ public class VpnService implements
         this.deletePublishedServiceUseCase = deletePublishedServiceUseCase;
         this.forResolvingPublicHost = forResolvingPublicHost;
         this.forGeolocatingIps = forGeolocatingIps;
+        this.forUpdatingPeerConfigurations = forUpdatingPeerConfigurations;
+        this.forUpdatingServerAllowedIps = forUpdatingServerAllowedIps;
     }
 
     @PostConstruct
@@ -269,6 +279,36 @@ public class VpnService implements
             String lanCidr = peerConfig.lanCidr();
             return generateScript(peerName, vpnIp, serverUrl, serverPort, wgConfig, lanCidr);
         });
+    }
+
+    // --- UpdateLanCidrUseCase ---
+
+    @Override
+    public void updateLanCidr(String peerName, String lanCidr) {
+        ForGettingPeerConfigurations.PeerConfiguration peer = peerConfigProvider.getPeerConfigByName(peerName)
+            .orElseThrow(() -> new IllegalArgumentException("Peer not found: " + peerName));
+
+        String normalized = (lanCidr == null || lanCidr.isBlank()) ? null : lanCidr.trim();
+
+        if (normalized != null) {
+            for (ForGettingPeerConfigurations.PeerConfiguration other : peerConfigProvider.getAllPeerConfigs()) {
+                if (other.name().equals(peerName)) continue;
+                if (normalized.equals(other.lanCidr())) {
+                    throw new IllegalStateException(
+                        "LAN CIDR " + normalized + " already owned by peer " + other.name());
+                }
+            }
+        }
+
+        // Comma-separated, no spaces — `wg set ... allowed-ips X,Y` requires a single argv token,
+        // and the install script's wg-quick save will preserve this on disk.
+        String newAllowedIps = peer.ipAddress() + "/32";
+        if (normalized != null) {
+            newAllowedIps = newAllowedIps + "," + normalized;
+        }
+        forUpdatingServerAllowedIps.setPeerAllowedIps(peer.ipAddress(), newAllowedIps);
+        forUpdatingPeerConfigurations.updateLanCidr(peerName, lanCidr);
+        log.info("Updated lanCidr for peer {} to {} (server-side AllowedIPs: {})", peerName, normalized, newAllowedIps);
     }
 
     // --- DeletePeerUseCase ---

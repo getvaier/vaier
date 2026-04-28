@@ -20,6 +20,8 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
+import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -52,6 +54,8 @@ class VpnServiceTest {
     @Mock DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     @Mock ForResolvingPublicHost forResolvingPublicHost;
     @Mock ForGeolocatingIps forGeolocatingIps;
+    @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
+    @Mock ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
 
     @InjectMocks VpnService service;
 
@@ -609,6 +613,104 @@ class VpnServiceTest {
         when(configResolver.getDomain()).thenReturn("");
 
         assertThat(service.getServerLocation()).isEmpty();
+    }
+
+    // --- updateLanCidr (#176) ---
+
+    @Test
+    void updateLanCidr_setsServerSideAllowedIpsAndMetadata() {
+        when(peerConfigProvider.getPeerConfigByName("apalveien5"))
+            .thenReturn(Optional.of(new PeerConfiguration("apalveien5", "10.13.13.6", "config",
+                PeerType.UBUNTU_SERVER, null, null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, null, null)));
+
+        service.updateLanCidr("apalveien5", "192.168.3.0/24");
+
+        var order = inOrder(forUpdatingServerAllowedIps, forUpdatingPeerConfigurations);
+        order.verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.6", "10.13.13.6/32,192.168.3.0/24");
+        order.verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", "192.168.3.0/24");
+    }
+
+    @Test
+    void updateLanCidr_clearingStripsServerSideAllowedIps() {
+        when(peerConfigProvider.getPeerConfigByName("nuc02"))
+            .thenReturn(Optional.of(new PeerConfiguration("nuc02", "10.13.13.8", "config",
+                PeerType.UBUNTU_SERVER, "192.168.3.0/24", null)));
+
+        service.updateLanCidr("nuc02", null);
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.8", "10.13.13.8/32");
+        verify(forUpdatingPeerConfigurations).updateLanCidr("nuc02", null);
+    }
+
+    @Test
+    void updateLanCidr_blankIsTreatedAsClear() {
+        when(peerConfigProvider.getPeerConfigByName("nuc02"))
+            .thenReturn(Optional.of(new PeerConfiguration("nuc02", "10.13.13.8", "config",
+                PeerType.UBUNTU_SERVER, "192.168.3.0/24", null)));
+
+        service.updateLanCidr("nuc02", "  ");
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.8", "10.13.13.8/32");
+    }
+
+    @Test
+    void updateLanCidr_changingReplacesServerSideCidr() {
+        when(peerConfigProvider.getPeerConfigByName("relay"))
+            .thenReturn(Optional.of(new PeerConfiguration("relay", "10.13.13.10", "config",
+                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("relay", "10.13.13.10", "config", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+
+        service.updateLanCidr("relay", "192.168.5.0/24");
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.10", "10.13.13.10/32,192.168.5.0/24");
+        verify(forUpdatingPeerConfigurations).updateLanCidr("relay", "192.168.5.0/24");
+    }
+
+    @Test
+    void updateLanCidr_rejectsConflictWhenAnotherPeerOwnsTheCidr() {
+        when(peerConfigProvider.getPeerConfigByName("apalveien5"))
+            .thenReturn(Optional.of(new PeerConfiguration("apalveien5", "10.13.13.6", "config",
+                PeerType.UBUNTU_SERVER, null, null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, null, null),
+            new PeerConfiguration("nuc02",      "10.13.13.8", "config", PeerType.UBUNTU_SERVER, "192.168.3.0/24", null)));
+
+        assertThatThrownBy(() -> service.updateLanCidr("apalveien5", "192.168.3.0/24"))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("nuc02")
+            .hasMessageContaining("192.168.3.0/24");
+
+        verifyNoInteractions(forUpdatingServerAllowedIps);
+        verifyNoInteractions(forUpdatingPeerConfigurations);
+    }
+
+    @Test
+    void updateLanCidr_allowsSameCidrOnSamePeerIdempotent() {
+        when(peerConfigProvider.getPeerConfigByName("relay"))
+            .thenReturn(Optional.of(new PeerConfiguration("relay", "10.13.13.10", "config",
+                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("relay", "10.13.13.10", "config", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+
+        service.updateLanCidr("relay", "192.168.1.0/24");
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.10", "10.13.13.10/32,192.168.1.0/24");
+        verify(forUpdatingPeerConfigurations).updateLanCidr("relay", "192.168.1.0/24");
+    }
+
+    @Test
+    void updateLanCidr_throwsWhenPeerDoesNotExist() {
+        when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateLanCidr("ghost", "192.168.3.0/24"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("ghost");
+
+        verifyNoInteractions(forUpdatingServerAllowedIps);
+        verifyNoInteractions(forUpdatingPeerConfigurations);
     }
 
     // silence unused field warning — PeerType is referenced in Javadoc of PeerConfigResult ctor via record definition
