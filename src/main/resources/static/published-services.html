@@ -552,6 +552,7 @@
         }
 
         async function ignoreService(key) {
+            applyIgnoredOptimistically(key, true);
             await fetch('/published-services/publishable/ignore', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -561,12 +562,23 @@
         }
 
         async function unignoreService(key) {
+            applyIgnoredOptimistically(key, false);
             await fetch('/published-services/publishable/unignore', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key })
             });
             await fetchPublishable();
+        }
+
+        // Re-render immediately so the click registers visibly — fetchPublishable() takes seconds
+        // because it scrapes every peer and LAN Docker host. The next refresh reconciles authority.
+        function applyIgnoredOptimistically(key, ignored) {
+            const svc = lastPublishableServices.find(s => ignoreKey(s) === key);
+            if (svc) {
+                svc.ignored = ignored;
+                displayPublishable(lastPublishableServices);
+            }
         }
 
         function showPublishModalFromBtn(btn) {

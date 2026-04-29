@@ -186,6 +186,15 @@ public class PublishingService implements
 
     @Override
     public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
+        // A LAN docker host's IP arrives here when the user clicks "+ Publish" on a discovered
+        // LAN_DOCKER_HOST service. Dispatch to the LAN flow so the route is marked isLanService=true
+        // and the dashboard's direct-LAN URL bypass works (#180).
+        if (hostInsideAnyRelayLanCidr(address)) {
+            log.info("Address {} falls inside a relay's lanCidr — publishing as LAN service", address);
+            publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled);
+            return;
+        }
+
         String fqdn = subdomain + "." + configResolver.getDomain();
         String serverFqdn = "vaier." + configResolver.getDomain();
 

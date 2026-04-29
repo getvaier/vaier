@@ -672,6 +672,36 @@ class PublishingServiceTest {
             "app.example.com", "10.13.13.3", 8080, false, null);
     }
 
+    @Test
+    void publishService_addressInsideRelayLanCidr_dispatchesToLanFlow() {
+        // Discovered LAN docker services hit the regular /publish endpoint with a LAN IP. They must be
+        // recognised and routed through the LAN flow instead — otherwise the resulting route gets
+        // isLanService=false and the dashboard's directUrl() can't find the relay peer (#180).
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
+                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+
+        service.publishService("192.168.3.50", 80, "pihole", false, null, false);
+
+        // The peer flow tracks pendingPublications by (address, port); the LAN flow does not, so
+        // skipping it is the observable signal that the LAN dispatch happened.
+        verify(pendingPublicationsService, never()).track(anyString(), anyInt());
+        verify(forPublishingEvents).publish("published-services", "publish-dns-created", "pihole");
+    }
+
+    @Test
+    void publishService_addressOutsideAllRelayLanCidrs_usesPeerFlow() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
+                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+
+        service.publishService("10.13.13.5", 8080, "app", false, null, false);
+
+        verify(pendingPublicationsService).track("10.13.13.5", 8080);
+    }
+
     // --- publishLanService (#175) ---
 
     @Test
