@@ -494,9 +494,9 @@
         let lastPublishableServices = [];
 
         function ignoreKey(s) {
-            return s.source === 'PEER'
-                ? s.peerName + '/' + s.containerName + ':' + s.port
-                : s.containerName + ':' + s.port;
+            if (s.source === 'PEER')            return s.peerName + '/' + s.containerName + ':' + s.port;
+            if (s.source === 'LAN_DOCKER_HOST') return s.address  + '/' + s.containerName + ':' + s.port;
+            return s.containerName + ':' + s.port;
         }
 
         function toggleShowIgnored() {

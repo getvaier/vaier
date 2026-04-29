@@ -470,7 +470,7 @@ public class PublishingService implements
                     .filter(p -> existingRoutes.stream()
                         .noneMatch(r -> r.getAddress().equals(host.hostIp()) && r.getPort() == p.publicPort()))
                     .filter(p -> !pendingPublicationsService.isPending(host.hostIp(), p.publicPort()))
-                    .map(p -> new PublishableService(PublishableSource.LAN_DOCKER_HOST, host.hostName(),
+                    .map(p -> new PublishableService(PublishableSource.LAN_DOCKER_HOST, host.relayPeerName(),
                         host.hostIp(), container.containerName(), p.publicPort(), null, false))
                 )
             )
@@ -488,8 +488,9 @@ public class PublishingService implements
 
     static String ignoreKey(PublishableService s) {
         return switch (s.source()) {
-            case PEER, LAN_DOCKER_HOST -> s.peerName() + "/" + s.containerName() + ":" + s.port();
-            case LOCAL                 -> s.containerName() + ":" + s.port();
+            case PEER            -> s.peerName() + "/" + s.containerName() + ":" + s.port();
+            case LAN_DOCKER_HOST -> s.address()  + "/" + s.containerName() + ":" + s.port();
+            case LOCAL           -> s.containerName() + ":" + s.port();
         };
     }
 

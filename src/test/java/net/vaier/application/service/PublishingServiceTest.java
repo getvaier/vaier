@@ -961,6 +961,51 @@ class PublishingServiceTest {
     }
 
     @Test
+    void getPublishableServices_lanDockerHostContainer_sourceLabelIsRelayPeerName() {
+        // For an already-published LAN docker route, ReverseProxyRoute.displayName() resolves the
+        // server suffix to the relay peer name (the peer whose lanCidr contains the host IP).
+        // The publishable list must use the same name so the suggested subdomain (`container.source`)
+        // collapses cleanly to `container @ relayPeer` after publication, instead of leaking the
+        // LAN host name into the displayed subdomain.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
+        when(discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers()).thenReturn(List.of(
+            okLanHost("nas", "192.168.1.50", 2375, "apalveien",
+                List.of(peerContainer("pihole", 80, "tcp")))
+        ));
+
+        List<PublishableService> result = service.getPublishableServices();
+
+        assertThat(result).hasSize(1);
+        PublishableService svc = result.getFirst();
+        assertThat(svc.source()).isEqualTo(PublishableSource.LAN_DOCKER_HOST);
+        assertThat(svc.peerName()).isEqualTo("apalveien");
+        assertThat(svc.address()).isEqualTo("192.168.1.50");
+        assertThat(svc.containerName()).isEqualTo("pihole");
+        assertThat(svc.port()).isEqualTo(80);
+    }
+
+    @Test
+    void getPublishableServices_ignoredLanDockerHostService_markedIgnored() {
+        // Ignore key for LAN_DOCKER_HOST uses the LAN host IP (not the relay peer name) so two
+        // LAN hosts behind the same relay with same-named containers don't collide.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
+        when(discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers()).thenReturn(List.of(
+            okLanHost("nas", "192.168.1.50", 2375, "apalveien",
+                List.of(peerContainer("pihole", 80, "tcp")))
+        ));
+        when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of("192.168.1.50/pihole:80"));
+
+        List<PublishableService> result = service.getPublishableServices();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().ignored()).isTrue();
+    }
+
+    @Test
     void getPublishableServices_nonIgnoredService_markedNotIgnored() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
@@ -1168,6 +1213,13 @@ class PublishingServiceTest {
 
     private PeerContainers okPeer(String name, String ip, List<DockerService> containers) {
         return new PeerContainers(name, ip, "OK", containers, false, "");
+    }
+
+    private DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers okLanHost(
+            String hostName, String hostIp, int port, String relayPeerName,
+            List<DockerService> containers) {
+        return new DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers(
+            hostName, hostIp, port, relayPeerName, "OK", containers);
     }
 
     private DockerService peerContainer(String name, int port, String type) {
