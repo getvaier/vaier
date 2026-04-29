@@ -27,12 +27,34 @@
         .service-header:hover { background: var(--bg-hover); }
 
         .service-header-left {
-            display: grid;
-            grid-template-columns: auto 10rem 8rem 1fr;
+            display: flex;
             align-items: center;
-            gap: 0.6rem;
+            gap: 0.55rem;
             min-width: 0;
+            flex: 1;
         }
+
+        .machine-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .machine-icon-cap {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+        .machine-icon-cap.cap-auth    { color: var(--green); }
+        .machine-icon-cap.cap-no-auth { color: var(--orange); }
+        .machine-icon-cap.cap-docker  { color: #2496ed; }
 
         .service-name {
             font-size: 0.85rem;
@@ -44,7 +66,7 @@
         }
 
         .service-peer {
-            font-size: 0.82rem;
+            font-size: 0.78rem;
             color: var(--text-muted);
             font-weight: 400;
             white-space: nowrap;
@@ -56,16 +78,25 @@
             font-size: 0.78rem;
             color: var(--accent);
             font-family: var(--mono);
+            text-decoration: none;
         }
 
-        .service-link:hover { color: var(--accent-hover); }
+        .service-link:hover { color: var(--accent-hover); text-decoration: underline; }
 
-        .service-actions {
+        .service-actions-row {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            justify-content: flex-end;
-            gap: 0.3rem;
-            flex-shrink: 0;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+        .service-actions-row .service-actions-left {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
         }
 
         .service-chevron {
@@ -172,21 +203,46 @@
 
         .step-icon { font-size: 0.85rem; width: 1.2rem; text-align: center; }
 
+        /* Toast stack — fixed bottom so transient messages don't shift the list */
+        .toast-stack {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            pointer-events: none;
+            width: max-content;
+            max-width: 90%;
+        }
+        .toast-stack > div { pointer-events: auto; }
+        .toast-stack .error,
+        .toast-stack .success {
+            margin-bottom: 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        }
+
         /* Mobile */
         @media (max-width: 600px) {
-            .service-header { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
-            .service-header-left { display: flex; flex-wrap: wrap; }
-            .service-actions { justify-content: start; }
+            .service-header { padding: 0.6rem 0.75rem; }
             .service-body { padding: 0 0.75rem 0.75rem; }
             .service-details { grid-template-columns: 70px 1fr; gap: 0.3rem 0.5rem; }
             .discoverable-card { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
             .section-header { margin: 1.25rem 0 0.5rem; }
+            .toast-stack {
+                left: 0.5rem;
+                right: 0.5rem;
+                transform: none;
+                width: auto;
+                max-width: none;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div id="error-message"></div>
         <div id="services-container">
             <div class="loading">Loading services…</div>
         </div>
@@ -212,6 +268,10 @@
             </div>
             <div id="publishable-container"></div>
         </div>
+    </div>
+
+    <div class="toast-stack">
+        <div id="error-message"></div>
     </div>
 
     <!-- Delete Modal -->
@@ -337,6 +397,66 @@
             return name.replace(/[^a-zA-Z0-9]/g, '_');
         }
 
+        // Inline SVG icons keep the cards self-contained and recolour via currentColor.
+        function machineIconSvg(kind) {
+            const A = 'width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
+            switch (kind) {
+                case 'mobile':  return `<svg ${A}><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/></svg>`;
+                case 'laptop':  return `<svg ${A}><rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/></svg>`;
+                case 'server':  return `<svg ${A}><rect x="2" y="2.5" width="12" height="4" rx="0.6"/><rect x="2" y="9.5" width="12" height="4" rx="0.6"/><circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none"/><circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none"/></svg>`;
+                case 'lan':     return `<svg ${A}><path d="M2 7.5 L8 2.5 L14 7.5 V14 H2 Z"/><line x1="6.5" y1="14" x2="6.5" y2="10"/><line x1="9.5" y1="14" x2="9.5" y2="10"/></svg>`;
+                case 'local':   return `<svg ${A}><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`;
+            }
+            return '';
+        }
+
+        function capabilityIconSvg(kind) {
+            if (kind === 'docker') {
+                return `<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="2.5" y="6.5" width="2.5" height="2.5"/>
+                    <rect x="5.5" y="6.5" width="2.5" height="2.5"/>
+                    <rect x="8.5" y="6.5" width="2.5" height="2.5"/>
+                    <rect x="5.5" y="3.5" width="2.5" height="2.5"/>
+                    <path d="M1.5 10 c0.8 2.2 3 3.2 6 3.2 c4 0 7 -2 8 -3.5 z"/>
+                </svg>`;
+            }
+            if (kind === 'auth') {
+                return `<svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="7.5" width="10" height="6.5" rx="1"/>
+                    <path d="M5 7.5 V5 a3 3 0 0 1 6 0 V7.5"/>
+                </svg>`;
+            }
+            if (kind === 'no-auth') {
+                return `<svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="7.5" width="10" height="6.5" rx="1"/>
+                    <path d="M5 7.5 V5 a3 3 0 0 1 5.5 -1.6"/>
+                </svg>`;
+            }
+            return '';
+        }
+
+        function machineIconHtml(kind, title) {
+            return `<span class="machine-icon" title="${title}">${machineIconSvg(kind)}</span>`;
+        }
+
+        function capabilityIconHtml(kind, title) {
+            const cls = kind === 'no-auth' ? 'cap-no-auth' : `cap-${kind}`;
+            return `<span class="machine-icon-cap ${cls}" title="${title}">${capabilityIconSvg(kind)}</span>`;
+        }
+
+        function serviceTypeIcon(service) {
+            if (service.isLanService) return 'lan';
+            const nameParts = service.name.split(' @ ');
+            if (nameParts.length === 1) return 'local';
+            return 'server';
+        }
+
+        function discoverableTypeIcon(s) {
+            if (s.source === 'LAN_DOCKER_HOST') return 'lan';
+            if (s.source === 'LOCAL')           return 'local';
+            return 'server';
+        }
+
         function toggleService(name) {
             const id = cardId(name);
             const body    = document.getElementById('body-' + id);
@@ -424,9 +544,9 @@
                 const authBadge  = service.authenticated
                     ? '<span class="badge badge-success">auth</span>'
                     : '<span class="badge badge-warning">no-auth</span>';
-                const lanBadge   = service.isLanService
-                    ? '<span class="badge badge-warning" title="LAN service routed through a relay peer">LAN</span>'
-                    : '';
+                const authCap    = service.authenticated
+                    ? capabilityIconHtml('auth',    'Authelia authentication required')
+                    : capabilityIconHtml('no-auth', 'No authentication — service is publicly reachable');
                 const serviceUrl = `https://${service.dnsAddress}`;
                 const isSelf = service.dnsAddress.startsWith('vaier.');
 
@@ -434,29 +554,35 @@
                 const nameParts = service.name.split(' @ ');
                 const shortName = nameParts[0];
                 const peerName  = nameParts.length === 2 ? nameParts[1] : '';
+                const typeKind  = serviceTypeIcon(service);
+                const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'local': 'Service on this Vaier host', 'server': 'Service on a VPN peer' })[typeKind];
+
+                const urlRow = dnsOk && !isSelf
+                    ? `<span class="detail-label">URL</span>
+                       <span class="detail-value"><a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}">${service.dnsAddress}</a></span>`
+                    : `<span class="detail-label">URL</span>
+                       <span class="detail-value" style="color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`;
+
+                const openBtn = dnsOk && !isSelf
+                    ? `<a class="btn btn-small btn-secondary" href="${serviceUrl}" target="${service.dnsAddress}">Open ↗</a>`
+                    : '';
 
                 return `
                 <div class="service-card">
                     <div class="service-header" onclick="toggleService('${service.name.replace(/'/g, "\\'")}')">
                         <div class="service-header-left">
                             <span class="status-dot ${dotClass}"></span>
+                            ${machineIconHtml(typeKind, typeTip)}
                             <span class="service-name">${shortName}</span>
-                            <span class="service-peer">${peerName}</span>
-                            ${dnsOk && !isSelf
-                                ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}" onclick="event.stopPropagation()">${service.dnsAddress}</a>`
-                                : `<span style="font-size:0.75rem;color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`}
+                            ${peerName ? `<span class="service-peer">@ ${peerName}</span>` : ''}
+                            ${authCap}
                         </div>
-                        <div class="service-actions">
-                            ${lanBadge}
-                            ${authBadge}
-                            <button class="btn btn-small btn-danger" onclick="event.stopPropagation();showDeleteModal('${service.dnsAddress}')">
-                                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 3 13 13"/><polyline points="13 3 3 13"/></svg>
-                            </button>
-                            <span class="service-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
-                        </div>
+                        <span class="service-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                     </div>
                     <div class="service-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                         <div class="service-details">
+                            ${urlRow}
+
                             <span class="detail-label">DNS</span>
                             <span class="detail-value">${getStatusHtml(service.dnsState, dnsOk)}</span>
 
@@ -484,6 +610,12 @@
                                     style="accent-color:var(--accent);cursor:pointer"
                                     onchange="setDirectUrlDisabled('${service.dnsAddress}', this.checked)">
                             </span>
+                        </div>
+                        <div class="service-actions-row">
+                            <div class="service-actions-left">
+                                ${openBtn}
+                            </div>
+                            <button class="btn btn-small btn-danger" onclick="showDeleteModal('${service.dnsAddress}')">Delete</button>
                         </div>
                     </div>
                 </div>`;
@@ -523,6 +655,8 @@
                 const sourceLabel = isLocal ? 'local' : s.peerName;
                 const key = ignoreKey(s);
                 const dimStyle = s.ignored ? 'opacity:0.55' : '';
+                const typeKind = discoverableTypeIcon(s);
+                const typeTip  = ({ 'lan': 'Discovered on a LAN Docker host', 'local': 'Discovered on this Vaier host', 'server': 'Discovered on a VPN peer' })[typeKind];
                 const actionButtons = s.ignored
                     ? `<button class="btn btn-success btn-small" title="Show this service again in the list" onclick="unignoreService('${key}')">Unignore</button>`
                     : `<button class="btn btn-primary btn-small"
@@ -540,9 +674,10 @@
                 <div class="discoverable-card">
                     <div class="service-header-left" style="${dimStyle}">
                         <span class="status-dot status-neutral"></span>
+                        ${machineIconHtml(typeKind, typeTip)}
                         <span class="service-name">${s.containerName}</span>
-                        <span class="service-peer">${sourceLabel}</span>
-                        <span class="discoverable-meta">${s.address}:${s.port}</span>
+                        <span class="service-peer">@ ${sourceLabel}</span>
+                        <span class="discoverable-meta" style="margin-left:auto">${s.address}:${s.port}</span>
                     </div>
                     <div style="display:flex;gap:0.4rem;align-items:center">
                         ${actionButtons}
@@ -621,8 +756,8 @@
                     <div class="service-header-left">
                         <span class="status-dot status-pending"></span>
                         <span class="service-name">${subdomain}</span>
+                        ${authBadge}
                     </div>
-                    <div class="service-actions">${authBadge}</div>
                 </div>
                 <div style="padding:0.5rem 1rem 0.75rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:0.35rem">
                     <div id="proc-step-dns-create-${id}"    class="progress-step"><span class="step-icon">✓</span><span>DNS record created</span></div>

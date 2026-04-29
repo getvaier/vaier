@@ -94,19 +94,41 @@
         .peer-header:hover { background: var(--bg-hover); }
 
         .peer-header-left {
-            display: grid;
-            grid-template-columns: auto 10rem auto 1fr;
+            display: flex;
             align-items: center;
-            gap: 0.6rem;
+            gap: 0.55rem;
             min-width: 0;
         }
+
+        .machine-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .machine-icon-cap {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+        .machine-icon-cap.cap-relay  { color: #2496ed; }
+        .machine-icon-cap.cap-docker { color: #2496ed; }
 
         .recency-bars {
             display: inline-flex;
             align-items: flex-end;
             gap: 2px;
-            height: 12px;
-            justify-self: start;
+            height: 14px;
+            margin-left: auto;
+            flex-shrink: 0;
         }
         .recency-bars i {
             display: block;
@@ -115,10 +137,10 @@
             opacity: 0.25;
             border-radius: 1px;
         }
-        .recency-bars i:nth-child(1) { height: 3px; }
-        .recency-bars i:nth-child(2) { height: 6px; }
-        .recency-bars i:nth-child(3) { height: 9px; }
-        .recency-bars i:nth-child(4) { height: 12px; }
+        .recency-bars i:nth-child(1) { height: 4px; }
+        .recency-bars i:nth-child(2) { height: 7px; }
+        .recency-bars i:nth-child(3) { height: 10px; }
+        .recency-bars i:nth-child(4) { height: 14px; }
         .recency-tier-1 i:nth-child(-n+1),
         .recency-tier-2 i:nth-child(-n+2),
         .recency-tier-3 i:nth-child(-n+3),
@@ -150,11 +172,20 @@
         .status-neutral  { background: var(--text-dim); }
         .status-degraded { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
 
-        .peer-actions {
+        .peer-actions-row {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 0.3rem;
-            flex-shrink: 0;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+        .peer-actions-row .peer-actions-left {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
         }
 
         .peer-chevron {
@@ -329,19 +360,43 @@
             margin-top: 0.25rem;
         }
 
+        /* Toast stack — fixed bottom so transient messages don't shift the list */
+        .toast-stack {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            pointer-events: none;
+            width: max-content;
+            max-width: 90%;
+        }
+        .toast-stack > div { pointer-events: auto; }
+        .toast-stack .error,
+        .toast-stack .success {
+            margin-bottom: 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        }
+
         /* Mobile */
         @media (max-width: 600px) {
-            .peer-header { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
-            .peer-header-left { display: flex; flex: 1 1 100%; flex-wrap: wrap; }
-            .peer-actions { flex: 1 1 100%; flex-wrap: wrap; }
+            .peer-header { padding: 0.6rem 0.75rem; }
             .peer-body { padding: 0 0.75rem 0.75rem; }
+            .toast-stack {
+                left: 0.5rem;
+                right: 0.5rem;
+                transform: none;
+                width: auto;
+                max-width: none;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div id="error-message"></div>
-        <div id="success-message"></div>
         <div class="tab-nav">
             <button class="tab-button active" data-tab="list" onclick="switchTab('list')">List</button>
             <button class="tab-button"        data-tab="map"  onclick="switchTab('map')">Map</button>
@@ -357,6 +412,11 @@
         </div>
     </div>
     <button class="fab" onclick="showCreatePeerModal()" aria-label="Add Machine" title="Add Machine">+</button>
+
+    <div class="toast-stack">
+        <div id="error-message"></div>
+        <div id="success-message"></div>
+    </div>
 
     <!-- Add Machine Modal (unified) -->
     <div id="createPeerModal" class="modal">
@@ -399,7 +459,14 @@
             </div>
             <div class="form-group" id="dockerPortGroup" style="display:none">
                 <label class="form-label" for="dockerPort">Docker API port</label>
-                <input type="number" id="dockerPort" class="form-input" min="1" max="65535" value="2375">
+                <input type="number" id="dockerPort" class="form-input" min="1" max="65535" value="2375" oninput="updateDockerSetupHint()">
+                <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.5rem;">
+                    Run this on the LAN host first to expose the Docker API (idempotent; covers native + snap):
+                </div>
+                <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.3rem">
+                    <code id="dockerSetupCmd" style="flex:1;font-size:0.72rem;background:var(--bg-input);padding:0.35rem 0.5rem;border-radius:3px;overflow-x:auto;white-space:nowrap;color:var(--text)"></code>
+                    <button type="button" class="btn btn-small btn-secondary" onclick="copyDockerSetupCmd()" title="Copy to clipboard">copy</button>
+                </div>
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="createPeerCancelBtn" onclick="hideCreatePeerModal()">Cancel</button>
@@ -434,6 +501,26 @@
         </div>
     </div>
 
+    <!-- Setup-script Dialog (VPN peer + LAN docker host) -->
+    <div id="scriptDialogModal" class="modal">
+        <div class="modal-content" style="max-width:680px;width:95%">
+            <div class="modal-header" id="scriptDialogTitle">Setup script</div>
+            <div id="scriptDialogDesc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem"></div>
+            <div class="form-group">
+                <label class="form-label">Run on the host (copy &amp; paste)</label>
+                <div style="display:flex;gap:0.4rem;align-items:center;">
+                    <code id="scriptDialogCmd" style="flex:1;font-size:0.78rem;background:var(--bg-input);padding:0.5rem 0.6rem;border-radius:3px;overflow-x:auto;white-space:nowrap;color:var(--text);user-select:all"></code>
+                    <button class="btn btn-small btn-secondary" id="scriptDialogCopyBtn" onclick="copyScriptDialogCmd()">copy</button>
+                </div>
+                <div id="scriptDialogAuthNote" style="display:none;font-size:0.72rem;color:var(--yellow);margin-top:0.4rem"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideScriptDialog()">Close</button>
+                <button class="btn btn-primary" id="scriptDialogDownloadBtn" onclick="scriptDialogDownload()">↓ Download</button>
+            </div>
+        </div>
+    </div>
+
     <!-- QR Code Modal -->
     <div id="qrModal" class="modal">
         <div class="modal-content" style="max-width:380px;width:95%">
@@ -451,6 +538,7 @@
         let peers = [];
         let peerServices = {};
         let localServices = [];
+        let localServicesStatus = 'UNKNOWN'; // OK | UNREACHABLE | UNKNOWN
         let lanServers = [];
         let lanServerServices = {};
         let lastFetchSuccessful = false;
@@ -502,11 +590,15 @@
                 const response = await fetch('/docker-services/local');
                 if (response.ok) {
                     localServices = await response.json();
-                    displayPeers(peers);
+                    localServicesStatus = 'OK';
+                } else {
+                    localServicesStatus = 'UNREACHABLE';
                 }
             } catch (error) {
                 console.error('Failed to load local services:', error);
+                localServicesStatus = 'UNREACHABLE';
             }
+            displayPeers(peers);
         }
 
         async function fetchLanServers() {
@@ -585,6 +677,59 @@
                     </span>`;
         }
 
+        // Inline SVG icons keep the cards self-contained and recolour via currentColor.
+        function machineIconSvg(kind) {
+            const A = 'width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
+            switch (kind) {
+                case 'mobile':  return `<svg ${A}><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/></svg>`;
+                case 'laptop':  return `<svg ${A}><rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/></svg>`;
+                case 'server':  return `<svg ${A}><rect x="2" y="2.5" width="12" height="4" rx="0.6"/><rect x="2" y="9.5" width="12" height="4" rx="0.6"/><circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none"/><circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none"/></svg>`;
+                case 'lan':     return `<svg ${A}><path d="M2 7.5 L8 2.5 L14 7.5 V14 H2 Z"/><line x1="6.5" y1="14" x2="6.5" y2="10"/><line x1="9.5" y1="14" x2="9.5" y2="10"/></svg>`;
+                case 'local':   return `<svg ${A}><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`;
+            }
+            return '';
+        }
+
+        function capabilityIconSvg(kind) {
+            if (kind === 'docker') {
+                // Stylised Docker logo: stacked containers + whale body underneath.
+                return `<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="2.5" y="6.5" width="2.5" height="2.5"/>
+                    <rect x="5.5" y="6.5" width="2.5" height="2.5"/>
+                    <rect x="8.5" y="6.5" width="2.5" height="2.5"/>
+                    <rect x="5.5" y="3.5" width="2.5" height="2.5"/>
+                    <path d="M1.5 10 c0.8 2.2 3 3.2 6 3.2 c4 0 7 -2 8 -3.5 z"/>
+                </svg>`;
+            }
+            if (kind === 'relay') {
+                // "Share/hub" — three nodes connected to a central forwarding point.
+                return `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="18" cy="5" r="2.5"/>
+                    <circle cx="6" cy="12" r="2.5"/>
+                    <circle cx="18" cy="19" r="2.5"/>
+                    <line x1="8.6" y1="13.5" x2="15.4" y2="17.5" fill="none"/>
+                    <line x1="15.4" y1="6.5" x2="8.6" y2="10.5" fill="none"/>
+                </svg>`;
+            }
+            return '';
+        }
+
+        function machineIconHtml(kind, title) {
+            return `<span class="machine-icon" title="${title}">${machineIconSvg(kind)}</span>`;
+        }
+
+        function capabilityIconHtml(kind, title) {
+            return `<span class="machine-icon-cap cap-${kind}" title="${title}">${capabilityIconSvg(kind)}</span>`;
+        }
+
+        function peerTypeIconKind(peerType) {
+            switch (peerType) {
+                case 'MOBILE_CLIENT':  return 'mobile';
+                case 'WINDOWS_CLIENT': return 'laptop';
+                default:               return 'server';
+            }
+        }
+
         function togglePeer(peerName) {
             const id = cardId(peerName);
             const body    = document.getElementById('body-' + id);
@@ -646,16 +791,16 @@
             } else {
                 statusClass = 'status-connected';
             }
-            const relayLabel = server.relayPeerName
-                ? `via ${server.relayPeerName}`
-                : `<span style="color:var(--red)">no relay covers ${server.lanAddress}</span>`;
-            const portBadge = server.runsDocker
-                ? `<span class="peer-ip-badge">${server.lanAddress}:${server.dockerPort}</span>`
-                : `<span class="peer-ip-badge">${server.lanAddress}</span>`;
-            const dockerBadge = server.runsDocker
-                ? `<span class="badge badge-warning" title="Docker auto-discovery enabled">Docker</span>`
+            const dockerCap = server.runsDocker
+                ? capabilityIconHtml('docker', 'Docker auto-discovery enabled')
                 : '';
-            const detailsHtml = (() => {
+            const portText = server.runsDocker
+                ? `${server.lanAddress}:${server.dockerPort}`
+                : server.lanAddress;
+            const relayRow = server.relayPeerName
+                ? `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value">via ${server.relayPeerName}</span></div>`
+                : `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value" style="color:var(--red)">no relay covers ${server.lanAddress}</span></div>`;
+            const servicesHtml = (() => {
                 if (!server.runsDocker) return '';
                 if (!server.relayPeerName)
                     return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">no relay peer covers this server's lanAddress</span></div>`;
@@ -663,30 +808,35 @@
                     return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
                 return renderServiceList(services.containers);
             })();
+            const scriptBtn = server.runsDocker
+                ? `<button class="btn btn-small btn-secondary" onclick="showLanDockerSetupScript(${server.dockerPort || 2375})" title="Show the script to expose the Docker API on this host">script</button>`
+                : '';
 
             return `
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
                         <span class="status-dot ${statusClass}"></span>
+                        ${machineIconHtml('lan', 'LAN server (no VPN, behind a relay)')}
                         <span class="peer-name">${server.name}</span>
-                        ${portBadge}
-                        <span style="display:inline-flex;align-items:center;gap:0.5rem;min-width:0">
-                            <span class="badge badge-warning" title="LAN server on a relay peer's LAN — not itself a VPN peer">LAN</span>
-                            ${dockerBadge}
-                            <span style="font-size:0.75rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${relayLabel}</span>
-                        </span>
+                        ${dockerCap}
                     </div>
-                    <div class="peer-actions">
-                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation();deleteLanServer('${server.name.replace(/'/g, "\\'")}')" title="Remove this LAN server">
-                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 3 13 13"/><polyline points="13 3 3 13"/></svg>
-                        </button>
-                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
-                    </div>
+                    <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
-                        ${detailsHtml}
+                        <div class="detail-row">
+                            <span class="detail-label">LAN address</span>
+                            <span class="detail-value">${portText}</span>
+                        </div>
+                        ${relayRow}
+                        ${servicesHtml}
+                    </div>
+                    <div class="peer-actions-row">
+                        <div class="peer-actions-left">
+                            ${scriptBtn}
+                        </div>
+                        <button class="btn btn-small btn-danger" onclick="deleteLanServer('${server.name.replace(/'/g, "\\'")}')">Delete</button>
                     </div>
                 </div>
             </div>`;
@@ -696,21 +846,29 @@
             const key = '__local__';
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
+            // Mirror the LAN-server status semantics: green when the local Docker engine
+            // responded OK to the most recent /docker-services/local poll, red if it
+            // errored, neutral until the first poll completes.
+            const statusClass = localServicesStatus === 'OK'           ? 'status-connected'
+                              : localServicesStatus === 'UNREACHABLE'  ? 'status-disconnected'
+                              :                                          'status-neutral';
+            const servicesHtml = localServicesStatus === 'UNREACHABLE'
+                ? `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">Docker engine unreachable</span></div>`
+                : renderServiceList(localServices);
             return `
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key}')">
                     <div class="peer-header-left">
-                        <span class="status-dot status-neutral"></span>
+                        <span class="status-dot ${statusClass}"></span>
+                        ${machineIconHtml('local', 'This Vaier host')}
                         <span class="peer-name">local</span>
-                        <span></span>
+                        ${capabilityIconHtml('docker', 'Local Docker engine')}
                     </div>
-                    <div class="peer-actions">
-                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
-                    </div>
+                    <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
-                        ${renderServiceList(localServices)}
+                        ${servicesHtml}
                     </div>
                 </div>
             </div>`;
@@ -738,8 +896,33 @@
             })();
             const outdated = !!(services && services.wireguardOutdated);
             const expectedImage = services && services.wireguardExpectedImage;
-            const outdatedBadge = outdated
-                ? `<span class="badge badge-warning" title="This peer is running an older WireGuard image than the server. To upgrade, edit the 'image:' tag on the peer's docker-compose.yml to '${expectedImage}' and run 'docker compose up -d' — don't overwrite the whole file with 'compose' if the peer has customizations (network_mode, volumes, TZ).">wireguard out of date</span>`
+            const outdatedRow = outdated
+                ? `<div class="detail-row">
+                       <span class="detail-label">WireGuard</span>
+                       <span class="detail-value">
+                           <span class="badge badge-warning" title="To upgrade, edit the 'image:' tag on the peer's docker-compose.yml to '${expectedImage}' and run 'docker compose up -d' — don't overwrite the whole file with 'compose' if the peer has customizations (network_mode, volumes, TZ).">out of date</span>
+                       </span>
+                   </div>`
+                : '';
+
+            const isRelay = isServer && !!(peer.lanCidr && peer.lanCidr.trim());
+            const iconKind = peerTypeIconKind(peerType);
+            const typeTooltip = ({
+                'mobile': 'Mobile client (VPN)',
+                'laptop': 'Windows client (VPN)',
+                'server': 'Server (VPN)'
+            })[iconKind];
+            const relayCap   = isRelay ? capabilityIconHtml('relay', `Relay for LAN ${peer.lanCidr}`) : '';
+            const dockerCap  = isServer ? capabilityIconHtml('docker', 'Runs Docker') : '';
+
+            const composeBtn = isServer
+                ? `<button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.name}')">compose</button>`
+                : '';
+            const scriptBtn = peerType === 'UBUNTU_SERVER'
+                ? `<button class="btn btn-small btn-secondary" onclick="showVpnPeerSetupScript('${peer.name}')">script</button>`
+                : '';
+            const qrBtn = peerType === 'MOBILE_CLIENT'
+                ? `<button class="btn btn-small btn-secondary" onclick="showQrModal('${peer.name}')">qr</button>`
                 : '';
 
             return `
@@ -747,21 +930,13 @@
                 <div class="peer-header" onclick="togglePeer('${peer.name.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
                         <span class="status-dot ${statusClass}" id="hdr-dot-${id}"></span>
+                        ${machineIconHtml(iconKind, typeTooltip)}
                         <span class="peer-name">${peer.name}</span>
-                        <span class="peer-ip-badge">${vpnIp}</span>
+                        ${relayCap}
+                        ${dockerCap}
                         ${recencyBarsHtml(peer.latestHandshake, 'last-seen-' + id)}
                     </div>
-                    <div class="peer-actions">
-                        ${outdatedBadge}
-                        <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();viewPeerConfig('${peer.name}')">config</button>
-                        ${isServer ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadDockerCompose('${peer.name}')">compose</button>` : ''}
-                        ${peerType === 'UBUNTU_SERVER' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();downloadSetupScript('${peer.name}')">script</button>` : ''}
-                        ${peerType === 'MOBILE_CLIENT' ? `<button class="btn btn-small btn-secondary" onclick="event.stopPropagation();showQrModal('${peer.name}')">qr</button>` : ''}
-                        <button class="btn btn-small btn-danger" onclick="event.stopPropagation();confirmDeletePeer('${peer.name}')">
-                            <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
-                        </button>
-                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
-                    </div>
+                    <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
@@ -790,6 +965,7 @@
                             <span class="detail-label">Rx / Tx</span>
                             <span class="detail-value" id="rxtx-${id}">${formatBytes(peer.transferRx)} / ${formatBytes(peer.transferTx)}</span>
                         </div>
+                        ${outdatedRow}
                         ${isServer ? `
                         <div class="detail-row">
                             <span class="detail-label">LAN CIDR</span>
@@ -818,6 +994,15 @@
                             </span>
                         </div>` : ''}
                         ${servicesHtml}
+                    </div>
+                    <div class="peer-actions-row">
+                        <div class="peer-actions-left">
+                            <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.name}')">config</button>
+                            ${composeBtn}
+                            ${scriptBtn}
+                            ${qrBtn}
+                        </div>
+                        <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.name}')">Delete</button>
                     </div>
                 </div>
             </div>`;
@@ -899,6 +1084,21 @@
             const runsDocker  = document.getElementById('runsDocker').checked;
             document.getElementById('dockerPortGroup').style.display =
                 (isLanServer && runsDocker) ? '' : 'none';
+            updateDockerSetupHint();
+        }
+
+        function updateDockerSetupHint() {
+            const el = document.getElementById('dockerSetupCmd');
+            if (!el) return;
+            const port = document.getElementById('dockerPort').value || '2375';
+            const url  = window.location.origin + '/lan-servers/docker-setup.sh';
+            el.textContent = `curl -sSL ${url} | sudo bash -s -- --port ${port}`;
+        }
+
+        function copyDockerSetupCmd() {
+            const el = document.getElementById('dockerSetupCmd');
+            if (!el) return;
+            navigator.clipboard.writeText(el.textContent).catch(() => {});
         }
 
         function hideCreatePeerModal() {
@@ -1080,7 +1280,7 @@
                 btns.push(`<button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peerName}')">↓ Docker Compose</button>`);
             }
             if (t === 'UBUNTU_SERVER') {
-                btns.push(`<button class="btn btn-primary" onclick="downloadSetupScript('${peerName}')">↓ Setup Script</button>`);
+                btns.push(`<button class="btn btn-primary" onclick="showVpnPeerSetupScript('${peerName}')">↓ Setup Script</button>`);
             }
             return btns.join('');
         }
@@ -1150,6 +1350,71 @@
 
         function downloadSetupScript(peerName) {
             window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/setup-script`;
+        }
+
+        // --- Setup-script dialog (shared between VPN peer + LAN docker host) ---
+        let _scriptDialogDownloadUrl = null;
+
+        function showSetupScriptDialog(opts) {
+            document.getElementById('scriptDialogTitle').textContent = opts.title;
+            document.getElementById('scriptDialogDesc').textContent  = opts.description || '';
+            document.getElementById('scriptDialogCmd').textContent   = opts.curlCommand;
+            const copyBtn = document.getElementById('scriptDialogCopyBtn');
+            copyBtn.textContent = 'copy';
+            copyBtn.classList.remove('copied');
+            const note = document.getElementById('scriptDialogAuthNote');
+            if (opts.requiresAuth) {
+                note.textContent = 'This URL requires a Vaier login — curl from a fresh host will be redirected to the login page. '
+                    + 'Use the Download button (your browser sends the auth cookie) and scp the file to the target host instead.';
+                note.style.display = '';
+            } else {
+                note.style.display = 'none';
+            }
+            _scriptDialogDownloadUrl = opts.downloadUrl;
+            document.getElementById('scriptDialogModal').classList.add('active');
+        }
+
+        function hideScriptDialog() {
+            document.getElementById('scriptDialogModal').classList.remove('active');
+        }
+
+        function copyScriptDialogCmd() {
+            const text = document.getElementById('scriptDialogCmd').textContent;
+            const btn  = document.getElementById('scriptDialogCopyBtn');
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'copied';
+                btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 1500);
+            }).catch(() => {});
+        }
+
+        function scriptDialogDownload() {
+            if (_scriptDialogDownloadUrl) window.location.href = _scriptDialogDownloadUrl;
+        }
+
+        function showVpnPeerSetupScript(peerName) {
+            const url = `${window.location.origin}/vpn/peers/${encodeURIComponent(peerName)}/setup-script`;
+            showSetupScriptDialog({
+                title: `Setup script — ${peerName}`,
+                description: 'Bootstraps WireGuard + Docker on a fresh Ubuntu server. Embeds this peer’s WireGuard private key, '
+                    + 'so the URL stays behind Vaier login.',
+                downloadUrl: url,
+                curlCommand: `curl -fsSL '${url}' -o setup-${peerName}.sh && sudo bash setup-${peerName}.sh`,
+                requiresAuth: true,
+            });
+        }
+
+        function showLanDockerSetupScript(port) {
+            const url = `${window.location.origin}/lan-servers/docker-setup.sh`;
+            const p = (port && /^\d+$/.test(String(port))) ? port : 2375;
+            showSetupScriptDialog({
+                title: 'Open Docker API on a LAN host',
+                description: 'Idempotent — exposes the Docker engine API on tcp://0.0.0.0:<port>. '
+                    + 'Covers native (systemd drop-in) and Snap Docker installs. Static script with no secrets, served unauthenticated.',
+                downloadUrl: url,
+                curlCommand: `curl -sSL ${url} | sudo bash -s -- --port ${p}`,
+                requiresAuth: false,
+            });
         }
 
 
@@ -1250,8 +1515,20 @@
             }
         }
 
-        const COLOR_CONNECTED    = '#4ec9b0'; // matches --green / status-connected dot
-        const COLOR_DISCONNECTED = '#f48771'; // matches --red   / status-disconnected dot
+        const COLOR_CONNECTED    = '#4ec9b0'; // matches --green     / status-connected dot
+        const COLOR_DISCONNECTED = '#f48771'; // matches --red       / status-disconnected dot
+        const COLOR_DEGRADED     = '#dcdcaa'; // matches --yellow    / status-degraded dot
+        const COLOR_NEUTRAL      = '#5a5a5a'; // matches --text-dim  / status-neutral dot
+
+        // Map a LAN server's reachability + Docker-scrape status to a marker color.
+        // Mirrors the four-state dot logic in renderLanServerCard (closes #187 — map
+        // used to always render LAN servers green regardless of actual status).
+        function lanServerColor(server, services) {
+            if (!server.reachability || server.reachability === 'UNKNOWN') return COLOR_NEUTRAL;
+            if (server.reachability === 'DOWN') return COLOR_DISCONNECTED;
+            if (server.runsDocker && (!services || services.status !== 'OK')) return COLOR_DEGRADED;
+            return COLOR_CONNECTED;
+        }
 
         function setupPeerMap() {
             if (typeof L === 'undefined') return;
@@ -1376,7 +1653,7 @@
                     + `<span style="color:#888;font-size:0.85em">Behind ${escapeHtml(s.relayPeerName)}</span><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(s.lanAddress)}</span>`
                     + (s.runsDocker ? `<br><span style="color:#888;font-size:0.78em">Docker on :${s.dockerPort}</span>` : '');
-                const firm = makeFirmDot([relay.latitude, relay.longitude], COLOR_CONNECTED);
+                const firm = makeFirmDot([relay.latitude, relay.longitude], lanServerColor(s, lanServerServices[s.name]));
                 bindHoverPopup(firm, popup);
                 _markersClusterGroup.addLayer(firm);
                 allCoords.push([relay.latitude, relay.longitude]);
