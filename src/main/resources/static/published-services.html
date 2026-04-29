@@ -252,17 +252,19 @@
         <div class="modal-content">
             <div class="modal-header">Publish LAN Service</div>
             <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.6rem">
-                Expose a LAN host (NAS, IPMI, printer, etc.) through a relay peer. The target IP must be inside a relay peer's <code style="color:var(--text)">lanCidr</code>.
+                Pick a registered LAN server (a non-Docker machine on a relay peer's LAN — NAS UI, IPMI, printer, etc.) and expose one of its services through the relay.
             </p>
             <div id="publishLanForm">
                 <div class="form-group">
-                    <label class="form-label" for="publishLanSubdomain">Subdomain</label>
-                    <input type="text" id="publishLanSubdomain" class="form-input" placeholder="e.g. nas">
+                    <label class="form-label" for="publishLanMachine">Machine</label>
+                    <select id="publishLanMachine" class="form-input" onchange="onPublishLanMachineChange()">
+                        <option value="">— select a LAN server —</option>
+                    </select>
+                    <span id="publishLanRelayHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
                 </div>
                 <div class="form-group">
-                    <label class="form-label" for="publishLanHost">Target host (LAN IP)</label>
-                    <input type="text" id="publishLanHost" class="form-input" placeholder="e.g. 192.168.3.50" oninput="updateRelayHint()">
-                    <span id="publishLanRelayHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
+                    <label class="form-label" for="publishLanSubdomain">Subdomain</label>
+                    <input type="text" id="publishLanSubdomain" class="form-input" placeholder="e.g. nas">
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="publishLanPort">Target port</label>
@@ -657,59 +659,67 @@
             } catch (e) { /* ignore */ }
         }
 
-        let _relayPeers = [];
+        let _lanServerOptions = [];
 
-        async function loadRelayPeers() {
+        async function loadLanServersForPublish() {
             try {
-                const response = await fetch('/vpn/peers');
+                const response = await fetch('/lan-servers');
                 if (!response.ok) return;
-                const peers = await response.json();
-                _relayPeers = peers.filter(p => p.lanCidr && p.lanCidr.trim());
-            } catch (e) { /* ignore */ }
+                _lanServerOptions = await response.json();
+            } catch (e) { _lanServerOptions = []; }
+            populateLanServerSelect();
         }
 
-        function ipInCidr(ip, cidr) {
-            const [base, prefixStr] = cidr.split('/');
-            const prefix = parseInt(prefixStr);
-            const toInt = a => a.split('.').reduce((acc, b) => (acc << 8) + parseInt(b), 0) >>> 0;
-            try {
-                const baseInt = toInt(base);
-                const ipInt = toInt(ip);
-                if (prefix === 0) return true;
-                const mask = (~0 << (32 - prefix)) >>> 0;
-                return (baseInt & mask) === (ipInt & mask);
-            } catch (e) { return false; }
+        function populateLanServerSelect() {
+            const select = document.getElementById('publishLanMachine');
+            select.innerHTML = '';
+            if (_lanServerOptions.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '— no LAN servers registered —';
+                select.appendChild(opt);
+                select.disabled = true;
+                return;
+            }
+            select.disabled = false;
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = '— select a LAN server —';
+            select.appendChild(placeholder);
+            _lanServerOptions.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.name;
+                const relay = s.relayPeerName ? ` — via ${s.relayPeerName}` : '';
+                opt.textContent = `${s.name} (${s.lanAddress})${relay}`;
+                select.appendChild(opt);
+            });
+            onPublishLanMachineChange();
         }
 
-        function findRelayForHost(host) {
-            if (!host) return null;
-            return _relayPeers.find(p => ipInCidr(host, p.lanCidr));
-        }
-
-        function updateRelayHint() {
-            const host = document.getElementById('publishLanHost').value.trim();
+        function onPublishLanMachineChange() {
+            const name = document.getElementById('publishLanMachine').value;
             const hint = document.getElementById('publishLanRelayHint');
-            if (!host) { hint.textContent = ''; return; }
-            const relay = findRelayForHost(host);
-            if (relay) {
-                hint.textContent = `Routes via ${relay.name} (${relay.lanCidr})`;
+            if (!name) { hint.textContent = ''; return; }
+            const machine = _lanServerOptions.find(s => s.name === name);
+            if (!machine) { hint.textContent = ''; return; }
+            if (machine.relayPeerName) {
+                hint.textContent = `Routes via ${machine.relayPeerName} to ${machine.lanAddress}`;
                 hint.style.color = 'var(--text-muted)';
             } else {
-                hint.textContent = `${host} is not inside any relay peer's lanCidr — set lanCidr on a relay first.`;
+                hint.textContent = `${machine.lanAddress} is not inside any relay peer's lanCidr — set lanCidr on a relay first.`;
                 hint.style.color = 'var(--red)';
             }
         }
 
-        function showPublishLanModal() {
-            loadRelayPeers();
+        async function showPublishLanModal() {
             document.getElementById('publishLanSubdomain').value = '';
-            document.getElementById('publishLanHost').value = '';
             document.getElementById('publishLanPort').value = '';
             document.getElementById('publishLanProtocol').value = 'http';
             document.getElementById('publishLanRequiresAuth').checked = false;
             document.getElementById('publishLanDirectUrlDisabled').checked = false;
             document.getElementById('publishLanRelayHint').textContent = '';
             document.getElementById('publishLanModal').classList.add('active');
+            await loadLanServersForPublish();
             document.getElementById('publishLanSubdomain').focus();
         }
 
@@ -718,15 +728,15 @@
         }
 
         async function submitPublishLan() {
-            const subdomain = document.getElementById('publishLanSubdomain').value.trim();
-            const host      = document.getElementById('publishLanHost').value.trim();
-            const port      = parseInt(document.getElementById('publishLanPort').value);
-            const protocol  = document.getElementById('publishLanProtocol').value;
+            const subdomain   = document.getElementById('publishLanSubdomain').value.trim();
+            const machineName = document.getElementById('publishLanMachine').value;
+            const port        = parseInt(document.getElementById('publishLanPort').value);
+            const protocol    = document.getElementById('publishLanProtocol').value;
             const requireAuth        = document.getElementById('publishLanRequiresAuth').checked;
             const directUrlDisabled  = document.getElementById('publishLanDirectUrlDisabled').checked;
 
-            if (!subdomain) { alert('Please enter a subdomain'); return; }
-            if (!host)      { alert('Please enter a target host'); return; }
+            if (!machineName) { alert('Please select a LAN server'); return; }
+            if (!subdomain)   { alert('Please enter a subdomain'); return; }
             if (!port || port < 1 || port > 65535) { alert('Please enter a valid port (1-65535)'); return; }
 
             const submitBtn = document.getElementById('publishLanSubmitBtn');
@@ -739,10 +749,10 @@
                 const response = await fetch('/published-services/lan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ subdomain, host, port, protocol, requireAuth, directUrlDisabled })
+                    body: JSON.stringify({ subdomain, machineName, port, protocol, requireAuth, directUrlDisabled })
                 });
                 if (response.status === 400) {
-                    alert(`The target host ${host} is not inside any relay peer's lanCidr. Set lanCidr on a relay first.`);
+                    alert(`Could not publish — make sure ${machineName}'s lanAddress is inside a relay peer's lanCidr.`);
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -757,6 +767,7 @@
                 submitBtn.textContent = 'Publish';
             }
         }
+
 
         async function submitPublish() {
             const address          = document.getElementById('publishAddress').value;

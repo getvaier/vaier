@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
+import net.vaier.application.GetLanServersUseCase;
+import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -38,6 +40,7 @@ public class PublishedServiceRestController {
     private final ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
+    private final GetLanServersUseCase getLanServersUseCase;
     private final SseEventPublisher sseEventPublisher;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -67,12 +70,23 @@ public class PublishedServiceRestController {
 
     @PostMapping("/lan")
     public ResponseEntity<Void> publishLanService(@RequestBody PublishLanRequest request) {
-        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={})",
-            request.protocol(), request.host(), request.port(), request.subdomain(),
-            request.requireAuth(), request.directUrlDisabled());
+        LanServerView view = getLanServersUseCase.getAll().stream()
+            .filter(v -> v.server().name().equals(request.machineName()))
+            .findFirst()
+            .orElse(null);
+        if (view == null) {
+            log.warn("LAN publish rejected: unknown machine {}", request.machineName());
+            return ResponseEntity.badRequest().build();
+        }
+        // A Docker-enabled LAN server can still have native (non-container) services that
+        // need manual publish — don't reject based on runsDocker.
+        String host = view.server().lanAddress();
+        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, machine={})",
+            request.protocol(), host, request.port(), request.subdomain(),
+            request.requireAuth(), request.directUrlDisabled(), request.machineName());
         try {
             publishLanServiceUseCase.publishLanService(
-                request.subdomain(), request.host(), request.port(), request.protocol(),
+                request.subdomain(), host, request.port(), request.protocol(),
                 request.requireAuth(), request.directUrlDisabled());
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
@@ -137,7 +151,7 @@ public class PublishedServiceRestController {
     }
 
     record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {}
-    record PublishLanRequest(String subdomain, String host, int port, String protocol, boolean requireAuth, boolean directUrlDisabled) {}
+    record PublishLanRequest(String subdomain, String machineName, int port, String protocol, boolean requireAuth, boolean directUrlDisabled) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}
