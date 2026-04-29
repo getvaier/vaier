@@ -19,6 +19,7 @@ import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
+import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
@@ -38,6 +39,7 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
+import net.vaier.domain.port.ForSyncingLanRoutes;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +53,8 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -64,7 +68,8 @@ public class VpnService implements
     GeneratePeerSetupScriptUseCase,
     GenerateDockerComposeUseCase,
     GetServerLocationUseCase,
-    UpdateLanCidrUseCase {
+    UpdateLanCidrUseCase,
+    SyncLanRoutesUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -90,6 +95,7 @@ public class VpnService implements
     private final ForGeolocatingIps forGeolocatingIps;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
+    private final ForSyncingLanRoutes forSyncingLanRoutes;
     private DockerClient dockerClient;
 
     public VpnService(ConfigResolver configResolver,
@@ -103,7 +109,8 @@ public class VpnService implements
                       ForResolvingPublicHost forResolvingPublicHost,
                       ForGeolocatingIps forGeolocatingIps,
                       ForUpdatingPeerConfigurations forUpdatingPeerConfigurations,
-                      ForUpdatingServerAllowedIps forUpdatingServerAllowedIps) {
+                      ForUpdatingServerAllowedIps forUpdatingServerAllowedIps,
+                      ForSyncingLanRoutes forSyncingLanRoutes) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -116,6 +123,7 @@ public class VpnService implements
         this.forGeolocatingIps = forGeolocatingIps;
         this.forUpdatingPeerConfigurations = forUpdatingPeerConfigurations;
         this.forUpdatingServerAllowedIps = forUpdatingServerAllowedIps;
+        this.forSyncingLanRoutes = forSyncingLanRoutes;
     }
 
     @PostConstruct
@@ -310,6 +318,20 @@ public class VpnService implements
         forUpdatingServerAllowedIps.setPeerAllowedIps(peer.ipAddress(), newAllowedIps);
         forUpdatingPeerConfigurations.updateLanCidr(peerName, lanCidr);
         log.info("Updated lanCidr for peer {} to {} (server-side AllowedIPs: {})", peerName, normalized, newAllowedIps);
+
+        syncLanRoutes();
+    }
+
+    // --- SyncLanRoutesUseCase ---
+
+    @Override
+    public void syncLanRoutes() {
+        Set<String> cidrs = peerConfigProvider.getAllPeerConfigs().stream()
+            .map(ForGettingPeerConfigurations.PeerConfiguration::lanCidr)
+            .filter(c -> c != null && !c.isBlank())
+            .map(String::trim)
+            .collect(Collectors.toSet());
+        forSyncingLanRoutes.syncLanRoutes(cidrs);
     }
 
     // --- DeletePeerUseCase ---

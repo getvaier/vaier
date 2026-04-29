@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.domain.port.ForInitialisingUserService;
@@ -16,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,6 +33,7 @@ class LifecycleServiceTest {
     @Mock ForResolvingPublicHost publicHostResolver;
     @Mock SetupStateHolder setupStateHolder;
     @Mock ConfigResolver configResolver;
+    @Mock SyncLanRoutesUseCase syncLanRoutesUseCase;
     @Mock ApplicationReadyEvent event;
 
     private LifecycleService service() {
@@ -39,7 +42,8 @@ class LifecycleServiceTest {
             containerRestarter, forPersistingDnsRecords,
             forInitialisingVpnRouting, bootstrapCredentialsWriter,
             autheliaAssetsPublisher, publicHostResolver,
-            setupStateHolder, configResolver
+            setupStateHolder, configResolver,
+            syncLanRoutesUseCase
         );
     }
 
@@ -51,5 +55,21 @@ class LifecycleServiceTest {
 
         verify(forInitialisingVpnRouting, never()).setupVpnRouting();
         verify(forInitialisingUserService, never()).initialiseConfiguration();
+        verify(syncLanRoutesUseCase, never()).syncLanRoutes();
+    }
+
+    @Test
+    void runsSyncLanRoutesOnReadyWhenConfigured() {
+        when(setupStateHolder.isConfigured()).thenReturn(true);
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(forPersistingDnsRecords.getDnsZones())
+            .thenReturn(java.util.List.of(new net.vaier.domain.DnsZone("example.com")));
+        when(forPersistingDnsRecords.getDnsRecords(any())).thenReturn(java.util.List.of());
+        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
+        when(publicHostResolver.resolve()).thenReturn(java.util.Optional.empty());
+
+        service().handle(event);
+
+        verify(syncLanRoutesUseCase).syncLanRoutes();
     }
 }

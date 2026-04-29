@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.config.SetupStateHolder;
@@ -31,6 +32,7 @@ public class LifecycleService {
     private final ForResolvingPublicHost publicHostResolver;
     private final SetupStateHolder setupStateHolder;
     private final ConfigResolver configResolver;
+    private final SyncLanRoutesUseCase syncLanRoutesUseCase;
 
     public LifecycleService(
         ForInitialisingUserService forInitialisingUserService,
@@ -42,7 +44,8 @@ public class LifecycleService {
         ForPublishingAutheliaAssets autheliaAssetsPublisher,
         ForResolvingPublicHost publicHostResolver,
         SetupStateHolder setupStateHolder,
-        ConfigResolver configResolver
+        ConfigResolver configResolver,
+        SyncLanRoutesUseCase syncLanRoutesUseCase
     ) {
         this.forInitialisingUserService = forInitialisingUserService;
         this.forPersistingUsers = forPersistingUsers;
@@ -54,6 +57,7 @@ public class LifecycleService {
         this.publicHostResolver = publicHostResolver;
         this.setupStateHolder = setupStateHolder;
         this.configResolver = configResolver;
+        this.syncLanRoutesUseCase = syncLanRoutesUseCase;
     }
 
     @EventListener
@@ -85,5 +89,6 @@ public class LifecycleService {
         ).start();
 
         forInitialisingVpnRouting.setupVpnRouting();
+        syncLanRoutesUseCase.syncLanRoutes();
     }
 }

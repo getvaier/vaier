@@ -20,6 +20,7 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
+import net.vaier.domain.port.ForSyncingLanRoutes;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -56,6 +58,7 @@ class VpnServiceTest {
     @Mock ForGeolocatingIps forGeolocatingIps;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
+    @Mock ForSyncingLanRoutes forSyncingLanRoutes;
 
     @InjectMocks VpnService service;
 
@@ -673,6 +676,52 @@ class VpnServiceTest {
         when(configResolver.getDomain()).thenReturn("");
 
         assertThat(service.getServerLocation()).isEmpty();
+    }
+
+    // --- syncLanRoutes ---
+
+    @Test
+    void syncLanRoutes_passesEveryRelayCidr_toLanRouteAdapter() {
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, "192.168.3.0/24", null),
+            new PeerConfiguration("alice",      "10.13.13.2", "config", PeerType.WINDOWS_CLIENT,    null,            null),
+            new PeerConfiguration("nuc02",      "10.13.13.8", "config", PeerType.UBUNTU_SERVER, "192.168.4.0/24", null)
+        ));
+
+        service.syncLanRoutes();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Set<String>> captor = ArgumentCaptor.forClass(java.util.Set.class);
+        verify(forSyncingLanRoutes).syncLanRoutes(captor.capture());
+        assertThat(captor.getValue()).containsExactlyInAnyOrder("192.168.3.0/24", "192.168.4.0/24");
+    }
+
+    @Test
+    void syncLanRoutes_skipsBlankAndNullCidrs() {
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("alice", "10.13.13.2", "config", PeerType.WINDOWS_CLIENT,    null, null),
+            new PeerConfiguration("blank", "10.13.13.3", "config", PeerType.UBUNTU_SERVER, "  ", null)
+        ));
+
+        service.syncLanRoutes();
+
+        verify(forSyncingLanRoutes).syncLanRoutes(java.util.Set.of());
+    }
+
+    @Test
+    void updateLanCidr_alsoSyncsLanRoutes() {
+        when(peerConfigProvider.getPeerConfigByName("apalveien5"))
+            .thenReturn(Optional.of(new PeerConfiguration("apalveien5", "10.13.13.6", "config",
+                PeerType.UBUNTU_SERVER, null, null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, null, null)));
+
+        service.updateLanCidr("apalveien5", "192.168.3.0/24");
+
+        // Sync must run AFTER the persistence step — otherwise the sync would read the pre-change CIDRs.
+        var order = inOrder(forUpdatingPeerConfigurations, forSyncingLanRoutes);
+        order.verify(forUpdatingPeerConfigurations).updateLanCidr("apalveien5", "192.168.3.0/24");
+        order.verify(forSyncingLanRoutes).syncLanRoutes(any());
     }
 
     // --- updateLanCidr (#176) ---
