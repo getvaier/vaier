@@ -147,7 +147,8 @@
             justify-self: start;
         }
 
-        .status-neutral { background: var(--text-dim); }
+        .status-neutral  { background: var(--text-dim); }
+        .status-degraded { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
 
         .peer-actions {
             display: flex;
@@ -627,8 +628,24 @@
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
             const services = lanServerServices[server.name];
-            const reachable = !server.runsDocker || (services && services.status === 'OK');
-            const statusClass = reachable ? 'status-connected' : 'status-disconnected';
+            // Status combines the periodic TCP ping (#186) with Docker scrape state for
+            // Docker hosts:
+            //   gray   — not yet probed
+            //   green  — host pingable; if it runs Docker, the scrape is also OK
+            //   yellow — host pingable but Docker scrape failed (Docker host only)
+            //   red    — host not pingable
+            let statusClass;
+            if (server.reachability === 'UNKNOWN' || !server.reachability) {
+                statusClass = 'status-neutral';
+            } else if (server.reachability === 'DOWN') {
+                statusClass = 'status-disconnected';
+            } else if (server.runsDocker) {
+                statusClass = (services && services.status === 'OK')
+                    ? 'status-connected'
+                    : 'status-degraded';
+            } else {
+                statusClass = 'status-connected';
+            }
             const relayLabel = server.relayPeerName
                 ? `via ${server.relayPeerName}`
                 : `<span style="color:var(--red)">no relay covers ${server.lanAddress}</span>`;
@@ -1402,6 +1419,7 @@
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());
+        _sse.addEventListener('lan-servers-updated', () => fetchLanServers());
         _sse.addEventListener('peers-stats', e => {
             try {
                 const stats = JSON.parse(e.data);

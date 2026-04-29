@@ -1,6 +1,8 @@
 package net.vaier.rest;
 
 import net.vaier.application.DeleteLanServerUseCase;
+import net.vaier.application.GetLanServerReachabilityUseCase;
+import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
@@ -26,6 +28,7 @@ class LanServerRestControllerTest {
     @Mock RegisterLanServerUseCase registerLanServerUseCase;
     @Mock DeleteLanServerUseCase deleteLanServerUseCase;
     @Mock GetLanServersUseCase getLanServersUseCase;
+    @Mock GetLanServerReachabilityUseCase reachabilityUseCase;
 
     @InjectMocks
     LanServerRestController controller;
@@ -81,11 +84,13 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void list_returnsRegisteredServersWithRelayName() {
+    void list_returnsRegisteredServersWithRelayNameAndReachability() {
         when(getLanServersUseCase.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5"),
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5")
         ));
+        when(reachabilityUseCase.getReachability("nas")).thenReturn(Reachability.UNKNOWN);
+        when(reachabilityUseCase.getReachability("printer")).thenReturn(Reachability.OK);
 
         var response = controller.list();
 
@@ -95,8 +100,10 @@ class LanServerRestControllerTest {
         assertThat(response.get(0).runsDocker()).isTrue();
         assertThat(response.get(0).dockerPort()).isEqualTo(2375);
         assertThat(response.get(0).relayPeerName()).isEqualTo("apalveien5");
+        assertThat(response.get(0).reachability()).isEqualTo("UNKNOWN");
         assertThat(response.get(1).name()).isEqualTo("printer");
         assertThat(response.get(1).runsDocker()).isFalse();
         assertThat(response.get(1).dockerPort()).isNull();
+        assertThat(response.get(1).reachability()).isEqualTo("OK");
     }
 }

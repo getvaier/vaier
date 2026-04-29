@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
+import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
@@ -20,11 +21,13 @@ public class LanServerRestController {
     private final RegisterLanServerUseCase registerLanServerUseCase;
     private final DeleteLanServerUseCase deleteLanServerUseCase;
     private final GetLanServersUseCase getLanServersUseCase;
+    private final GetLanServerReachabilityUseCase reachabilityUseCase;
 
     @GetMapping
     public List<LanServerResponse> list() {
         return getLanServersUseCase.getAll().stream()
-            .map(LanServerResponse::from)
+            .map(view -> LanServerResponse.from(view,
+                reachabilityUseCase.getReachability(view.server().name()).name()))
             .toList();
     }
 
@@ -56,15 +59,17 @@ public class LanServerRestController {
         String lanAddress,
         boolean runsDocker,
         Integer dockerPort,
-        String relayPeerName
+        String relayPeerName,
+        String reachability
     ) {
-        static LanServerResponse from(LanServerView view) {
+        static LanServerResponse from(LanServerView view, String reachability) {
             return new LanServerResponse(
                 view.server().name(),
                 view.server().lanAddress(),
                 view.server().runsDocker(),
                 view.server().dockerPort(),
-                view.relayPeerName());
+                view.relayPeerName(),
+                reachability);
         }
     }
 }
