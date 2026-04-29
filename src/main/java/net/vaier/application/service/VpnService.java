@@ -25,7 +25,7 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.GeoLocation;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
@@ -376,16 +376,16 @@ public class VpnService implements
 
     @Override
     public CreatedPeerUco createPeer(String peerName) {
-        return createPeer(peerName, PeerType.UBUNTU_SERVER, null, null);
+        return createPeer(peerName, MachineType.UBUNTU_SERVER, null, null);
     }
 
     @Override
-    public CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr) {
+    public CreatedPeerUco createPeer(String peerName, MachineType peerType, String lanCidr) {
         return createPeer(peerName, peerType, lanCidr, null);
     }
 
     @Override
-    public CreatedPeerUco createPeer(String peerName, PeerType peerType, String lanCidr, String lanAddress) {
+    public CreatedPeerUco createPeer(String peerName, MachineType peerType, String lanCidr, String lanAddress) {
         peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
         log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {}, lanAddress: {})",
                 peerName, wireguardInterface, peerType, lanCidr, lanAddress);

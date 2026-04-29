@@ -1,6 +1,6 @@
 package net.vaier.domain.port;
 
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 
 import java.util.List;
 import java.util.Optional;
@@ -17,16 +17,16 @@ public interface ForGettingPeerConfigurations {
         String name,
         String ipAddress,
         String configContent,
-        PeerType peerType,
+        MachineType peerType,
         String lanCidr,
         String lanAddress
     ) {
         public PeerConfiguration(String name, String ipAddress, String configContent) {
-            this(name, ipAddress, configContent, PeerType.UBUNTU_SERVER, null, null);
+            this(name, ipAddress, configContent, MachineType.UBUNTU_SERVER, null, null);
         }
 
         public PeerConfiguration(String name, String ipAddress, String configContent,
-                                 PeerType peerType, String lanCidr) {
+                                 MachineType peerType, String lanCidr) {
             this(name, ipAddress, configContent, peerType, lanCidr, null);
         }
     }

@@ -137,7 +137,7 @@ class WireguardConfigFileAdapterTest {
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("server1");
 
         assertThat(result).isPresent();
-        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
         assertThat(result.get().lanCidr()).isNull();
     }
 
@@ -149,7 +149,7 @@ class WireguardConfigFileAdapterTest {
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("phone");
 
         assertThat(result).isPresent();
-        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.PeerType.MOBILE_CLIENT);
+        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.MachineType.MOBILE_CLIENT);
         assertThat(result.get().lanCidr()).isNull();
     }
 
@@ -161,7 +161,7 @@ class WireguardConfigFileAdapterTest {
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("spain");
 
         assertThat(result).isPresent();
-        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.get().peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
         assertThat(result.get().lanCidr()).isEqualTo("192.168.1.0/24");
     }
 
@@ -187,7 +187,7 @@ class WireguardConfigFileAdapterTest {
 
         PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
         assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
     }
 
     @Test
@@ -221,7 +221,7 @@ class WireguardConfigFileAdapterTest {
 
         PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
         assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
     }
 
     @Test
@@ -254,7 +254,7 @@ class WireguardConfigFileAdapterTest {
 
         PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
         assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
     }
 
     @Test
@@ -288,7 +288,7 @@ class WireguardConfigFileAdapterTest {
 
         PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
         assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.PeerType.UBUNTU_SERVER);
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
     }
 
     @Test

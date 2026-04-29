@@ -3,7 +3,7 @@ package net.vaier.application.service;
 import net.vaier.application.GetUsersUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.PeerSnapshot;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
@@ -53,7 +53,7 @@ class NotificationServiceTest {
     }
 
     private PeerSnapshot snapshot(boolean connected) {
-        return new PeerSnapshot("file-server", PeerType.UBUNTU_SERVER, connected, 1700000000L, "192.168.1.50");
+        return new PeerSnapshot("file-server", MachineType.UBUNTU_SERVER, connected, 1700000000L, "192.168.1.50");
     }
 
     @Test

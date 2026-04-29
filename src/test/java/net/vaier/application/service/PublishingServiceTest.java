@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
+import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
 import net.vaier.application.GetLocalDockerServicesUseCase;
@@ -87,7 +87,7 @@ class PublishingServiceTest {
     DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
 
     @Mock
-    DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase;
+    DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
 
     @Mock
     GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
@@ -679,7 +679,7 @@ class PublishingServiceTest {
         // isLanService=false and the dashboard's directUrl() can't find the relay peer (#180).
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
-                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+                "apalveien5", "10.13.13.5", "", MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
         ));
 
         service.publishService("192.168.3.50", 80, "pihole", false, null, false);
@@ -694,7 +694,7 @@ class PublishingServiceTest {
     void publishService_addressOutsideAllRelayLanCidrs_usesPeerFlow() {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
-                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+                "apalveien5", "10.13.13.5", "", MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
         ));
 
         service.publishService("10.13.13.5", 8080, "app", false, null, false);
@@ -708,7 +708,7 @@ class PublishingServiceTest {
     void publishLanService_targetIpOutsideEveryRelayLanCidr_throws() {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
-                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+                "apalveien5", "10.13.13.5", "", MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
         ));
 
         assertThrows(IllegalArgumentException.class, () ->
@@ -723,7 +723,7 @@ class PublishingServiceTest {
     void publishLanService_targetIpInsideRelayLanCidr_createsCnameDnsRecord() {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration(
-                "apalveien5", "10.13.13.5", "", PeerType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+                "apalveien5", "10.13.13.5", "", MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
         ));
 
         service.publishLanService("nas", "192.168.3.50", 5000, "https", false, false);
@@ -1000,7 +1000,7 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
-        when(discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers()).thenReturn(List.of(
+        when(discoverLanServerContainersUseCase.discoverAllLanServerContainers()).thenReturn(List.of(
             okLanHost("nas", "192.168.1.50", 2375, "apalveien",
                 List.of(peerContainer("pihole", 80, "tcp")))
         ));
@@ -1009,7 +1009,7 @@ class PublishingServiceTest {
 
         assertThat(result).hasSize(1);
         PublishableService svc = result.getFirst();
-        assertThat(svc.source()).isEqualTo(PublishableSource.LAN_DOCKER_HOST);
+        assertThat(svc.source()).isEqualTo(PublishableSource.LAN_SERVER);
         assertThat(svc.peerName()).isEqualTo("apalveien");
         assertThat(svc.address()).isEqualTo("192.168.1.50");
         assertThat(svc.containerName()).isEqualTo("pihole");
@@ -1018,12 +1018,12 @@ class PublishingServiceTest {
 
     @Test
     void getPublishableServices_ignoredLanDockerHostService_markedIgnored() {
-        // Ignore key for LAN_DOCKER_HOST uses the LAN host IP (not the relay peer name) so two
+        // Ignore key for LAN_SERVER uses the LAN host IP (not the relay peer name) so two
         // LAN hosts behind the same relay with same-named containers don't collide.
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
-        when(discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers()).thenReturn(List.of(
+        when(discoverLanServerContainersUseCase.discoverAllLanServerContainers()).thenReturn(List.of(
             okLanHost("nas", "192.168.1.50", 2375, "apalveien",
                 List.of(peerContainer("pihole", 80, "tcp")))
         ));
@@ -1245,10 +1245,10 @@ class PublishingServiceTest {
         return new PeerContainers(name, ip, "OK", containers, false, "");
     }
 
-    private DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers okLanHost(
+    private DiscoverLanServerContainersUseCase.LanServerContainers okLanHost(
             String hostName, String hostIp, int port, String relayPeerName,
             List<DockerService> containers) {
-        return new DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers(
+        return new DiscoverLanServerContainersUseCase.LanServerContainers(
             hostName, hostIp, port, relayPeerName, "OK", containers);
     }
 

@@ -6,7 +6,7 @@ public final class WireGuardPeerConfig {
 
     public static String generate(String privateKey, String ipAddress, String serverPublicKey,
                                   String presharedKey, String serverEndpoint,
-                                  PeerType peerType, String lanCidr, String lanAddress, String vpnSubnet) {
+                                  MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet) {
         // lanCidr is intentionally NOT appended to the client-side AllowedIPs: doing so makes
         // wg-quick install a route for that CIDR via wg0 on the relay peer, which hijacks the
         // relay's own LAN. lanCidr is still recorded in the # VAIER metadata below so that
@@ -36,10 +36,10 @@ public final class WireGuardPeerConfig {
                 serverPublicKey, presharedKey, serverEndpoint, allowedIps);
     }
 
-    public static String vaierJson(PeerType peerType, String lanCidr, String lanAddress) {
+    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
-        boolean serverType = peerType == PeerType.UBUNTU_SERVER;
+        boolean serverType = peerType == MachineType.UBUNTU_SERVER;
         if (serverType && lanCidr != null && !lanCidr.isBlank()) {
             sb.append(",\"lanCidr\":\"").append(lanCidr).append("\"");
         }

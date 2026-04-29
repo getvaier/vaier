@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
@@ -49,7 +49,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata meta = extractVaierMetadata(configContent);
 
             return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
-                    parsePeerType(meta.peerType()), meta.lanCidr(), meta.lanAddress()));
+                    parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress()));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -86,7 +86,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 VaierMetadata meta = extractVaierMetadata(configContent);
 
                 return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
-                        parsePeerType(meta.peerType()), meta.lanCidr(), meta.lanAddress()));
+                        parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress()));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -203,7 +203,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata existing = extractVaierMetadata(content);
             String normalized = (lanAddress == null || lanAddress.isBlank()) ? null : lanAddress.trim();
             VaierMetadata updated = new VaierMetadata(
-                existing.peerType() != null ? existing.peerType() : PeerType.UBUNTU_SERVER.name(),
+                existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
                 existing.lanCidr(),
                 normalized);
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
@@ -232,7 +232,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata existing = extractVaierMetadata(content);
             String normalized = (lanCidr == null || lanCidr.isBlank()) ? null : lanCidr.trim();
             VaierMetadata updated = new VaierMetadata(
-                existing.peerType() != null ? existing.peerType() : PeerType.UBUNTU_SERVER.name(),
+                existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
                 normalized,
                 existing.lanAddress());
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
@@ -250,13 +250,13 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         }
     }
 
-    private PeerType parsePeerType(String value) {
-        if (value == null) return PeerType.UBUNTU_SERVER;
+    private MachineType parseMachineType(String value) {
+        if (value == null) return MachineType.UBUNTU_SERVER;
         try {
-            return PeerType.valueOf(value);
+            return MachineType.valueOf(value);
         } catch (IllegalArgumentException e) {
             log.warn("Unknown peer type '{}', defaulting to UBUNTU_SERVER", value);
-            return PeerType.UBUNTU_SERVER;
+            return MachineType.UBUNTU_SERVER;
         }
     }
 }

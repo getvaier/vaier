@@ -1,7 +1,7 @@
 package net.vaier.rest;
 
-import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
-import net.vaier.application.DiscoverLanDockerHostContainersUseCase.LanDockerHostContainers;
+import net.vaier.application.DiscoverLanServerContainersUseCase;
+import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
 import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
@@ -22,16 +22,16 @@ public class DockerServiceRestController {
     private final GetServerInfoUseCase getServerInfoUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
-    private final DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase;
+    private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
 
     public DockerServiceRestController(GetServerInfoUseCase getServerInfoUseCase,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
                                        DiscoverLocalContainersUseCase discoverLocalContainersUseCase,
-                                       DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase) {
+                                       DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase) {
         this.getServerInfoUseCase = getServerInfoUseCase;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverLocalContainersUseCase = discoverLocalContainersUseCase;
-        this.discoverLanDockerHostContainersUseCase = discoverLanDockerHostContainersUseCase;
+        this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
     }
 
     @GetMapping
@@ -66,10 +66,10 @@ public class DockerServiceRestController {
         }
     }
 
-    @GetMapping("/lan-docker-hosts")
-    public ResponseEntity<List<LanDockerHostContainers>> discoverLanDockerHostContainers() {
+    @GetMapping("/lan-servers")
+    public ResponseEntity<List<LanServerContainers>> discoverLanServerContainers() {
         try {
-            return ResponseEntity.ok(discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers());
+            return ResponseEntity.ok(discoverLanServerContainersUseCase.discoverAllLanServerContainers());
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }

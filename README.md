@@ -260,14 +260,14 @@ For LAN-only devices that don't run Docker — NAS appliances, printers, IPMI, o
 2. In Vaier → Services → **+ Publish LAN service**, enter subdomain, target IP (must fall inside a relay's `lanCidr`), port, and protocol (`http` / `https`)
 3. Vaier creates the DNS CNAME and a Traefik route whose backend is `http(s)://<lan-ip>:<port>`. Cryptokey routing on `wg0` plus the relay's `ip_forward` + iptables rules forward traffic from the Vaier server through the relay onto its LAN.
 
-### Publishing services from a Docker host on a relay's LAN
+### Registering a LAN server (Docker optional)
 
-For a Docker host that lives on a relay peer's LAN (e.g. a NAS that runs Docker, an extra Docker server) — but isn't itself a VPN peer:
+A *LAN server* is any machine on a relay peer's LAN that isn't itself a VPN peer — a NAS, a printer, a Docker host. Registering it lets Vaier publish its services through the relay. Docker discovery is optional; if the LAN server runs Docker and exposes its socket, Vaier auto-discovers containers, otherwise you publish a single service manually.
 
 1. On the relay peer, set `lanCidr` (e.g. `192.168.3.0/24`) so Vaier knows which LAN sits behind it
-2. On the LAN Docker host, expose its Docker socket on TCP 2375 reachable from the relay (no TLS in V1; firewall to the relay's LAN range)
-3. In Vaier → Machines, click **+ Add** under "LAN Docker hosts", enter a name, the host IP (must fall inside a relay's `lanCidr`), and the Docker API port (defaults to 2375)
-4. Discovered containers appear in Services → discovered list with a `LAN docker` badge and route through the relay when published
+2. (Docker only) On the LAN server, expose its Docker socket on TCP 2375 reachable from the relay (no TLS in V1; firewall to the relay's LAN range)
+3. In Vaier → Machines, click **+ Add LAN server**, enter a name, the LAN address (must fall inside a relay's `lanCidr`), and toggle Docker on/off (Docker port defaults to 2375)
+4. With Docker on, discovered containers appear in Services → discovered list and route through the relay when published. With Docker off, use **+ Publish LAN service** to publish a single service by hand
 
 ---
 

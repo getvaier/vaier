@@ -7,10 +7,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class WireGuardPeerConfigTest {
 
     @Test
-    void generate_mobileClient_routesAllTrafficAndEmbedsPeerType() {
+    void generate_mobileClient_routesAllTrafficAndEmbedsMachineType() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(config).contains("\"peerType\":\"MOBILE_CLIENT\"");
@@ -18,10 +18,10 @@ class WireGuardPeerConfigTest {
     }
 
     @Test
-    void generate_windowsClient_routesAllTrafficAndEmbedsPeerType() {
+    void generate_windowsClient_routesAllTrafficAndEmbedsMachineType() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.WINDOWS_CLIENT, null, null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.WINDOWS_CLIENT, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(config).contains("\"peerType\":\"WINDOWS_CLIENT\"");
@@ -31,7 +31,7 @@ class WireGuardPeerConfigTest {
     void generate_ubuntuServer_routesOnlyVpnTraffic() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).contains("\"peerType\":\"UBUNTU_SERVER\"");
@@ -47,7 +47,7 @@ class WireGuardPeerConfigTest {
         // via its own LAN NIC using ip_forward + iptables NAT (issue #170).
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).doesNotContain("AllowedIPs = 10.13.13.0/24, 192.168.1.0/24");
@@ -60,7 +60,7 @@ class WireGuardPeerConfigTest {
     void generate_windowsServer_routesOnlyVpnTraffic() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.4", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.WINDOWS_SERVER, null, null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.WINDOWS_SERVER, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).contains("\"peerType\":\"WINDOWS_SERVER\"");
@@ -70,7 +70,7 @@ class WireGuardPeerConfigTest {
     void generate_ubuntuServerWithLanAddress_embedsLanAddressInMetadata() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, "192.168.3.121", "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, "192.168.3.121", "10.13.13.0/24");
 
         assertThat(config).contains("\"lanAddress\":\"192.168.3.121\"");
         assertThat(config).doesNotContain("\"lanCidr\"");
@@ -80,7 +80,7 @@ class WireGuardPeerConfigTest {
     void generate_mobileClientWithLanAddress_doesNotEmbedLanAddress() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, "192.168.3.121", "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, "192.168.3.121", "10.13.13.0/24");
 
         assertThat(config).doesNotContain("lanAddress");
     }
@@ -89,7 +89,7 @@ class WireGuardPeerConfigTest {
     void generate_ubuntuServer_usesConfiguredSubnetNotDefault() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.10.10.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, null, "10.10.10.0/24");
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.10.10.0/24");
 
         assertThat(config).contains("AllowedIPs = 10.10.10.0/24");
         assertThat(config).doesNotContain("10.13.13.0/24");
@@ -99,7 +99,7 @@ class WireGuardPeerConfigTest {
     void generate_clientType_includesDnsLine() {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.2", "serverPk", "psk",
-                "vpn.example.com:51820", PeerType.MOBILE_CLIENT, null, null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24");
 
         assertThat(config).contains("DNS = 172.20.0.53");
     }
@@ -108,7 +108,7 @@ class WireGuardPeerConfigTest {
     void generate_serverType_omitsDnsLine() {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
-                "vpn.example.com:51820", PeerType.UBUNTU_SERVER, null, null, "10.13.13.0/24");
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24");
 
         assertThat(config).doesNotContain("DNS =");
     }

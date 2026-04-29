@@ -1,7 +1,7 @@
 package net.vaier.integration.adapter;
 
 import net.vaier.adapter.driven.WireguardConfigFileAdapter;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +33,7 @@ class WireguardConfigFileAdapterIT {
         ReflectionTestUtils.setField(adapter, "wireguardConfigPath", tempDir.toString());
     }
 
-    private void writePeerConfig(String peerName, String ipAddress, PeerType peerType, String lanCidr) throws IOException {
+    private void writePeerConfig(String peerName, String ipAddress, MachineType peerType, String lanCidr) throws IOException {
         Path peerDir = tempDir.resolve(peerName);
         Files.createDirectories(peerDir);
         StringBuilder content = new StringBuilder();
@@ -54,9 +54,9 @@ class WireguardConfigFileAdapterIT {
 
     @Test
     void getAllPeerConfigs_returnsAllThreePeers() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.UBUNTU_SERVER, null);
-        writePeerConfig("peer2", "10.13.13.3", PeerType.MOBILE_CLIENT, null);
-        writePeerConfig("peer3", "10.13.13.4", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("peer1", "10.13.13.2", MachineType.UBUNTU_SERVER, null);
+        writePeerConfig("peer2", "10.13.13.3", MachineType.MOBILE_CLIENT, null);
+        writePeerConfig("peer3", "10.13.13.4", MachineType.UBUNTU_SERVER, null);
 
         List<PeerConfiguration> configs = adapter.getAllPeerConfigs();
 
@@ -67,7 +67,7 @@ class WireguardConfigFileAdapterIT {
 
     @Test
     void wgConfsDirectory_isExcludedFromListing() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("peer1", "10.13.13.2", MachineType.UBUNTU_SERVER, null);
         Files.createDirectories(tempDir.resolve("wg_confs"));
 
         List<PeerConfiguration> configs = adapter.getAllPeerConfigs();
@@ -77,7 +77,7 @@ class WireguardConfigFileAdapterIT {
 
     @Test
     void hiddenDirectory_isExcludedFromListing() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("peer1", "10.13.13.2", MachineType.UBUNTU_SERVER, null);
         Files.createDirectories(tempDir.resolve(".hidden"));
 
         List<PeerConfiguration> configs = adapter.getAllPeerConfigs();
@@ -87,14 +87,14 @@ class WireguardConfigFileAdapterIT {
 
     @Test
     void getPeerConfigByName_returnsCorrectConfig() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("peer1", "10.13.13.2", MachineType.UBUNTU_SERVER, null);
 
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("peer1");
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("peer1");
         assertThat(result.get().ipAddress()).isEqualTo("10.13.13.2");
-        assertThat(result.get().peerType()).isEqualTo(PeerType.UBUNTU_SERVER);
+        assertThat(result.get().peerType()).isEqualTo(MachineType.UBUNTU_SERVER);
     }
 
     @Test
@@ -104,31 +104,31 @@ class WireguardConfigFileAdapterIT {
 
     @Test
     void getPeerConfigByIp_findsCorrectPeerFromMultiple() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.UBUNTU_SERVER, null);
-        writePeerConfig("peer2", "10.13.13.3", PeerType.MOBILE_CLIENT, null);
-        writePeerConfig("peer3", "10.13.13.4", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("peer1", "10.13.13.2", MachineType.UBUNTU_SERVER, null);
+        writePeerConfig("peer2", "10.13.13.3", MachineType.MOBILE_CLIENT, null);
+        writePeerConfig("peer3", "10.13.13.4", MachineType.UBUNTU_SERVER, null);
 
         Optional<PeerConfiguration> result = adapter.getPeerConfigByIp("10.13.13.3");
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("peer2");
-        assertThat(result.get().peerType()).isEqualTo(PeerType.MOBILE_CLIENT);
+        assertThat(result.get().peerType()).isEqualTo(MachineType.MOBILE_CLIENT);
     }
 
     @Test
     void vaierMetadata_peerTypeAndLanCidrParsedCorrectly() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.MOBILE_CLIENT, "192.168.1.0/24");
+        writePeerConfig("peer1", "10.13.13.2", MachineType.MOBILE_CLIENT, "192.168.1.0/24");
 
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("peer1");
 
         assertThat(result).isPresent();
-        assertThat(result.get().peerType()).isEqualTo(PeerType.MOBILE_CLIENT);
+        assertThat(result.get().peerType()).isEqualTo(MachineType.MOBILE_CLIENT);
         assertThat(result.get().lanCidr()).isEqualTo("192.168.1.0/24");
     }
 
     @Test
     void resolvePeerNameByIp_returnsNameWhenFound() throws IOException {
-        writePeerConfig("myserver", "10.13.13.5", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("myserver", "10.13.13.5", MachineType.UBUNTU_SERVER, null);
 
         String resolved = adapter.resolvePeerNameByIp("10.13.13.5");
 
@@ -149,7 +149,7 @@ class WireguardConfigFileAdapterIT {
 
     @Test
     void configContent_containsOriginalFileContent() throws IOException {
-        writePeerConfig("peer1", "10.13.13.2", PeerType.UBUNTU_SERVER, null);
+        writePeerConfig("peer1", "10.13.13.2", MachineType.UBUNTU_SERVER, null);
 
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("peer1");
 

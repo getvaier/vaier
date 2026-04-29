@@ -2,7 +2,7 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
-import net.vaier.application.DiscoverLanDockerHostContainersUseCase;
+import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
@@ -74,7 +74,7 @@ public class PublishingService implements
     private final ForManagingIgnoredServices forManagingIgnoredServices;
     private final PendingPublicationsService pendingPublicationsService;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
-    private final DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase;
+    private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
     private final GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
 
     private volatile List<PublishedServiceUco> cache = null;
@@ -100,7 +100,7 @@ public class PublishingService implements
                              ForManagingIgnoredServices forManagingIgnoredServices,
                              PendingPublicationsService pendingPublicationsService,
                              DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
-                             DiscoverLanDockerHostContainersUseCase discoverLanDockerHostContainersUseCase,
+                             DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase,
                              GetLocalDockerServicesUseCase getLocalDockerServicesUseCase) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
@@ -114,7 +114,7 @@ public class PublishingService implements
         this.forManagingIgnoredServices = forManagingIgnoredServices;
         this.pendingPublicationsService = pendingPublicationsService;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
-        this.discoverLanDockerHostContainersUseCase = discoverLanDockerHostContainersUseCase;
+        this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
         this.getLocalDockerServicesUseCase = getLocalDockerServicesUseCase;
     }
 
@@ -187,7 +187,7 @@ public class PublishingService implements
     @Override
     public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
         // A LAN docker host's IP arrives here when the user clicks "+ Publish" on a discovered
-        // LAN_DOCKER_HOST service. Dispatch to the LAN flow so the route is marked isLanService=true
+        // LAN_SERVER service. Dispatch to the LAN flow so the route is marked isLanService=true
         // and the dashboard's direct-LAN URL bypass works (#180).
         if (hostInsideAnyRelayLanCidr(address)) {
             log.info("Address {} falls inside a relay's lanCidr — publishing as LAN service", address);
@@ -470,17 +470,17 @@ public class PublishingService implements
             )
             .forEach(publishable::add);
 
-        discoverLanDockerHostContainersUseCase.discoverAllLanDockerHostContainers().stream()
+        discoverLanServerContainersUseCase.discoverAllLanServerContainers().stream()
             .filter(host -> "OK".equals(host.status()))
             .flatMap(host -> host.containers().stream()
                 .flatMap(container -> container.ports().stream()
                     .filter(p -> "tcp".equals(p.type()))
                     .filter(p -> p.publicPort() != null)
                     .filter(p -> existingRoutes.stream()
-                        .noneMatch(r -> r.getAddress().equals(host.hostIp()) && r.getPort() == p.publicPort()))
-                    .filter(p -> !pendingPublicationsService.isPending(host.hostIp(), p.publicPort()))
-                    .map(p -> new PublishableService(PublishableSource.LAN_DOCKER_HOST, host.relayPeerName(),
-                        host.hostIp(), container.containerName(), p.publicPort(), null, false))
+                        .noneMatch(r -> r.getAddress().equals(host.lanAddress()) && r.getPort() == p.publicPort()))
+                    .filter(p -> !pendingPublicationsService.isPending(host.lanAddress(), p.publicPort()))
+                    .map(p -> new PublishableService(PublishableSource.LAN_SERVER, host.relayPeerName(),
+                        host.lanAddress(), container.containerName(), p.publicPort(), null, false))
                 )
             )
             .forEach(publishable::add);
@@ -498,7 +498,7 @@ public class PublishingService implements
     static String ignoreKey(PublishableService s) {
         return switch (s.source()) {
             case PEER            -> s.peerName() + "/" + s.containerName() + ":" + s.port();
-            case LAN_DOCKER_HOST -> s.address()  + "/" + s.containerName() + ":" + s.port();
+            case LAN_SERVER -> s.address()  + "/" + s.containerName() + ":" + s.port();
             case LOCAL           -> s.containerName() + ":" + s.port();
         };
     }

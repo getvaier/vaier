@@ -5,7 +5,7 @@ import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.domain.PeerSnapshot;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,7 +42,7 @@ class PeerConnectivityWatcherTest {
         return new VpnClient("pk-" + allowedIps, allowedIps, "1.2.3.4", "51820", latestHandshake, "0", "0");
     }
 
-    private GetPeerConfigUseCase.PeerConfigResult configResult(String name, String ip, PeerType type) {
+    private GetPeerConfigUseCase.PeerConfigResult configResult(String name, String ip, MachineType type) {
         return new GetPeerConfigUseCase.PeerConfigResult(name, ip, "", type, null, null);
     }
 
@@ -55,7 +55,7 @@ class PeerConnectivityWatcherTest {
         when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.2/32", recent())));
         when(peerNameResolver.resolvePeerNameByIp("10.0.0.2")).thenReturn("server-a");
         when(peerConfigs.getPeerConfigByIp("10.0.0.2"))
-                .thenReturn(Optional.of(configResult("server-a", "10.0.0.2", PeerType.UBUNTU_SERVER)));
+                .thenReturn(Optional.of(configResult("server-a", "10.0.0.2", MachineType.UBUNTU_SERVER)));
 
         watcher.checkConnectivity();
 
@@ -66,7 +66,7 @@ class PeerConnectivityWatcherTest {
     void serverPeerTransitionsToDisconnected_notifiesAdmins() {
         when(peerNameResolver.resolvePeerNameByIp("10.0.0.2")).thenReturn("server-a");
         when(peerConfigs.getPeerConfigByIp("10.0.0.2"))
-                .thenReturn(Optional.of(configResult("server-a", "10.0.0.2", PeerType.UBUNTU_SERVER)));
+                .thenReturn(Optional.of(configResult("server-a", "10.0.0.2", MachineType.UBUNTU_SERVER)));
 
         when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.2/32", recent())));
         watcher.checkConnectivity();
@@ -78,14 +78,14 @@ class PeerConnectivityWatcherTest {
         verify(notifier).notifyAdmins(captor.capture());
         assertThat(captor.getValue().name()).isEqualTo("server-a");
         assertThat(captor.getValue().connected()).isFalse();
-        assertThat(captor.getValue().peerType()).isEqualTo(PeerType.UBUNTU_SERVER);
+        assertThat(captor.getValue().peerType()).isEqualTo(MachineType.UBUNTU_SERVER);
     }
 
     @Test
     void clientPeerTransition_isIgnored() {
         when(peerNameResolver.resolvePeerNameByIp("10.0.0.2")).thenReturn("phone");
         when(peerConfigs.getPeerConfigByIp("10.0.0.2"))
-                .thenReturn(Optional.of(configResult("phone", "10.0.0.2", PeerType.MOBILE_CLIENT)));
+                .thenReturn(Optional.of(configResult("phone", "10.0.0.2", MachineType.MOBILE_CLIENT)));
 
         when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.2/32", recent())));
         watcher.checkConnectivity();
@@ -100,7 +100,7 @@ class PeerConnectivityWatcherTest {
     void windowsServerTransition_isNotified() {
         when(peerNameResolver.resolvePeerNameByIp("10.0.0.5")).thenReturn("win-server");
         when(peerConfigs.getPeerConfigByIp("10.0.0.5"))
-                .thenReturn(Optional.of(configResult("win-server", "10.0.0.5", PeerType.WINDOWS_SERVER)));
+                .thenReturn(Optional.of(configResult("win-server", "10.0.0.5", MachineType.WINDOWS_SERVER)));
 
         when(vpnClients.getClients()).thenReturn(List.of(client("10.0.0.5/32", "0")));
         watcher.checkConnectivity();
@@ -111,7 +111,7 @@ class PeerConnectivityWatcherTest {
         ArgumentCaptor<PeerSnapshot> captor = ArgumentCaptor.forClass(PeerSnapshot.class);
         verify(notifier).notifyAdmins(captor.capture());
         assertThat(captor.getValue().connected()).isTrue();
-        assertThat(captor.getValue().peerType()).isEqualTo(PeerType.WINDOWS_SERVER);
+        assertThat(captor.getValue().peerType()).isEqualTo(MachineType.WINDOWS_SERVER);
     }
 
     @Test

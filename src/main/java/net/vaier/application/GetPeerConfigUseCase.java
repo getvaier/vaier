@@ -1,6 +1,6 @@
 package net.vaier.application;
 
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 
 import java.util.Optional;
 
@@ -14,11 +14,11 @@ public interface GetPeerConfigUseCase {
         String name,
         String ipAddress,
         String configContent,
-        PeerType peerType,
+        MachineType peerType,
         String lanCidr,
         String lanAddress
     ) {
-        public PeerConfigResult(String name, String ipAddress, String configContent, PeerType peerType) {
+        public PeerConfigResult(String name, String ipAddress, String configContent, MachineType peerType) {
             this(name, ipAddress, configContent, peerType, null, null);
         }
     }

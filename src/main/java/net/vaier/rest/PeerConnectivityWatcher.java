@@ -7,7 +7,7 @@ import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.domain.PeerConnectivityTracker;
 import net.vaier.domain.PeerSnapshot;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -40,7 +40,7 @@ public class PeerConnectivityWatcher {
         try {
             List<PeerSnapshot> serverSnapshots = vpnClients.getClients().stream()
                     .map(this::toSnapshot)
-                    .filter(s -> s != null && s.peerType().isServerType())
+                    .filter(s -> s != null && s.peerType().isVpnPeer() && s.peerType().isServerType())
                     .toList();
             for (PeerSnapshot transition : tracker.update(serverSnapshots)) {
                 notifier.notifyAdmins(transition);
@@ -57,7 +57,7 @@ public class PeerConnectivityWatcher {
 
         String name = peerNameResolver.resolvePeerNameByIp(peerIp);
         Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = peerConfigs.getPeerConfigByIp(peerIp);
-        PeerType type = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType).orElse(PeerType.UBUNTU_SERVER);
+        MachineType type = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType).orElse(MachineType.UBUNTU_SERVER);
         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
 
         long handshake = parseHandshake(client.latestHandshake());

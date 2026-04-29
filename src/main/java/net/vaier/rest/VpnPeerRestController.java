@@ -14,7 +14,7 @@ import net.vaier.domain.GeoLocation;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 
 import java.util.Optional;
@@ -65,9 +65,9 @@ public class VpnPeerRestController {
                         String peerIp = client.allowedIps().split("/")[0];
                         String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
                         var cfg = getPeerConfigUseCase.getPeerConfigByIp(peerIp);
-                        PeerType peerType = cfg
+                        MachineType peerType = cfg
                                 .map(GetPeerConfigUseCase.PeerConfigResult::peerType)
-                                .orElse(PeerType.UBUNTU_SERVER);
+                                .orElse(MachineType.UBUNTU_SERVER);
                         String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
                         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
                         Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
@@ -122,7 +122,7 @@ public class VpnPeerRestController {
     public ResponseEntity<CreatePeerResponse> createPeer(@RequestBody CreatePeerRequest request) {
         log.info("Creating new VPN peer: {}", request.name());
 
-        PeerType peerType = request.peerType() != null ? request.peerType() : PeerType.UBUNTU_SERVER;
+        MachineType peerType = request.peerType() != null ? request.peerType() : MachineType.UBUNTU_SERVER;
 
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 request.name(),
@@ -333,7 +333,7 @@ public class VpnPeerRestController {
 
     public record CreatePeerRequest(
             String name,
-            PeerType peerType,
+            MachineType peerType,
             String lanCidr,
             String lanAddress
     ) {}

@@ -11,7 +11,7 @@ class PeerConnectivityTrackerTest {
     private final PeerConnectivityTracker tracker = new PeerConnectivityTracker();
 
     private static PeerSnapshot snap(String name, boolean connected) {
-        return new PeerSnapshot(name, PeerType.UBUNTU_SERVER, connected, 0L, null);
+        return new PeerSnapshot(name, MachineType.UBUNTU_SERVER, connected, 0L, null);
     }
 
     @Test

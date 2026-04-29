@@ -6,7 +6,7 @@ import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.GeoLocation;
-import net.vaier.domain.PeerType;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
@@ -331,7 +331,7 @@ class VpnServiceTest {
         ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
         when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
             Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
-                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null))
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null))
         );
 
         String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
@@ -346,7 +346,7 @@ class VpnServiceTest {
         ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
         when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
             Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
-                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null))
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null))
         );
 
         String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
@@ -385,7 +385,7 @@ class VpnServiceTest {
     void generateSetupScript_lanCidrBlank_omitsForwardingBlock() {
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
             Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config",
-                PeerType.UBUNTU_SERVER, "   ", null))
+                MachineType.UBUNTU_SERVER, "   ", null))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
@@ -683,9 +683,9 @@ class VpnServiceTest {
     @Test
     void syncLanRoutes_passesEveryRelayCidr_toLanRouteAdapter() {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, "192.168.3.0/24", null),
-            new PeerConfiguration("alice",      "10.13.13.2", "config", PeerType.WINDOWS_CLIENT,    null,            null),
-            new PeerConfiguration("nuc02",      "10.13.13.8", "config", PeerType.UBUNTU_SERVER, "192.168.4.0/24", null)
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", MachineType.UBUNTU_SERVER, "192.168.3.0/24", null),
+            new PeerConfiguration("alice",      "10.13.13.2", "config", MachineType.WINDOWS_CLIENT,    null,            null),
+            new PeerConfiguration("nuc02",      "10.13.13.8", "config", MachineType.UBUNTU_SERVER, "192.168.4.0/24", null)
         ));
 
         service.syncLanRoutes();
@@ -699,8 +699,8 @@ class VpnServiceTest {
     @Test
     void syncLanRoutes_skipsBlankAndNullCidrs() {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("alice", "10.13.13.2", "config", PeerType.WINDOWS_CLIENT,    null, null),
-            new PeerConfiguration("blank", "10.13.13.3", "config", PeerType.UBUNTU_SERVER, "  ", null)
+            new PeerConfiguration("alice", "10.13.13.2", "config", MachineType.WINDOWS_CLIENT,    null, null),
+            new PeerConfiguration("blank", "10.13.13.3", "config", MachineType.UBUNTU_SERVER, "  ", null)
         ));
 
         service.syncLanRoutes();
@@ -712,9 +712,9 @@ class VpnServiceTest {
     void updateLanCidr_alsoSyncsLanRoutes() {
         when(peerConfigProvider.getPeerConfigByName("apalveien5"))
             .thenReturn(Optional.of(new PeerConfiguration("apalveien5", "10.13.13.6", "config",
-                PeerType.UBUNTU_SERVER, null, null)));
+                MachineType.UBUNTU_SERVER, null, null)));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, null, null)));
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", MachineType.UBUNTU_SERVER, null, null)));
 
         service.updateLanCidr("apalveien5", "192.168.3.0/24");
 
@@ -730,9 +730,9 @@ class VpnServiceTest {
     void updateLanCidr_setsServerSideAllowedIpsAndMetadata() {
         when(peerConfigProvider.getPeerConfigByName("apalveien5"))
             .thenReturn(Optional.of(new PeerConfiguration("apalveien5", "10.13.13.6", "config",
-                PeerType.UBUNTU_SERVER, null, null)));
+                MachineType.UBUNTU_SERVER, null, null)));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, null, null)));
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", MachineType.UBUNTU_SERVER, null, null)));
 
         service.updateLanCidr("apalveien5", "192.168.3.0/24");
 
@@ -745,7 +745,7 @@ class VpnServiceTest {
     void updateLanCidr_clearingStripsServerSideAllowedIps() {
         when(peerConfigProvider.getPeerConfigByName("nuc02"))
             .thenReturn(Optional.of(new PeerConfiguration("nuc02", "10.13.13.8", "config",
-                PeerType.UBUNTU_SERVER, "192.168.3.0/24", null)));
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", null)));
 
         service.updateLanCidr("nuc02", null);
 
@@ -757,7 +757,7 @@ class VpnServiceTest {
     void updateLanCidr_blankIsTreatedAsClear() {
         when(peerConfigProvider.getPeerConfigByName("nuc02"))
             .thenReturn(Optional.of(new PeerConfiguration("nuc02", "10.13.13.8", "config",
-                PeerType.UBUNTU_SERVER, "192.168.3.0/24", null)));
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", null)));
 
         service.updateLanCidr("nuc02", "  ");
 
@@ -768,9 +768,9 @@ class VpnServiceTest {
     void updateLanCidr_changingReplacesServerSideCidr() {
         when(peerConfigProvider.getPeerConfigByName("relay"))
             .thenReturn(Optional.of(new PeerConfiguration("relay", "10.13.13.10", "config",
-                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null)));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("relay", "10.13.13.10", "config", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+            new PeerConfiguration("relay", "10.13.13.10", "config", MachineType.UBUNTU_SERVER, "192.168.1.0/24", null)));
 
         service.updateLanCidr("relay", "192.168.5.0/24");
 
@@ -782,10 +782,10 @@ class VpnServiceTest {
     void updateLanCidr_rejectsConflictWhenAnotherPeerOwnsTheCidr() {
         when(peerConfigProvider.getPeerConfigByName("apalveien5"))
             .thenReturn(Optional.of(new PeerConfiguration("apalveien5", "10.13.13.6", "config",
-                PeerType.UBUNTU_SERVER, null, null)));
+                MachineType.UBUNTU_SERVER, null, null)));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "config", PeerType.UBUNTU_SERVER, null, null),
-            new PeerConfiguration("nuc02",      "10.13.13.8", "config", PeerType.UBUNTU_SERVER, "192.168.3.0/24", null)));
+            new PeerConfiguration("apalveien5", "10.13.13.6", "config", MachineType.UBUNTU_SERVER, null, null),
+            new PeerConfiguration("nuc02",      "10.13.13.8", "config", MachineType.UBUNTU_SERVER, "192.168.3.0/24", null)));
 
         assertThatThrownBy(() -> service.updateLanCidr("apalveien5", "192.168.3.0/24"))
             .isInstanceOf(IllegalStateException.class)
@@ -800,9 +800,9 @@ class VpnServiceTest {
     void updateLanCidr_allowsSameCidrOnSamePeerIdempotent() {
         when(peerConfigProvider.getPeerConfigByName("relay"))
             .thenReturn(Optional.of(new PeerConfiguration("relay", "10.13.13.10", "config",
-                PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null)));
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("relay", "10.13.13.10", "config", PeerType.UBUNTU_SERVER, "192.168.1.0/24", null)));
+            new PeerConfiguration("relay", "10.13.13.10", "config", MachineType.UBUNTU_SERVER, "192.168.1.0/24", null)));
 
         service.updateLanCidr("relay", "192.168.1.0/24");
 
@@ -822,7 +822,7 @@ class VpnServiceTest {
         verifyNoInteractions(forUpdatingPeerConfigurations);
     }
 
-    // silence unused field warning — PeerType is referenced in Javadoc of PeerConfigResult ctor via record definition
+    // silence unused field warning — MachineType is referenced in Javadoc of PeerConfigResult ctor via record definition
     @SuppressWarnings("unused")
-    private static final PeerType REFERENCE = PeerType.UBUNTU_SERVER;
+    private static final MachineType REFERENCE = MachineType.UBUNTU_SERVER;
 }

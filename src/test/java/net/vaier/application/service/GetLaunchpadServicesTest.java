@@ -172,7 +172,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
@@ -189,7 +189,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("203.0.113.10");
@@ -206,7 +206,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, null)
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, null)
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
@@ -223,7 +223,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
@@ -240,7 +240,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
@@ -261,7 +261,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
@@ -278,7 +278,7 @@ class GetLaunchpadServicesTest {
         ));
         setupEmptyLocalServices();
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("apalveien5", "10.13.13.6", "", PeerType.UBUNTU_SERVER, null, "192.168.3.121")
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
         ));
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
