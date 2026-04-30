@@ -133,12 +133,22 @@ Never write implementation code without a corresponding test written first. PRs 
 
 ## Keeping docs in sync
 
-After any change to the feature set — new features, changed behaviour, removed functionality, renamed concepts — update both `README.md` and `PRD.md` before committing:
+After any change to the feature set — new features, changed behaviour, removed functionality, renamed concepts — update `README.md`, `PRD.md`, and `UBIQUITOUS_LANGUAGE.md` before committing:
 
 - **README.md** — user-facing; update feature tables, workflow descriptions, and any affected quick-start steps
 - **PRD.md** — planning document; mark implemented items ✅, update planned items, and add backlog entries for anything new that was discussed
+- **UBIQUITOUS_LANGUAGE.md** — vocabulary; add new terms, update definitions when behaviour changes, retire terms that no longer apply
 
-The two documents must always reflect the actual state of the codebase. Stale docs are treated as bugs.
+All three documents must always reflect the actual state of the codebase. Stale docs are treated as bugs.
+
+## Ubiquitous language is authoritative
+
+`UBIQUITOUS_LANGUAGE.md` is the source of truth for vocabulary in this project. Apply it like a rule, not a reference:
+
+- **Before introducing a new term** (in code, commits, issues, PRs, UI copy, conversation), check `UBIQUITOUS_LANGUAGE.md`. If a term already exists for the concept, use it exactly — don't invent a synonym.
+- **Before adding a new concept**, decide its canonical name *first* and add an entry to `UBIQUITOUS_LANGUAGE.md` in the same change. The name lands in the document and the code together.
+- **When the codebase and this document disagree**, the codebase wins and the document gets updated.
+- Watch especially for near-synonyms (e.g. "host" vs "machine", "client" vs "peer", "subdomain" vs "service"). Pick one, retire the other.
 
 ## After changing code
 
