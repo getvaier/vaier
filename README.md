@@ -257,7 +257,7 @@ The service is live at `https://subdomain.yourdomain.com`.
 A *LAN server* is any machine on a relay peer's LAN that isn't itself a VPN peer — a NAS, a printer, IPMI, an extra Docker host. Register it once on the Machines page, then publish its services through the relay.
 
 1. On the relay peer, set `lanCidr` (e.g. `192.168.3.0/24`) so Vaier knows which LAN sits behind it
-2. (Docker only) On the LAN server, expose its Docker socket on TCP 2375 reachable from the relay (no TLS in V1; firewall to the relay's LAN range)
+2. (Docker only) On the LAN server, expose its Docker socket on TCP 2375 reachable from the relay (no TLS in V1; firewall to the relay's LAN range). The Add Machine modal shows a one-liner `curl https://vaier.<domain>/lan-servers/docker-setup.sh | sudo bash -s -- --port 2375` — an idempotent script that handles both native (systemd) and Snap Docker installs
 3. In Vaier → Machines, click the **+** FAB, pick **LAN server**, enter a name, the LAN address (must fall inside a relay's `lanCidr`), and toggle Docker on/off (Docker port defaults to 2375)
 4. With Docker on, discovered containers appear in Services → discovered list and route through the relay when published. To publish a native (non-container) service on any LAN server — Docker on or off — go to Services → **+ Publish LAN service**, pick the machine from the dropdown, and enter port/subdomain/protocol — Vaier creates the DNS CNAME and a Traefik route whose backend is `http(s)://<lanAddress>:<port>`
 

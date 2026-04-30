@@ -7,9 +7,15 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 
 @RestController
@@ -50,6 +56,22 @@ public class LanServerRestController {
         log.info("Deleting LAN server: {}", name);
         deleteLanServerUseCase.delete(name);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping(value = "/docker-setup.sh", produces = "application/x-sh")
+    public ResponseEntity<Resource> downloadDockerSetupScript() {
+        Resource script = new ClassPathResource("scripts/lan-docker-setup.sh");
+        long length;
+        try {
+            length = script.contentLength();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load lan-docker-setup.sh from classpath", e);
+        }
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=lan-docker-setup.sh")
+            .contentType(MediaType.parseMediaType("application/x-sh"))
+            .contentLength(length)
+            .body(script);
     }
 
     record RegisterRequest(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {}

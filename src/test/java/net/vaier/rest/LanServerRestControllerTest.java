@@ -12,9 +12,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +86,55 @@ class LanServerRestControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(deleteLanServerUseCase).delete("nas");
+    }
+
+    // --- docker-setup.sh ---
+
+    @Test
+    void downloadDockerSetupScript_returns200WithShellAttachment() throws IOException {
+        ResponseEntity<Resource> response = controller.downloadDockerSetupScript();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.parseMediaType("application/x-sh"));
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+            .contains("filename=lan-docker-setup.sh");
+        Resource body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.contentLength()).isPositive();
+    }
+
+    @Test
+    void downloadDockerSetupScript_bodyHasShebangAndCoversNativeAndSnapDocker() throws IOException {
+        ResponseEntity<Resource> response = controller.downloadDockerSetupScript();
+
+        String body = new String(response.getBody().getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        // shebang + safe-mode
+        assertThat(body).startsWith("#!/usr/bin/env bash");
+        assertThat(body).contains("set -euo pipefail");
+
+        // accepts a --port flag (default 2375)
+        assertThat(body).contains("--port");
+        assertThat(body).contains("2375");
+
+        // detects snap docker and writes its daemon.json
+        assertThat(body).contains("snap list docker");
+        assertThat(body).contains("/var/snap/docker/current/config/daemon.json");
+        assertThat(body).contains("snap.docker.dockerd");
+
+        // native path: writes /etc/docker/daemon.json + systemd drop-in to clear -H
+        assertThat(body).contains("/etc/docker/daemon.json");
+        assertThat(body).contains("/etc/systemd/system/docker.service.d");
+        assertThat(body).contains("ExecStart=");
+
+        // tcp host string
+        assertThat(body).contains("tcp://0.0.0.0:");
+
+        // idempotency: skips re-write when daemon.json already has the desired hosts
+        assertThat(body).contains("already configured");
+
+        // verification: waits for docker info after restart
+        assertThat(body).contains("docker info");
     }
 
     @Test

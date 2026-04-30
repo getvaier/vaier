@@ -317,7 +317,7 @@ services:
     labels:
       - traefik.enable=true
       # Public router — launchpad API and favicon (no auth)
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/setup.html`) || PathPrefix(`/api/setup/`))
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/setup.html`) || PathPrefix(`/api/setup/`) || Path(`/lan-servers/docker-setup.sh`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200
