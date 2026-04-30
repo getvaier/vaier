@@ -36,9 +36,9 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 flowchart LR
     browser([User browser])
     route53[AWS Route53]
-    server["Vaier server<br/>(Traefik + Vaier + WireGuard)"]
-    p1["Peer 1<br/>container"]
-    p2["Peer 2<br/>container"]
+    server[Vaier server]
+    p1[Peer 1 container]
+    p2[Peer 2 container]
 
     browser -->|DNS| route53
     browser -->|HTTPS| server
