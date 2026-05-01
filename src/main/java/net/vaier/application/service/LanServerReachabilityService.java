@@ -29,6 +29,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private final ForProbingTcp forProbingTcp;
     private final ForPublishingEvents forPublishingEvents;
     private final Map<String, Reachability> cache = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastSeenEpochSec = new ConcurrentHashMap<>();
 
     public LanServerReachabilityService(GetLanServersUseCase getLanServersUseCase,
                                         ForProbingTcp forProbingTcp,
@@ -44,6 +45,11 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     }
 
     @Override
+    public Long getLastSeenEpochSec(String lanServerName) {
+        return lastSeenEpochSec.get(lanServerName);
+    }
+
+    @Override
     public synchronized void refreshAll() {
         Map<String, Reachability> previous = new HashMap<>(cache);
         Set<String> seen = new HashSet<>();
@@ -53,9 +59,17 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         for (var view : getLanServersUseCase.getAll()) {
             LanServer server = view.server();
             seen.add(server.name());
-            cache.put(server.name(), probe(server.lanAddress()));
+            Reachability r = probe(server.lanAddress());
+            cache.put(server.name(), r);
+            // Only stamp lastSeen on a successful probe — a DOWN result must not erase the
+            // previous lastSeen, since the whole point of "last seen" is to remember when
+            // the host was last alive.
+            if (r == Reachability.OK) {
+                lastSeenEpochSec.put(server.name(), System.currentTimeMillis() / 1000);
+            }
         }
         cache.keySet().retainAll(seen);
+        lastSeenEpochSec.keySet().retainAll(seen);
 
         if (!previous.equals(cache)) {
             // Wake up the Machines page so the status dot reflects the latest probe without

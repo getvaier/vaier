@@ -33,7 +33,8 @@ public class LanServerRestController {
     public List<LanServerResponse> list() {
         return getLanServersUseCase.getAll().stream()
             .map(view -> LanServerResponse.from(view,
-                reachabilityUseCase.getReachability(view.server().name()).name()))
+                reachabilityUseCase.getReachability(view.server().name()).name(),
+                reachabilityUseCase.getLastSeenEpochSec(view.server().name())))
             .toList();
     }
 
@@ -82,16 +83,18 @@ public class LanServerRestController {
         boolean runsDocker,
         Integer dockerPort,
         String relayPeerName,
-        String reachability
+        String reachability,
+        Long lastSeen
     ) {
-        static LanServerResponse from(LanServerView view, String reachability) {
+        static LanServerResponse from(LanServerView view, String reachability, Long lastSeen) {
             return new LanServerResponse(
                 view.server().name(),
                 view.server().lanAddress(),
                 view.server().runsDocker(),
                 view.server().dockerPort(),
                 view.relayPeerName(),
-                reachability);
+                reachability,
+                lastSeen);
         }
     }
 }

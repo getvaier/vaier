@@ -9,6 +9,14 @@ public interface GetLanServerReachabilityUseCase {
     Reachability getReachability(String lanServerName);
 
     /**
+     * Epoch-second timestamp of the most recent successful probe (CONNECTED or REFUSED) for
+     * the named LAN server, or {@code null} if it has never responded since startup. The
+     * value is preserved across subsequent unreachable probes — the UI uses it for the same
+     * "Last seen 5m ago" affordance VPN peers get from their WireGuard handshake.
+     */
+    Long getLastSeenEpochSec(String lanServerName);
+
+    /**
      * Force a fresh probe of every registered LAN server now (skipping the schedule).
      * Cache is updated synchronously.
      */

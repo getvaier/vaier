@@ -100,7 +100,7 @@ Avoid: "vhost", "site", "auth provider".
 | **Reachability check** | A TCP probe (`ForProbingTcp`) used for LAN servers. Every 30s, hits ports 80/443/22; *any* response (handshake or RST) means pingable. Drives the **four-state status dot**. |
 | **Probe result** | `CONNECTED` (open), `REFUSED` (host alive, port closed — still pingable), `UNREACHABLE` (timeout or low-level error). |
 | **Four-state status dot** | UI indicator on machine cards: **grey** (not yet probed), **green** (host pingable; if Docker-enabled, scrape also OK), **yellow** (Docker host pingable but scrape failed), **red** (host not pingable). |
-| **Last seen** | Relative timestamp ("5m ago", "2h ago", "never") rendered on each peer card from the latest WireGuard handshake. |
+| **Last seen** | Relative timestamp ("5m ago", "2h ago", "never") rendered on each machine card. Sourced from the latest WireGuard handshake for VPN peers; for LAN servers, the most recent successful TCP probe (CONNECTED or REFUSED). Preserved across later DOWN probes — once a host has been seen, the timestamp sticks until the LAN server is removed or the app restarts. |
 | **Geolocation** | `GeoLocation(latitude, longitude, city, country)` resolved by `DbIpGeolocationAdapter` against a DB-IP City Lite MMDB downloaded by the `geoip-init` container. Used for the Map tab. |
 | **Map tab** / **List tab** | The two views on the Machines page. The Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering. |
 | **Server marker** | The single distinct marker for the Vaier server itself on the Map tab. |

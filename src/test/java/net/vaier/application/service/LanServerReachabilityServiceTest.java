@@ -154,6 +154,92 @@ class LanServerReachabilityServiceTest {
         assertThat(service.getReachability("printer")).isEqualTo(Reachability.UNKNOWN);
     }
 
+    @Test
+    void getLastSeenEpochSec_beforeAnyProbe_returnsNull() {
+        assertThat(service.getLastSeenEpochSec("printer")).isNull();
+    }
+
+    @Test
+    void refreshAll_okProbe_recordsLastSeenAtNow() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+
+        long before = System.currentTimeMillis() / 1000;
+        service.refreshAll();
+        long after = System.currentTimeMillis() / 1000;
+
+        assertThat(service.getLastSeenEpochSec("printer"))
+            .isNotNull()
+            .isBetween(before, after);
+    }
+
+    @Test
+    void refreshAll_refusedProbe_recordsLastSeen() {
+        // RST-back is enough — host is on the network, so it counts as "seen".
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.REFUSED);
+
+        service.refreshAll();
+
+        assertThat(service.getLastSeenEpochSec("printer")).isNotNull();
+    }
+
+    @Test
+    void refreshAll_downProbe_keepsLastSeenNull() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        // default mock returns UNREACHABLE for all probe ports.
+
+        service.refreshAll();
+
+        assertThat(service.getLastSeenEpochSec("printer")).isNull();
+    }
+
+    @Test
+    void refreshAll_downAfterOk_preservesLastSeen() {
+        // "Last seen" means the last time the host responded — once recorded, a later DOWN
+        // probe must not erase it (otherwise the UI would forget the host the moment it
+        // goes offline, which is exactly when "last seen" is most useful).
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        service.refreshAll();
+        Long firstSeen = service.getLastSeenEpochSec("printer");
+        assertThat(firstSeen).isNotNull();
+
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.UNREACHABLE);
+        service.refreshAll();
+
+        assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
+        assertThat(service.getLastSeenEpochSec("printer")).isEqualTo(firstSeen);
+    }
+
+    @Test
+    void refreshAll_evictsLastSeenForRemovedLanServers() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        service.refreshAll();
+        assertThat(service.getLastSeenEpochSec("printer")).isNotNull();
+
+        when(getLanServersUseCase.getAll()).thenReturn(List.of());
+        service.refreshAll();
+
+        assertThat(service.getLastSeenEpochSec("printer")).isNull();
+    }
+
     private static LanServerView view(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
         return new LanServerView(new LanServer(name, lanAddress, runsDocker, dockerPort), "relay");
     }

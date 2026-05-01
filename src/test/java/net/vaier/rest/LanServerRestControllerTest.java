@@ -160,4 +160,21 @@ class LanServerRestControllerTest {
         assertThat(response.get(1).dockerPort()).isNull();
         assertThat(response.get(1).reachability()).isEqualTo("OK");
     }
+
+    @Test
+    void list_includesLastSeenEpochSecFromReachabilityUseCase() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5"),
+            new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5")
+        ));
+        when(reachabilityUseCase.getReachability("nas")).thenReturn(Reachability.OK);
+        when(reachabilityUseCase.getReachability("printer")).thenReturn(Reachability.UNKNOWN);
+        when(reachabilityUseCase.getLastSeenEpochSec("nas")).thenReturn(1714000000L);
+        when(reachabilityUseCase.getLastSeenEpochSec("printer")).thenReturn(null);
+
+        var response = controller.list();
+
+        assertThat(response.get(0).lastSeen()).isEqualTo(1714000000L);
+        assertThat(response.get(1).lastSeen()).isNull();
+    }
 }

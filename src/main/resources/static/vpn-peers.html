@@ -820,6 +820,7 @@
                         ${machineIconHtml('lan', 'LAN server (no VPN, behind a relay)')}
                         <span class="peer-name">${server.name}</span>
                         ${dockerCap}
+                        ${recencyBarsHtml(server.lastSeen, 'last-seen-' + id)}
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
@@ -830,6 +831,10 @@
                             <span class="detail-value">${portText}</span>
                         </div>
                         ${relayRow}
+                        <div class="detail-row">
+                            <span class="detail-label">Last Seen</span>
+                            <span class="detail-value" id="last-seen-detail-${id}">${lastSeenAbsolute(server.lastSeen)}</span>
+                        </div>
                         ${servicesHtml}
                     </div>
                     <div class="peer-actions-row">
