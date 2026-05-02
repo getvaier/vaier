@@ -381,6 +381,60 @@ class VpnServiceTest {
         assertThat(script).doesNotContain("FORWARD");
     }
 
+    // --- generateSetupScript: relay iptables survive reboot (#191) ---
+
+    @Test
+    void generateSetupScript_lanCidrSet_installsBootTimeUnitToReapplyIptables() {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
+            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null))
+        );
+
+        String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
+
+        // Writes a systemd unit and enables it at boot.
+        assertThat(script).contains("/etc/systemd/system/vaier-wg-relay-iptables.service");
+        assertThat(script).contains("systemctl daemon-reload");
+        assertThat(script).contains("systemctl enable");
+        assertThat(script).contains("vaier-wg-relay-iptables");
+
+        // The unit re-applies the same idempotent iptables rules on every boot.
+        // Take everything between the unit file's heredoc markers and assert against that.
+        int unitStart = script.indexOf("vaier-wg-relay-iptables.service");
+        int unitEnd = script.indexOf("UNIT_FILE\n", unitStart);
+        assertThat(unitStart).isPositive();
+        assertThat(unitEnd).isGreaterThan(unitStart);
+        String unitBody = script.substring(unitStart, unitEnd);
+
+        assertThat(unitBody).contains(
+            "iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
+        assertThat(unitBody).contains(
+            "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
+        assertThat(unitBody).contains(
+            "iptables -C FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
+        assertThat(unitBody).contains(
+            "iptables -A FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
+        assertThat(unitBody).contains(
+            "iptables -C FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
+        assertThat(unitBody).contains(
+            "iptables -A FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
+
+        // Boot-time service runs after networking is ready; otherwise iptables -t nat fails.
+        assertThat(unitBody).contains("After=network");
+    }
+
+    @Test
+    void generateSetupScript_lanCidrAbsent_omitsBootTimeIptablesUnit() {
+        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
+            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
+        );
+
+        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
+
+        assertThat(script).doesNotContain("vaier-wg-relay-iptables");
+    }
+
     @Test
     void generateSetupScript_lanCidrBlank_omitsForwardingBlock() {
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(

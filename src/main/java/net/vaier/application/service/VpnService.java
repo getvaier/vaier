@@ -684,6 +684,35 @@ public class VpnService implements
                 .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\\n");
             sb.append("  || sudo iptables -A FORWARD -s ").append(lan).append(" -d ").append(vpnSubnet)
                 .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT\n");
+
+            // Persist relay rules across reboots via a systemd oneshot. Distro-agnostic
+            // (no iptables-persistent dependency) and idempotent (-C ... || -A ...).
+            sb.append("\n");
+            sb.append("# --- Persist relay iptables rules across reboot via systemd oneshot ---\n");
+            sb.append("sudo tee /etc/systemd/system/vaier-wg-relay-iptables.service > /dev/null << 'UNIT_FILE'\n");
+            sb.append("[Unit]\n");
+            sb.append("Description=Vaier WireGuard relay iptables rules\n");
+            sb.append("After=network-online.target\n");
+            sb.append("Wants=network-online.target\n");
+            sb.append("\n");
+            sb.append("[Service]\n");
+            sb.append("Type=oneshot\n");
+            sb.append("RemainAfterExit=yes\n");
+            sb.append("ExecStart=/bin/sh -c 'iptables -t nat -C POSTROUTING -s ").append(vpnSubnet)
+                .append(" -d ").append(lan).append(" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ")
+                .append(vpnSubnet).append(" -d ").append(lan).append(" -j MASQUERADE'\n");
+            sb.append("ExecStart=/bin/sh -c 'iptables -C FORWARD -s ").append(vpnSubnet)
+                .append(" -d ").append(lan).append(" -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ")
+                .append(vpnSubnet).append(" -d ").append(lan).append(" -j ACCEPT'\n");
+            sb.append("ExecStart=/bin/sh -c 'iptables -C FORWARD -s ").append(lan)
+                .append(" -d ").append(vpnSubnet).append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ")
+                .append(lan).append(" -d ").append(vpnSubnet).append(" -m state --state RELATED,ESTABLISHED -j ACCEPT'\n");
+            sb.append("\n");
+            sb.append("[Install]\n");
+            sb.append("WantedBy=multi-user.target\n");
+            sb.append("UNIT_FILE\n");
+            sb.append("sudo systemctl daemon-reload\n");
+            sb.append("sudo systemctl enable --now vaier-wg-relay-iptables.service\n");
         }
 
         sb.append("\n");
