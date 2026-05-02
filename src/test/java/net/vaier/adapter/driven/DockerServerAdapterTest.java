@@ -405,6 +405,161 @@ class DockerServerAdapterTest {
         assertThat(adapter.findContainerNameByIp(Server.local(), "172.20.0.3")).isEmpty();
     }
 
+    // --- collapseContiguousRanges (#189) ---
+
+    @Test
+    void collapseContiguousRanges_singlePort_unchanged() {
+        var single = new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0");
+
+        List<DockerService.PortMapping> collapsed =
+            DockerServerAdapter.collapseContiguousRanges(List.of(single));
+
+        assertThat(collapsed).hasSize(1);
+        assertThat(collapsed.get(0).privatePort()).isEqualTo(8080);
+        assertThat(collapsed.get(0).isRange()).isFalse();
+    }
+
+    @Test
+    void collapseContiguousRanges_contiguousTcpRun_collapsesToOneRange() {
+        // Roon-style: 9100/tcp, 9101/tcp, 9102/tcp ... 9339/tcp = one range row
+        List<DockerService.PortMapping> input = new java.util.ArrayList<>();
+        for (int p = 9100; p <= 9339; p++) {
+            input.add(new DockerService.PortMapping(p, p, "tcp", "0.0.0.0"));
+        }
+
+        List<DockerService.PortMapping> collapsed =
+            DockerServerAdapter.collapseContiguousRanges(input);
+
+        assertThat(collapsed).hasSize(1);
+        assertThat(collapsed.get(0).isRange()).isTrue();
+        assertThat(collapsed.get(0).privatePort()).isEqualTo(9100);
+        assertThat(collapsed.get(0).lastPrivatePort()).isEqualTo(9339);
+        assertThat(collapsed.get(0).type()).isEqualTo("tcp");
+    }
+
+    @Test
+    void collapseContiguousRanges_protocolsDoNotMerge() {
+        // 9003/udp must NOT merge with 9004/tcp even though numerically adjacent.
+        var udp = new DockerService.PortMapping(9003, 9003, "udp", "0.0.0.0");
+        var tcp = new DockerService.PortMapping(9004, 9004, "tcp", "0.0.0.0");
+
+        List<DockerService.PortMapping> collapsed =
+            DockerServerAdapter.collapseContiguousRanges(List.of(udp, tcp));
+
+        assertThat(collapsed).hasSize(2);
+        assertThat(collapsed).noneMatch(DockerService.PortMapping::isRange);
+    }
+
+    @Test
+    void collapseContiguousRanges_nonContiguousEntriesStaySeparate() {
+        // 55000/tcp + 9100-9339/tcp in the same container — only the run collapses,
+        // 55000 stays as its own row.
+        List<DockerService.PortMapping> input = new java.util.ArrayList<>();
+        input.add(new DockerService.PortMapping(55000, 55000, "tcp", "0.0.0.0"));
+        for (int p = 9100; p <= 9105; p++) {
+            input.add(new DockerService.PortMapping(p, p, "tcp", "0.0.0.0"));
+        }
+
+        List<DockerService.PortMapping> collapsed =
+            DockerServerAdapter.collapseContiguousRanges(input);
+
+        assertThat(collapsed).hasSize(2);
+        assertThat(collapsed).filteredOn(DockerService.PortMapping::isRange)
+            .singleElement()
+            .satisfies(r -> {
+                assertThat(r.privatePort()).isEqualTo(9100);
+                assertThat(r.lastPrivatePort()).isEqualTo(9105);
+            });
+    }
+
+    @Test
+    void collapseContiguousRanges_unsortedInput_stillCollapses() {
+        // Order doesn't matter — the collapse helper sorts internally.
+        var p2 = new DockerService.PortMapping(101, 101, "tcp", "0.0.0.0");
+        var p1 = new DockerService.PortMapping(100, 100, "tcp", "0.0.0.0");
+        var p3 = new DockerService.PortMapping(102, 102, "tcp", "0.0.0.0");
+
+        List<DockerService.PortMapping> collapsed =
+            DockerServerAdapter.collapseContiguousRanges(List.of(p2, p1, p3));
+
+        assertThat(collapsed).hasSize(1);
+        assertThat(collapsed.get(0).privatePort()).isEqualTo(100);
+        assertThat(collapsed.get(0).lastPrivatePort()).isEqualTo(102);
+    }
+
+    @Test
+    void collapseContiguousRanges_pairOfTwoIsCollapsed() {
+        var a = new DockerService.PortMapping(80, 80, "tcp", "0.0.0.0");
+        var b = new DockerService.PortMapping(81, 81, "tcp", "0.0.0.0");
+
+        List<DockerService.PortMapping> collapsed =
+            DockerServerAdapter.collapseContiguousRanges(List.of(a, b));
+
+        assertThat(collapsed).hasSize(1);
+        assertThat(collapsed.get(0).isRange()).isTrue();
+        assertThat(collapsed.get(0).lastPrivatePort()).isEqualTo(81);
+    }
+
+    @Test
+    void collapseContiguousRanges_emptyInput_returnsEmpty() {
+        assertThat(DockerServerAdapter.collapseContiguousRanges(List.of())).isEmpty();
+    }
+
+    @Test
+    void getServicesWithExposedPorts_hostNetworkRoonServer_collapsesExposedPortRange() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = mock(Container.class);
+        when(container.getId()).thenReturn("roon123");
+        when(container.getNames()).thenReturn(new String[]{"/roonserver"});
+        when(container.getImage()).thenReturn("ghcr.io/roonlabs/roonserver:latest");
+        when(container.getImageId()).thenReturn("sha256:roon");
+        when(container.getState()).thenReturn("running");
+
+        ContainerHostConfig hostConfig = mock(ContainerHostConfig.class);
+        when(hostConfig.getNetworkMode()).thenReturn("host");
+        when(container.getHostConfig()).thenReturn(hostConfig);
+
+        ContainerNetworkSettings networkSettings = mock(ContainerNetworkSettings.class);
+        when(networkSettings.getNetworks()).thenReturn(Map.of("host", mock(com.github.dockerjava.api.model.ContainerNetwork.class)));
+        when(container.getNetworkSettings()).thenReturn(networkSettings);
+
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        // Build the same ExposedPorts shape Roon ships: 9100-9339/tcp + 55000/tcp + 9003/udp
+        StringBuilder exposed = new StringBuilder("\"55000/tcp\":{},\"9003/udp\":{}");
+        for (int p = 9100; p <= 9339; p++) {
+            exposed.append(",\"").append(p).append("/tcp\":{}");
+        }
+        String inspectJson = "{\"Config\":{\"ExposedPorts\":{" + exposed + "}}}";
+        DockerHttpClient.Response httpResponse = mock(DockerHttpClient.Response.class);
+        when(httpResponse.getBody()).thenReturn(new ByteArrayInputStream(inspectJson.getBytes(StandardCharsets.UTF_8)));
+        when(dockerHttpClient.execute(any(DockerHttpClient.Request.class))).thenReturn(httpResponse);
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:roon")).thenReturn(inspectImageCmd);
+        when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+
+        assertThat(services).hasSize(1);
+        // 163 raw entries collapse to 3: one 9100-9339/tcp range + 55000/tcp + 9003/udp
+        assertThat(services.get(0).ports()).hasSize(3);
+        assertThat(services.get(0).ports()).filteredOn(DockerService.PortMapping::isRange)
+            .singleElement()
+            .satisfies(r -> {
+                assertThat(r.privatePort()).isEqualTo(9100);
+                assertThat(r.lastPrivatePort()).isEqualTo(9339);
+                assertThat(r.type()).isEqualTo("tcp");
+            });
+    }
+
     @Test
     void findContainerNameByIp_noMatchingIp_returnsEmpty() {
         DockerClient dockerClient = mock(DockerClient.class);

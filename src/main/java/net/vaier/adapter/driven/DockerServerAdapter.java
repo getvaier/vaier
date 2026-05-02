@@ -22,6 +22,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -216,11 +217,62 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                     portMappings.add(new DockerService.PortMapping(port, port, parts[1], "0.0.0.0"));
                 }
             });
-            return portMappings;
+            // Roon-style images expose huge contiguous ranges (9100-9339/tcp). Collapse
+            // them so one container doesn't drown the publishable list with hundreds of rows.
+            return collapseContiguousRanges(portMappings);
         } catch (Exception e) {
             log.warn("Failed to get exposed ports for host-network container {}: {}", container.getNames()[0], e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Group runs of consecutive {@code (port, type, ip)} tuples into a single range
+     * mapping. {@code (port, type, ip)} groups are sorted, then any chain where each
+     * entry's {@code privatePort} is exactly one above the previous is merged into a
+     * single {@link DockerService.PortMapping} carrying {@code lastPrivatePort}.
+     *
+     * <p>Only applied to host-network ExposedPorts data where {@code publicPort == privatePort}.
+     */
+    static List<DockerService.PortMapping> collapseContiguousRanges(List<DockerService.PortMapping> input) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, List<DockerService.PortMapping>> grouped = new java.util.LinkedHashMap<>();
+        for (DockerService.PortMapping pm : input) {
+            String key = pm.type() + "|" + (pm.ip() == null ? "" : pm.ip());
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(pm);
+        }
+
+        List<DockerService.PortMapping> result = new ArrayList<>();
+        for (List<DockerService.PortMapping> group : grouped.values()) {
+            group.sort(Comparator.comparingInt(DockerService.PortMapping::privatePort));
+            int runStart = group.get(0).privatePort();
+            int runEnd = runStart;
+            String type = group.get(0).type();
+            String ip = group.get(0).ip();
+
+            for (int i = 1; i < group.size(); i++) {
+                int p = group.get(i).privatePort();
+                if (p == runEnd + 1) {
+                    runEnd = p;
+                } else {
+                    result.add(buildMapping(runStart, runEnd, type, ip));
+                    runStart = p;
+                    runEnd = p;
+                }
+            }
+            result.add(buildMapping(runStart, runEnd, type, ip));
+        }
+        return result;
+    }
+
+    private static DockerService.PortMapping buildMapping(int first, int last, String type, String ip) {
+        if (first == last) {
+            return new DockerService.PortMapping(first, first, type, ip);
+        }
+        return new DockerService.PortMapping(first, last, first, type, ip);
     }
 
     private List<String> extractNetworks(Container container) {

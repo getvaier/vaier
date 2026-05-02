@@ -19,7 +19,7 @@ public record DockerService(
 
     public boolean listensOnPort(int port) {
         return ports.stream()
-            .anyMatch(mapping -> mapping.privatePort() == port ||
+            .anyMatch(mapping -> mapping.containsPort(port) ||
                       (mapping.publicPort() != null && mapping.publicPort() == port));
     }
 
@@ -51,11 +51,28 @@ public record DockerService(
 
     public record PortMapping(
             int privatePort,
+            Integer lastPrivatePort,
             Integer publicPort,
             String type,
             String ip
     ) {
+        public PortMapping(int privatePort, Integer publicPort, String type, String ip) {
+            this(privatePort, null, publicPort, type, ip);
+        }
+
+        public boolean isRange() {
+            return lastPrivatePort != null && lastPrivatePort > privatePort;
+        }
+
+        public boolean containsPort(int port) {
+            int last = lastPrivatePort != null ? lastPrivatePort : privatePort;
+            return port >= privatePort && port <= last;
+        }
+
         public String toString() {
+            if (isRange()) {
+                return privatePort + "-" + lastPrivatePort + "/" + type;
+            }
             if (publicPort != null) {
                 String ipPart = (ip != null && !ip.isEmpty()) ? ip + ":" : "";
                 return ipPart + publicPort + "->" + privatePort + "/" + type;

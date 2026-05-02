@@ -891,6 +891,21 @@ class PublishingServiceTest {
     }
 
     @Test
+    void getPublishableServices_peerWithExposedPortRange_excluded() {
+        // #189 — a container that exposes a contiguous range (e.g. RoonServer 9100-9339)
+        // surfaces as a single range PortMapping; it must NOT explode the publishable list.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        DockerService roon = new DockerService("id", "roonserver", "image", "latest",
+            List.of(new PortMapping(9100, 9339, 9100, "tcp", "0.0.0.0")), List.of(), "running");
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+            okPeer("media", "10.13.13.5", List.of(roon))
+        ));
+        when(getLocalDockerServicesUseCase.getUnpublishedLocalServices(any())).thenReturn(List.of());
+
+        assertThat(service.getPublishableServices()).isEmpty();
+    }
+
+    @Test
     void getPublishableServices_peerWithUdpPort_excluded() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
