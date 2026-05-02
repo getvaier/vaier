@@ -24,7 +24,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -268,7 +272,14 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         }
     }
 
+    record PeerInfo(String publicKey, String allowedIps) {}
+
     private String findPeerPublicKeyByIp(String interfaceName, String ipAddress) throws IOException, InterruptedException {
+        PeerInfo info = findPeerInfoByIp(interfaceName, ipAddress);
+        return info == null ? "" : info.publicKey();
+    }
+
+    private PeerInfo findPeerInfoByIp(String interfaceName, String ipAddress) throws IOException, InterruptedException {
         String output = executeInContainer("wg", "show", interfaceName, "dump");
 
         try (var reader = new java.io.BufferedReader(new java.io.StringReader(output))) {
@@ -286,16 +297,19 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
                     String publicKey = parts[0];
                     String allowedIps = parts[3];
 
-                    if (allowedIps.startsWith(ipAddress + "/") || allowedIps.equals(ipAddress)) {
-                        log.info("Found peer with public key {} for IP {}", publicKey, ipAddress);
-                        return publicKey;
+                    for (String cidr : allowedIps.split(",")) {
+                        String trimmed = cidr.trim();
+                        if (trimmed.startsWith(ipAddress + "/") || trimmed.equals(ipAddress)) {
+                            log.info("Found peer with public key {} for IP {}", publicKey, ipAddress);
+                            return new PeerInfo(publicKey, allowedIps);
+                        }
                     }
                 }
             }
         }
 
         log.warn("No peer found with IP address: {}", ipAddress);
-        return "";
+        return null;
     }
 
     private void deleteDirectory(Path directory) throws IOException {
@@ -326,23 +340,87 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     public void setPeerAllowedIps(String peerIpAddress, String allowedIps) {
         log.info("Updating server-side AllowedIPs for peer at {} to: {}", peerIpAddress, allowedIps);
         try {
-            String publicKey = findPeerPublicKeyByIp(wireguardInterface, peerIpAddress);
-            if (publicKey == null || publicKey.isEmpty()) {
+            PeerInfo peerInfo = findPeerInfoByIp(wireguardInterface, peerIpAddress);
+            if (peerInfo == null) {
                 throw new RuntimeException("No peer found on " + wireguardInterface + " with VPN IP " + peerIpAddress);
             }
 
+            String oldAllowedIps = peerInfo.allowedIps();
+            RouteDelta routeDelta = computeRouteDelta(oldAllowedIps, allowedIps);
+
             String setCommand = String.format("wg set %s peer %s allowed-ips %s",
-                wireguardInterface, publicKey, allowedIps);
+                wireguardInterface, peerInfo.publicKey(), allowedIps);
             log.debug("Executing: {}", setCommand);
             executeInContainer("sh", "-c", setCommand);
 
             // Persist live runtime state to wg0.conf so it survives a container restart.
             executeInContainer("wg-quick", "save", wireguardInterface);
             log.info("Persisted new AllowedIPs for peer at {}", peerIpAddress);
+
+            // wg set / wg-quick save mutate cryptokey routing but never install kernel
+            // routes — those are only added by wg-quick up at bring-up. Reconcile them
+            // here so the kernel FIB matches the new AllowedIPs without restarting wg0.
+            reconcileKernelRoutes(routeDelta);
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to update AllowedIPs for peer at " + peerIpAddress + ": " + e.getMessage(), e);
         }
+    }
+
+    private void reconcileKernelRoutes(RouteDelta routeDelta) throws IOException, InterruptedException {
+        for (String cidr : routeDelta.toAdd()) {
+            log.info("Installing kernel route: {} dev {}", cidr, wireguardInterface);
+            executeInContainer("ip", "route", "replace", cidr, "dev", wireguardInterface);
+        }
+        for (String cidr : routeDelta.toRemove()) {
+            log.info("Removing kernel route: {} dev {}", cidr, wireguardInterface);
+            // best-effort: ignore "No such process" / non-zero exits via sh wrapper
+            executeInContainer("sh", "-c",
+                String.format("ip route del %s dev %s 2>/dev/null || true", cidr, wireguardInterface));
+        }
+    }
+
+    record RouteDelta(List<String> toAdd, List<String> toRemove) {}
+
+    /**
+     * Compute which CIDRs need {@code ip route replace} (add) or {@code ip route del} (remove)
+     * inside the wireguard container, given the previous and new {@code AllowedIPs} for one peer.
+     *
+     * <p>{@code /32} host routes are skipped — they're managed by {@code wg-quick up} and we must
+     * not touch them here. Non-/32 CIDRs in the new set are always emitted as adds (idempotent
+     * via {@code ip route replace}) so drift from earlier {@code wg set} calls is healed.
+     */
+    static RouteDelta computeRouteDelta(String oldAllowedIps, String newAllowedIps) {
+        List<String> oldCidrs = parseCidrList(oldAllowedIps);
+        List<String> newCidrs = parseCidrList(newAllowedIps);
+        Set<String> newSet = new HashSet<>(newCidrs);
+
+        List<String> toAdd = newCidrs.stream()
+                .filter(cidr -> !cidr.endsWith("/32"))
+                .distinct()
+                .toList();
+
+        List<String> toRemove = oldCidrs.stream()
+                .filter(cidr -> !cidr.endsWith("/32"))
+                .filter(cidr -> !newSet.contains(cidr))
+                .distinct()
+                .toList();
+
+        return new RouteDelta(toAdd, toRemove);
+    }
+
+    private static List<String> parseCidrList(String allowedIps) {
+        if (allowedIps == null || allowedIps.isBlank()) {
+            return List.of();
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        for (String cidr : allowedIps.split(",")) {
+            String trimmed = cidr.trim();
+            if (!trimmed.isEmpty()) {
+                seen.add(trimmed);
+            }
+        }
+        return new ArrayList<>(seen);
     }
 
     @Override
