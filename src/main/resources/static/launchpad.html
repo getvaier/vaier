@@ -193,11 +193,10 @@
                 const res = await fetch('/users/me', { redirect: 'manual', cache: 'no-store' });
                 if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
                     me = await res.json();
-                    if (!me.username) me = null;
                 }
             } catch (_) { /* anonymous */ }
 
-            if (me) {
+            if (me && me.username) {
                 const name = me.displayname || me.username;
                 const logout = me.logoutUrl || '#';
                 nav.innerHTML = `
@@ -211,9 +210,10 @@
                     <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
                 `;
             } else {
+                const login = (me && me.loginUrl) || '/admin.html';
                 nav.innerHTML = '';
                 user.innerHTML = `
-                    <a href="/admin.html" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
+                    <a href="${login}" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
                 `;
             }
         }

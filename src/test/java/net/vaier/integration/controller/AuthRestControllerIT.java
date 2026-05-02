@@ -148,7 +148,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
         mockMvc.perform(get("/users/me").header("Remote-User", "alice"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.username").value("alice"))
-               .andExpect(jsonPath("$.logoutUrl").value("https://login.example.com/logout"));
+               .andExpect(jsonPath("$.logoutUrl").value("https://login.example.com/logout?rd=https://vaier.example.com/"))
+               .andExpect(jsonPath("$.loginUrl").value("https://login.example.com/?rd=https://vaier.example.com/"));
     }
 
     @Test
@@ -157,7 +158,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
         mockMvc.perform(get("/users/me"))
                .andExpect(status().isOk())
-               .andExpect(jsonPath("$.username").doesNotExist());
+               .andExpect(jsonPath("$.username").doesNotExist())
+               .andExpect(jsonPath("$.loginUrl").value("https://login.example.com/?rd=https://vaier.example.com/"));
     }
 
     @Test
@@ -166,7 +168,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
         mockMvc.perform(get("/users/me").header("Remote-User", "alice"))
                .andExpect(status().isOk())
-               .andExpect(jsonPath("$.logoutUrl").doesNotExist());
+               .andExpect(jsonPath("$.logoutUrl").doesNotExist())
+               .andExpect(jsonPath("$.loginUrl").doesNotExist());
     }
 
     @Test

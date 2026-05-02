@@ -136,10 +136,10 @@ public class AuthRestController {
             @RequestHeader(value = "Remote-Name", required = false) String displayname,
             @RequestHeader(value = "Remote-Email", required = false) String email) {
         String domain = configResolver.getDomain();
-        String logoutUrl = (domain != null && !domain.isBlank())
-                ? "https://login." + domain + "/logout"
-                : null;
-        return ResponseEntity.ok(new MeResponse(username, displayname, email, logoutUrl));
+        boolean hasDomain = domain != null && !domain.isBlank();
+        String logoutUrl = hasDomain ? "https://login." + domain + "/logout?rd=https://vaier." + domain + "/" : null;
+        String loginUrl = hasDomain ? "https://login." + domain + "/?rd=https://vaier." + domain + "/" : null;
+        return ResponseEntity.ok(new MeResponse(username, displayname, email, logoutUrl, loginUrl));
     }
 
     @GetMapping("/groups")
@@ -162,5 +162,5 @@ public class AuthRestController {
     public record UpdateEmailRequest(String email) {}
     public record UpdateDisplayNameRequest(String displayname) {}
     public record UpdateGroupsRequest(List<String> groups) {}
-    public record MeResponse(String username, String displayname, String email, String logoutUrl) {}
+    public record MeResponse(String username, String displayname, String email, String logoutUrl, String loginUrl) {}
 }

@@ -5,6 +5,7 @@ import net.vaier.application.*;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.rest.FaviconFetcher;
 import org.junit.jupiter.api.BeforeEach;
@@ -140,6 +141,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
 
+    @MockBean
+    protected ForGeolocatingIps forGeolocatingIps;
+
     // --- Published service use cases ---
     @MockBean
     protected GetPublishedServicesUseCase getPublishedServicesUseCase;
@@ -190,6 +194,40 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
+
+    @MockBean
+    protected DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+
+    // --- LAN server use cases ---
+    @MockBean
+    protected RegisterLanServerUseCase registerLanServerUseCase;
+
+    @MockBean
+    protected DeleteLanServerUseCase deleteLanServerUseCase;
+
+    @MockBean
+    protected GetLanServersUseCase getLanServersUseCase;
+
+    @MockBean
+    protected GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
+
+    @MockBean
+    protected PublishLanServiceUseCase publishLanServiceUseCase;
+
+    @MockBean
+    protected UpdateLanCidrUseCase updateLanCidrUseCase;
+
+    // --- Machine use cases ---
+    @MockBean
+    protected GetMachinesUseCase getMachinesUseCase;
+
+    // --- Server location use case ---
+    @MockBean
+    protected GetServerLocationUseCase getServerLocationUseCase;
+
+    // --- Peer notification use case ---
+    @MockBean
+    protected NotifyAdminsOfPeerTransitionUseCase notifyAdminsOfPeerTransitionUseCase;
 
     // --- Launchpad use cases ---
     @MockBean

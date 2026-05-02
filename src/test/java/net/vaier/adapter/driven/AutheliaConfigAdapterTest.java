@@ -119,6 +119,16 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
+    void initialiseConfiguration_usersMeEndpointBypassesAuthentication() throws IOException {
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("/users/me");
+    }
+
+    @Test
     void initialiseConfiguration_stylesheetBypassesAuthentication() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
