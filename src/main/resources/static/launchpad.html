@@ -244,7 +244,7 @@
         }
 
         function renderTile(service) {
-            const url    = service.directUrl || `https://${service.dnsAddress}`;
+            const url    = service.url;
             const name   = serviceName(service.dnsAddress);
             const color  = avatarColor(name);
             const letter = name.charAt(0).toUpperCase();

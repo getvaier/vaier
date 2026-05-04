@@ -28,7 +28,7 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsMappedServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("app.example.com", "10.0.0.1", State.OK, null),
+                new LaunchpadServiceUco("app.example.com", "10.0.0.1", State.OK, "https://app.example.com"),
                 new LaunchpadServiceUco("db.example.com", "10.0.0.2", State.OK, "http://10.0.0.2:8080")
         ));
 
@@ -37,15 +37,15 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(jsonPath("$[0].dnsAddress").value("app.example.com"))
                .andExpect(jsonPath("$[0].hostAddress").value("10.0.0.1"))
                .andExpect(jsonPath("$[0].state").value("OK"))
-               .andExpect(jsonPath("$[0].directUrl").doesNotExist())
+               .andExpect(jsonPath("$[0].url").value("https://app.example.com"))
                .andExpect(jsonPath("$[1].dnsAddress").value("db.example.com"))
-               .andExpect(jsonPath("$[1].directUrl").value("http://10.0.0.2:8080"));
+               .andExpect(jsonPath("$[1].url").value("http://10.0.0.2:8080"));
     }
 
     @Test
     void getServices_returnsUnreachableServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("down.example.com", "10.0.0.3", State.UNREACHABLE, null)
+                new LaunchpadServiceUco("down.example.com", "10.0.0.3", State.UNREACHABLE, "https://down.example.com")
         ));
 
         mockMvc.perform(get("/launchpad/services"))

@@ -65,6 +65,7 @@ The primary workflow. Always use these terms — the UI is built around them.
 | **Root redirect path** | Optional `rootRedirectPath` on a published service — appended to the direct URL and (where applicable) used for a Traefik redirect at root. |
 | **Direct URL** | The `http://lanAddress:port` URL the launchpad hands out *to callers on the same LAN* as the hosting peer, bypassing Traefik and Authelia. |
 | **Direct URL disabled** | Per-route opt-out (`directUrlDisabled`, persisted as `x-vaier-direct-url-disabled`). For services whose public origin differs from `http://lan:port` — Vaultwarden is the canonical case. |
+| **Auth-mediated tile URL** | The `https://login.<domain>/?rd=...` URL the launchpad hands out for auth-protected services when no direct-LAN bypass applies. Forces the browser to land on the Authelia origin first, so a PWA's service worker on the service origin can't serve a cached SPA that bypasses login. |
 | **Auth toggle** | The per-service Authelia forward-auth on/off switch. Stored as a Traefik middleware reference. |
 | **Ignored service** | A publishable service the operator has chosen to hide from the discovered list. Persisted via `ForManagingIgnoredServices`. |
 

@@ -164,7 +164,7 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
-    void getLaunchpadServices_callerIpMatchesPeerEndpoint_setsDirectUrlToLanAddress() {
+    void getLaunchpadServices_callerIpMatchesPeerEndpoint_setsUrlToLanAddress() {
         setupOneRoute("app.example.com", "10.13.13.6", 6875);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         when(forGettingVpnClients.getClients()).thenReturn(List.of(
@@ -177,7 +177,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
-        assertThat(result.get(0).directUrl()).isEqualTo("http://192.168.3.121:6875");
+        assertThat(result.get(0).url()).isEqualTo("http://192.168.3.121:6875");
     }
 
     @Test
@@ -194,7 +194,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("203.0.113.10");
 
-        assertThat(result.get(0).directUrl()).isNull();
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
     }
 
     @Test
@@ -211,7 +211,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
-        assertThat(result.get(0).directUrl()).isNull();
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
     }
 
     @Test
@@ -228,7 +228,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
-        assertThat(result.get(0).directUrl()).isNull();
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
     }
 
     @Test
@@ -245,7 +245,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
-        assertThat(result.get(0).directUrl()).isNull();
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
     }
 
     @Test
@@ -266,7 +266,57 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
-        assertThat(result.get(0).directUrl()).isNull();
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
+    }
+
+    @Test
+    void getLaunchpadServices_authenticatedRoute_urlGoesViaAuthelia() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "route", "app.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).url())
+            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fapp.example.com%2F");
+    }
+
+    @Test
+    void getLaunchpadServices_publicRoute_urlIsDirectHttps() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
+    }
+
+    @Test
+    void getLaunchpadServices_authenticatedRouteOnSameLan_urlIsDirectLanBypass() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "route", "app.example.com", "10.13.13.6", 6875, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            vpnClient("10.13.13.6/32", "51.175.8.217")
+        ));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.6", "", MachineType.UBUNTU_SERVER, null, "192.168.3.121")
+        ));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
+
+        assertThat(result.get(0).url()).isEqualTo("http://192.168.3.121:6875");
     }
 
     @Test
@@ -283,7 +333,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
-        assertThat(result.get(0).directUrl()).isNull();
+        assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
     }
 
     private VpnClient vpnClient(String allowedIps, String endpointIp) {

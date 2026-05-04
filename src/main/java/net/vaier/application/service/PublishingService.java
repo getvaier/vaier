@@ -39,6 +39,8 @@ import net.vaier.domain.port.ForResolvingDns;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import org.springframework.stereotype.Service;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -160,9 +162,22 @@ public class PublishingService implements
                     .filter(r -> r.getDomainName().equals(s.dnsAddress()))
                     .findFirst().orElse(null);
                 String directUrl = route == null ? null : route.directUrl(callerIp, peers, vpnClients);
-                return new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress(), s.state(), directUrl);
+                return new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress(), s.state(),
+                    resolveLaunchpadUrl(s, directUrl));
             })
             .toList();
+    }
+
+    private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {
+        if (directUrl != null) return directUrl;
+        if (!s.authenticated()) return "https://" + s.dnsAddress();
+        // Auth-protected services route via Authelia's login URL so the browser navigates to a
+        // different origin first. Without this, openHAB-style PWAs serve a cached SPA from their
+        // own service worker, the SPA hits /rest/* (which Authelia answers with 401, not 302),
+        // and the user sees the app's own login looping instead of Authelia's.
+        String target = "https://" + s.dnsAddress() + "/";
+        String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
+        return "https://login." + configResolver.getDomain() + "/?rd=" + encoded;
     }
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,

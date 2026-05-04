@@ -7,5 +7,5 @@ public interface GetLaunchpadServicesUseCase {
 
     List<LaunchpadServiceUco> getLaunchpadServices(String callerIp);
 
-    record LaunchpadServiceUco(String dnsAddress, String hostAddress, State state, String directUrl) {}
+    record LaunchpadServiceUco(String dnsAddress, String hostAddress, State state, String url) {}
 }
