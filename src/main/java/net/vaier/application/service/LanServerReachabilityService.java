@@ -3,7 +3,10 @@ package net.vaier.application.service;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServersUseCase;
+import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.port.ForProbingTcp;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -28,15 +31,18 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private final GetLanServersUseCase getLanServersUseCase;
     private final ForProbingTcp forProbingTcp;
     private final ForPublishingEvents forPublishingEvents;
+    private final NotifyAdminsOfPeerTransitionUseCase notifier;
     private final Map<String, Reachability> cache = new ConcurrentHashMap<>();
     private final Map<String, Long> lastSeenEpochSec = new ConcurrentHashMap<>();
 
     public LanServerReachabilityService(GetLanServersUseCase getLanServersUseCase,
                                         ForProbingTcp forProbingTcp,
-                                        ForPublishingEvents forPublishingEvents) {
+                                        ForPublishingEvents forPublishingEvents,
+                                        NotifyAdminsOfPeerTransitionUseCase notifier) {
         this.getLanServersUseCase = getLanServersUseCase;
         this.forProbingTcp = forProbingTcp;
         this.forPublishingEvents = forPublishingEvents;
+        this.notifier = notifier;
     }
 
     @Override
@@ -67,6 +73,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
             if (r == Reachability.OK) {
                 lastSeenEpochSec.put(server.name(), System.currentTimeMillis() / 1000);
             }
+            maybeNotifyTransition(server, previous.get(server.name()), r);
         }
         cache.keySet().retainAll(seen);
         lastSeenEpochSec.keySet().retainAll(seen);
@@ -75,6 +82,26 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
             // Wake up the Machines page so the status dot reflects the latest probe without
             // needing a manual refresh.
             forPublishingEvents.publish(SSE_TOPIC, SSE_EVENT, "");
+        }
+    }
+
+    private void maybeNotifyTransition(LanServer server, Reachability previous, Reachability current) {
+        // A null previous means this is the first observation for this server (Vaier just
+        // started, or the server was just registered) — baseline silently to avoid an email
+        // storm on restart. Same rule the VPN PeerConnectivityTracker applies.
+        if (previous == null || previous == current) return;
+        boolean connected = current == Reachability.OK;
+        Long lastSeen = lastSeenEpochSec.get(server.name());
+        PeerSnapshot snapshot = new PeerSnapshot(
+                server.name(),
+                MachineType.LAN_SERVER,
+                connected,
+                lastSeen != null ? lastSeen : 0L,
+                server.lanAddress());
+        try {
+            notifier.notifyAdmins(snapshot);
+        } catch (Exception e) {
+            log.warn("Failed to notify admins for LAN server {}: {}", server.name(), e.getMessage());
         }
     }
 

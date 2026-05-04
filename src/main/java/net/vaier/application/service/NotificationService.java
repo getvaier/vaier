@@ -95,7 +95,7 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
 
     private String buildBody(PeerSnapshot snapshot) {
         StringBuilder body = new StringBuilder();
-        body.append("Peer: ").append(snapshot.name()).append("\n");
+        body.append("Machine: ").append(snapshot.name()).append("\n");
         body.append("Type: ").append(snapshot.peerType().name()).append("\n");
         body.append("Status: ").append(snapshot.connected() ? "connected" : "disconnected").append("\n");
         if (snapshot.latestHandshakeEpochSeconds() > 0) {

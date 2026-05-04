@@ -25,7 +25,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Reverse proxy** | Traefik dynamic config generated automatically, with per-service Authelia toggle and root-path redirect. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users and groups from the UI. |
-| **Email notifications** | SMTP-powered password resets and admin alerts on peer connect/disconnect. |
+| **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down. |
 | **Consistent branding** | Authelia login pages share Vaier's dark theme so the auth hand-off feels seamless. |
 
 ---

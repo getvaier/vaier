@@ -130,7 +130,7 @@ Avoid: "vhost", "site", "auth provider".
 | **vaier-init** | One-shot busybox container (mirroring `redis-init`/`authelia-init`) that `chown`s the four bind-mounted config dirs to UID 1000 on every start, so the non-root Vaier process can read and write its own state. |
 | **SMTP notifier** | The Jakarta Mail-based outbound mail integration. Powers Authelia password-reset email and Vaier admin alerts. Settings in `vaier-config.yml`; password in Authelia's `secrets.properties`. |
 | **Test email** | A full AUTH + roundtrip Jakarta Mail send triggered from Settings, used to verify SMTP config independently of the auth layer. |
-| **Peer transition** / **connect/disconnect alert** | Email sent to every user in the `admins` group when a server peer flips connected/disconnected. The first observation after Vaier startup is treated as a baseline so restarts don't generate noise. |
+| **Machine transition** / **up/down alert** | Email sent to every user in the `admins` group when a server-type machine (VPN server peer or LAN server) flips connected/disconnected. Mobile/Windows clients are excluded — their disconnects are routine. The first observation after Vaier startup is treated as a baseline so restarts don't generate noise. |
 | **Update available** | (Planned, #57) Indicator on a container when its image has a newer digest on Docker Hub. UI-only in V1; no auto-update. |
 | **Wireguard out of date** | Badge on a peer card whose running wireguard image differs from `WireguardClientImage.EXPECTED`. Operator action: re-download the client compose and redeploy. |
 

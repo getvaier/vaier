@@ -3,13 +3,17 @@ package net.vaier.application.service;
 import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
+import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.port.ForProbingTcp;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForPublishingEvents;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -20,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,12 +35,13 @@ class LanServerReachabilityServiceTest {
     @Mock GetLanServersUseCase getLanServersUseCase;
     @Mock ForProbingTcp forProbingTcp;
     @Mock ForPublishingEvents forPublishingEvents;
+    @Mock NotifyAdminsOfPeerTransitionUseCase notifier;
 
     LanServerReachabilityService service;
 
     @BeforeEach
     void setUp() {
-        service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPublishingEvents);
+        service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPublishingEvents, notifier);
         lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of());
         lenient().when(forProbingTcp.probe(anyString(), anyInt(), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
@@ -238,6 +244,94 @@ class LanServerReachabilityServiceTest {
         service.refreshAll();
 
         assertThat(service.getLastSeenEpochSec("printer")).isNull();
+    }
+
+    @Test
+    void refreshAll_firstObservation_doesNotNotify() {
+        // First time we see a server, baseline its state silently — a Vaier restart must not
+        // produce an email storm for every machine that's currently down.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+
+        service.refreshAll();
+
+        verify(notifier, never()).notifyAdmins(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void refreshAll_okThenDown_notifiesAdminsOfDisconnect() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        service.refreshAll(); // baseline OK, no notification
+
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.UNREACHABLE);
+        service.refreshAll();
+
+        ArgumentCaptor<PeerSnapshot> captor = ArgumentCaptor.forClass(PeerSnapshot.class);
+        verify(notifier).notifyAdmins(captor.capture());
+        PeerSnapshot snap = captor.getValue();
+        assertThat(snap.name()).isEqualTo("printer");
+        assertThat(snap.peerType()).isEqualTo(MachineType.LAN_SERVER);
+        assertThat(snap.connected()).isFalse();
+        assertThat(snap.lanAddress()).isEqualTo("192.168.3.20");
+    }
+
+    @Test
+    void refreshAll_downThenOk_notifiesAdminsOfReconnect() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        // default mock returns UNREACHABLE — first refresh baselines DOWN.
+        service.refreshAll();
+
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        service.refreshAll();
+
+        ArgumentCaptor<PeerSnapshot> captor = ArgumentCaptor.forClass(PeerSnapshot.class);
+        verify(notifier).notifyAdmins(captor.capture());
+        PeerSnapshot snap = captor.getValue();
+        assertThat(snap.name()).isEqualTo("printer");
+        assertThat(snap.peerType()).isEqualTo(MachineType.LAN_SERVER);
+        assertThat(snap.connected()).isTrue();
+    }
+
+    @Test
+    void refreshAll_unchangedReachability_doesNotNotify() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+
+        service.refreshAll(); // baseline OK
+        service.refreshAll(); // still OK
+        service.refreshAll(); // still OK
+
+        verify(notifier, never()).notifyAdmins(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void refreshAll_swallowsNotifierExceptionsSoSchedulerKeepsRunning() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        service.refreshAll(); // baseline OK
+
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.UNREACHABLE);
+        org.mockito.Mockito.doThrow(new RuntimeException("notifier blew up"))
+            .when(notifier).notifyAdmins(org.mockito.ArgumentMatchers.any());
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.refreshAll())
+            .doesNotThrowAnyException();
     }
 
     private static LanServerView view(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
