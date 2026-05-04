@@ -212,8 +212,6 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                         - "^/published-services/discover$"
                         - "^/users/me$"
                         - "^/favicon$"
-                        - "^/setup.html$"
-                        - "^/api/setup/.*$"
                     - domain: "%s"
                       policy: one_factor
                 %s""",

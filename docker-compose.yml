@@ -80,6 +80,7 @@ services:
       - --accesslog.format=json
       - --api.insecure=true
       - --providers.docker=true
+      - --providers.docker.endpoint=tcp://docker-proxy:2375
       - --providers.docker.exposedbydefault=false
       - --providers.file.directory=/traefik/config
       - --providers.file.watch=true
@@ -98,7 +99,6 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/config:/traefik/config
       - ./traefik/acme:/traefik/acme
       - ./wireguard/config:/wireguard-config:ro
@@ -106,6 +106,31 @@ services:
     depends_on:
       - wireguard
       - authelia
+      - docker-proxy
+    networks:
+      - vaier-network
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    container_name: docker-proxy
+    environment:
+      # Allowlist flags for Vaier + Traefik. Combined with the custom haproxy.cfg
+      # (which adds explicit denies for /containers/create and /containers/{id}/start),
+      # this closes the privesc chain from "RCE in vaier" to "host root via
+      # docker run --privileged".
+      - CONTAINERS=1     # /containers and /containers/{id}/json — Vaier discovery + Traefik provider
+      - EVENTS=1         # /events — DockerEventListener + Traefik live updates
+      - EXEC=1           # /exec — WireGuardVpnAdapter exec into wireguard container
+      - IMAGES=1         # /images — DockerServerAdapter image inspect
+      - PING=1           # /_ping — health checks
+      - POST=1           # global gate for POST methods (required by EXEC and ALLOW_RESTARTS)
+      - ALLOW_RESTARTS=1 # /containers/{name}/restart — DockerContainerAdapter
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Override the upstream template so the entrypoint substitutes env vars
+      # into our custom config (added explicit denies). CMD reads /tmp/haproxy.cfg.
+      - ./docker-proxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg.template:ro
+    restart: unless-stopped
     networks:
       - vaier-network
 
@@ -283,10 +308,34 @@ services:
       - ./geoip:/geoip
     restart: "no"
 
+  vaier-init:
+    image: busybox:1.37.0
+    container_name: vaier-init
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        # Vaier container runs as UID 1000 (Dockerfile USER directive). Bind mounts inherit
+        # host ownership, so we chown the config dirs once on every start.
+        for d in /vaier/config /traefik/config /authelia/config /wireguard/config; do
+          [ -d "$$d" ] && chown -R 1000:1000 "$$d"
+        done
+    volumes:
+      - ./vaier/config:/vaier/config
+      - ./traefik/config:/traefik/config
+      - ./authelia/config:/authelia/config
+      - ./wireguard/config:/wireguard/config
+    restart: "no"
+
   vaier:
     image: getvaier/vaier:latest
     container_name: vaier
     cap_add:
+      # Needed by VpnNetworkSetupAdapter and LanRouteAdapter, which shell out to
+      # `ip route` inside this container to install routes for the VPN subnet
+      # and relay-peer LAN CIDRs. WireGuard exec is unrelated and runs in the
+      # wireguard container's own namespace (which has its own NET_ADMIN).
       - NET_ADMIN
     environment:
       VAIER_AWS_KEY: ${VAIER_AWS_KEY:-}
@@ -300,24 +349,33 @@ services:
       TRAEFIK_API_URL: http://traefik:8080
       AUTHELIA_CONFIG_PATH: /authelia/config
       VAIER_CONFIG_PATH: /vaier/config
+      DOCKER_HOST: tcp://docker-proxy:2375
     depends_on:
-      - wireguard
-      - traefik
-      - authelia
-      - redis-init
-      - geoip-init
+      vaier-init:
+        condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+      wireguard:
+        condition: service_started
+      traefik:
+        condition: service_started
+      authelia:
+        condition: service_started
+      redis-init:
+        condition: service_completed_successfully
+      geoip-init:
+        condition: service_completed_successfully
     volumes:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config
       - ./authelia/config:/authelia/config
       - ./vaier/config:/vaier/config
       - ./geoip:/geoip:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
     labels:
       - traefik.enable=true
       # Public router — launchpad API and favicon (no auth)
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/setup.html`) || PathPrefix(`/api/setup/`) || Path(`/lan-servers/docker-setup.sh`))
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/lan-servers/docker-setup.sh`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200

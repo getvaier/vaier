@@ -40,6 +40,22 @@ public class Server {
     }
 
     public static Server local() {
+        String dockerHost = System.getenv("DOCKER_HOST");
+        if (dockerHost != null && !dockerHost.isBlank()) {
+            if (dockerHost.startsWith("tcp://")) {
+                String hostPort = dockerHost.substring("tcp://".length());
+                int colon = hostPort.lastIndexOf(':');
+                if (colon > 0) {
+                    String host = hostPort.substring(0, colon);
+                    int port = Integer.parseInt(hostPort.substring(colon + 1));
+                    return new Server(host, port, false);
+                }
+                return new Server(hostPort, 2375, false);
+            }
+            if (dockerHost.startsWith("unix://")) {
+                return new Server(dockerHost.substring("unix://".length()), 0, false);
+            }
+        }
         return new Server("/var/run/docker.sock", 0, false);
     }
 }

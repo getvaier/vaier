@@ -55,26 +55,21 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
         if (!isWindows) {
             try {
-                // Check if Docker socket exists
-                java.nio.file.Path socketPath = java.nio.file.Paths.get("/var/run/docker.sock");
-                if (!java.nio.file.Files.exists(socketPath)) {
-                    log.error("Docker socket not found at /var/run/docker.sock");
-                    log.error("Make sure Docker socket is mounted in docker-compose.yml");
-                    throw new RuntimeException("Docker socket not accessible");
+                String dockerHost = resolveDockerHost();
+                log.info("Docker host configured as: {}", dockerHost);
+
+                if (dockerHost.startsWith("unix://")) {
+                    java.nio.file.Path socketPath = java.nio.file.Paths.get(dockerHost.substring("unix://".length()));
+                    if (!java.nio.file.Files.exists(socketPath)) {
+                        log.error("Docker socket not found at {}", socketPath);
+                        throw new RuntimeException("Docker socket not accessible");
+                    }
                 }
-                log.info("Docker socket found at /var/run/docker.sock");
 
-                // Clear any environment variables that might override our config
-                String dockerHostEnv = System.getenv("DOCKER_HOST");
-                log.info("DOCKER_HOST environment variable: {}", dockerHostEnv);
-
-                // Initialize Docker client for Linux/container environment
                 DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                    .withDockerHost("unix:///var/run/docker.sock")
+                    .withDockerHost(dockerHost)
                     .withDockerTlsVerify(false)
                     .build();
-
-                log.info("Docker host configured as: {}", config.getDockerHost());
 
                 DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
                     .dockerHost(config.getDockerHost())
@@ -86,7 +81,6 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
                 dockerClient = DockerClientImpl.getInstance(config, httpClient);
                 log.info("Docker client initialized for WireGuard container access");
 
-                // Test the connection
                 dockerClient.pingCmd().exec();
                 log.info("Successfully connected to Docker daemon");
             } catch (Exception e) {
@@ -94,6 +88,14 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
                 throw new RuntimeException("Failed to connect to Docker daemon", e);
             }
         }
+    }
+
+    private static String resolveDockerHost() {
+        String env = System.getenv("DOCKER_HOST");
+        if (env != null && !env.isBlank()) {
+            return env;
+        }
+        return "unix:///var/run/docker.sock";
     }
 
     @PreDestroy

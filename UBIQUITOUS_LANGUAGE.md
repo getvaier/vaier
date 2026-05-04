@@ -124,8 +124,9 @@ Avoid: "vhost", "site", "auth provider".
 | Term | Definition |
 |------|------------|
 | **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the `vaier.<domain>` DNS record exists, ensure the `login.<domain>` CNAME exists, initialise Authelia config, write the bootstrap admin password if no users exist. |
-| **First-run** | The first `docker compose up -d` on a host. Triggers the `authelia-init` and `redis-init` one-shot containers, the bootstrap admin write, and the auto-create of `vaier.<domain>` and `login.<domain>`. |
-| **Setup wizard** | (Deprecated) The in-app `/setup.html` flow. No longer part of Getting Started; scheduled for removal. Don't reference it in new docs. |
+| **First-run** | The first `docker compose up -d` on a host. Triggers the `authelia-init`, `redis-init`, `geoip-init`, and `vaier-init` one-shot containers, the bootstrap admin write, and the auto-create of `vaier.<domain>` and `login.<domain>`. |
+| **Docker socket proxy** | The `tecnativa/docker-socket-proxy` sidecar (`docker-proxy` container) that holds the real `/var/run/docker.sock` and exposes a restricted HTTP API on `tcp://docker-proxy:2375` over `vaier-network`. Vaier and Traefik talk to it instead of mounting the host socket. Allowlist: `CONTAINERS, EVENTS, EXEC, IMAGES, PING, POST, ALLOW_RESTARTS`. Default-deny on `/containers/create`, `/containers/{id}/start`, image pulls, swarm/network/volume management. |
+| **vaier-init** | One-shot busybox container (mirroring `redis-init`/`authelia-init`) that `chown`s the four bind-mounted config dirs to UID 1000 on every start, so the non-root Vaier process can read and write its own state. |
 | **SMTP notifier** | The Jakarta Mail-based outbound mail integration. Powers Authelia password-reset email and Vaier admin alerts. Settings in `vaier-config.yml`; password in Authelia's `secrets.properties`. |
 | **Test email** | A full AUTH + roundtrip Jakarta Mail send triggered from Settings, used to verify SMTP config independently of the auth layer. |
 | **Peer transition** / **connect/disconnect alert** | Email sent to every user in the `admins` group when a server peer flips connected/disconnected. The first observation after Vaier startup is treated as a baseline so restarts don't generate noise. |
@@ -159,7 +160,7 @@ Hexagonal architecture (ports & adapters), four layers. See `CLAUDE.md` for the 
 | **Domain** | Pure Java, no Spring. Entities, value objects, port interfaces. | `domain.Machine`, `domain.ReverseProxyRoute` |
 | **Port (driving)** | `*UseCase` interface — one per use case, narrow. Controllers depend on these. | `PublishPeerServiceUseCase`, `DeletePeerUseCase` |
 | **Port (driven)** | `For*` interface — one per outbound capability. | `ForPersistingDnsRecords`, `ForProbingTcp`, `ForResolvingPublicHost` |
-| **Application service** | `*Service` — one per *domain concept*, not per use case. Implements every use case in its domain. | `VpnService`, `PublishingService`, `UserService`, `MachineService`, `LanServerService`, `LanServerReachabilityService`, `DnsService`, `ReverseProxyService`, `SettingsService`, `SetupService`, `ContainerService`, `LifecycleService`, `NotificationService` |
+| **Application service** | `*Service` — one per *domain concept*, not per use case. Implements every use case in its domain. | `VpnService`, `PublishingService`, `UserService`, `MachineService`, `LanServerService`, `LanServerReachabilityService`, `DnsService`, `ReverseProxyService`, `SettingsService`, `ContainerService`, `LifecycleService`, `NotificationService` |
 | **Adapter** | `*Adapter` — driven adapter, implements `For*` ports. Lives in `adapter/driven/`. | `Route53DnsAdapter`, `WireGuardVpnAdapter`, `TraefikReverseProxyAdapter`, `LanServerFileAdapter`, `JavaSocketTcpProbeAdapter` |
 | **REST controller** | `*RestController`, in `rest/`. DTOs are inner `record` classes. | `MachineRestController`, `PublishedServiceRestController` |
 

@@ -47,7 +47,7 @@ Swagger UI: `http://localhost:8080/swagger-ui.html` (local) or `http://localhost
 
 ### One service per domain, not per use case
 
-Keep `*UseCase` interfaces narrow and one-per-use-case — they are the ports controllers depend on, and narrow interfaces keep controller tests small. But group their **implementations** by domain concept: `VpnService`, `UserService`, `DnsService`, `ReverseProxyService`, `ContainerService`, `SettingsService`, `PublishingService`, `SetupService`. One `@Service` class implements every use case in its domain.
+Keep `*UseCase` interfaces narrow and one-per-use-case — they are the ports controllers depend on, and narrow interfaces keep controller tests small. But group their **implementations** by domain concept: `VpnService`, `UserService`, `DnsService`, `ReverseProxyService`, `ContainerService`, `SettingsService`, `PublishingService`. One `@Service` class implements every use case in its domain.
 
 When adding a new use case, do NOT create a new `*Service` class unless the use case belongs to a genuinely new domain. Add the method to the existing domain service.
 

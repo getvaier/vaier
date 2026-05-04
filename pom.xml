@@ -14,7 +14,7 @@
 
     <groupId>net.vaier</groupId>
     <artifactId>vaier</artifactId>
-    <version>0.0.3</version>
+    <version>0.0.4</version>
     <packaging>jar</packaging>
 
     <name>Vaier</name>

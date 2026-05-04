@@ -3,19 +3,15 @@ package net.vaier.integration.base;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.*;
 import net.vaier.config.ConfigResolver;
-import net.vaier.config.SetupStateHolder;
 import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.rest.FaviconFetcher;
-import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-
-import static org.mockito.Mockito.when;
 
 /**
  * Base class for all controller integration tests.
@@ -23,10 +19,6 @@ import static org.mockito.Mockito.when;
  * Uses @WebMvcTest to load the full web layer (all controllers + filters) with all
  * service/adapter dependencies replaced by @MockBean stubs. Subclasses add @Test
  * methods targeting specific endpoints.
- *
- * The SetupRedirectFilter is active in every test. The @BeforeEach here configures
- * setupStateHolder.isConfigured() = true so non-setup endpoints are not redirected.
- * Tests that need to verify redirect behaviour should override this with isConfigured() = false.
  */
 @WebMvcTest
 @TestPropertySource(locations = "classpath:application-integration.yml")
@@ -38,10 +30,6 @@ public abstract class VaierWebMvcIntegrationBase {
     @Autowired
     protected ObjectMapper objectMapper;
 
-    // --- Filter dependencies ---
-    @MockBean
-    protected SetupStateHolder setupStateHolder;
-
     // --- Non-use-case component dependencies ---
     @MockBean
     protected ConfigResolver configResolver;
@@ -51,16 +39,6 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected FaviconFetcher faviconFetcher;
-
-    // --- Setup use cases ---
-    @MockBean
-    protected CheckSetupStatusUseCase checkSetupStatusUseCase;
-
-    @MockBean
-    protected ValidateAwsCredentialsUseCase validateAwsCredentialsUseCase;
-
-    @MockBean
-    protected CompleteSetupUseCase completeSetupUseCase;
 
     // --- User use cases ---
     @MockBean
@@ -232,9 +210,4 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- Launchpad use cases ---
     @MockBean
     protected GetLaunchpadServicesUseCase getLaunchpadServicesUseCase;
-
-    @BeforeEach
-    void configureSetupState() {
-        when(setupStateHolder.isConfigured()).thenReturn(true);
-    }
 }

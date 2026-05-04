@@ -63,7 +63,7 @@ public class LifecycleService {
     @EventListener
     public void handle(ApplicationReadyEvent event) {
         if (!setupStateHolder.isConfigured()) {
-            log.info("Vaier is not configured. Visit /setup.html to complete first-run setup.");
+            log.info("Vaier is not configured. Set VAIER_DOMAIN, VAIER_AWS_KEY, VAIER_AWS_SECRET in .env and restart the stack.");
             return;
         }
 
