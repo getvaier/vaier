@@ -196,7 +196,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     public void updateLanAddress(String peerName, String lanAddress) {
         Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
         if (!Files.exists(peerConfigPath)) {
-            throw new IllegalArgumentException("Peer not found: " + peerName);
+            throw new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerName);
         }
         try {
             String content = Files.readString(peerConfigPath);
@@ -225,7 +225,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     public void updateLanCidr(String peerName, String lanCidr) {
         Path peerConfigPath = Paths.get(wireguardConfigPath, peerName, peerName + ".conf");
         if (!Files.exists(peerConfigPath)) {
-            throw new IllegalArgumentException("Peer not found: " + peerName);
+            throw new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerName);
         }
         try {
             String content = Files.readString(peerConfigPath);

@@ -350,10 +350,10 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
             String oldAllowedIps = peerInfo.allowedIps();
             RouteDelta routeDelta = computeRouteDelta(oldAllowedIps, allowedIps);
 
-            String setCommand = String.format("wg set %s peer %s allowed-ips %s",
-                wireguardInterface, peerInfo.publicKey(), allowedIps);
-            log.debug("Executing: {}", setCommand);
-            executeInContainer("sh", "-c", setCommand);
+            // Argv-style — no shell, so user-supplied lanCidr cannot break out of `allowed-ips`.
+            // Closes #195.
+            executeInContainer("wg", "set", wireguardInterface,
+                "peer", peerInfo.publicKey(), "allowed-ips", allowedIps);
 
             // Persist live runtime state to wg0.conf so it survives a container restart.
             executeInContainer("wg-quick", "save", wireguardInterface);
@@ -376,9 +376,11 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         }
         for (String cidr : routeDelta.toRemove()) {
             log.info("Removing kernel route: {} dev {}", cidr, wireguardInterface);
-            // best-effort: ignore "No such process" / non-zero exits via sh wrapper
-            executeInContainer("sh", "-c",
-                String.format("ip route del %s dev %s 2>/dev/null || true", cidr, wireguardInterface));
+            // Argv-style. executeInContainer already discards non-zero exits silently
+            // (the previous implementation used `2>/dev/null || true` in a shell wrapper
+            // because the previous executor surfaced exit codes); we drop the shell so
+            // user-supplied cidr cannot inject. Closes #195.
+            executeInContainer("ip", "route", "del", cidr, "dev", wireguardInterface);
         }
     }
 
@@ -461,9 +463,9 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
             log.info("Removing peer with public key: {}", publicKey);
 
-            String removePeerCommand = String.format("wg set %s peer %s remove", wireguardInterface, publicKey);
-            log.info("Executing: {}", removePeerCommand);
-            String output = executeInContainer("sh", "-c", removePeerCommand);
+            // Argv-style — no shell. publicKey is computed locally from `wg show`,
+            // not user-supplied, but the sh-c pattern is being purged repo-wide. Closes #195.
+            String output = executeInContainer("wg", "set", wireguardInterface, "peer", publicKey, "remove");
             log.info("Remove peer output: {}", output);
 
             String saveOutput = executeInContainer("wg-quick", "save", wireguardInterface);

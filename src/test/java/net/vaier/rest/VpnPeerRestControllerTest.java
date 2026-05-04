@@ -79,7 +79,7 @@ class VpnPeerRestControllerTest {
 
     @Test
     void updateLanAddress_returns404WhenPeerNotFound() {
-        doThrow(new IllegalArgumentException("Peer not found: ghost"))
+        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
             .when(forUpdatingPeerConfigurations).updateLanAddress("ghost", "192.168.3.121");
         var request = new VpnPeerRestController.UpdateLanAddressRequest("192.168.3.121");
 
@@ -122,7 +122,7 @@ class VpnPeerRestControllerTest {
 
     @Test
     void updateLanCidr_returns404WhenPeerNotFound() {
-        doThrow(new IllegalArgumentException("Peer not found: ghost"))
+        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
             .when(updateLanCidrUseCase).updateLanCidr("ghost", "192.168.3.0/24");
         var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
 

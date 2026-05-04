@@ -151,9 +151,12 @@ public class VpnPeerRestController {
             deletePeerUseCase.deletePeer(peerIdentifier);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
+        } catch (net.vaier.domain.PeerNotFoundException e) {
             log.error("Peer not found: {}", e.getMessage());
             return ResponseEntity.notFound().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Bad request deleting peer {}: {}", peerIdentifier, e.getMessage());
+            return ResponseEntity.badRequest().build();
         } catch (Exception e) {
             log.error("Failed to delete peer: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
@@ -170,9 +173,12 @@ public class VpnPeerRestController {
             forUpdatingPeerConfigurations.updateLanAddress(peerName, lanAddress);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
+        } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for lan-address update: {}", peerName);
             return ResponseEntity.notFound().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Bad lan-address request for peer {}: {}", peerName, e.getMessage());
+            return ResponseEntity.badRequest().build();
         } catch (Exception e) {
             log.error("Failed to update lan address for peer {}: {}", peerName, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
@@ -189,9 +195,12 @@ public class VpnPeerRestController {
             updateLanCidrUseCase.updateLanCidr(peerName, lanCidr);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
-        } catch (IllegalArgumentException e) {
+        } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for lan-cidr update: {}", peerName);
             return ResponseEntity.notFound().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Bad lan-cidr request for peer {}: {}", peerName, e.getMessage());
+            return ResponseEntity.badRequest().build();
         } catch (IllegalStateException e) {
             log.warn("LAN CIDR conflict for peer {}: {}", peerName, e.getMessage());
             return ResponseEntity.status(409).build();

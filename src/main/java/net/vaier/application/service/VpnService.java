@@ -294,8 +294,15 @@ public class VpnService implements
 
     @Override
     public void updateLanCidr(String peerName, String lanCidr) {
+        // Strict CIDR validation BEFORE any peer lookup or state change. Closes #195 —
+        // keeps shell-injection payloads out of `wg set ... allowed-ips` and `ip route del`.
+        // Null/blank means "clear the lanCidr" — that's allowed without validation.
+        if (lanCidr != null && !lanCidr.isBlank()) {
+            net.vaier.domain.Cidr.validateLanCidr(lanCidr);
+        }
+
         ForGettingPeerConfigurations.PeerConfiguration peer = peerConfigProvider.getPeerConfigByName(peerName)
-            .orElseThrow(() -> new IllegalArgumentException("Peer not found: " + peerName));
+            .orElseThrow(() -> new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerName));
 
         String normalized = (lanCidr == null || lanCidr.isBlank()) ? null : lanCidr.trim();
 
@@ -345,7 +352,7 @@ public class VpnService implements
             String resolvedName = forResolvingPeerNames.resolvePeerNameByIp(peerIdentifier);
             if (resolvedName.equals(peerIdentifier)) {
                 log.error("Could not find peer name for IP: {}", peerIdentifier);
-                throw new IllegalArgumentException("Peer not found for IP: " + peerIdentifier);
+                throw new net.vaier.domain.PeerNotFoundException("Peer not found for IP: " + peerIdentifier);
             }
             peerName = resolvedName;
             log.info("Resolved IP {} to peer name: {}", peerIdentifier, peerName);
@@ -386,6 +393,12 @@ public class VpnService implements
 
     @Override
     public CreatedPeerUco createPeer(String peerName, MachineType peerType, String lanCidr, String lanAddress) {
+        // Strict CIDR validation BEFORE any state change. Closes #195 — keeps shell-injection
+        // payloads out of `wg set ... allowed-ips` and `ip route del` even though those sinks
+        // are now argv-style.
+        if (lanCidr != null && !lanCidr.isBlank()) {
+            net.vaier.domain.Cidr.validateLanCidr(lanCidr);
+        }
         peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
         log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {}, lanAddress: {})",
                 peerName, wireguardInterface, peerType, lanCidr, lanAddress);
@@ -518,6 +531,12 @@ public class VpnService implements
     private void addPeerToServer(String interfaceName, String publicKey, String presharedKey,
                                  String ipAddress, String lanCidr)
             throws IOException, InterruptedException {
+        // PSK file written via shell-free `sh -c "echo ... > file"` pattern: the input
+        // to that shell is internally generated (`wg genpsk` output, base64 only —
+        // no shell metacharacters), and the file path is Java-controlled. Kept as
+        // sh-c here only because the alternative requires shared-volume coordination
+        // between vaier and wireguard containers; user-supplied lanCidr never reaches
+        // this sink.
         String pskFile = "/tmp/psk_" + System.currentTimeMillis();
         executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
 
@@ -526,12 +545,10 @@ public class VpnService implements
             serverAllowedIps = serverAllowedIps + "," + lanCidr;
         }
 
-        String addPeerCommand = String.format(
-                "wg set %s peer %s preshared-key %s allowed-ips %s",
-                interfaceName, publicKey, pskFile, serverAllowedIps
-        );
-        log.info("Executing: {}", addPeerCommand);
-        String output = executeInContainer("sh", "-c", addPeerCommand);
+        // Argv-style — no shell, so user-supplied lanCidr cannot break out of `allowed-ips`.
+        // Closes #195.
+        String output = executeInContainer("wg", "set", interfaceName,
+            "peer", publicKey, "preshared-key", pskFile, "allowed-ips", serverAllowedIps);
         log.info("Add peer output: {}", output);
 
         executeInContainer("rm", "-f", pskFile);

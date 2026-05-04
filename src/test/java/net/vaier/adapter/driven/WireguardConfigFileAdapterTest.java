@@ -239,7 +239,7 @@ class WireguardConfigFileAdapterTest {
     @Test
     void updateLanAddress_throwsWhenPeerDoesNotExist() {
         assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
             () -> adapter.updateLanAddress("ghost", "192.168.3.121"));
     }
 
@@ -294,7 +294,7 @@ class WireguardConfigFileAdapterTest {
     @Test
     void updateLanCidr_throwsWhenPeerDoesNotExist() {
         assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
             () -> adapter.updateLanCidr("ghost", "192.168.3.0/24"));
     }
 

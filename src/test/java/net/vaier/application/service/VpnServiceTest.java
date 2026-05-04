@@ -532,11 +532,11 @@ class VpnServiceTest {
     }
 
     @Test
-    void deletePeer_ipNotResolved_throwsIllegalArgumentException() {
+    void deletePeer_ipNotResolved_throwsPeerNotFound() {
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.99")).thenReturn("10.13.13.99");
 
         assertThatThrownBy(() -> service.deletePeer("10.13.13.99"))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class)
             .hasMessageContaining("10.13.13.99");
     }
 
@@ -545,7 +545,7 @@ class VpnServiceTest {
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.99")).thenReturn("10.13.13.99");
 
         assertThatThrownBy(() -> service.deletePeer("10.13.13.99"))
-            .isInstanceOf(IllegalArgumentException.class);
+            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
 
         verifyNoInteractions(vpnPeerDeleter);
     }
@@ -869,11 +869,50 @@ class VpnServiceTest {
         when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.updateLanCidr("ghost", "192.168.3.0/24"))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class)
             .hasMessageContaining("ghost");
 
         verifyNoInteractions(forUpdatingServerAllowedIps);
         verifyNoInteractions(forUpdatingPeerConfigurations);
+    }
+
+    // --- updateLanCidr (#195) — reject shell-injection payloads at the boundary ---
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "1.2.3.0/24; id",
+        "1.2.3.0/24 | id",
+        "1.2.3.0/24`id`",
+        "1.2.3.0/24$(id)",
+        "1.2.3.0/24\nid",
+        "256.0.0.0/24",
+        "1.2.3.4/33",
+        "not-a-cidr"
+    })
+    void updateLanCidr_rejectsCommandInjectionAndMalformedCidr(String malicious) {
+        // The injection check must fire BEFORE any peer lookup or persistence call.
+        // Otherwise an attacker could probe peer existence + leave audit traces
+        // even on rejected requests.
+        assertThatThrownBy(() -> service.updateLanCidr("apalveien5", malicious))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("lanCidr");
+
+        verifyNoInteractions(peerConfigProvider, forUpdatingServerAllowedIps, forUpdatingPeerConfigurations, forSyncingLanRoutes);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "1.2.3.0/24; id",
+        "256.0.0.0/24",
+        "1.2.3.4/33"
+    })
+    void createPeer_rejectsCommandInjectionAndMalformedCidr(String malicious) {
+        assertThatThrownBy(() -> service.createPeer("evilpeer", MachineType.UBUNTU_SERVER, malicious))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("lanCidr");
+
+        verifyNoInteractions(peerConfigProvider, forUpdatingServerAllowedIps,
+            forUpdatingPeerConfigurations, forGettingVpnClients);
     }
 
     // silence unused field warning — MachineType is referenced in Javadoc of PeerConfigResult ctor via record definition

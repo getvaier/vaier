@@ -89,7 +89,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void deletePeer_returns404WhenNotFound() throws Exception {
-        doThrow(new IllegalArgumentException("Peer not found: peer1"))
+        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: peer1"))
                 .when(deletePeerUseCase).deletePeer(eq("peer1"));
 
         mockMvc.perform(delete("/vpn/peers/peer1"))
