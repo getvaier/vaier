@@ -109,6 +109,11 @@
             color: var(--text-muted);
             flex-shrink: 0;
         }
+        /* Status colour rides on the machine icon now that the dot is gone. */
+        .machine-icon.icon-up        { color: var(--green); }
+        .machine-icon.icon-down      { color: var(--red); }
+        .machine-icon.icon-degraded  { color: var(--yellow); }
+        .machine-icon.icon-unknown   { color: var(--text-dim); }
 
         .machine-icon-cap {
             display: inline-flex;
@@ -122,31 +127,27 @@
         .machine-icon-cap.cap-relay  { color: #2496ed; }
         .machine-icon-cap.cap-docker { color: #2496ed; }
 
-        .recency-bars {
-            display: inline-flex;
-            align-items: flex-end;
-            gap: 2px;
-            height: 14px;
+        /* Fixed-column capability strip — empty slots keep icons aligned across cards. */
+        .machine-caps {
+            display: grid;
+            grid-template-columns: 90px 90px;
+            gap: 0.5rem;
             margin-left: auto;
             flex-shrink: 0;
+            align-items: center;
         }
-        .recency-bars i {
-            display: block;
-            width: 3px;
-            background: var(--text-dim);
-            opacity: 0.25;
-            border-radius: 1px;
+        .machine-caps > .cap-slot {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            min-width: 0;
         }
-        .recency-bars i:nth-child(1) { height: 4px; }
-        .recency-bars i:nth-child(2) { height: 7px; }
-        .recency-bars i:nth-child(3) { height: 10px; }
-        .recency-bars i:nth-child(4) { height: 14px; }
-        .recency-tier-1 i:nth-child(-n+1),
-        .recency-tier-2 i:nth-child(-n+2),
-        .recency-tier-3 i:nth-child(-n+3),
-        .recency-tier-4 i:nth-child(-n+4) {
-            background: var(--green);
-            opacity: 1;
+        .cap-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .peer-name {
@@ -168,9 +169,6 @@
             border: 1px solid var(--border);
             justify-self: start;
         }
-
-        .status-neutral  { background: var(--text-dim); }
-        .status-degraded { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
 
         .peer-actions-row {
             display: flex;
@@ -385,6 +383,8 @@
         @media (max-width: 600px) {
             .peer-header { padding: 0.6rem 0.75rem; }
             .peer-body { padding: 0 0.75rem 0.75rem; }
+            .machine-caps { grid-template-columns: 20px 20px; gap: 0.4rem; }
+            .cap-label { display: none; }
             .toast-stack {
                 left: 0.5rem;
                 right: 0.5rem;
@@ -647,43 +647,13 @@
             return new Date(h * 1000).toLocaleString();
         }
 
-        function lastSeenRelative(handshakeEpoch) {
-            const h = parseInt(handshakeEpoch);
-            if (isNaN(h) || h <= 0) return 'never';
-            const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - h);
-            if (ageSec < 60)    return ageSec + 's ago';
-            if (ageSec < 3600)  return Math.floor(ageSec / 60)    + 'm ago';
-            if (ageSec < 86400) return Math.floor(ageSec / 3600)  + 'h ago';
-            return Math.floor(ageSec / 86400) + 'd ago';
-        }
-
-        function recencyTier(handshakeEpoch) {
-            const h = parseInt(handshakeEpoch);
-            if (isNaN(h) || h <= 0) return 0;
-            const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - h);
-            if (ageSec < 300)    return 4;   // <5 min
-            if (ageSec < 3600)   return 3;   // <1 hour
-            if (ageSec < 86400)  return 2;   // <1 day
-            if (ageSec < 604800) return 1;   // <1 week
-            return 0;
-        }
-
-        function recencyBarsHtml(handshakeEpoch, id) {
-            const tier = recencyTier(handshakeEpoch);
-            const title = 'Last seen ' + lastSeenAbsolute(handshakeEpoch)
-                + (tier > 0 ? ' (' + lastSeenRelative(handshakeEpoch) + ')' : '');
-            return `<span class="recency-bars recency-tier-${tier}" id="${id}" title="${title}">
-                        <i></i><i></i><i></i><i></i>
-                    </span>`;
-        }
-
         // Inline SVG icons keep the cards self-contained and recolour via currentColor.
         function machineIconSvg(kind) {
             const A = 'width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
             switch (kind) {
                 case 'mobile':  return `<svg ${A}><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/></svg>`;
                 case 'laptop':  return `<svg ${A}><rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/></svg>`;
-                case 'server':  return `<svg ${A}><rect x="2" y="2.5" width="12" height="4" rx="0.6"/><rect x="2" y="9.5" width="12" height="4" rx="0.6"/><circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none"/><circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none"/></svg>`;
+                case 'server':  return `<svg ${A}><path d="M8 1.5 L13.5 3.5 V8 C13.5 11.3 11.2 13.7 8 14.5 C4.8 13.7 2.5 11.3 2.5 8 V3.5 Z"/><polyline points="5.5 8.2 7.3 10 10.6 6.5"/></svg>`;
                 case 'lan':     return `<svg ${A}><path d="M2 7.5 L8 2.5 L14 7.5 V14 H2 Z"/><line x1="6.5" y1="14" x2="6.5" y2="10"/><line x1="9.5" y1="14" x2="9.5" y2="10"/></svg>`;
                 case 'local':   return `<svg ${A}><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`;
             }
@@ -714,12 +684,41 @@
             return '';
         }
 
-        function machineIconHtml(kind, title) {
-            return `<span class="machine-icon" title="${title}">${machineIconSvg(kind)}</span>`;
+        // Map the legacy "status-*" dot class names to the icon-colour variants. Lets the
+        // existing branching in the renderers stay untouched while we move the status colour
+        // off the (now removed) dot and onto the machine icon itself.
+        function iconStatusClass(statusDotClass) {
+            switch (statusDotClass) {
+                case 'status-connected':    return 'icon-up';
+                case 'status-disconnected': return 'icon-down';
+                case 'status-degraded':     return 'icon-degraded';
+                default:                    return 'icon-unknown';
+            }
+        }
+
+        function machineIconHtml(kind, title, statusClass, id) {
+            const cls = 'machine-icon' + (statusClass ? ' ' + statusClass : '');
+            const idAttr = id ? ` id="${id}"` : '';
+            return `<span class="${cls}"${idAttr} title="${title}">${machineIconSvg(kind)}</span>`;
         }
 
         function capabilityIconHtml(kind, title) {
             return `<span class="machine-icon-cap cap-${kind}" title="${title}">${capabilityIconSvg(kind)}</span>`;
+        }
+
+        // Renders a fixed-column strip of capability icons. Each slot is either an
+        // {kind,title,label} object or null; null slots render as empty placeholders so that
+        // the docker icon (etc.) lines up vertically across every machine card. The label
+        // appears next to the icon on desktop and is hidden on mobile via CSS.
+        function capabilitySlotsHtml(slots) {
+            const cells = slots.map(slot => {
+                if (!slot) return '<div class="cap-slot"></div>';
+                const label = slot.label
+                    ? `<span class="cap-label">${slot.label}</span>`
+                    : '';
+                return `<div class="cap-slot">${capabilityIconHtml(slot.kind, slot.title)}${label}</div>`;
+            }).join('');
+            return `<div class="machine-caps">${cells}</div>`;
         }
 
         function peerTypeIconKind(peerType) {
@@ -791,9 +790,9 @@
             } else {
                 statusClass = 'status-connected';
             }
-            const dockerCap = server.runsDocker
-                ? capabilityIconHtml('docker', 'Docker auto-discovery enabled')
-                : '';
+            const dockerSlot = server.runsDocker
+                ? { kind: 'docker', title: 'Docker auto-discovery enabled', label: 'Docker' }
+                : null;
             const portText = server.runsDocker
                 ? `${server.lanAddress}:${server.dockerPort}`
                 : server.lanAddress;
@@ -816,11 +815,9 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
-                        <span class="status-dot ${statusClass}"></span>
-                        ${machineIconHtml('lan', 'LAN server (no VPN, behind a relay)')}
+                        ${machineIconHtml('lan', 'LAN server (no VPN, behind a relay)', iconStatusClass(statusClass))}
                         <span class="peer-name">${server.name}</span>
-                        ${dockerCap}
-                        ${recencyBarsHtml(server.lastSeen, 'last-seen-' + id)}
+                        ${capabilitySlotsHtml([null, dockerSlot])}
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
@@ -864,10 +861,9 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key}')">
                     <div class="peer-header-left">
-                        <span class="status-dot ${statusClass}"></span>
-                        ${machineIconHtml('local', 'This Vaier host')}
+                        ${machineIconHtml('local', 'This Vaier host', iconStatusClass(statusClass))}
                         <span class="peer-name">local</span>
-                        ${capabilityIconHtml('docker', 'Local Docker engine')}
+                        ${capabilitySlotsHtml([null, { kind: 'docker', title: 'Local Docker engine', label: 'Docker' }])}
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
@@ -915,10 +911,10 @@
             const typeTooltip = ({
                 'mobile': 'Mobile client (VPN)',
                 'laptop': 'Windows client (VPN)',
-                'server': 'Server (VPN)'
+                'server': 'VPN server'
             })[iconKind];
-            const relayCap   = isRelay ? capabilityIconHtml('relay', `Relay for LAN ${peer.lanCidr}`) : '';
-            const dockerCap  = isServer ? capabilityIconHtml('docker', 'Runs Docker') : '';
+            const relaySlot  = isRelay ? { kind: 'relay',  title: `Relay for LAN ${peer.lanCidr}`, label: 'Relay' } : null;
+            const dockerSlot = isServer ? { kind: 'docker', title: 'Runs Docker', label: 'Docker' } : null;
 
             const composeBtn = isServer
                 ? `<button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.name}')">compose</button>`
@@ -934,12 +930,9 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${peer.name.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
-                        <span class="status-dot ${statusClass}" id="hdr-dot-${id}"></span>
-                        ${machineIconHtml(iconKind, typeTooltip)}
+                        ${machineIconHtml(iconKind, typeTooltip, iconStatusClass(statusClass), 'hdr-icon-' + id)}
                         <span class="peer-name">${peer.name}</span>
-                        ${relayCap}
-                        ${dockerCap}
-                        ${recencyBarsHtml(peer.latestHandshake, 'last-seen-' + id)}
+                        ${capabilitySlotsHtml([relaySlot, dockerSlot])}
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
@@ -1711,22 +1704,14 @@
                     const id = s.name.replace(/[^a-zA-Z0-9]/g, '_');
                     const handshake = parseInt(s.latestHandshake);
                     const connected = handshake > 0 && (now - handshake) < 180;
-                    const statusClass = connected ? 'status-connected' : 'status-disconnected';
+                    const iconCls = connected ? 'icon-up' : 'icon-down';
 
-                    const hdrDot         = document.getElementById('hdr-dot-'          + id);
+                    const hdrIcon        = document.getElementById('hdr-icon-'         + id);
                     const rxtx           = document.getElementById('rxtx-'             + id);
-                    const lastSeenBars   = document.getElementById('last-seen-'        + id);
                     const lastSeenDetail = document.getElementById('last-seen-detail-' + id);
 
-                    if (hdrDot)         { hdrDot.className = 'status-dot ' + statusClass; }
+                    if (hdrIcon)        { hdrIcon.className = 'machine-icon ' + iconCls; }
                     if (rxtx)           { rxtx.textContent = formatBytes(s.transferRx) + ' / ' + formatBytes(s.transferTx); }
-                    if (lastSeenBars) {
-                        const tier = recencyTier(s.latestHandshake);
-                        lastSeenBars.className = 'recency-bars recency-tier-' + tier;
-                        const abs = lastSeenAbsolute(s.latestHandshake);
-                        lastSeenBars.title = 'Last seen ' + abs
-                            + (tier > 0 ? ' (' + lastSeenRelative(s.latestHandshake) + ')' : '');
-                    }
                     if (lastSeenDetail) { lastSeenDetail.textContent = lastSeenAbsolute(s.latestHandshake); }
 
                     // Sync the in-memory peers array so map markers reflect live connection state.

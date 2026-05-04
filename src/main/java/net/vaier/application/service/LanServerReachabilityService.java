@@ -25,6 +25,11 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
 
     private static final List<Integer> PROBE_PORTS = List.of(80, 443, 22);
     private static final int PROBE_TIMEOUT_MS = 1000;
+    // A probe result must hold for this many consecutive cycles before it lands in the cache
+    // (and therefore triggers an admin email). Dampens both warmup-after-restart blips and
+    // ordinary network flapping. With the 30s scheduler, N=3 means a state must persist for
+    // ~60s before we tell the operator about it.
+    private static final int REQUIRED_CONSECUTIVE_PROBES = 3;
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-servers-updated";
 
@@ -34,6 +39,8 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private final NotifyAdminsOfPeerTransitionUseCase notifier;
     private final Map<String, Reachability> cache = new ConcurrentHashMap<>();
     private final Map<String, Long> lastSeenEpochSec = new ConcurrentHashMap<>();
+    private final Map<String, Reachability> pendingState = new ConcurrentHashMap<>();
+    private final Map<String, Integer> pendingCount = new ConcurrentHashMap<>();
 
     public LanServerReachabilityService(GetLanServersUseCase getLanServersUseCase,
                                         ForProbingTcp forProbingTcp,
@@ -64,23 +71,36 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         // Docker scrape result to produce green / yellow / red for Docker hosts.
         for (var view : getLanServersUseCase.getAll()) {
             LanServer server = view.server();
-            seen.add(server.name());
+            String name = server.name();
+            seen.add(name);
             Reachability r = probe(server.lanAddress());
-            cache.put(server.name(), r);
-            // Only stamp lastSeen on a successful probe — a DOWN result must not erase the
-            // previous lastSeen, since the whole point of "last seen" is to remember when
-            // the host was last alive.
+            // Only stamp lastSeen on a successful raw probe — independent of debounce, since
+            // a one-off TCP success still proves the host was alive at that moment.
             if (r == Reachability.OK) {
-                lastSeenEpochSec.put(server.name(), System.currentTimeMillis() / 1000);
+                lastSeenEpochSec.put(name, System.currentTimeMillis() / 1000);
             }
-            maybeNotifyTransition(server, previous.get(server.name()), r);
+            // Debounce: only commit to the published cache (and therefore to the email path)
+            // once the same probe result has held for REQUIRED_CONSECUTIVE_PROBES cycles.
+            Reachability candidate = pendingState.get(name);
+            int count = (candidate == r ? pendingCount.getOrDefault(name, 0) : 0) + 1;
+            if (count >= REQUIRED_CONSECUTIVE_PROBES) {
+                pendingState.remove(name);
+                pendingCount.remove(name);
+                Reachability prev = cache.put(name, r);
+                maybeNotifyTransition(server, prev, r);
+            } else {
+                pendingState.put(name, r);
+                pendingCount.put(name, count);
+            }
         }
         cache.keySet().retainAll(seen);
         lastSeenEpochSec.keySet().retainAll(seen);
+        pendingState.keySet().retainAll(seen);
+        pendingCount.keySet().retainAll(seen);
 
         if (!previous.equals(cache)) {
-            // Wake up the Machines page so the status dot reflects the latest probe without
-            // needing a manual refresh.
+            // Wake up the Machines page so the icon colour reflects the latest confirmed
+            // probe without needing a manual refresh.
             forPublishingEvents.publish(SSE_TOPIC, SSE_EVENT, "");
         }
     }

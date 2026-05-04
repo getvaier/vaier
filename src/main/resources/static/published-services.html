@@ -43,6 +43,11 @@
             color: var(--text-muted);
             flex-shrink: 0;
         }
+        /* Status colour rides on the service-type icon now that the dot is gone. */
+        .machine-icon.icon-up        { color: var(--green); }
+        .machine-icon.icon-down      { color: var(--red); }
+        .machine-icon.icon-degraded  { color: var(--yellow); }
+        .machine-icon.icon-unknown   { color: var(--text-dim); }
 
         .machine-icon-cap {
             display: inline-flex;
@@ -55,6 +60,29 @@
         .machine-icon-cap.cap-auth    { color: var(--green); }
         .machine-icon-cap.cap-no-auth { color: var(--orange); }
         .machine-icon-cap.cap-docker  { color: #2496ed; }
+
+        /* Fixed-column capability strip — empty slots keep icons aligned across cards. */
+        .machine-caps {
+            display: grid;
+            grid-template-columns: 110px;
+            gap: 0.5rem;
+            margin-left: auto;
+            flex-shrink: 0;
+            align-items: center;
+        }
+        .machine-caps > .cap-slot {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            min-width: 0;
+        }
+        .cap-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
         .service-name {
             font-size: 0.85rem;
@@ -122,8 +150,6 @@
             margin-top: 0.75rem;
         }
 
-        .status-pending      { background: var(--yellow, #f59e0b); }
-
         /* Discoverable action buttons */
         .btn { transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s; }
 
@@ -160,8 +186,6 @@
             color: var(--text-muted);
             font-family: var(--mono);
         }
-
-        .status-neutral { background: var(--text-dim); }
 
         /* Publish progress */
         .progress-step {
@@ -201,6 +225,8 @@
             .service-body { padding: 0 0.75rem 0.75rem; }
             .discoverable-card { grid-template-columns: 1fr; gap: 0.4rem; padding: 0.6rem 0.75rem; }
             .section-header { margin: 1.25rem 0 0.5rem; }
+            .machine-caps { grid-template-columns: 20px; gap: 0.4rem; }
+            .cap-label { display: none; }
             .toast-stack {
                 left: 0.5rem;
                 right: 0.5rem;
@@ -387,13 +413,40 @@
             return '';
         }
 
-        function machineIconHtml(kind, title) {
-            return `<span class="machine-icon" title="${title}">${machineIconSvg(kind)}</span>`;
+        // Map dot-style status names to icon-colour variants. The page used to render a
+        // standalone dot; status now rides on the per-service machine icon.
+        function iconStatusClass(statusDotClass) {
+            switch (statusDotClass) {
+                case 'status-connected':    return 'icon-up';
+                case 'status-disconnected': return 'icon-down';
+                case 'status-degraded':     return 'icon-degraded';
+                case 'status-pending':      return 'icon-degraded';
+                default:                    return 'icon-unknown';
+            }
+        }
+
+        function machineIconHtml(kind, title, statusClass) {
+            const cls = 'machine-icon' + (statusClass ? ' ' + statusClass : '');
+            return `<span class="${cls}" title="${title}">${machineIconSvg(kind)}</span>`;
         }
 
         function capabilityIconHtml(kind, title) {
             const cls = kind === 'no-auth' ? 'cap-no-auth' : `cap-${kind}`;
             return `<span class="machine-icon-cap ${cls}" title="${title}">${capabilityIconSvg(kind)}</span>`;
+        }
+
+        // Renders a fixed-column strip of capability icons. Each slot is either an
+        // {kind,title,label} object or null; null slots render as empty placeholders so the
+        // capability icon (auth/no-auth) lines up vertically across every service card.
+        function capabilitySlotsHtml(slots) {
+            const cells = slots.map(slot => {
+                if (!slot) return '<div class="cap-slot"></div>';
+                const label = slot.label
+                    ? `<span class="cap-label">${slot.label}</span>`
+                    : '';
+                return `<div class="cap-slot">${capabilityIconHtml(slot.kind, slot.title)}${label}</div>`;
+            }).join('');
+            return `<div class="machine-caps">${cells}</div>`;
         }
 
         function serviceTypeIcon(service) {
@@ -493,9 +546,9 @@
                 const id         = cardId(service.name);
                 const isExpanded = expandedServices.has(service.name);
                 const dotClass   = dnsOk && hostOk ? 'status-connected' : 'status-disconnected';
-                const authCap    = service.authenticated
-                    ? capabilityIconHtml('auth',    'Authelia authentication required')
-                    : capabilityIconHtml('no-auth', 'No authentication — service is publicly reachable');
+                const authSlot   = service.authenticated
+                    ? { kind: 'auth',    title: 'Authelia authentication required',         label: 'Auth' }
+                    : { kind: 'no-auth', title: 'No authentication — service is publicly reachable', label: 'No auth' };
                 const serviceUrl = `https://${service.dnsAddress}`;
                 const isSelf = service.dnsAddress.startsWith('vaier.');
 
@@ -514,11 +567,10 @@
                 <div class="service-card">
                     <div class="service-header" onclick="toggleService('${service.name.replace(/'/g, "\\'")}')">
                         <div class="service-header-left">
-                            <span class="status-dot ${dotClass}"></span>
-                            ${machineIconHtml(typeKind, typeTip)}
+                            ${machineIconHtml(typeKind, typeTip, iconStatusClass(dotClass))}
                             <span class="service-name">${shortName}</span>
                             ${peerName ? `<span class="service-peer">@ ${peerName}</span>` : ''}
-                            ${authCap}
+                            ${capabilitySlotsHtml([authSlot])}
                         </div>
                         <span class="service-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                     </div>
@@ -631,7 +683,6 @@
                 return `
                 <div class="discoverable-card">
                     <div class="service-header-left" style="${dimStyle}">
-                        <span class="status-dot status-neutral"></span>
                         ${machineIconHtml(typeKind, typeTip)}
                         <span class="service-name">${s.containerName}</span>
                         <span class="service-peer">@ ${sourceLabel}</span>
@@ -712,7 +763,6 @@
             card.innerHTML = `
                 <div class="service-header" style="cursor:default">
                     <div class="service-header-left">
-                        <span class="status-dot status-pending"></span>
                         <span class="service-name">${subdomain}</span>
                         ${authBadge}
                     </div>

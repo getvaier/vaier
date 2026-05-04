@@ -39,12 +39,20 @@ class LanServerReachabilityServiceTest {
 
     LanServerReachabilityService service;
 
+    /** Number of consecutive same-state probes required before the service commits a result
+     *  (mirrors LanServerReachabilityService.REQUIRED_CONSECUTIVE_PROBES). */
+    private static final int CONFIRM = 3;
+
     @BeforeEach
     void setUp() {
         service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPublishingEvents, notifier);
         lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of());
         lenient().when(forProbingTcp.probe(anyString(), anyInt(), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
+    }
+
+    private void refreshN(int n) {
+        for (int i = 0; i < n; i++) service.refreshAll();
     }
 
     @Test
@@ -60,7 +68,7 @@ class LanServerReachabilityServiceTest {
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
 
-        service.refreshAll();
+        refreshN(CONFIRM);
 
         assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
     }
@@ -74,7 +82,7 @@ class LanServerReachabilityServiceTest {
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.REFUSED);
 
-        service.refreshAll();
+        refreshN(CONFIRM);
 
         assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
     }
@@ -86,7 +94,7 @@ class LanServerReachabilityServiceTest {
         ));
         // default mock returns UNREACHABLE for all calls.
 
-        service.refreshAll();
+        refreshN(CONFIRM);
 
         assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
     }
@@ -101,7 +109,7 @@ class LanServerReachabilityServiceTest {
         when(forProbingTcp.probe(eq("192.168.3.50"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
 
-        service.refreshAll();
+        refreshN(CONFIRM);
 
         assertThat(service.getReachability("nas")).isEqualTo(Reachability.OK);
     }
@@ -128,7 +136,7 @@ class LanServerReachabilityServiceTest {
             view("printer", "192.168.3.20", false, null)
         ));
 
-        service.refreshAll();
+        refreshN(CONFIRM);
 
         verify(forPublishingEvents).publish(eq("vpn-peers"), eq("lan-servers-updated"), anyString());
     }
@@ -139,8 +147,8 @@ class LanServerReachabilityServiceTest {
             view("printer", "192.168.3.20", false, null)
         ));
 
-        service.refreshAll(); // first refresh: DOWN → publishes
-        service.refreshAll(); // second refresh: still DOWN → no event
+        refreshN(CONFIRM);     // confirms DOWN → 1 publish
+        service.refreshAll();  // still DOWN, already confirmed → no event
 
         verify(forPublishingEvents, times(1))
             .publish(eq("vpn-peers"), eq("lan-servers-updated"), anyString());
@@ -151,7 +159,7 @@ class LanServerReachabilityServiceTest {
         when(getLanServersUseCase.getAll()).thenReturn(List.of(
             view("printer", "192.168.3.20", false, null)
         ));
-        service.refreshAll();
+        refreshN(CONFIRM);
         assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
 
         when(getLanServersUseCase.getAll()).thenReturn(List.of());
@@ -218,13 +226,13 @@ class LanServerReachabilityServiceTest {
         ));
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
-        service.refreshAll();
+        refreshN(CONFIRM);
         Long firstSeen = service.getLastSeenEpochSec("printer");
         assertThat(firstSeen).isNotNull();
 
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
-        service.refreshAll();
+        refreshN(CONFIRM);
 
         assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
         assertThat(service.getLastSeenEpochSec("printer")).isEqualTo(firstSeen);
@@ -266,11 +274,11 @@ class LanServerReachabilityServiceTest {
         ));
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
-        service.refreshAll(); // baseline OK, no notification
+        refreshN(CONFIRM); // baseline OK, no notification
 
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
-        service.refreshAll();
+        refreshN(CONFIRM); // confirms DOWN → notify
 
         ArgumentCaptor<PeerSnapshot> captor = ArgumentCaptor.forClass(PeerSnapshot.class);
         verify(notifier).notifyAdmins(captor.capture());
@@ -286,12 +294,12 @@ class LanServerReachabilityServiceTest {
         when(getLanServersUseCase.getAll()).thenReturn(List.of(
             view("printer", "192.168.3.20", false, null)
         ));
-        // default mock returns UNREACHABLE — first refresh baselines DOWN.
-        service.refreshAll();
+        // default mock returns UNREACHABLE — confirm baseline DOWN.
+        refreshN(CONFIRM);
 
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
-        service.refreshAll();
+        refreshN(CONFIRM); // confirms OK → notify
 
         ArgumentCaptor<PeerSnapshot> captor = ArgumentCaptor.forClass(PeerSnapshot.class);
         verify(notifier).notifyAdmins(captor.capture());
@@ -309,11 +317,53 @@ class LanServerReachabilityServiceTest {
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
 
-        service.refreshAll(); // baseline OK
-        service.refreshAll(); // still OK
-        service.refreshAll(); // still OK
+        refreshN(CONFIRM);     // baseline OK
+        refreshN(CONFIRM);     // still OK, still OK, still OK
 
         verify(notifier, never()).notifyAdmins(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void refreshAll_singleTransientFlip_doesNotNotify() {
+        // After a confirmed OK baseline, a single DOWN probe (network blip / port edge case)
+        // must never be enough to fire an email — that's the whole point of the debounce.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        refreshN(CONFIRM); // baseline OK
+
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.UNREACHABLE);
+        service.refreshAll(); // single DOWN — pending, not committed
+
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        service.refreshAll(); // back to OK before threshold hit
+
+        verify(notifier, never()).notifyAdmins(org.mockito.ArgumentMatchers.any());
+        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+    }
+
+    @Test
+    void refreshAll_warmupKeepsCacheUnknownUntilConfirmed() {
+        // First couple of probes after Vaier startup must not flip the published cache —
+        // otherwise the UI shows red briefly during the WireGuard tunnel warmup window.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+
+        for (int i = 0; i < CONFIRM - 1; i++) {
+            service.refreshAll();
+            assertThat(service.getReachability("printer"))
+                .as("must stay UNKNOWN until %d consecutive probes confirm", CONFIRM)
+                .isEqualTo(Reachability.UNKNOWN);
+        }
+        service.refreshAll();
+        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -323,14 +373,14 @@ class LanServerReachabilityServiceTest {
         ));
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
-        service.refreshAll(); // baseline OK
+        refreshN(CONFIRM); // baseline OK
 
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
         org.mockito.Mockito.doThrow(new RuntimeException("notifier blew up"))
             .when(notifier).notifyAdmins(org.mockito.ArgumentMatchers.any());
 
-        org.assertj.core.api.Assertions.assertThatCode(() -> service.refreshAll())
+        org.assertj.core.api.Assertions.assertThatCode(() -> refreshN(CONFIRM))
             .doesNotThrowAnyException();
     }
 
