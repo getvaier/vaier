@@ -372,76 +372,76 @@ class ContainerServiceTest {
         assertThat(result.get(0).wireguardOutdated()).isFalse();
     }
 
-    // --- getUnpublishedLocalServices ---
+    // --- getUnpublishedVaierServerServices ---
 
     @Test
-    void getUnpublishedLocalServices_excludesWireguardContainer() {
+    void getUnpublishedVaierServerServices_excludesWireguardContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class)))
             .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD, 51820, "tcp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_excludesAutheliaContainer() {
+    void getUnpublishedVaierServerServices_excludesAutheliaContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.AUTHELIA, 9091, "tcp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_excludesRedisContainer() {
+    void getUnpublishedVaierServerServices_excludesRedisContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.REDIS, 6379, "tcp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_excludesVaierContainer() {
+    void getUnpublishedVaierServerServices_excludesVaierContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.VAIER, 8080, "tcp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_excludesWireguardMasqueradeContainer() {
+    void getUnpublishedVaierServerServices_excludesWireguardMasqueradeContainer() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD_MASQUERADE, 8080, "tcp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_traefikOnPort8080_includedWithDashboardRedirect() {
+    void getUnpublishedVaierServerServices_traefikOnPort8080_includedWithDashboardRedirect() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.TRAEFIK, 8080, "tcp")));
 
-        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).containerName()).isEqualTo(ServiceNames.TRAEFIK);
         assertThat(result.get(0).port()).isEqualTo(8080);
         assertThat(result.get(0).rootRedirectPath()).isEqualTo("/dashboard/");
-        assertThat(result.get(0).source()).isEqualTo(PublishableSource.LOCAL);
+        assertThat(result.get(0).source()).isEqualTo(PublishableSource.VAIER_SERVER);
     }
 
     @Test
-    void getUnpublishedLocalServices_traefikOnPort80_excluded() {
+    void getUnpublishedVaierServerServices_traefikOnPort80_excluded() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("traefik", 80, "tcp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_unknownContainerTcpPort_includedWithNullRedirectPath() {
+    void getUnpublishedVaierServerServices_unknownContainerTcpPort_includedWithNullRedirectPath() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
 
-        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).containerName()).isEqualTo("my-app");
@@ -450,38 +450,38 @@ class ContainerServiceTest {
     }
 
     @Test
-    void getUnpublishedLocalServices_udpPort_excluded() {
+    void getUnpublishedVaierServerServices_udpPort_excluded() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("my-app", 3000, "udp")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_alreadyPublishedRoute_excluded() {
+    void getUnpublishedVaierServerServices_alreadyPublishedRoute_excluded() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
         List<ReverseProxyRoute> existingRoutes = List.of(route("my-app", 3000));
 
-        assertThat(service.getUnpublishedLocalServices(existingRoutes)).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(existingRoutes)).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_dockerThrows_returnsEmptyList() {
+    void getUnpublishedVaierServerServices_dockerThrows_returnsEmptyList() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenThrow(new RuntimeException("Docker socket unavailable"));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_containerOnVaierNetwork_usesContainerNameAndPrivatePort() {
+    void getUnpublishedVaierServerServices_containerOnVaierNetwork_usesContainerNameAndPrivatePort() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
                 List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
                 List.of(VAIER_NETWORK), "running")));
 
-        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).address()).isEqualTo("my-app");
@@ -489,13 +489,13 @@ class ContainerServiceTest {
     }
 
     @Test
-    void getUnpublishedLocalServices_containerOnOtherNetworkWithPublicPort_usesGatewayAndPublicPort() {
+    void getUnpublishedVaierServerServices_containerOnOtherNetworkWithPublicPort_usesGatewayAndPublicPort() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
                 List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
                 List.of("uptime-kuma_default"), "running")));
 
-        List<PublishableService> result = service.getUnpublishedLocalServices(List.of());
+        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).address()).isEqualTo(GATEWAY_IP);
@@ -504,24 +504,24 @@ class ContainerServiceTest {
     }
 
     @Test
-    void getUnpublishedLocalServices_containerOnOtherNetworkWithoutPublicPort_excluded() {
+    void getUnpublishedVaierServerServices_containerOnOtherNetworkWithoutPublicPort_excluded() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "my-app", "image:latest", "latest",
                 List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
                 List.of("some-other-network"), "running")));
 
-        assertThat(service.getUnpublishedLocalServices(List.of())).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
     }
 
     @Test
-    void getUnpublishedLocalServices_crossNetworkContainerAlreadyPublished_excluded() {
+    void getUnpublishedVaierServerServices_crossNetworkContainerAlreadyPublished_excluded() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(new DockerService("id", "uptime-kuma", "image:latest", "latest",
                 List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
                 List.of("uptime-kuma_default"), "running")));
         List<ReverseProxyRoute> existingRoutes = List.of(route(GATEWAY_IP, 3001));
 
-        assertThat(service.getUnpublishedLocalServices(existingRoutes)).isEmpty();
+        assertThat(service.getUnpublishedVaierServerServices(existingRoutes)).isEmpty();
     }
 
     // --- helpers ---

@@ -43,14 +43,14 @@ public class DockerServerAdapter implements ForGettingServerInfo {
     }
 
     /**
-     * Test constructor that pre-populates the caches for local server.
+     * Test constructor that pre-populates the caches for the Vaier server.
      */
     DockerServerAdapter(DockerClient dockerClient, DockerHttpClient dockerHttpClient) {
-        Server local = Server.local();
-        String cacheKey = local.getAddress() + ":" + local.getPort();
+        Server vaierServer = Server.vaierServer();
+        String cacheKey = vaierServer.getAddress() + ":" + vaierServer.getPort();
         dockerClientCache.put(cacheKey, dockerClient);
         httpClientCache.put(cacheKey, dockerHttpClient);
-        serverCache.put(cacheKey, local);
+        serverCache.put(cacheKey, vaierServer);
     }
 
     @Override

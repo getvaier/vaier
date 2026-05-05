@@ -39,7 +39,7 @@ public class Server {
         OK, UNREACHABLE
     }
 
-    public static Server local() {
+    public static Server vaierServer() {
         String dockerHost = System.getenv("DOCKER_HOST");
         if (dockerHost != null && !dockerHost.isBlank()) {
             if (dockerHost.startsWith("tcp://")) {

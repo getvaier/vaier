@@ -171,7 +171,7 @@ public abstract class VaierWebMvcIntegrationBase {
     protected DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
 
     @MockBean
-    protected DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
+    protected DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
 
     @MockBean
     protected DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;

@@ -383,7 +383,7 @@
                 case 'laptop':  return `<svg ${A}><rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/></svg>`;
                 case 'server':  return `<svg ${A}><rect x="2" y="2.5" width="12" height="4" rx="0.6"/><rect x="2" y="9.5" width="12" height="4" rx="0.6"/><circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none"/><circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none"/></svg>`;
                 case 'lan':     return `<svg ${A}><path d="M2 7.5 L8 2.5 L14 7.5 V14 H2 Z"/><line x1="6.5" y1="14" x2="6.5" y2="10"/><line x1="9.5" y1="14" x2="9.5" y2="10"/></svg>`;
-                case 'local':   return `<svg ${A}><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`;
+                case 'vaier':   return `<svg ${A}><circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/><line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/><line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/><circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/></svg>`;
             }
             return '';
         }
@@ -452,13 +452,14 @@
         function serviceTypeIcon(service) {
             if (service.isLanService) return 'lan';
             const nameParts = service.name.split(' @ ');
-            if (nameParts.length === 1) return 'local';
+            if (nameParts.length === 2 && nameParts[1] === 'Vaier server') return 'vaier';
+            if (nameParts.length === 1) return 'vaier';
             return 'server';
         }
 
         function discoverableTypeIcon(s) {
             if (s.source === 'LAN_DOCKER_HOST') return 'lan';
-            if (s.source === 'LOCAL')           return 'local';
+            if (s.source === 'VAIER_SERVER')    return 'vaier';
             return 'server';
         }
 
@@ -557,7 +558,7 @@
                 const shortName = nameParts[0];
                 const peerName  = nameParts.length === 2 ? nameParts[1] : '';
                 const typeKind  = serviceTypeIcon(service);
-                const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'local': 'Service on this Vaier host', 'server': 'Service on a VPN peer' })[typeKind];
+                const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'vaier': 'Service on the Vaier server', 'server': 'Service on a VPN peer' })[typeKind];
 
                 const urlValue = dnsOk && !isSelf
                     ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}">${service.dnsAddress}</a>`
@@ -661,12 +662,12 @@
             }
 
             const html = visible.map(s => {
-                const isLocal = s.source === 'LOCAL';
-                const sourceLabel = isLocal ? 'local' : s.peerName;
+                const isVaierServer = s.source === 'VAIER_SERVER';
+                const sourceLabel = isVaierServer ? 'Vaier server' : s.peerName;
                 const key = ignoreKey(s);
                 const dimStyle = s.ignored ? 'opacity:0.55' : '';
                 const typeKind = discoverableTypeIcon(s);
-                const typeTip  = ({ 'lan': 'Discovered on a LAN Docker host', 'local': 'Discovered on this Vaier host', 'server': 'Discovered on a VPN peer' })[typeKind];
+                const typeTip  = ({ 'lan': 'Discovered on a LAN Docker host', 'vaier': 'Discovered on the Vaier server', 'server': 'Discovered on a VPN peer' })[typeKind];
                 const actionButtons = s.ignored
                     ? `<button class="btn btn-success btn-small" title="Show this service again in the list" onclick="unignoreService('${key}')">Unignore</button>`
                     : `<button class="btn btn-primary btn-small"
@@ -674,7 +675,7 @@
                         data-address="${s.address}"
                         data-port="${s.port}"
                         data-container="${s.containerName}"
-                        data-source="${isLocal ? 'local' : s.peerName}"
+                        data-source="${isVaierServer ? 'vaier-server' : s.peerName}"
                         data-redirect="${s.rootRedirectPath || ''}"
                         onclick="showPublishModalFromBtn(this)">
                         + Publish
@@ -735,7 +736,7 @@
             document.getElementById('publishAddress').value          = address;
             document.getElementById('publishPort').value             = port;
             document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
-            document.getElementById('publishSubdomain').value        = sourceName === 'local' ? containerName : `${containerName}.${sourceName}`;
+            document.getElementById('publishSubdomain').value        = sourceName === 'vaier-server' ? containerName : `${containerName}.${sourceName}`;
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceName} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;

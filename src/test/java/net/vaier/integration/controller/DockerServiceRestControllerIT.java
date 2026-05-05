@@ -82,34 +82,34 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void discoverLocalContainers_returnsLocalServices() throws Exception {
-        when(discoverLocalContainersUseCase.discover()).thenReturn(List.of(
-                new DockerService("local1", "vaier", "getvaier/vaier:latest", "latest",
+    void discoverVaierServerContainers_returnsVaierServerServices() throws Exception {
+        when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of(
+                new DockerService("c1", "vaier", "getvaier/vaier:latest", "latest",
                         List.of(new PortMapping(8080, 8888, "tcp", "0.0.0.0")),
                         List.of("vaier-net"), "running")
         ));
 
-        mockMvc.perform(get("/docker-services/local"))
+        mockMvc.perform(get("/docker-services/vaier-server"))
                .andExpect(status().isOk())
-               .andExpect(jsonPath("$[0].containerId").value("local1"))
+               .andExpect(jsonPath("$[0].containerId").value("c1"))
                .andExpect(jsonPath("$[0].containerName").value("vaier"));
     }
 
     @Test
-    void discoverLocalContainers_returnsEmptyListWhenNoContainers() throws Exception {
-        when(discoverLocalContainersUseCase.discover()).thenReturn(List.of());
+    void discoverVaierServerContainers_returnsEmptyListWhenNoContainers() throws Exception {
+        when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of());
 
-        mockMvc.perform(get("/docker-services/local"))
+        mockMvc.perform(get("/docker-services/vaier-server"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$").isEmpty());
     }
 
     @Test
-    void discoverLocalContainers_returns500WhenDockerUnavailable() throws Exception {
-        when(discoverLocalContainersUseCase.discover())
+    void discoverVaierServerContainers_returns500WhenDockerUnavailable() throws Exception {
+        when(discoverVaierServerContainersUseCase.discover())
                 .thenThrow(new RuntimeException("docker.sock not accessible"));
 
-        mockMvc.perform(get("/docker-services/local"))
+        mockMvc.perform(get("/docker-services/vaier-server"))
                .andExpect(status().isInternalServerError());
     }
 

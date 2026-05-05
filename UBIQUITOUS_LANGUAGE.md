@@ -52,8 +52,8 @@ The primary workflow. Always use these terms — the UI is built around them.
 
 | Term | Definition |
 |------|------------|
-| **Service** | (Without qualifier) a Docker container with at least one exposed port, running on the local host or a server peer or a Docker-enabled LAN server. Discovered automatically. Backed by `domain.DockerService`. |
-| **Publishable service** | A discovered service eligible for publishing. Has a `source` indicating where it was discovered (local, peer, LAN server). Listed under **Services → Publishable** / "Discovered". |
+| **Service** | (Without qualifier) a Docker container with at least one exposed port, running on the Vaier server or a server peer or a Docker-enabled LAN server. Discovered automatically. Backed by `domain.DockerService`. |
+| **Publishable service** | A discovered service eligible for publishing. Has a `source` indicating where it was discovered (`VAIER_SERVER`, `PEER`, `LAN_SERVER`). Listed under **Services → Publishable** / "Discovered". |
 | **Published service** | A service that has been wired through the publish flow: a DNS CNAME (or A) plus a Traefik route plus optional Authelia middleware. Backed by a `ReverseProxyRoute`. Listed under **Services → Active**. |
 | **LAN service** | A published service whose backend is a host:port on a relay peer's LAN, not a container. `ReverseProxyRoute.isLanService == true`. Routed via the relay peer. Surfaces with a "LAN" badge. |
 | **Publish flow** | The end-to-end pipeline: validate → write CNAME → wait for DNS propagation → write Traefik route → confirm Traefik picked it up. UI shows it as a **Processing** card between Discovered and Active. Survives page refresh because state lives server-side. |
@@ -97,7 +97,7 @@ Avoid: "vhost", "site", "auth provider".
 
 | Term | Definition |
 |------|------------|
-| **Discovery** | The process of listing Docker containers on a host. `DiscoverLocalContainersUseCase` (Vaier server), `DiscoverPeerContainersUseCase` (server peer via `tcp://<peer>:<port>`), `DiscoverLanServerContainersUseCase` (LAN server, scraped through the relay). |
+| **Discovery** | The process of listing Docker containers on a host. `DiscoverVaierServerContainersUseCase` (Vaier server), `DiscoverPeerContainersUseCase` (server peer via `tcp://<peer>:<port>`), `DiscoverLanServerContainersUseCase` (LAN server, scraped through the relay). |
 | **Reachability check** | A TCP probe (`ForProbingTcp`) used for LAN servers. Every 30s, hits ports 80/443/22; *any* response (handshake or RST) means pingable. Drives the **four-state machine-icon colour**. |
 | **Probe result** | `CONNECTED` (open), `REFUSED` (host alive, port closed — still pingable), `UNREACHABLE` (timeout or low-level error). |
 | **Four-state machine-icon colour** | The machine-type icon on each card carries the status colour: **grey** (not yet probed / unknown), **green** (host pingable; if Docker-enabled, scrape also OK), **yellow** (Docker host pingable but scrape failed), **red** (host not pingable). Replaces the older standalone status dot. |
@@ -200,6 +200,7 @@ These pairs come up often. Use the left, never the right.
 | publish | expose, deploy, route (verb) |
 | publishable service | candidate, available service |
 | direct URL | local URL, lan URL (when written as one word) |
+| Vaier server | local, local host, this host (when referring to the machine running the stack) |
 | operator | admin (means a group), user (means an Authelia user) |
 | bootstrap admin | initial admin, default user |
 | latest handshake | last seen (UI label only — derived from this) |

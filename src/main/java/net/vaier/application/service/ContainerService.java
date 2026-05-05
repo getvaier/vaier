@@ -2,11 +2,11 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DiscoverLanServerContainersUseCase;
-import net.vaier.application.DiscoverLocalContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
-import net.vaier.application.GetLocalDockerServicesUseCase;
+import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
@@ -33,11 +33,11 @@ import java.util.Set;
 @Service
 @Slf4j
 public class ContainerService implements
-    DiscoverLocalContainersUseCase,
+    DiscoverVaierServerContainersUseCase,
     DiscoverPeerContainersUseCase,
     DiscoverLanServerContainersUseCase,
     GetServerInfoUseCase,
-    GetLocalDockerServicesUseCase {
+    GetVaierServerDockerServicesUseCase {
 
     private static final Set<String> EXCLUDED_NAMES = Set.of(
         ServiceNames.WIREGUARD, ServiceNames.WIREGUARD_MASQUERADE,
@@ -88,7 +88,7 @@ public class ContainerService implements
 
     @Override
     public List<DockerService> discover() {
-        return forGettingServerInfo.getServicesWithExposedPorts(Server.local());
+        return forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer());
     }
 
     @Override
@@ -179,10 +179,10 @@ public class ContainerService implements
     }
 
     @Override
-    public List<PublishableService> getUnpublishedLocalServices(List<ReverseProxyRoute> existingRoutes) {
+    public List<PublishableService> getUnpublishedVaierServerServices(List<ReverseProxyRoute> existingRoutes) {
         List<PublishableService> result = new ArrayList<>();
         try {
-            forGettingServerInfo.getServicesWithExposedPorts(Server.local()).forEach(container -> {
+            forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer()).forEach(container -> {
                 String name = container.containerName().toLowerCase();
                 if (EXCLUDED_NAMES.contains(name)) return;
 
@@ -196,7 +196,7 @@ public class ContainerService implements
                         if (ep == null) return;
                         if (existingRoutes.stream().anyMatch(r -> r.getAddress().equals(ep.address()) && r.getPort() == ep.port())) return;
                         result.add(new PublishableService(
-                            PublishableSource.LOCAL,
+                            PublishableSource.VAIER_SERVER,
                             null,
                             ep.address(),
                             container.containerName(),
@@ -207,7 +207,7 @@ public class ContainerService implements
                     });
             });
         } catch (Exception e) {
-            log.warn("Failed to query local Docker socket: {}", e.getMessage());
+            log.warn("Failed to query Vaier server Docker socket: {}", e.getMessage());
         }
         return result;
     }

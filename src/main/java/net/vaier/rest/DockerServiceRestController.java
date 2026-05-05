@@ -2,7 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
-import net.vaier.application.DiscoverLocalContainersUseCase;
+import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
 import net.vaier.application.GetServerInfoUseCase;
@@ -21,16 +21,16 @@ public class DockerServiceRestController {
 
     private final GetServerInfoUseCase getServerInfoUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
-    private final DiscoverLocalContainersUseCase discoverLocalContainersUseCase;
+    private final DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
     private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
 
     public DockerServiceRestController(GetServerInfoUseCase getServerInfoUseCase,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
-                                       DiscoverLocalContainersUseCase discoverLocalContainersUseCase,
+                                       DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase,
                                        DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase) {
         this.getServerInfoUseCase = getServerInfoUseCase;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
-        this.discoverLocalContainersUseCase = discoverLocalContainersUseCase;
+        this.discoverVaierServerContainersUseCase = discoverVaierServerContainersUseCase;
         this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
     }
 
@@ -48,10 +48,10 @@ public class DockerServiceRestController {
         }
     }
 
-    @GetMapping("/local")
-    public ResponseEntity<List<DockerService>> discoverLocalContainers() {
+    @GetMapping("/vaier-server")
+    public ResponseEntity<List<DockerService>> discoverVaierServerContainers() {
         try {
-            return ResponseEntity.ok(discoverLocalContainersUseCase.discover());
+            return ResponseEntity.ok(discoverVaierServerContainersUseCase.discover());
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }

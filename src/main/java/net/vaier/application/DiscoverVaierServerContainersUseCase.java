@@ -4,7 +4,7 @@ import net.vaier.domain.DockerService;
 
 import java.util.List;
 
-public interface DiscoverLocalContainersUseCase {
+public interface DiscoverVaierServerContainersUseCase {
 
     List<DockerService> discover();
 }

@@ -127,6 +127,27 @@
         .machine-icon-cap.cap-relay  { color: #2496ed; }
         .machine-icon-cap.cap-docker { color: #2496ed; }
 
+        /* Map markers: typed icons in a coloured bubble. Mirrors the list's
+           machine-icon kinds with the same up/down/degraded/unknown colours. */
+        .map-marker {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            border: 2px solid #1e1e1e;
+            display: flex; align-items: center; justify-content: center;
+            box-sizing: border-box;
+            color: #fff;
+        }
+        .map-marker svg { width: 60%; height: 60%; }
+        .map-marker.up        { background: var(--green); }
+        .map-marker.down      { background: var(--red); }
+        .map-marker.degraded  { background: var(--yellow); }
+        .map-marker.unknown   { background: var(--text-dim); }
+        /* Dotted border + low opacity for the carrier-IP marker on client peers — keeps
+           the existing "approximate ISP location" semantic from the old dashed dot. */
+        .map-marker.weak      { opacity: 0.55; border-style: dashed; }
+        /* Larger pin reserved for the Vaier server marker. */
+        .map-marker.large     { width: 36px; height: 36px; border-width: 3px; }
+
         /* Fixed-column capability strip — empty slots keep icons aligned across cards. */
         .machine-caps {
             display: grid;
@@ -537,8 +558,8 @@
     <script>
         let peers = [];
         let peerServices = {};
-        let localServices = [];
-        let localServicesStatus = 'UNKNOWN'; // OK | UNREACHABLE | UNKNOWN
+        let vaierServerServices = [];
+        let vaierServerServicesStatus = 'UNKNOWN'; // OK | UNREACHABLE | UNKNOWN
         let lanServers = [];
         let lanServerServices = {};
         let lastFetchSuccessful = false;
@@ -585,18 +606,18 @@
             }
         }
 
-        async function fetchLocalServices() {
+        async function fetchVaierServerServices() {
             try {
-                const response = await fetch('/docker-services/local');
+                const response = await fetch('/docker-services/vaier-server');
                 if (response.ok) {
-                    localServices = await response.json();
-                    localServicesStatus = 'OK';
+                    vaierServerServices = await response.json();
+                    vaierServerServicesStatus = 'OK';
                 } else {
-                    localServicesStatus = 'UNREACHABLE';
+                    vaierServerServicesStatus = 'UNREACHABLE';
                 }
             } catch (error) {
-                console.error('Failed to load local services:', error);
-                localServicesStatus = 'UNREACHABLE';
+                console.error('Failed to load Vaier server services:', error);
+                vaierServerServicesStatus = 'UNREACHABLE';
             }
             displayPeers(peers);
         }
@@ -655,7 +676,7 @@
                 case 'laptop':  return `<svg ${A}><rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/></svg>`;
                 case 'server':  return `<svg ${A}><path d="M8 1.5 L13.5 3.5 V8 C13.5 11.3 11.2 13.7 8 14.5 C4.8 13.7 2.5 11.3 2.5 8 V3.5 Z"/><polyline points="5.5 8.2 7.3 10 10.6 6.5"/></svg>`;
                 case 'lan':     return `<svg ${A}><path d="M2 7.5 L8 2.5 L14 7.5 V14 H2 Z"/><line x1="6.5" y1="14" x2="6.5" y2="10"/><line x1="9.5" y1="14" x2="9.5" y2="10"/></svg>`;
-                case 'local':   return `<svg ${A}><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`;
+                case 'vaier':   return `<svg ${A}><circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/><line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/><line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/><circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/></svg>`;
             }
             return '';
         }
@@ -844,26 +865,26 @@
             </div>`;
         }
 
-        function renderLocalCard() {
-            const key = '__local__';
+        function renderVaierServerCard() {
+            const key = '__vaier-server__';
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
-            // Mirror the LAN-server status semantics: green when the local Docker engine
-            // responded OK to the most recent /docker-services/local poll, red if it
-            // errored, neutral until the first poll completes.
-            const statusClass = localServicesStatus === 'OK'           ? 'status-connected'
-                              : localServicesStatus === 'UNREACHABLE'  ? 'status-disconnected'
+            // Mirror the LAN-server status semantics: green when the Vaier server's Docker
+            // engine responded OK to the most recent /docker-services/vaier-server poll,
+            // red if it errored, neutral until the first poll completes.
+            const statusClass = vaierServerServicesStatus === 'OK'           ? 'status-connected'
+                              : vaierServerServicesStatus === 'UNREACHABLE'  ? 'status-disconnected'
                               :                                          'status-neutral';
-            const servicesHtml = localServicesStatus === 'UNREACHABLE'
+            const servicesHtml = vaierServerServicesStatus === 'UNREACHABLE'
                 ? `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">Docker engine unreachable</span></div>`
-                : renderServiceList(localServices);
+                : renderServiceList(vaierServerServices);
             return `
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml('local', 'This Vaier host', iconStatusClass(statusClass))}
-                        <span class="peer-name">local</span>
-                        ${capabilitySlotsHtml([null, { kind: 'docker', title: 'Local Docker engine', label: 'Docker' }])}
+                        ${machineIconHtml('vaier', 'Vaier server', iconStatusClass(statusClass))}
+                        <span class="peer-name">Vaier server</span>
+                        ${capabilitySlotsHtml([null, { kind: 'docker', title: 'Vaier server Docker engine', label: 'Docker' }])}
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
@@ -1019,7 +1040,7 @@
                 return t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT';
             };
 
-            // Unified Servers section: local + VPN servers + LAN servers, sorted by name.
+            // Unified Servers section: Vaier server (always first) + VPN server peers + LAN servers, sorted by name.
             const serverEntries = [
                 ...peers.filter(isServerType).map(p => ({ kind: 'peer', name: p.name, data: p })),
                 ...lanServers.map(s => ({ kind: 'lan', name: s.name, data: s }))
@@ -1027,7 +1048,7 @@
             const clients = peers.filter(isClientType).sort(byName);
 
             let html = `<div class="section-header">Servers</div>`;
-            html += renderLocalCard();
+            html += renderVaierServerCard();
             html += serverEntries.map(e =>
                 e.kind === 'peer' ? renderPeerCard(e.data) : renderLanServerCard(e.data)
             ).join('');
@@ -1513,21 +1534,6 @@
             }
         }
 
-        const COLOR_CONNECTED    = '#4ec9b0'; // matches --green     / status-connected dot
-        const COLOR_DISCONNECTED = '#f48771'; // matches --red       / status-disconnected dot
-        const COLOR_DEGRADED     = '#dcdcaa'; // matches --yellow    / status-degraded dot
-        const COLOR_NEUTRAL      = '#5a5a5a'; // matches --text-dim  / status-neutral dot
-
-        // Map a LAN server's reachability + Docker-scrape status to a marker color.
-        // Mirrors the four-state dot logic in renderLanServerCard (closes #187 — map
-        // used to always render LAN servers green regardless of actual status).
-        function lanServerColor(server, services) {
-            if (!server.reachability || server.reachability === 'UNKNOWN') return COLOR_NEUTRAL;
-            if (server.reachability === 'DOWN') return COLOR_DISCONNECTED;
-            if (server.runsDocker && (!services || services.status !== 'OK')) return COLOR_DEGRADED;
-            return COLOR_CONNECTED;
-        }
-
         function setupPeerMap() {
             if (typeof L === 'undefined') return;
             L.Icon.Default.mergeOptions({
@@ -1567,27 +1573,34 @@
             return (Math.floor(Date.now() / 1000) - h) < 180;
         }
 
-        function makeFirmDot(latlng, color, opts) {
-            const radius = (opts && opts.radius) || 7;
-            const weight = (opts && opts.weight) || 2;
-            return L.circleMarker(latlng, {
-                radius,
-                color: '#1e1e1e',
-                weight,
-                fillColor: color,
-                fillOpacity: 1
-            });
+        function statusKeyForPeer(p) {
+            return isPeerConnected(p) ? 'up' : 'down';
         }
 
-        function makeWeakDot(latlng, color) {
-            // Dashed outline, low fill opacity — communicates "approximate / carrier egress"
-            return L.circleMarker(latlng, {
-                radius: 6,
-                color: color,
-                weight: 1.5,
-                dashArray: '3 3',
-                fillColor: color,
-                fillOpacity: 0.18
+        function statusKeyForLanServer(s, services) {
+            if (!s.reachability) return 'unknown';
+            if (s.reachability === 'DOWN') return 'down';
+            if (s.runsDocker && (!services || services.status !== 'OK')) return 'degraded';
+            return 'up';
+        }
+
+        // Build a Leaflet divIcon marker carrying the same SVG used in the machine-list cards.
+        // statusKey = 'up' | 'down' | 'degraded' | 'unknown'; opts.weak / opts.big toggle styles.
+        function makeIconMarker(latlng, kind, statusKey, opts) {
+            const big  = !!(opts && opts.big);
+            const weak = !!(opts && opts.weak);
+            const sz   = big ? 36 : 28;
+            const cls  = ['map-marker', statusKey];
+            if (big)  cls.push('large');
+            if (weak) cls.push('weak');
+            return L.marker(latlng, {
+                icon: L.divIcon({
+                    html: `<div class="${cls.join(' ')}">${machineIconSvg(kind)}</div>`,
+                    className: '',
+                    iconSize: [sz, sz],
+                    iconAnchor: [sz / 2, sz / 2]
+                }),
+                riseOnHover: true
             });
         }
 
@@ -1604,7 +1617,8 @@
 
             peers.forEach(p => {
                 if (p.latitude == null || p.longitude == null) return;
-                const color = isPeerConnected(p) ? COLOR_CONNECTED : COLOR_DISCONNECTED;
+                const statusKey = statusKeyForPeer(p);
+                const iconKind = peerTypeIconKind(p.peerType);
                 const carrierPlace = [p.city, p.country].filter(Boolean).join(', ');
 
                 if (isClientType(p)) {
@@ -1614,7 +1628,7 @@
                         + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(p.endpointIp)}</span>`
                         + (carrierPlace ? `<br>${escapeHtml(carrierPlace)}` : '')
                         + `<br><span style="color:#888;font-size:0.78em">approx. ISP location</span>`;
-                    const weak = makeWeakDot([p.latitude, p.longitude], color);
+                    const weak = makeIconMarker([p.latitude, p.longitude], iconKind, statusKey, { weak: true });
                     bindHoverPopup(weak, carrierPopup);
                     _markersClusterGroup.addLayer(weak);
                     allCoords.push([p.latitude, p.longitude]);
@@ -1625,7 +1639,7 @@
                         const surfacePopup = `<strong>${escapeHtml(p.name)}</strong><br>`
                             + `<span style="color:#888;font-size:0.85em">internet via Vaier</span>`
                             + (surfacePlace ? `<br>${escapeHtml(surfacePlace)}` : '');
-                        const firm = makeFirmDot([_serverLocation.latitude, _serverLocation.longitude], color);
+                        const firm = makeIconMarker([_serverLocation.latitude, _serverLocation.longitude], iconKind, statusKey);
                         bindHoverPopup(firm, surfacePopup);
                         _markersClusterGroup.addLayer(firm);
                     }
@@ -1634,7 +1648,7 @@
                     const popup = `<strong>${escapeHtml(p.name)}</strong><br>`
                         + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(p.endpointIp)}</span>`
                         + (carrierPlace ? `<br>${escapeHtml(carrierPlace)}` : '');
-                    const firm = makeFirmDot([p.latitude, p.longitude], color);
+                    const firm = makeIconMarker([p.latitude, p.longitude], iconKind, statusKey);
                     bindHoverPopup(firm, popup);
                     _markersClusterGroup.addLayer(firm);
                     allCoords.push([p.latitude, p.longitude]);
@@ -1651,7 +1665,7 @@
                     + `<span style="color:#888;font-size:0.85em">Behind ${escapeHtml(s.relayPeerName)}</span><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(s.lanAddress)}</span>`
                     + (s.runsDocker ? `<br><span style="color:#888;font-size:0.78em">Docker on :${s.dockerPort}</span>` : '');
-                const firm = makeFirmDot([relay.latitude, relay.longitude], lanServerColor(s, lanServerServices[s.name]));
+                const firm = makeIconMarker([relay.latitude, relay.longitude], 'lan', statusKeyForLanServer(s, lanServerServices[s.name]));
                 bindHoverPopup(firm, popup);
                 _markersClusterGroup.addLayer(firm);
                 allCoords.push([relay.latitude, relay.longitude]);
@@ -1662,7 +1676,7 @@
                 const popup = `<strong>Vaier server</strong><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(_serverLocation.publicHost)}</span>`
                     + (place ? `<br>${escapeHtml(place)}` : '');
-                const m = makeFirmDot([_serverLocation.latitude, _serverLocation.longitude], COLOR_CONNECTED, { radius: 10, weight: 3 });
+                const m = makeIconMarker([_serverLocation.latitude, _serverLocation.longitude], 'vaier', 'up', { big: true });
                 bindHoverPopup(m, popup);
                 _markersClusterGroup.addLayer(m);
                 allCoords.push([_serverLocation.latitude, _serverLocation.longitude]);
@@ -1688,7 +1702,7 @@
 
         setupPeerMap();
         fetchPeers();
-        fetchLocalServices();
+        fetchVaierServerServices();
         fetchLanServers();
         fetchServerLocation();
 

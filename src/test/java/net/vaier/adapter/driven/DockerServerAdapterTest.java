@@ -76,7 +76,7 @@ class DockerServerAdapterTest {
 
         // When
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         // Then: netdata should appear with its exposed port
         assertThat(services).hasSize(1);
@@ -108,7 +108,7 @@ class DockerServerAdapterTest {
         when(listCmd.exec()).thenReturn(List.of(container));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        Optional<String> name = adapter.findContainerNameByIp(Server.local(), "172.20.0.3");
+        Optional<String> name = adapter.findContainerNameByIp(Server.vaierServer(), "172.20.0.3");
 
         assertThat(name).contains("vaier");
     }
@@ -149,7 +149,7 @@ class DockerServerAdapterTest {
         when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).hasSize(1);
         DockerService.PortMapping mapping = services.get(0).ports().get(0);
@@ -199,7 +199,7 @@ class DockerServerAdapterTest {
         when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).hasSize(1);
         assertThat(services.get(0).ports()).hasSize(3);
@@ -244,7 +244,7 @@ class DockerServerAdapterTest {
         when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).hasSize(1);
         assertThat(services.get(0).ports().get(0).type()).isEqualTo("udp");
@@ -271,7 +271,7 @@ class DockerServerAdapterTest {
         when(listCmd.exec()).thenReturn(List.of(container));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).isEmpty();
     }
@@ -296,7 +296,7 @@ class DockerServerAdapterTest {
         when(listCmd.exec()).thenReturn(List.of(container));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).isEmpty();
     }
@@ -338,7 +338,7 @@ class DockerServerAdapterTest {
         when(inspectImageCmd.exec()).thenThrow(new DockerException("No such image", 404));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         // Falls back to extracting "1.27.0" from the image tag
         assertThat(services).hasSize(1);
@@ -357,7 +357,7 @@ class DockerServerAdapterTest {
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
 
-        assertThatThrownBy(() -> adapter.getServicesWithExposedPorts(Server.local()))
+        assertThatThrownBy(() -> adapter.getServicesWithExposedPorts(Server.vaierServer()))
             .isInstanceOf(RuntimeException.class)
             .hasMessageContaining("Failed to get Docker services");
     }
@@ -373,7 +373,7 @@ class DockerServerAdapterTest {
         when(listCmd.exec()).thenReturn(List.of());
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).isEmpty();
     }
@@ -385,9 +385,9 @@ class DockerServerAdapterTest {
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
 
-        assertThat(adapter.findContainerNameByIp(Server.local(), "")).isEmpty();
-        assertThat(adapter.findContainerNameByIp(Server.local(), "   ")).isEmpty();
-        assertThat(adapter.findContainerNameByIp(Server.local(), null)).isEmpty();
+        assertThat(adapter.findContainerNameByIp(Server.vaierServer(), "")).isEmpty();
+        assertThat(adapter.findContainerNameByIp(Server.vaierServer(), "   ")).isEmpty();
+        assertThat(adapter.findContainerNameByIp(Server.vaierServer(), null)).isEmpty();
     }
 
     @Test
@@ -402,7 +402,7 @@ class DockerServerAdapterTest {
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
 
-        assertThat(adapter.findContainerNameByIp(Server.local(), "172.20.0.3")).isEmpty();
+        assertThat(adapter.findContainerNameByIp(Server.vaierServer(), "172.20.0.3")).isEmpty();
     }
 
     // --- collapseContiguousRanges (#189) ---
@@ -546,7 +546,7 @@ class DockerServerAdapterTest {
         when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.local());
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
 
         assertThat(services).hasSize(1);
         // 163 raw entries collapse to 3: one 9100-9339/tcp range + 55000/tcp + 9003/udp
@@ -580,7 +580,7 @@ class DockerServerAdapterTest {
         when(listCmd.exec()).thenReturn(List.of(container));
 
         DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
-        Optional<String> name = adapter.findContainerNameByIp(Server.local(), "10.13.13.3");
+        Optional<String> name = adapter.findContainerNameByIp(Server.vaierServer(), "10.13.13.3");
 
         assertThat(name).isEmpty();
     }

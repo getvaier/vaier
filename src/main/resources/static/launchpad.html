@@ -237,10 +237,10 @@
         }
 
         function peerName(dnsAddress, hostAddress) {
-            if (hostAddress && hostAddress.startsWith('172.20.')) return 'local';
-            if (hostAddress && !hostAddress.includes('.')) return 'local';
+            if (hostAddress && hostAddress.startsWith('172.20.')) return 'Vaier server';
+            if (hostAddress && !hostAddress.includes('.')) return 'Vaier server';
             const parts = dnsAddress.split('.');
-            return parts.length >= 2 ? parts[1] : 'local';
+            return parts.length >= 2 ? parts[1] : 'Vaier server';
         }
 
         function renderTile(service) {

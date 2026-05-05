@@ -131,7 +131,7 @@ public class ReverseProxyRoute {
                               List<PeerConfiguration> peers) {
         String subdomain = extractSubdomain(baseDomain);
         String server = resolveServerName(vpnClients, peerNameResolver, peers);
-        if (!"local".equals(server) && subdomain.endsWith("." + server)) {
+        if (!"Vaier server".equals(server) && subdomain.endsWith("." + server)) {
             subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
         }
         return subdomain + " @ " + server;
@@ -188,16 +188,16 @@ public class ReverseProxyRoute {
         if (isLanService) {
             PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
             if (relay != null && relay.name() != null) return relay.name();
-            return "local";
+            return "Vaier server";
         }
-        // Check VPN peers first — a peer IP is unambiguous, whereas port-only local
-        // matching can produce false positives when a local container happens to use the same port.
+        // Check VPN peers first — a peer IP is unambiguous, whereas port-only Vaier-server
+        // matching can produce false positives when a Vaier-server container happens to use the same port.
         boolean isPeer = vpnClients.stream().anyMatch(p -> p.containsAddress(address));
         if (isPeer) {
             String peerName = peerNameResolver.resolvePeerNameByIp(address);
             return peerName.equals(address) ? address : peerName;
         }
-        return "local";
+        return "Vaier server";
     }
 
     @AllArgsConstructor

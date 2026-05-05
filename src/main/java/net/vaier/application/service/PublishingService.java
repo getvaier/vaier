@@ -6,7 +6,7 @@ import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
-import net.vaier.application.GetLocalDockerServicesUseCase;
+import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
@@ -77,7 +77,7 @@ public class PublishingService implements
     private final PendingPublicationsService pendingPublicationsService;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
-    private final GetLocalDockerServicesUseCase getLocalDockerServicesUseCase;
+    private final GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
 
     private volatile List<PublishedServiceUco> cache = null;
 
@@ -103,7 +103,7 @@ public class PublishingService implements
                              PendingPublicationsService pendingPublicationsService,
                              DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
                              DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase,
-                             GetLocalDockerServicesUseCase getLocalDockerServicesUseCase) {
+                             GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
@@ -117,7 +117,7 @@ public class PublishingService implements
         this.pendingPublicationsService = pendingPublicationsService;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
-        this.getLocalDockerServicesUseCase = getLocalDockerServicesUseCase;
+        this.getVaierServerDockerServicesUseCase = getVaierServerDockerServicesUseCase;
     }
 
     @Override
@@ -136,7 +136,7 @@ public class PublishingService implements
             .flatMap(zone -> forPersistingDnsRecords.getDnsRecords(zone).stream())
             .toList();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
-        List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.local());
+        List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer());
 
         cache = routes.stream()
             .filter(r -> !isInfrastructureRouter(r))
@@ -350,7 +350,7 @@ public class PublishingService implements
                 log.info("DNS propagated for {}, activating Traefik route", fqdn);
                 pendingPublishes.compute(subdomain, (k, v) -> new PendingState(v != null && v.requiresAuth(), true));
                 forPublishingEvents.publish("published-services", "publish-dns-propagated", subdomain);
-                String persistedAddress = forGettingServerInfo.findContainerNameByIp(Server.local(), address).orElse(address);
+                String persistedAddress = forGettingServerInfo.findContainerNameByIp(Server.vaierServer(), address).orElse(address);
                 if (!persistedAddress.equals(address)) {
                     log.info("Normalized backend address {} -> {} for {}", address, persistedAddress, fqdn);
                 }
@@ -502,7 +502,7 @@ public class PublishingService implements
             )
             .forEach(publishable::add);
 
-        getLocalDockerServicesUseCase.getUnpublishedLocalServices(existingRoutes).stream()
+        getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(existingRoutes).stream()
             .filter(s -> !pendingPublicationsService.isPending(s.address(), s.port()))
             .forEach(publishable::add);
 
@@ -516,7 +516,7 @@ public class PublishingService implements
         return switch (s.source()) {
             case PEER            -> s.peerName() + "/" + s.containerName() + ":" + s.port();
             case LAN_SERVER -> s.address()  + "/" + s.containerName() + ":" + s.port();
-            case LOCAL           -> s.containerName() + ":" + s.port();
+            case VAIER_SERVER    -> s.containerName() + ":" + s.port();
         };
     }
 

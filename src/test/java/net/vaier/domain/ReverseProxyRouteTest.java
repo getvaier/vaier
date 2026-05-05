@@ -147,13 +147,13 @@ class ReverseProxyRouteTest {
     // --- displayName ---
 
     @Test
-    void displayName_localService_returnsSubdomainAtLocal() {
+    void displayName_vaierServerService_returnsSubdomainAtVaierServer() {
         ReverseProxyRoute route = route("pihole.example.com", "pihole", 8080);
         ForResolvingPeerNames resolver = ip -> ip;
 
         String name = route.displayName("example.com", List.of(), List.of(), resolver);
 
-        assertThat(name).isEqualTo("pihole @ local");
+        assertThat(name).isEqualTo("pihole @ Vaier server");
     }
 
     @Test
@@ -168,13 +168,13 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void displayName_unknownAddress_fallsBackToLocal() {
+    void displayName_unknownAddress_fallsBackToVaierServer() {
         ReverseProxyRoute route = route("app.example.com", "10.13.13.5", 8080);
         ForResolvingPeerNames resolver = ip -> ip;
 
         String name = route.displayName("example.com", List.of(), List.of(), resolver);
 
-        assertThat(name).isEqualTo("app @ local");
+        assertThat(name).isEqualTo("app @ Vaier server");
     }
 
     @Test

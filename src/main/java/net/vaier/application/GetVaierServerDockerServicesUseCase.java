@@ -5,7 +5,7 @@ import net.vaier.domain.ReverseProxyRoute;
 
 import java.util.List;
 
-public interface GetLocalDockerServicesUseCase {
+public interface GetVaierServerDockerServicesUseCase {
 
-    List<PublishableService> getUnpublishedLocalServices(List<ReverseProxyRoute> existingRoutes);
+    List<PublishableService> getUnpublishedVaierServerServices(List<ReverseProxyRoute> existingRoutes);
 }
