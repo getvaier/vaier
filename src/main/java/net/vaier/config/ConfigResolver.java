@@ -2,6 +2,7 @@ package net.vaier.config;
 
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.domain.DnsProvider;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,7 +45,7 @@ public class ConfigResolver {
         this.smtpUsername = config.getSmtpUsername();
         this.smtpSender = config.getSmtpSender();
         if (domain != null) {
-            log.info("Configuration resolved for domain: {}", domain);
+            log.info("Configuration resolved for domain: {} (DNS provider: {})", domain, getDnsProvider());
         }
     }
 
@@ -62,4 +63,9 @@ public class ConfigResolver {
     public Integer getSmtpPort() { return smtpPort; }
     public String getSmtpUsername() { return smtpUsername; }
     public String getSmtpSender() { return smtpSender; }
+    public DnsProvider getDnsProvider() {
+        boolean hasAwsCredentials = awsKey != null && !awsKey.isBlank()
+            && awsSecret != null && !awsSecret.isBlank();
+        return hasAwsCredentials ? DnsProvider.ROUTE53 : DnsProvider.MANUAL;
+    }
 }

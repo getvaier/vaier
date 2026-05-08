@@ -166,6 +166,25 @@ class LifecycleTest {
     }
 
     @Test
+    void initDns_isSilent_whenWiredWithManualDnsAdapter() {
+        net.vaier.config.ConfigResolver configResolver = mock(net.vaier.config.ConfigResolver.class);
+        when(configResolver.getDomain()).thenReturn("test.example.com");
+        ForPersistingDnsRecords manualAdapter = spy(
+            new net.vaier.adapter.driven.ManualDnsAdapter(configResolver));
+
+        Lifecycle lifecycle = new Lifecycle(forInitialisingUserService, forPersistingUsers, manualAdapter,
+            containerRestarter, bootstrapCredentialsWriter, autheliaAssetsPublisher, publicHostResolver,
+            "test.example.com", "admin", "authelia", "vaier", "login");
+
+        assertThatCode(lifecycle::start).doesNotThrowAnyException();
+
+        verify(manualAdapter, never()).addDnsRecord(any(), any());
+        verify(manualAdapter, never()).updateDnsRecord(any(), any());
+        verify(manualAdapter, never()).deleteDnsRecord(any(), any(), any());
+        verifyNoInteractions(publicHostResolver);
+    }
+
+    @Test
     void initDns_doesNotThrow_whenVaierRecordMissingAndResolverEmpty() {
         DnsZone zone = new DnsZone("test.example.com");
         when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));

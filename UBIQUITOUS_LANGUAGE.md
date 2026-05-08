@@ -77,8 +77,10 @@ Avoid: "expose", "deploy", "route" (as a verb for the user-facing publish action
 
 | Term | Definition |
 |------|------------|
-| **DNS zone** | A Route53 hosted zone (`domain.DnsZone`). Vaier owns at most one — the zone for `VAIER_DOMAIN`. |
-| **DNS record** | `domain.DnsRecord` with a `DnsRecordType` (A, CNAME, MX, etc.). Stored in Route53. |
+| **DNS provider** | `domain.DnsProvider` — `ROUTE53` or `MANUAL`. **Inferred** from configuration by `ConfigResolver.getDnsProvider()`: `ROUTE53` when both AWS key and secret are present, `MANUAL` otherwise. There is no `VAIER_DNS_PROVIDER` env var. Picks which `ForPersistingDnsRecords` adapter wires up via `DnsAdapterConfig`. |
+| **Manual DNS mode** | The default when no AWS credentials are configured. Vaier owns no DNS — the operator maintains records by hand in whatever provider they like. Backed by `ManualDnsAdapter`, which no-ops every write and synthesizes the bootstrap records as already-present so `Lifecycle.initDns()` is silent. To switch into Route53 mode, save AWS credentials (env or Settings UI) and restart. |
+| **DNS zone** | A DNS hosted zone (`domain.DnsZone`). In Route53 mode this is a real Route53 hosted zone; in manual mode it's the synthesized zone for `VAIER_DOMAIN`. Vaier owns at most one. |
+| **DNS record** | `domain.DnsRecord` with a `DnsRecordType` (A, CNAME, MX, etc.). In Route53 mode written to Route53; in manual mode the operator maintains them externally and Vaier's writes are no-ops. |
 | **DNS state** | `OK` (record exists matching expectation) or `NON_EXISTING` (`domain.DnsState`). Used in published-service status. |
 | **Public host** | The Vaier server's public address as a `(value, type)` pair — either A (IPv4) or CNAME (hostname). Resolved by `ForResolvingPublicHost` in order: `VAIER_PUBLIC_HOST` → `VAIER_PUBLIC_IP` → EC2 IMDSv2 `public-hostname` → DNS lookup of `vaier.<domain>`. |
 | **Reverse proxy route** | `domain.ReverseProxyRoute`. The Traefik-side half of a published service. Some routes are created by service publishing; others are added directly through the reverse-proxy CRUD endpoints (the escape hatch). |
@@ -125,8 +127,8 @@ Avoid: "vhost", "site", "auth provider".
 
 | Term | Definition |
 |------|------------|
-| **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the `vaier.<domain>` DNS record exists, ensure the `login.<domain>` CNAME exists, initialise Authelia config, write the bootstrap admin password if no users exist. |
-| **First-run** | The first `docker compose up -d` on a host. Triggers the `authelia-init`, `redis-init`, `geoip-init`, and `vaier-init` one-shot containers, the bootstrap admin write, and the auto-create of `vaier.<domain>` and `login.<domain>`. |
+| **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the `vaier.<domain>` DNS record exists, ensure the `login.<domain>` CNAME exists, initialise Authelia config, write the bootstrap admin password if no users exist. In manual DNS mode the DNS-record steps are silent no-ops since the operator owns those records. |
+| **First-run** | The first `docker compose up -d` on a host. Triggers the `authelia-init`, `redis-init`, `geoip-init`, and `vaier-init` one-shot containers, the bootstrap admin write, and (in Route53 mode) the auto-create of `vaier.<domain>` and `login.<domain>`. |
 | **Docker socket proxy** | The `tecnativa/docker-socket-proxy` sidecar (`docker-proxy` container) that holds the real `/var/run/docker.sock` and exposes a restricted HTTP API on `tcp://docker-proxy:2375` over `vaier-network`. Vaier and Traefik talk to it instead of mounting the host socket. Allowlist: `CONTAINERS, EVENTS, EXEC, IMAGES, PING, POST, ALLOW_RESTARTS`. Default-deny on `/containers/create`, `/containers/{id}/start`, image pulls, swarm/network/volume management. |
 | **vaier-init** | One-shot busybox container (mirroring `redis-init`/`authelia-init`) that `chown`s the four bind-mounted config dirs to UID 1000 on every start, so the non-root Vaier process can read and write its own state. |
 | **SMTP notifier** | The Jakarta Mail-based outbound mail integration. Powers Authelia password-reset email and Vaier admin alerts. Settings in `vaier-config.yml`; password in Authelia's `secrets.properties`. |

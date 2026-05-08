@@ -1,7 +1,9 @@
 package net.vaier.application.service;
 
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
+import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
+import net.vaier.domain.DnsProvider;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
@@ -41,6 +43,7 @@ class SettingsServiceTest {
     @Mock ForVerifyingSmtpCredentials smtpVerifier;
     @Mock ForReadingStoredSmtpPassword storedPasswordReader;
     @Mock ForSendingTestEmail testEmailSender;
+    @Mock ConfigResolver configResolver;
 
     @InjectMocks SettingsService service;
 
@@ -103,6 +106,26 @@ class SettingsServiceTest {
 
         assertThat(result.domain()).isNull();
         assertThat(result.awsKeyHint()).isNull();
+    }
+
+    @Test
+    void getSettings_includesDnsProviderFromConfigResolver() {
+        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
+        when(configResolver.getDnsProvider()).thenReturn(DnsProvider.MANUAL);
+
+        AppSettingsResult result = service.getSettings();
+
+        assertThat(result.dnsProvider()).isEqualTo("MANUAL");
+    }
+
+    @Test
+    void getSettings_dnsProviderDefaultsToRoute53WhenNoConfig() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+        when(configResolver.getDnsProvider()).thenReturn(DnsProvider.ROUTE53);
+
+        AppSettingsResult result = service.getSettings();
+
+        assertThat(result.dnsProvider()).isEqualTo("ROUTE53");
     }
 
     @Test

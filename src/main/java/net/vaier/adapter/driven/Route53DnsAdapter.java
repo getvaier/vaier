@@ -5,7 +5,6 @@ import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import java.util.stream.Collectors;
-import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -15,13 +14,11 @@ import software.amazon.awssdk.services.route53.model.*;
 import java.util.ArrayList;
 import java.util.List;
 
-@Component
 public class Route53DnsAdapter implements ForPersistingDnsRecords, net.vaier.domain.port.ForValidatingAwsCredentials {
 
     private Route53Client route53Client;
     private final net.vaier.config.ConfigResolver configResolver;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public Route53DnsAdapter(net.vaier.config.ConfigResolver configResolver) {
         this.configResolver = configResolver;
         initClient();

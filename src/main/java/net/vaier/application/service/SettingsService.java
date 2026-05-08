@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
+import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForConfiguringSmtpNotifier;
@@ -31,6 +32,7 @@ public class SettingsService implements
     private final ForVerifyingSmtpCredentials smtpVerifier;
     private final ForReadingStoredSmtpPassword storedPasswordReader;
     private final ForSendingTestEmail testEmailSender;
+    private final ConfigResolver configResolver;
 
     public SettingsService(ForPersistingAppConfiguration configPersistence,
                            ForValidatingAwsCredentials forValidatingAwsCredentials,
@@ -38,7 +40,8 @@ public class SettingsService implements
                            ForRestartingContainers containerRestarter,
                            ForVerifyingSmtpCredentials smtpVerifier,
                            ForReadingStoredSmtpPassword storedPasswordReader,
-                           ForSendingTestEmail testEmailSender) {
+                           ForSendingTestEmail testEmailSender,
+                           ConfigResolver configResolver) {
         this.configPersistence = configPersistence;
         this.forValidatingAwsCredentials = forValidatingAwsCredentials;
         this.smtpNotifierConfig = smtpNotifierConfig;
@@ -46,13 +49,18 @@ public class SettingsService implements
         this.smtpVerifier = smtpVerifier;
         this.storedPasswordReader = storedPasswordReader;
         this.testEmailSender = testEmailSender;
+        this.configResolver = configResolver;
     }
 
     @Override
     public AppSettingsResult getSettings() {
         return configPersistence.load()
             .map(this::toResult)
-            .orElse(new AppSettingsResult(null, null, null, null, null, null, null));
+            .orElse(new AppSettingsResult(null, null, null, null, null, null, null, dnsProviderName()));
+    }
+
+    private String dnsProviderName() {
+        return configResolver.getDnsProvider() == null ? null : configResolver.getDnsProvider().name();
     }
 
     @Override
@@ -117,7 +125,8 @@ public class SettingsService implements
             config.getSmtpHost(),
             config.getSmtpPort(),
             config.getSmtpUsername(),
-            config.getSmtpSender()
+            config.getSmtpSender(),
+            dnsProviderName()
         );
     }
 

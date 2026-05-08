@@ -63,7 +63,7 @@ public class LifecycleService {
     @EventListener
     public void handle(ApplicationReadyEvent event) {
         if (!setupStateHolder.isConfigured()) {
-            log.info("Vaier is not configured. Set VAIER_DOMAIN, VAIER_AWS_KEY, VAIER_AWS_SECRET in .env and restart the stack.");
+            log.info("Vaier is not configured. Set VAIER_DOMAIN in .env and restart the stack. Add VAIER_AWS_KEY + VAIER_AWS_SECRET to enable Route53; otherwise Vaier runs in manual DNS mode.");
             return;
         }
 

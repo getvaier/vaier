@@ -10,6 +10,7 @@ public interface GetAppSettingsUseCase {
         String smtpHost,
         Integer smtpPort,
         String smtpUsername,
-        String smtpSender
+        String smtpSender,
+        String dnsProvider
     ) {}
 }

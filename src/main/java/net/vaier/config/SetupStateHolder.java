@@ -1,17 +1,26 @@
 package net.vaier.config;
 
+import java.util.function.Function;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 public class SetupStateHolder {
 
     private final ForPersistingAppConfiguration configPersistence;
+    private final Function<String, String> envLookup;
     private volatile boolean configured;
 
+    @Autowired
     public SetupStateHolder(ForPersistingAppConfiguration configPersistence) {
+        this(configPersistence, System::getenv);
+    }
+
+    SetupStateHolder(ForPersistingAppConfiguration configPersistence, Function<String, String> envLookup) {
         this.configPersistence = configPersistence;
-        this.configured = configPersistence.exists() || hasEnvVars();
+        this.envLookup = envLookup;
+        this.configured = configPersistence.exists() || hasDomainEnvVar();
     }
 
     public boolean isConfigured() {
@@ -22,12 +31,8 @@ public class SetupStateHolder {
         this.configured = true;
     }
 
-    private boolean hasEnvVars() {
-        String domain = System.getenv("VAIER_DOMAIN");
-        String awsKey = System.getenv("VAIER_AWS_KEY");
-        String awsSecret = System.getenv("VAIER_AWS_SECRET");
-        return domain != null && !domain.isBlank()
-            && awsKey != null && !awsKey.isBlank()
-            && awsSecret != null && !awsSecret.isBlank();
+    private boolean hasDomainEnvVar() {
+        String domain = envLookup.apply("VAIER_DOMAIN");
+        return domain != null && !domain.isBlank();
     }
 }

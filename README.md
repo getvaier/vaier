@@ -55,7 +55,7 @@ Every published service resolves via Route53 to the single Vaier server, termina
 - A Linux server with a public IP (EC2 t3.small or similar)
 - Docker and Docker Compose installed
 - A domain name you control
-- AWS credentials with Route53 access
+- AWS credentials with Route53 access — *or* skip them entirely and Vaier will run in manual DNS mode (you maintain records yourself)
 
 ### Server ports to open
 
@@ -99,6 +99,27 @@ chmod 600 .env
 ```
 
 The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`. Vaier auto-creates `vaier.yourdomain.com` and `login.yourdomain.com` records on first boot.
+
+#### Manual DNS mode (no AWS)
+
+If your domain isn't on Route53, or you'd rather Vaier never touched AWS, just leave the AWS variables out of `.env`:
+
+```bash
+cat > .env <<'EOF'
+VAIER_DOMAIN=yourdomain.com
+ACME_EMAIL=you@yourdomain.com
+EOF
+chmod 600 .env
+```
+
+Vaier infers manual DNS mode whenever AWS credentials are absent. You maintain DNS records yourself in whatever provider you use. Before first boot, create:
+
+| Record | Type | Value |
+|--------|------|-------|
+| `vaier.yourdomain.com` | A or CNAME | the public IP/hostname of this server |
+| `login.yourdomain.com` | CNAME | `vaier.yourdomain.com` |
+
+Each time you publish a service, also create a `<subdomain>.yourdomain.com` CNAME pointing at `vaier.yourdomain.com`. Vaier waits up to two minutes for the record to propagate, then activates the Traefik route automatically.
 
 ### 4. Start the stack
 

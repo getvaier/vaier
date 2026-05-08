@@ -69,7 +69,7 @@ Each step is done in a different tool, with no feedback loop. Mistakes are silen
 ## 5. Non-Goals
 
 - Not a general-purpose container orchestrator (no Portainer replacement)
-- Not a multi-cloud DNS manager (Route53 only for now)
+- Not a multi-cloud DNS manager (Route53 is the only automated provider; manual DNS mode is supported for everything else, see §6.4)
 - Not a monitoring platform
 - No multi-server WireGuard topology (single VPN server, multiple peers)
 - No management of the Docker host OS (no package installs, kernel config, etc.)
@@ -181,16 +181,15 @@ A read-only launchpad page listing all published services as a clean grid of til
 
 ---
 
-### 6.4 DNS Management ✅ (exists)
+### 6.4 DNS Management
 
-Direct CRUD for Route53 DNS zones and records.
+Vaier supports two DNS modes, inferred from the presence of AWS credentials. There is no `VAIER_DNS_PROVIDER` env var: `ConfigResolver.getDnsProvider()` derives `ROUTE53` when both `awsKey` and `awsSecret` are present and `MANUAL` otherwise.
 
-**Current capabilities:**
-- List zones and records
-- Create/delete zones
-- Create/delete records (all standard types)
+**Route53 mode ✅ (default when AWS keys present).** Vaier automates DNS through the AWS Route53 API: it auto-creates the bootstrap records (`vaier.<domain>`, `login.<domain>`) on first boot and a CNAME per published service. Backed by `Route53DnsAdapter` and the `ForPersistingDnsRecords` / `ForValidatingAwsCredentials` ports. There is no UI page for general-purpose record CRUD — the REST endpoints exist (`/dns/*`) but the navigation page was never built. Service publishing is the primary path; advanced records are managed in the AWS console.
 
-No planned changes — this is a power-user escape hatch for records Vaier doesn't manage automatically.
+**Manual DNS mode ✅ (closes [#198](https://github.com/getvaier/vaier/issues/198)).** Omit `VAIER_AWS_KEY` / `VAIER_AWS_SECRET` (and don't save them via the Settings UI) and Vaier runs without Route53. The `ManualDnsAdapter` no-ops every DNS write and synthesizes the bootstrap records as already-present so `Lifecycle.initDns()` is silent. The publish flow is unchanged: `addDnsRecord` no-ops, then `waitForDnsThenActivate` polls real DNS via `ForResolvingDns` and activates Traefik once the operator's record propagates. If the record never appears, the existing 2-minute timeout + rollback handles it. The Settings UI always shows the AWS Credentials card so the operator can opt into Route53 by saving keys (the runtime adapter still flips on the next restart).
+
+**V2** — Cloudflare as a first-class alternative provider, tracked in [#154](https://github.com/getvaier/vaier/issues/154).
 
 ---
 

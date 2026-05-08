@@ -1,5 +1,6 @@
 package net.vaier.config;
 
+import net.vaier.domain.DnsProvider;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import org.junit.jupiter.api.Test;
@@ -105,6 +106,86 @@ class ConfigResolverTest {
         ConfigResolver resolver = new ConfigResolver(configPersistence, env::get);
 
         assertThat(resolver.getDomain()).isEqualTo("file.com");
+    }
+
+    @Test
+    void infersManualDnsProviderWhenAwsKeysAbsent() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.MANUAL);
+    }
+
+    @Test
+    void infersRoute53DnsProviderWhenAwsKeysPresent() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("k")
+            .awsSecret("s")
+            .build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.ROUTE53);
+    }
+
+    @Test
+    void infersRoute53DnsProviderWhenOnlyEnvAwsKeysPresent() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+        Map<String, String> env = Map.of(
+            "VAIER_AWS_KEY", "envKey",
+            "VAIER_AWS_SECRET", "envSecret"
+        );
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, env::get);
+
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.ROUTE53);
+    }
+
+    @Test
+    void infersManualDnsProviderWhenOnlyAwsKeyPresentWithoutSecret() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("k")
+            .build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.MANUAL);
+    }
+
+    @Test
+    void infersManualDnsProviderWhenAwsKeysBlank() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("   ")
+            .awsSecret("   ")
+            .build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.MANUAL);
+    }
+
+    @Test
+    void dnsProviderUpdatesAfterReloadPicksUpNewAwsKeys() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.MANUAL);
+
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("k")
+            .awsSecret("s")
+            .build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+        resolver.reload();
+
+        assertThat(resolver.getDnsProvider()).isEqualTo(DnsProvider.ROUTE53);
     }
 
     @Test
