@@ -127,8 +127,6 @@ You then maintain DNS records yourself in whatever provider you use. **Before fi
 
 **Each time you publish a service**, also create a `<subdomain>.yourdomain.com` CNAME pointing at `vaier.yourdomain.com`. Vaier waits up to two minutes for the record to propagate, then activates the Traefik route automatically. If the record never appears the publish is rolled back.
 
-> ⚠️ **Caveat — Let's Encrypt:** the bundled Traefik config issues certificates via the Route53 DNS-01 challenge, which won't work without AWS credentials. In manual mode you'll need to edit `docker-compose.yml` to use the HTTP-01 challenge instead (replace the `--certificatesresolvers.letsencrypt.acme.dnschallenge.*` lines with `--certificatesresolvers.letsencrypt.acme.httpchallenge=true` and `--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web`). Existing certs keep working until renewal.
-
 ### 4. Start the stack
 
 ```bash
