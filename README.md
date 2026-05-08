@@ -53,7 +53,7 @@ Every published service resolves via Route53 to the single Vaier server, termina
 ## Prerequisites
 
 - A Linux server with a public IP (EC2 t3.small or similar)
-- Docker and Docker Compose installed
+- Docker and Docker Compose v2.23+ (the compose file embeds an inline `configs:` entry, which requires Compose v2.23 or newer — December 2023). The `curl get.docker.com | sh` step below installs current.
 - A domain name you control
 - AWS credentials with Route53 access — *or* skip them entirely and Vaier will run in manual DNS mode (you maintain records yourself)
 
