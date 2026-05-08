@@ -72,12 +72,14 @@ Every published service resolves via Route53 to the single Vaier server, termina
 
 ### 1. Install Docker
 
-On a fresh Linux server:
+Run as your regular SSH user (e.g. `ubuntu` on EC2 Ubuntu AMIs, `ec2-user` on Amazon Linux) — **don't `sudo su -` to root first**. The rest of the quick start assumes an unprivileged user that's a member of the `docker` group; running as root skips that path and leaves bind-mounted config dirs root-owned, which complicates later edits.
 
 ```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER   # then log out and back in
 ```
+
+Confirm with `docker ps` (no `sudo`) before continuing. If it errors with permission denied, the new group membership hasn't taken effect — fully close the SSH session and reconnect.
 
 ### 2. Download the compose file
 

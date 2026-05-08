@@ -421,6 +421,15 @@ services:
         for d in /vaier/config /traefik/config /authelia/config /wireguard/config; do
           [ -d "$$d" ] && chown -R 1000:1000 "$$d"
         done
+    # authelia-init and redis-init both write files into ./authelia/config as root
+    # before this container's chown runs. Without these gates the chown can race
+    # ahead, leaving root-owned files inside a 1000-owned dir, which then
+    # AccessDenies AutheliaAssetsAdapter.publishAssets() and crash-loops vaier.
+    depends_on:
+      authelia-init:
+        condition: service_completed_successfully
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - ./vaier/config:/vaier/config
       - ./traefik/config:/traefik/config
