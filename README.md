@@ -86,7 +86,13 @@ mkdir -p vaier && cd vaier
 curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
 ```
 
-### 3. Create the `.env` file
+### 3. Pick a DNS mode
+
+Vaier supports two modes — choose one based on where your domain lives. The mode is **inferred at boot from the presence of AWS credentials**: include them, you get Route53 automation; omit them, you get manual DNS. There is no separate switch.
+
+#### Option A: Route53 (automated)
+
+If your domain is on AWS Route53 and you want Vaier to manage DNS for you, include the AWS credentials in `.env`:
 
 ```bash
 cat > .env <<'EOF'
@@ -98,11 +104,11 @@ EOF
 chmod 600 .env
 ```
 
-The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`. Vaier auto-creates `vaier.yourdomain.com` and `login.yourdomain.com` records on first boot.
+The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`. Vaier auto-creates `vaier.yourdomain.com` and `login.yourdomain.com` on first boot, and a CNAME per published service after that.
 
-#### Manual DNS mode (no AWS)
+#### Option B: Manual DNS (no AWS)
 
-If your domain isn't on Route53, or you'd rather Vaier never touched AWS, just leave the AWS variables out of `.env`:
+If your domain isn't on Route53, or you'd rather Vaier never touched AWS, simply leave the AWS variables out:
 
 ```bash
 cat > .env <<'EOF'
@@ -112,14 +118,16 @@ EOF
 chmod 600 .env
 ```
 
-Vaier infers manual DNS mode whenever AWS credentials are absent. You maintain DNS records yourself in whatever provider you use. Before first boot, create:
+You then maintain DNS records yourself in whatever provider you use. **Before first boot**, create these two records:
 
 | Record | Type | Value |
 |--------|------|-------|
 | `vaier.yourdomain.com` | A or CNAME | the public IP/hostname of this server |
 | `login.yourdomain.com` | CNAME | `vaier.yourdomain.com` |
 
-Each time you publish a service, also create a `<subdomain>.yourdomain.com` CNAME pointing at `vaier.yourdomain.com`. Vaier waits up to two minutes for the record to propagate, then activates the Traefik route automatically.
+**Each time you publish a service**, also create a `<subdomain>.yourdomain.com` CNAME pointing at `vaier.yourdomain.com`. Vaier waits up to two minutes for the record to propagate, then activates the Traefik route automatically. If the record never appears the publish is rolled back.
+
+> ⚠️ **Caveat — Let's Encrypt:** the bundled Traefik config issues certificates via the Route53 DNS-01 challenge, which won't work without AWS credentials. In manual mode you'll need to edit `docker-compose.yml` to use the HTTP-01 challenge instead (replace the `--certificatesresolvers.letsencrypt.acme.dnschallenge.*` lines with `--certificatesresolvers.letsencrypt.acme.httpchallenge=true` and `--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web`). Existing certs keep working until renewal.
 
 ### 4. Start the stack
 

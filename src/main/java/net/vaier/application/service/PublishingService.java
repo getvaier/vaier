@@ -18,6 +18,7 @@ import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.DnsProvider;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
@@ -183,10 +184,15 @@ public class PublishingService implements
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        // In manual DNS mode the operator owns DNS — Vaier has no authoritative view, so
+        // assume records exist rather than rendering every published service as missing.
+        DnsState dnsState = configResolver.getDnsProvider() == DnsProvider.MANUAL
+            ? DnsState.OK
+            : route.dnsState(allDnsRecords);
         return new PublishedServiceUco(
             route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames, peers),
             route.getDomainName(),
-            route.dnsState(allDnsRecords),
+            dnsState,
             route.getAddress(),
             route.getPort(),
             route.hostState(localServices, vpnClients, peers),

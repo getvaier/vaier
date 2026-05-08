@@ -157,6 +157,19 @@ class PublishingServiceTest {
     }
 
     @Test
+    void getPublishedServices_manualDnsProvider_alwaysReportsDnsStateOk() {
+        when(configResolver.getDnsProvider()).thenReturn(DnsProvider.MANUAL);
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.dnsState()).isEqualTo(DnsState.OK);
+    }
+
+    @Test
     void getPublishedServices_runningLocalService_hostStateOk() {
         setupOneRoute("app.example.com", "my-container", 8080);
         setupNoDnsRecords();
