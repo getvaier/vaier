@@ -101,6 +101,7 @@ Avoid: "vhost", "site", "auth provider".
 |------|------------|
 | **Discovery** | The process of listing Docker containers on a host. `DiscoverVaierServerContainersUseCase` (Vaier server), `DiscoverPeerContainersUseCase` (server peer via `tcp://<peer>:<port>`), `DiscoverLanServerContainersUseCase` (LAN server, scraped through the relay). |
 | **Reachability check** | A TCP probe (`ForProbingTcp`) used for LAN servers. Every 30s, hits ports 80/443/22; *any* response (handshake or RST) means pingable. Drives the **four-state machine-icon colour**. |
+| **LAN server scrape** | The 30s scheduled Docker-socket scrape of every Docker-enabled LAN server, owned by `LanServerScrapeService`. Status (`OK` / `UNREACHABLE`) is debounced with the same 3-cycle dampening rule as reachability so the icon doesn't flicker green↔yellow on a transient socket blip. The cached result is what `GET /docker-services/lan-servers` returns; on a confirmed status change it republishes the existing `lan-servers-updated` SSE event. The live `DiscoverLanServerContainersUseCase` is still used by the publishable-services flow, which needs current state. |
 | **Probe result** | `CONNECTED` (open), `REFUSED` (host alive, port closed — still pingable), `UNREACHABLE` (timeout or low-level error). |
 | **Four-state machine-icon colour** | The machine-type icon on each card carries the status colour: **grey** (not yet probed / unknown), **green** (host pingable; if Docker-enabled, scrape also OK), **yellow** (Docker host pingable but scrape failed), **red** (host not pingable). Replaces the older standalone status dot. |
 | **Last seen** | Absolute timestamp shown in the **expanded** card's detail row. Sourced from the latest WireGuard handshake for VPN peers; for LAN servers, the most recent successful TCP probe (CONNECTED or REFUSED). Preserved across later DOWN probes — once a host has been seen, the timestamp sticks until the LAN server is removed or the app restarts. |
@@ -164,7 +165,7 @@ Hexagonal architecture (ports & adapters), four layers. See `CLAUDE.md` for the 
 | **Domain** | Pure Java, no Spring. Entities, value objects, port interfaces. | `domain.Machine`, `domain.ReverseProxyRoute` |
 | **Port (driving)** | `*UseCase` interface — one per use case, narrow. Controllers depend on these. | `PublishPeerServiceUseCase`, `DeletePeerUseCase` |
 | **Port (driven)** | `For*` interface — one per outbound capability. | `ForPersistingDnsRecords`, `ForProbingTcp`, `ForResolvingPublicHost` |
-| **Application service** | `*Service` — one per *domain concept*, not per use case. Implements every use case in its domain. | `VpnService`, `PublishingService`, `UserService`, `MachineService`, `LanServerService`, `LanServerReachabilityService`, `DnsService`, `ReverseProxyService`, `SettingsService`, `ContainerService`, `LifecycleService`, `NotificationService` |
+| **Application service** | `*Service` — one per *domain concept*, not per use case. Implements every use case in its domain. | `VpnService`, `PublishingService`, `UserService`, `MachineService`, `LanServerService`, `LanServerReachabilityService`, `LanServerScrapeService`, `DnsService`, `ReverseProxyService`, `SettingsService`, `ContainerService`, `LifecycleService`, `NotificationService` |
 | **Adapter** | `*Adapter` — driven adapter, implements `For*` ports. Lives in `adapter/driven/`. | `Route53DnsAdapter`, `WireGuardVpnAdapter`, `TraefikReverseProxyAdapter`, `LanServerFileAdapter`, `JavaSocketTcpProbeAdapter` |
 | **REST controller** | `*RestController`, in `rest/`. DTOs are inner `record` classes. | `MachineRestController`, `PublishedServiceRestController` |
 
@@ -181,7 +182,7 @@ The browser receives live updates via Server-Sent Events. Topics and event names
 | Topic | Events | Triggered by |
 |-------|--------|--------------|
 | `published-services` | `services-updated`, `publish-rolled-back` | Publishing flow, rollback, peer deletion, route changes |
-| `vpn-peers` | `peers-updated`, `peers-stats`, `lan-servers-updated` | `VpnService` mutations, `PeerStatsScheduler`, `LanServerReachabilityScheduler` |
+| `vpn-peers` | `peers-updated`, `peers-stats`, `lan-servers-updated` | `VpnService` mutations, `PeerStatsScheduler`, `LanServerReachabilityScheduler`, `LanServerScrapeScheduler` |
 
 Do not poll from the browser when an SSE topic exists.
 

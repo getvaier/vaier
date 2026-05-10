@@ -176,6 +176,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
 
+    @MockBean
+    protected GetLanServerScrapeUseCase getLanServerScrapeUseCase;
+
     // --- LAN server use cases ---
     @MockBean
     protected RegisterLanServerUseCase registerLanServerUseCase;

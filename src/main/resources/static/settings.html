@@ -343,6 +343,10 @@
                 const r = await fetch('/settings/config');
                 if (!r.ok) return;
                 const s = await r.json();
+                // Hide AWS credentials when running in manual DNS mode — they have no effect there.
+                if (s.dnsProvider && s.dnsProvider !== 'ROUTE53') {
+                    document.getElementById('awsCredentialsSection').style.display = 'none';
+                }
                 if (s.awsKeyHint) document.getElementById('awsCurrentKey').value = s.awsKeyHint;
                 if (s.smtpHost) document.getElementById('smtpHost').value = s.smtpHost;
                 if (s.smtpPort) document.getElementById('smtpPort').value = s.smtpPort;

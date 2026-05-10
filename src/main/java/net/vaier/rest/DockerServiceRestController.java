@@ -1,10 +1,10 @@
 package net.vaier.rest;
 
-import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
@@ -22,16 +22,16 @@ public class DockerServiceRestController {
     private final GetServerInfoUseCase getServerInfoUseCase;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
-    private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+    private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
 
     public DockerServiceRestController(GetServerInfoUseCase getServerInfoUseCase,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
                                        DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase,
-                                       DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase) {
+                                       GetLanServerScrapeUseCase getLanServerScrapeUseCase) {
         this.getServerInfoUseCase = getServerInfoUseCase;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverVaierServerContainersUseCase = discoverVaierServerContainersUseCase;
-        this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
+        this.getLanServerScrapeUseCase = getLanServerScrapeUseCase;
     }
 
     @GetMapping
@@ -69,7 +69,7 @@ public class DockerServiceRestController {
     @GetMapping("/lan-servers")
     public ResponseEntity<List<LanServerContainers>> discoverLanServerContainers() {
         try {
-            return ResponseEntity.ok(discoverLanServerContainersUseCase.discoverAllLanServerContainers());
+            return ResponseEntity.ok(getLanServerScrapeUseCase.getLanServerContainers());
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }
