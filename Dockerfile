@@ -13,8 +13,10 @@ ARG VAIER_VERSION=dev
 LABEL org.opencontainers.image.version="${VAIER_VERSION}"
 # Base image already has user `ubuntu` at UID 1000:1000 — reuse it.
 # util-linux for setpriv (handles cap+user transition cleanly), iproute2 for
-# the `ip` binary used by VpnNetworkSetupAdapter and LanRouteAdapter.
-RUN apt-get update && apt-get install -y --no-install-recommends iproute2 util-linux && rm -rf /var/lib/apt/lists/*
+# the `ip` binary used by VpnNetworkSetupAdapter and LanRouteAdapter, iputils-ping
+# for the ICMP fallback in LanServerReachabilityService (the package ships
+# /bin/ping with cap_net_raw+ep so the unprivileged ubuntu user can use it).
+RUN apt-get update && apt-get install -y --no-install-recommends iproute2 util-linux iputils-ping && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build --chown=1000:1000 /app/target/*.jar app.jar
 EXPOSE 8080

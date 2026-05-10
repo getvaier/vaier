@@ -7,6 +7,7 @@ import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.port.ForPingingHost;
 import net.vaier.domain.port.ForProbingTcp;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -25,6 +26,10 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
 
     private static final List<Integer> PROBE_PORTS = List.of(80, 443, 22);
     private static final int PROBE_TIMEOUT_MS = 1000;
+    // ICMP fallback fires only when every TCP probe times out. Printers / IoT / IPMI cards
+    // often reply to ping without exposing ports 80/443/22, and this stops them from showing
+    // as red on the Machines page.
+    private static final int PING_TIMEOUT_MS = 1000;
     // A probe result must hold for this many consecutive cycles before it lands in the cache
     // (and therefore triggers an admin email). Dampens both warmup-after-restart blips and
     // ordinary network flapping. With the 30s scheduler, N=3 means a state must persist for
@@ -35,6 +40,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
 
     private final GetLanServersUseCase getLanServersUseCase;
     private final ForProbingTcp forProbingTcp;
+    private final ForPingingHost forPingingHost;
     private final ForPublishingEvents forPublishingEvents;
     private final NotifyAdminsOfPeerTransitionUseCase notifier;
     private final Map<String, Reachability> cache = new ConcurrentHashMap<>();
@@ -44,10 +50,12 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
 
     public LanServerReachabilityService(GetLanServersUseCase getLanServersUseCase,
                                         ForProbingTcp forProbingTcp,
+                                        ForPingingHost forPingingHost,
                                         ForPublishingEvents forPublishingEvents,
                                         NotifyAdminsOfPeerTransitionUseCase notifier) {
         this.getLanServersUseCase = getLanServersUseCase;
         this.forProbingTcp = forProbingTcp;
+        this.forPingingHost = forPingingHost;
         this.forPublishingEvents = forPublishingEvents;
         this.notifier = notifier;
     }
@@ -131,6 +139,12 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
             if (r == ProbeResult.CONNECTED || r == ProbeResult.REFUSED) {
                 return Reachability.OK;
             }
+        }
+        // Every probed TCP port timed out. Fall back to ICMP for hosts that don't expose
+        // any of those ports — printers, IoT devices, IPMI cards. Keeps the fast path on
+        // healthy hosts (TCP wins early-exit, no ping subprocess spawned).
+        if (forPingingHost.isReachable(lanAddress, PING_TIMEOUT_MS)) {
+            return Reachability.OK;
         }
         return Reachability.DOWN;
     }

@@ -7,6 +7,7 @@ import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.port.ForPingingHost;
 import net.vaier.domain.port.ForProbingTcp;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -34,6 +35,7 @@ class LanServerReachabilityServiceTest {
 
     @Mock GetLanServersUseCase getLanServersUseCase;
     @Mock ForProbingTcp forProbingTcp;
+    @Mock ForPingingHost forPingingHost;
     @Mock ForPublishingEvents forPublishingEvents;
     @Mock NotifyAdminsOfPeerTransitionUseCase notifier;
 
@@ -45,10 +47,11 @@ class LanServerReachabilityServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPublishingEvents, notifier);
+        service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPingingHost, forPublishingEvents, notifier);
         lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of());
         lenient().when(forProbingTcp.probe(anyString(), anyInt(), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
+        lenient().when(forPingingHost.isReachable(anyString(), anyInt())).thenReturn(false);
     }
 
     private void refreshN(int n) {
@@ -382,6 +385,68 @@ class LanServerReachabilityServiceTest {
 
         org.assertj.core.api.Assertions.assertThatCode(() -> refreshN(CONFIRM))
             .doesNotThrowAnyException();
+    }
+
+    @Test
+    void refreshAll_allTcpUnreachableButIcmpReplies_marksOk() {
+        // Printers, IoT devices and IPMI cards in low-power state often reply to ICMP
+        // without exposing ports 80/443/22. The TCP probe alone misses them — ICMP is the
+        // safety net so they don't show as red on the Machines page.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.108", false, null)
+        ));
+        // default mock returns UNREACHABLE for every TCP port.
+        when(forPingingHost.isReachable(eq("192.168.3.108"), anyInt())).thenReturn(true);
+
+        refreshN(CONFIRM);
+
+        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+    }
+
+    @Test
+    void refreshAll_allTcpUnreachableAndIcmpFails_marksDown() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("ghost", "192.168.3.99", false, null)
+        ));
+        // Every TCP probe times out and ICMP returns no reply — host is genuinely offline.
+
+        refreshN(CONFIRM);
+
+        assertThat(service.getReachability("ghost")).isEqualTo(Reachability.DOWN);
+    }
+
+    @Test
+    void refreshAll_tcpAlreadyConnected_doesNotPing() {
+        // If TCP gives us an answer (CONNECTED or REFUSED), ICMP is wasted work — the host
+        // is already proven alive. Avoids spawning a `ping` subprocess on every cycle for
+        // every healthy host (most of them).
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("nas", "192.168.3.50", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.50"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+
+        service.refreshAll();
+
+        verify(forPingingHost, never()).isReachable(anyString(), anyInt());
+    }
+
+    @Test
+    void refreshAll_icmpReply_recordsLastSeen() {
+        // An ICMP reply proves the host responded — same semantic as a TCP CONNECTED or
+        // REFUSED, so the last-seen timestamp must update too.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.108", false, null)
+        ));
+        when(forPingingHost.isReachable(eq("192.168.3.108"), anyInt())).thenReturn(true);
+
+        long before = System.currentTimeMillis() / 1000;
+        service.refreshAll();
+        long after = System.currentTimeMillis() / 1000;
+
+        assertThat(service.getLastSeenEpochSec("printer"))
+            .isNotNull()
+            .isBetween(before, after);
     }
 
     private static LanServerView view(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
