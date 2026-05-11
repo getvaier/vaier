@@ -21,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,6 +62,7 @@ class GetLaunchpadServicesTest {
     void setUp() {
         lenient().when(configResolver.getDomain()).thenReturn("example.com");
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
         lenient().when(forResolvingPeerNames.resolvePeerNameByIp(org.mockito.ArgumentMatchers.anyString()))
             .thenAnswer(inv -> inv.getArgument(0));
     }

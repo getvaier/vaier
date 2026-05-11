@@ -7,6 +7,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +20,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,6 +33,13 @@ class LanServerServiceTest {
     @Mock private ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     @InjectMocks private LanServerService service;
+
+    @BeforeEach
+    void setUp() {
+        // register()/getAll() resolve the server LAN CIDR; default it to "absent" so the relay-only
+        // tests behave as before. Tests exercising the server-LAN-CIDR path override it.
+        lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
+    }
 
     private static PeerConfiguration relay(String name, String ip, String lanCidr) {
         return new PeerConfiguration(name, ip, "", MachineType.UBUNTU_SERVER, lanCidr, null);

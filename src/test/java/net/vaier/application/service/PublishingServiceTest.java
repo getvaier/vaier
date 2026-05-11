@@ -102,6 +102,10 @@ class PublishingServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(configResolver.getDomain()).thenReturn("example.com");
+        // getPublishedServices() always resolves the server LAN CIDR; default it to "absent" so the
+        // relay-only tests behave as before. (Mockito would return Optional.empty() anyway — this is
+        // just explicit.) Tests that exercise the server-LAN-CIDR path override it.
+        lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
     }
 
     @Test
