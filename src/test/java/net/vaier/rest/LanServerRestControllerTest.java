@@ -6,6 +6,8 @@ import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
+import net.vaier.application.ResolveLanAnchorUseCase;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +23,7 @@ import org.springframework.http.ResponseEntity;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
@@ -34,9 +37,35 @@ class LanServerRestControllerTest {
     @Mock DeleteLanServerUseCase deleteLanServerUseCase;
     @Mock GetLanServersUseCase getLanServersUseCase;
     @Mock GetLanServerReachabilityUseCase reachabilityUseCase;
+    @Mock ResolveLanAnchorUseCase resolveLanAnchorUseCase;
 
     @InjectMocks
     LanServerRestController controller;
+
+    // --- lan-anchor ---
+
+    @Test
+    void lanAnchor_routable_returnsRoutedViaAndCidr() {
+        LanAnchor anchor = LanAnchor.resolve("172.31.5.20", List.of(), "172.31.0.0/16").orElseThrow();
+        when(resolveLanAnchorUseCase.resolveLanAnchor("172.31.5.20")).thenReturn(Optional.of(anchor));
+
+        var resp = controller.lanAnchor("172.31.5.20");
+
+        assertThat(resp.routable()).isTrue();
+        assertThat(resp.routedVia()).isEqualTo("Vaier server");
+        assertThat(resp.cidr()).isEqualTo("172.31.0.0/16");
+    }
+
+    @Test
+    void lanAnchor_notRoutable_returnsRoutableFalse() {
+        when(resolveLanAnchorUseCase.resolveLanAnchor("10.99.99.99")).thenReturn(Optional.empty());
+
+        var resp = controller.lanAnchor("10.99.99.99");
+
+        assertThat(resp.routable()).isFalse();
+        assertThat(resp.routedVia()).isNull();
+        assertThat(resp.cidr()).isNull();
+    }
 
     @Test
     void register_runsDockerTrueWithDockerPort_delegatesToUseCase() {

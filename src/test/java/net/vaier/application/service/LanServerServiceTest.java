@@ -141,6 +141,52 @@ class LanServerServiceTest {
         verify(forPersistingLanServers, never()).save(org.mockito.ArgumentMatchers.any());
     }
 
+    // --- resolveLanAnchor ---
+
+    @Test
+    void resolveLanAnchor_addressInsideRelayLanCidr_returnsRelayAnchor() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        var anchor = service.resolveLanAnchor("192.168.3.50");
+
+        assertThat(anchor).isPresent();
+        assertThat(anchor.get().isVaierServer()).isFalse();
+        assertThat(anchor.get().name()).isEqualTo("apalveien5");
+        assertThat(anchor.get().cidr()).isEqualTo("192.168.3.0/24");
+    }
+
+    @Test
+    void resolveLanAnchor_addressInsideServerLanCidr_returnsVaierServerAnchor() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        var anchor = service.resolveLanAnchor("172.31.5.20");
+
+        assertThat(anchor).isPresent();
+        assertThat(anchor.get().isVaierServer()).isTrue();
+        assertThat(anchor.get().name()).isEqualTo("Vaier server");
+        assertThat(anchor.get().cidr()).isEqualTo("172.31.0.0/16");
+    }
+
+    @Test
+    void resolveLanAnchor_addressInNeither_empty() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        assertThat(service.resolveLanAnchor("10.99.99.99")).isEmpty();
+    }
+
+    @Test
+    void resolveLanAnchor_blankOrNullAddress_empty() {
+        assertThat(service.resolveLanAnchor("")).isEmpty();
+        assertThat(service.resolveLanAnchor("   ")).isEmpty();
+        assertThat(service.resolveLanAnchor(null)).isEmpty();
+    }
+
     // --- delete ---
 
     @Test

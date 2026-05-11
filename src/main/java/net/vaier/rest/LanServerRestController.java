@@ -7,6 +7,7 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
+import net.vaier.application.ResolveLanAnchorUseCase;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -28,6 +29,7 @@ public class LanServerRestController {
     private final DeleteLanServerUseCase deleteLanServerUseCase;
     private final GetLanServersUseCase getLanServersUseCase;
     private final GetLanServerReachabilityUseCase reachabilityUseCase;
+    private final ResolveLanAnchorUseCase resolveLanAnchorUseCase;
 
     @GetMapping
     public List<LanServerResponse> list() {
@@ -36,6 +38,18 @@ public class LanServerRestController {
                 reachabilityUseCase.getReachability(view.server().name()).name(),
                 reachabilityUseCase.getLastSeenEpochSec(view.server().name())))
             .toList();
+    }
+
+    /**
+     * What routes packets to {@code address}: a relay peer's lanCidr, or the Vaier server itself
+     * (server LAN CIDR). Returns {@code routable=false} when neither covers it. The Add Machine
+     * modal calls this so it doesn't reimplement CIDR-containment in JavaScript.
+     */
+    @GetMapping("/lan-anchor")
+    public LanAnchorResponse lanAnchor(@RequestParam(value = "address", required = false) String address) {
+        return resolveLanAnchorUseCase.resolveLanAnchor(address)
+            .map(a -> new LanAnchorResponse(true, a.name(), a.cidr()))
+            .orElseGet(() -> new LanAnchorResponse(false, null, null));
     }
 
     @PostMapping
@@ -76,6 +90,9 @@ public class LanServerRestController {
     }
 
     record RegisterRequest(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {}
+
+    /** {@code routedVia} is a relay peer name or "Vaier server"; both null when not routable. */
+    record LanAnchorResponse(boolean routable, String routedVia, String cidr) {}
 
     record LanServerResponse(
         String name,

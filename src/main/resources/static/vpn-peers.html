@@ -454,7 +454,7 @@
                     <option value="WINDOWS_SERVER">Windows server with Docker</option>
                     <option value="MOBILE_CLIENT">Mobile client (phone/tablet)</option>
                     <option value="WINDOWS_CLIENT">Windows client (laptop/desktop)</option>
-                    <option value="LAN_SERVER">LAN server (no VPN, behind a relay)</option>
+                    <option value="LAN_SERVER">LAN server (no VPN; behind a relay or in the server's subnet)</option>
                 </select>
             </div>
             <div class="form-group" id="lanCidrGroup" style="display:none">
@@ -836,7 +836,7 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml('lan', 'LAN server (no VPN, behind a relay)', iconStatusClass(statusClass))}
+                        ${machineIconHtml('lan', 'LAN server (no VPN; behind a relay or in the server\'s subnet)', iconStatusClass(statusClass))}
                         <span class="peer-name">${server.name}</span>
                         ${capabilitySlotsHtml([null, dockerSlot])}
                     </div>
@@ -1122,37 +1122,41 @@
 
         function hideCreatePeerModal() {
             document.getElementById('createPeerModal').classList.remove('active');
+            if (lanAnchorTimer) { clearTimeout(lanAnchorTimer); lanAnchorTimer = null; }
         }
 
-        function ipInCidrJs(ip, cidr) {
-            const [base, prefixStr] = (cidr || '').split('/');
-            const prefix = parseInt(prefixStr);
-            if (!base || isNaN(prefix)) return false;
-            const toInt = a => a.split('.').reduce((acc, b) => (acc << 8) + parseInt(b), 0) >>> 0;
-            try {
-                const baseInt = toInt(base);
-                const ipInt   = toInt(ip);
-                if (prefix === 0) return true;
-                const mask = (~0 << (32 - prefix)) >>> 0;
-                return (baseInt & mask) === (ipInt & mask);
-            } catch (e) { return false; }
-        }
+        // Whether/how a typed LAN address is routable (relay peer or the Vaier server itself) is a
+        // domain decision — we ask the server (`GET /lan-servers/lan-anchor`) rather than doing any
+        // CIDR math here. Debounced, with a sequence guard so a stale response can't overwrite a newer one.
+        let lanAnchorTimer = null;
+        let lanAnchorSeq = 0;
 
         function updateLanAddressHint() {
             const hint = document.getElementById('lanAddressHint');
             const type = document.getElementById('peerType').value;
             const ip   = document.getElementById('lanAddress').value.trim();
-            // Hint is informational only for VPN peers; show validation only for LAN_SERVER.
+            if (lanAnchorTimer) { clearTimeout(lanAnchorTimer); lanAnchorTimer = null; }
+            // Hint is informational only for VPN peers; show routability only for LAN_SERVER.
             if (type !== 'LAN_SERVER' || !ip) { hint.textContent = ''; return; }
-            const relayPeers = peers.filter(p => p.lanCidr && p.lanCidr.trim());
-            const relay = relayPeers.find(p => ipInCidrJs(ip, p.lanCidr));
-            if (relay) {
-                hint.textContent = `Routes via ${relay.name} (${relay.lanCidr})`;
-                hint.style.color = 'var(--text-muted)';
-            } else {
-                hint.textContent = `${ip} is not inside any relay peer's lanCidr — set lanCidr on a relay first.`;
-                hint.style.color = 'var(--red)';
-            }
+            hint.textContent = 'Checking…';
+            hint.style.color = 'var(--text-muted)';
+            const seq = ++lanAnchorSeq;
+            lanAnchorTimer = setTimeout(async () => {
+                let anchor = null;
+                try {
+                    const resp = await fetch(`/lan-servers/lan-anchor?address=${encodeURIComponent(ip)}`);
+                    if (resp.ok) anchor = await resp.json();
+                } catch (e) { /* leave anchor null */ }
+                if (seq !== lanAnchorSeq) return;   // a newer keystroke superseded this lookup
+                if (anchor === null) { hint.textContent = ''; return; }
+                if (anchor.routable) {
+                    hint.textContent = `Routes via ${anchor.routedVia}${anchor.cidr ? ` (${anchor.cidr})` : ''}`;
+                    hint.style.color = 'var(--text-muted)';
+                } else {
+                    hint.textContent = `${ip} isn't routable — not inside any relay peer's lanCidr or the Vaier server's own subnet.`;
+                    hint.style.color = 'var(--red)';
+                }
+            }, 250);
         }
 
         async function deleteLanServer(name) {
@@ -1195,7 +1199,7 @@
                         body: JSON.stringify({ name, lanAddress, runsDocker, dockerPort })
                     });
                     if (response.status === 400) {
-                        displayError(`${lanAddress} is not inside any relay peer's lanCidr. Set lanCidr on a relay first.`);
+                        displayError(`${lanAddress} isn't routable — not inside any relay peer's lanCidr or the Vaier server's own subnet.`);
                         return;
                     }
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);

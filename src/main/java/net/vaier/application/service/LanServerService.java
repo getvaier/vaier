@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.RegisterLanServerUseCase;
+import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -20,7 +21,8 @@ import java.util.Optional;
 public class LanServerService implements
     RegisterLanServerUseCase,
     DeleteLanServerUseCase,
-    GetLanServersUseCase {
+    GetLanServersUseCase,
+    ResolveLanAnchorUseCase {
 
     private final ForPersistingLanServers forPersistingLanServers;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
@@ -37,7 +39,7 @@ public class LanServerService implements
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
         LanServer.validate(name, lanAddress, runsDocker, dockerPort);
-        if (resolveAnchor(lanAddress).isEmpty()) {
+        if (resolveLanAnchor(lanAddress).isEmpty()) {
             throw new IllegalArgumentException(
                 "lanAddress " + lanAddress + " is not inside any relay peer's lanCidr, " +
                 "nor inside the Vaier server's own LAN CIDR. Set lanCidr on a relay peer first " +
@@ -64,7 +66,9 @@ public class LanServerService implements
             .toList();
     }
 
-    private Optional<LanAnchor> resolveAnchor(String lanAddress) {
+    @Override
+    public Optional<LanAnchor> resolveLanAnchor(String lanAddress) {
+        if (lanAddress == null || lanAddress.isBlank()) return Optional.empty();
         return LanAnchor.resolve(lanAddress,
             forGettingPeerConfigurations.getAllPeerConfigs(),
             forResolvingServerLanCidr.resolve().orElse(null));
