@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 #
-# Vaier LAN docker host setup
+# Vaier LAN Docker host setup — turn a from-scratch Ubuntu/Debian box (or any systemd
+# distro) into a LAN Docker host that a Vaier instance can scrape remotely.
 #
-# Exposes the Docker engine API on tcp://0.0.0.0:<port> so that a Vaier instance
-# (running on a relay peer's LAN) can scrape containers remotely. Idempotent —
-# safe to re-run. Covers both native Docker (systemd) and Snap Docker.
+# What it does:
+#   1. installs Docker (https://get.docker.com) if it isn't already present;
+#   2. exposes the Docker engine API on tcp://0.0.0.0:<port> so Vaier can list this
+#      host's containers;
+#   3. verifies the API is reachable and prints how to register the host in Vaier.
+# Idempotent — safe to re-run. Covers native Docker (systemd) and Snap Docker.
 #
-# Usage (run on the LAN docker host):
-#   curl -sSL https://vaier.<your-domain>/lan-servers/docker-setup.sh \
-#     | sudo bash -s -- --port 2375
+# Usage (run ON the LAN host you want to add):
+#   curl -sSL https://vaier.<your-domain>/lan-servers/docker-setup.sh | sudo bash -s -- --port 2375
 #
-# WARNING: tcp://0.0.0.0:2375 is unencrypted and unauthenticated. Only use this
-# on a LAN you trust. Vaier V1 does not yet support TLS / SSH for the LAN docker
-# socket — that's tracked separately.
+# AFTER running, allow inbound TCP <port> from the Vaier server in this host's security
+# group / firewall. The API on <port> is unencrypted and unauthenticated (Vaier V1 has
+# no TLS/SSH for the LAN Docker socket yet), so keep that rule scoped to the Vaier
+# server's address — never open it to the internet.
 
 set -euo pipefail
 
@@ -23,7 +27,7 @@ while [ $# -gt 0 ]; do
         --port) PORT="$2"; shift 2 ;;
         --port=*) PORT="${1#--port=}"; shift ;;
         -h|--help)
-            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -40,7 +44,26 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 2
 fi
 
-echo "==> Vaier LAN docker setup — exposing Docker API on tcp://0.0.0.0:${PORT}"
+echo "==> Vaier LAN Docker host setup (port ${PORT})"
+
+# --- 1. ensure Docker is installed -------------------------------------------------
+if command -v docker >/dev/null 2>&1; then
+    echo "==> Docker already installed: $(docker --version 2>/dev/null || echo present)"
+elif command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then
+    echo "==> Docker (snap) already installed"
+else
+    echo "==> Docker not found — installing via https://get.docker.com"
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable --now docker >/dev/null 2>&1 || true
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "ERROR: Docker install did not complete — check the output above" >&2
+        exit 1
+    fi
+    echo "    installed $(docker --version)"
+fi
+
+# --- 2. expose the engine API on tcp://0.0.0.0:<port> ------------------------------
+echo "==> Exposing Docker API on tcp://0.0.0.0:${PORT}"
 
 DESIRED_HOSTS="\"unix:///var/run/docker.sock\", \"tcp://0.0.0.0:${PORT}\""
 
@@ -134,6 +157,7 @@ ExecStart=/usr/bin/dockerd
     wait_for_docker
 fi
 
+# --- 3. verify ---------------------------------------------------------------------
 echo
 echo "==> Verifying remote API on tcp://127.0.0.1:${PORT}"
 if command -v curl >/dev/null 2>&1; then
@@ -147,9 +171,20 @@ else
     echo "    (curl not installed, skipping verification)"
 fi
 
+# --- done --------------------------------------------------------------------------
+THIS_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "$THIS_IP" ] || THIS_IP="<this host IP>"
 echo
-echo "Done. Register this host in Vaier with:"
-echo "  - Name:       <hostname>"
-echo "  - LAN address: <this host's IP on the relay peer's LAN>"
-echo "  - Runs Docker: yes"
-echo "  - Docker port: ${PORT}"
+echo "Done. Two things left:"
+echo
+echo "  1. In this host security group / firewall, allow inbound TCP ${PORT} from the"
+echo "     Vaier server address only. The Docker API on ${PORT} is unauthenticated —"
+echo "     do not expose it to the internet."
+echo
+echo "  2. In Vaier -> Machines -> Add Machine:"
+echo "       Type:        LAN server"
+echo "       Name:        $(hostname)"
+echo "       LAN address: ${THIS_IP}"
+echo "       Runs Docker: yes      Docker port: ${PORT}"
+echo
+echo "  Vaier scrapes this host every ~30s; allow ~90s for it to turn green."

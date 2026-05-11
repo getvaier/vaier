@@ -1659,20 +1659,28 @@
                 }
             });
 
-            // LAN_SERVERs: anchored at the relay peer's endpoint location with a "Behind <relay>" label.
-            // Closes #182.
+            // LAN_SERVERs: anchored at the relay peer's endpoint, or — when routed through the
+            // Vaier server itself (relayPeerName === "Vaier server", matching LanAnchor.VAIER_SERVER_NAME)
+            // — at the Vaier server's own location. "Behind <X>" label either way. Closes #182, #204.
             lanServers.forEach(s => {
                 if (!s.relayPeerName) return;
-                const relay = peers.find(p => p.name === s.relayPeerName);
-                if (!relay || relay.latitude == null || relay.longitude == null) return;
+                let lat, lon;
+                if (s.relayPeerName === 'Vaier server') {
+                    if (!_serverLocation || _serverLocation.latitude == null || _serverLocation.longitude == null) return;
+                    lat = _serverLocation.latitude; lon = _serverLocation.longitude;
+                } else {
+                    const relay = peers.find(p => p.name === s.relayPeerName);
+                    if (!relay || relay.latitude == null || relay.longitude == null) return;
+                    lat = relay.latitude; lon = relay.longitude;
+                }
                 const popup = `<strong>${escapeHtml(s.name)}</strong><br>`
                     + `<span style="color:#888;font-size:0.85em">Behind ${escapeHtml(s.relayPeerName)}</span><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(s.lanAddress)}</span>`
                     + (s.runsDocker ? `<br><span style="color:#888;font-size:0.78em">Docker on :${s.dockerPort}</span>` : '');
-                const firm = makeIconMarker([relay.latitude, relay.longitude], 'lan', statusKeyForLanServer(s, lanServerServices[s.name]));
+                const firm = makeIconMarker([lat, lon], 'lan', statusKeyForLanServer(s, lanServerServices[s.name]));
                 bindHoverPopup(firm, popup);
                 _markersClusterGroup.addLayer(firm);
-                allCoords.push([relay.latitude, relay.longitude]);
+                allCoords.push([lat, lon]);
             });
 
             if (_serverLocation) {

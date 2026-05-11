@@ -164,6 +164,14 @@ class LanServerRestControllerTest {
 
         // verification: waits for docker info after restart
         assertThat(body).contains("docker info");
+
+        // installs Docker from scratch if it isn't already present (Ubuntu-friendly)
+        assertThat(body).contains("command -v docker");
+        assertThat(body).contains("get.docker.com");
+
+        // reminds the operator about the security-group / firewall rule and how to register
+        assertThat(body).contains("security group");
+        assertThat(body).contains("Add Machine");
     }
 
     @Test
