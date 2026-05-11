@@ -570,6 +570,26 @@ class ContainerServiceTest {
     }
 
     @Test
+    void discoverAllLanServerContainers_serverAnchored_scrapesDirectly() {
+        // A LAN server in the Vaier server's own subnet is anchored at "Vaier server" — the
+        // scrape connects straight from the Vaier container, no relay hop.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("vpc-box", "172.31.5.20", true, 2375), "Vaier server")
+        ));
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+            argThat(s -> s.dockerHostUrl().equals("tcp://172.31.5.20:2375"))
+        )).thenReturn(List.of(dockerService("plex", 32400)));
+
+        var results = service.discoverAllLanServerContainers();
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).name()).isEqualTo("vpc-box");
+        assertThat(results.get(0).relayPeerName()).isEqualTo("Vaier server");
+        assertThat(results.get(0).status()).isEqualTo("OK");
+        assertThat(results.get(0).containers()).hasSize(1);
+    }
+
+    @Test
     void discoverAllLanServerContainers_relayUnknown_marksUnreachableAndDoesNotScrape() {
         when(getLanServersUseCase.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), null)

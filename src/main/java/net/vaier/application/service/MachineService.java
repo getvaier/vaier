@@ -5,13 +5,14 @@ import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
-import net.vaier.domain.Cidr;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingMachines;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -26,18 +27,22 @@ public class MachineService implements GetMachinesUseCase, ForGettingMachines {
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final GetVpnClientsUseCase getVpnClientsUseCase;
     private final GetLanServersUseCase getLanServersUseCase;
+    private final ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
                           GetVpnClientsUseCase getVpnClientsUseCase,
-                          GetLanServersUseCase getLanServersUseCase) {
+                          GetLanServersUseCase getLanServersUseCase,
+                          ForResolvingServerLanCidr forResolvingServerLanCidr) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.getVpnClientsUseCase = getVpnClientsUseCase;
         this.getLanServersUseCase = getLanServersUseCase;
+        this.forResolvingServerLanCidr = forResolvingServerLanCidr;
     }
 
     @Override
     public List<Machine> getAllMachines() {
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
         Map<String, VpnClient> clientsByIp = getVpnClientsUseCase.getClients().stream()
             .filter(c -> c.allowedIps() != null && !c.allowedIps().isBlank())
             .collect(Collectors.toMap(
@@ -68,12 +73,14 @@ public class MachineService implements GetMachinesUseCase, ForGettingMachines {
 
         for (LanServerView view : getLanServersUseCase.getAll()) {
             var server = view.server();
-            String relayLanCidr = relayLanCidrFor(server.lanAddress(), peers);
+            String anchorLanCidr = LanAnchor.resolve(server.lanAddress(), peers, serverLanCidr)
+                .map(LanAnchor::cidr)
+                .orElse(null);
             result.add(new Machine(
                 server.name(),
                 MachineType.LAN_SERVER,
                 null, null, null, null, null, null, null,
-                relayLanCidr,
+                anchorLanCidr,
                 server.lanAddress(),
                 server.runsDocker(),
                 server.dockerPort()
@@ -81,17 +88,5 @@ public class MachineService implements GetMachinesUseCase, ForGettingMachines {
         }
 
         return result;
-    }
-
-    private String relayLanCidrFor(String lanAddress, List<PeerConfiguration> peers) {
-        return peers.stream()
-            .filter(p -> p.lanCidr() != null && !p.lanCidr().isBlank())
-            .filter(p -> {
-                try { return Cidr.parse(p.lanCidr()).contains(lanAddress); }
-                catch (IllegalArgumentException e) { return false; }
-            })
-            .map(PeerConfiguration::lanCidr)
-            .findFirst()
-            .orElse(null);
     }
 }

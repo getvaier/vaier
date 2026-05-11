@@ -158,15 +158,18 @@ public class ContainerService implements
     private LanServerContainers scrapeLanServer(LanServerView view) {
         var server = view.server();
         if (view.relayPeerName() == null) {
-            log.debug("Skipping LAN server {} ({}) — no relay peer covers its lanCidr",
+            log.debug("Skipping LAN server {} ({}) — not inside any relay peer's lanCidr nor the server LAN CIDR",
                 server.name(), server.lanAddress());
             return new LanServerContainers(server.name(), server.lanAddress(), server.dockerPort(),
                 null, "UNREACHABLE", List.of());
         }
+        // relayPeerName is either a relay peer (scrape hops through its tunnel + LAN forwarding)
+        // or LanAnchor.VAIER_SERVER_NAME (scrape goes straight from the Vaier container, since the
+        // address is in the Vaier server's own subnet). The Docker socket target is the same.
         try {
             Server target = new Server(server.lanAddress(), server.dockerPort(), false);
             List<DockerService> containers = forGettingServerInfo.getServicesWithExposedPorts(target);
-            log.info("Discovered {} containers on LAN server {} ({}) via relay {}",
+            log.info("Discovered {} containers on LAN server {} ({}) via {}",
                 containers.size(), server.name(), server.lanAddress(), view.relayPeerName());
             return new LanServerContainers(server.name(), server.lanAddress(), server.dockerPort(),
                 view.relayPeerName(), "OK", containers);

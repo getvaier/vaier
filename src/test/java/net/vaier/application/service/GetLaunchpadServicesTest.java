@@ -12,6 +12,7 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,6 +47,9 @@ class GetLaunchpadServicesTest {
 
     @Mock
     ForGettingPeerConfigurations forGettingPeerConfigurations;
+
+    @Mock
+    ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     @Mock
     ConfigResolver configResolver;

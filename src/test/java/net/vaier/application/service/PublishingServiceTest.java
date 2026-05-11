@@ -24,6 +24,7 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingDns;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -67,6 +68,9 @@ class PublishingServiceTest {
 
     @Mock
     ForGettingPeerConfigurations forGettingPeerConfigurations;
+
+    @Mock
+    ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     @Mock
     ConfigResolver configResolver;
@@ -197,6 +201,22 @@ class PublishingServiceTest {
         PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.UNREACHABLE);
+    }
+
+    @Test
+    void getPublishedServices_lanServiceInsideServerLanCidr_hostStateOk() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            ReverseProxyRoute.lanRoute("box-router", "box.example.com", "172.31.5.20", 8080, "http", "box-svc")
+        ));
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.state()).isEqualTo(State.OK);
+        assertThat(result.isLanService()).isTrue();
     }
 
     @Test
@@ -715,6 +735,19 @@ class PublishingServiceTest {
         verify(pendingPublicationsService).track("10.13.13.5", 8080);
     }
 
+    @Test
+    void publishService_addressInsideServerLanCidr_dispatchesToLanFlow() {
+        // A box in the Vaier server's own subnet — no relay peer needed; still routed through the
+        // LAN flow so the route gets isLanService=true.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        service.publishService("172.31.5.20", 80, "pihole", false, null, false);
+
+        verify(pendingPublicationsService, never()).track(anyString(), anyInt());
+        verify(forPublishingEvents).publish("published-services", "publish-dns-created", "pihole");
+    }
+
     // --- publishLanService (#175) ---
 
     @Test
@@ -760,6 +793,28 @@ class PublishingServiceTest {
 
         verify(forPersistingReverseProxyRoutes).addLanReverseProxyRoute(
             "nas.example.com", "192.168.3.50", 5000, "https", true, true);
+    }
+
+    @Test
+    void publishLanService_targetIpInsideServerLanCidr_createsCnameDnsRecord() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        service.publishLanService("box", "172.31.5.20", 8080, "http", false, false);
+
+        ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);
+        verify(forPersistingDnsRecords).addDnsRecord(recordCaptor.capture(), any());
+        assertThat(recordCaptor.getValue().name()).isEqualTo("box.example.com.");
+    }
+
+    @Test
+    void publishLanService_targetIpOutsideRelaysAndServerLanCidr_throws() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        assertThrows(IllegalArgumentException.class, () ->
+            service.publishLanService("box", "10.99.99.99", 8080, "http", false, false));
+        verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
     }
 
     // --- deleteService ---
