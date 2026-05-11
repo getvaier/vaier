@@ -356,6 +356,13 @@ services:
     container_name: authelia
     environment:
       - TZ=Europe/Oslo
+      # Run Authelia as UID/GID 1000 (same as the vaier container). The image
+      # entrypoint does `chown -R "${PUID}:${PGID}" /config` on every start and
+      # PUID/PGID default to 0 — without this it re-roots ./authelia/config on
+      # each (re)start, locking the UID-1000 vaier process out of the dir it
+      # shares with Authelia (bootstrap password file, users database, assets).
+      - PUID=1000
+      - PGID=1000
     volumes:
       - ./authelia/config:/config
     depends_on:
