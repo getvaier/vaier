@@ -112,11 +112,24 @@ public class ReverseProxyRoute {
 
     public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients,
                            List<PeerConfiguration> peers) {
+        return hostState(localServices, vpnClients, peers, null);
+    }
+
+    /**
+     * Same as {@link #hostState(List, List, List)} but also honours the Vaier server's own LAN
+     * CIDR ({@code serverLanCidr}, may be null): a LAN service whose backend falls inside it is
+     * reachable directly from the Vaier server, so its host state follows the Vaier server (always
+     * OK when we're serving the request) rather than a relay peer's tunnel.
+     */
+    public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients,
+                           List<PeerConfiguration> peers, String serverLanCidr) {
         if (isLanService) {
-            PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
-            if (relay == null) return State.UNREACHABLE;
-            return vpnClients.stream().anyMatch(p -> p.containsAddress(relay.ipAddress()) && p.isConnected())
-                ? State.OK : State.UNREACHABLE;
+            LanAnchor anchor = LanAnchor.resolve(address, peers, serverLanCidr).orElse(null);
+            if (anchor == null) return State.UNREACHABLE;
+            if (anchor.isVaierServer()) return State.OK;
+            return anchor.relayPeer()
+                .map(relay -> vpnClients.stream().anyMatch(p -> p.containsAddress(relay.ipAddress()) && p.isConnected()))
+                .orElse(false) ? State.OK : State.UNREACHABLE;
         }
         return hostState(localServices, vpnClients);
     }
@@ -131,7 +144,7 @@ public class ReverseProxyRoute {
                               List<PeerConfiguration> peers) {
         String subdomain = extractSubdomain(baseDomain);
         String server = resolveServerName(vpnClients, peerNameResolver, peers);
-        if (!"Vaier server".equals(server) && subdomain.endsWith("." + server)) {
+        if (!LanAnchor.VAIER_SERVER_NAME.equals(server) && subdomain.endsWith("." + server)) {
             subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
         }
         return subdomain + " @ " + server;
@@ -167,13 +180,7 @@ public class ReverseProxyRoute {
     }
 
     private static PeerConfiguration findRelayWhoseLanContains(List<PeerConfiguration> peers, String ip) {
-        return peers.stream()
-            .filter(p -> p.lanCidr() != null && !p.lanCidr().isBlank())
-            .filter(p -> {
-                try { return Cidr.parse(p.lanCidr()).contains(ip); }
-                catch (IllegalArgumentException e) { return false; }
-            })
-            .findFirst().orElse(null);
+        return LanAnchor.resolve(ip, peers, null).flatMap(LanAnchor::relayPeer).orElse(null);
     }
 
     private String extractSubdomain(String baseDomain) {
@@ -188,7 +195,7 @@ public class ReverseProxyRoute {
         if (isLanService) {
             PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
             if (relay != null && relay.name() != null) return relay.name();
-            return "Vaier server";
+            return LanAnchor.VAIER_SERVER_NAME;
         }
         // Check VPN peers first — a peer IP is unambiguous, whereas port-only Vaier-server
         // matching can produce false positives when a Vaier-server container happens to use the same port.
@@ -197,7 +204,7 @@ public class ReverseProxyRoute {
             String peerName = peerNameResolver.resolvePeerNameByIp(address);
             return peerName.equals(address) ? address : peerName;
         }
-        return "Vaier server";
+        return LanAnchor.VAIER_SERVER_NAME;
     }
 
     @AllArgsConstructor

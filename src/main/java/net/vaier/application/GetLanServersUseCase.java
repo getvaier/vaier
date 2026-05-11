@@ -9,9 +9,11 @@ public interface GetLanServersUseCase {
     List<LanServerView> getAll();
 
     /**
-     * A registered LAN server together with the resolved relay peer that routes
-     * to it. {@code relayPeerName} is null when no current relay peer's lanCidr contains
-     * the server's lanAddress — typically because the relay was deleted or its lanCidr changed.
+     * A registered LAN server together with the name of whatever routes to it: a relay peer
+     * whose {@code lanCidr} contains the server's {@code lanAddress}, or {@code "Vaier server"}
+     * ({@link net.vaier.domain.LanAnchor#VAIER_SERVER_NAME}) when the address falls inside the
+     * Vaier server's own LAN CIDR. {@code relayPeerName} is null when neither covers it —
+     * typically because the relay was deleted or its lanCidr changed.
      */
     record LanServerView(LanServer server, String relayPeerName) {}
 }

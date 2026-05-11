@@ -9,6 +9,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -27,15 +29,18 @@ class MachineServiceTest {
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock GetVpnClientsUseCase getVpnClientsUseCase;
     @Mock GetLanServersUseCase getLanServersUseCase;
+    @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     MachineService service;
 
     @BeforeEach
     void setUp() {
-        service = new MachineService(forGettingPeerConfigurations, getVpnClientsUseCase, getLanServersUseCase);
+        service = new MachineService(forGettingPeerConfigurations, getVpnClientsUseCase, getLanServersUseCase,
+            forResolvingServerLanCidr);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(getVpnClientsUseCase.getClients()).thenReturn(List.of());
         lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of());
+        lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
     }
 
     @Test
@@ -162,6 +167,21 @@ class MachineServiceTest {
             .orElseThrow();
 
         assertThat(nas.lanCidr()).isEqualTo("192.168.3.0/24");
+    }
+
+    @Test
+    void getAllMachines_lanServerAnchoredAtVaierServer_lanCidrIsServerLanCidr() {
+        lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("vpc-box", "172.31.5.20", true, 2375), "Vaier server")
+        ));
+
+        Machine m = service.getAllMachines().stream()
+            .filter(x -> x.type() == MachineType.LAN_SERVER)
+            .findFirst().orElseThrow();
+
+        assertThat(m.lanCidr()).isEqualTo("172.31.0.0/16");
+        assertThat(m.lanAddress()).isEqualTo("172.31.5.20");
     }
 
     @Test

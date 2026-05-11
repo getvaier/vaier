@@ -144,6 +144,39 @@ class ReverseProxyRouteTest {
         assertThat(route.hostState(List.of(), List.of())).isEqualTo(State.UNREACHABLE);
     }
 
+    @Test
+    void hostState_lanServiceWithRelay_relayConnected_returnsOk() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
+
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null)).isEqualTo(State.OK);
+    }
+
+    @Test
+    void hostState_lanServiceWithRelay_relayDisconnected_returnsUnreachable() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+
+        assertThat(route.hostState(List.of(), List.of(), List.of(relay), null)).isEqualTo(State.UNREACHABLE);
+    }
+
+    @Test
+    void hostState_lanServiceInsideServerLanCidr_returnsOk() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "box.example.com", "172.31.5.20", 8080, "http", "svc");
+
+        assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16")).isEqualTo(State.OK);
+    }
+
+    @Test
+    void hostState_lanServiceNeitherRelayNorServerLanCidr_returnsUnreachable() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "box.example.com", "10.99.99.99", 8080, "http", "svc");
+
+        assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16")).isEqualTo(State.UNREACHABLE);
+    }
+
     // --- displayName ---
 
     @Test

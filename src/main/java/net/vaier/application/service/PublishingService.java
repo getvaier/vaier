@@ -23,8 +23,8 @@ import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
 import net.vaier.domain.DnsZone;
-import net.vaier.domain.Cidr;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
@@ -38,6 +38,7 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingDns;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.springframework.stereotype.Service;
 
 import java.net.URLEncoder;
@@ -71,6 +72,7 @@ public class PublishingService implements
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
+    private final ForResolvingServerLanCidr forResolvingServerLanCidr;
     private final ConfigResolver configResolver;
     private final ForPublishingEvents forPublishingEvents;
     private final ForResolvingDns forResolvingDns;
@@ -97,6 +99,7 @@ public class PublishingService implements
                              ForGettingVpnClients forGettingVpnClients,
                              ForResolvingPeerNames forResolvingPeerNames,
                              ForGettingPeerConfigurations forGettingPeerConfigurations,
+                             ForResolvingServerLanCidr forResolvingServerLanCidr,
                              ConfigResolver configResolver,
                              ForPublishingEvents forPublishingEvents,
                              ForResolvingDns forResolvingDns,
@@ -111,6 +114,7 @@ public class PublishingService implements
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
+        this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.configResolver = configResolver;
         this.forPublishingEvents = forPublishingEvents;
         this.forResolvingDns = forResolvingDns;
@@ -138,10 +142,11 @@ public class PublishingService implements
             .toList();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer());
+        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
 
         cache = routes.stream()
             .filter(r -> !isInfrastructureRouter(r))
-            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices))
+            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices, serverLanCidr))
             .toList();
         return cache;
     }
@@ -182,7 +187,8 @@ public class PublishingService implements
     }
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
-                                    List<VpnClient> vpnClients, List<DockerService> localServices) {
+                                    List<VpnClient> vpnClients, List<DockerService> localServices,
+                                    String serverLanCidr) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
         // In manual DNS mode the operator owns DNS — Vaier has no authoritative view, so
         // assume records exist rather than rendering every published service as missing.
@@ -195,7 +201,7 @@ public class PublishingService implements
             dnsState,
             route.getAddress(),
             route.getPort(),
-            route.hostState(localServices, vpnClients, peers),
+            route.hostState(localServices, vpnClients, peers, serverLanCidr),
             route.getAuthInfo() != null,
             route.getRootRedirectPath(),
             route.isDirectUrlDisabled(),
@@ -209,9 +215,10 @@ public class PublishingService implements
     public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
         // A LAN docker host's IP arrives here when the user clicks "+ Publish" on a discovered
         // LAN_SERVER service. Dispatch to the LAN flow so the route is marked isLanService=true
-        // and the dashboard's direct-LAN URL bypass works (#180).
-        if (hostInsideAnyRelayLanCidr(address)) {
-            log.info("Address {} falls inside a relay's lanCidr — publishing as LAN service", address);
+        // and the dashboard's direct-LAN URL bypass works (#180). The address may be on a relay
+        // peer's LAN or in the Vaier server's own subnet (server LAN CIDR).
+        if (hostInsideAnyLanCidr(address)) {
+            log.info("Address {} falls inside a relay peer's or the Vaier server's LAN CIDR — publishing as LAN service", address);
             publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled);
             return;
         }
@@ -264,10 +271,11 @@ public class PublishingService implements
             throw new IllegalArgumentException("protocol must be http or https (was " + protocol + ")");
         }
 
-        if (!hostInsideAnyRelayLanCidr(host)) {
+        if (!hostInsideAnyLanCidr(host)) {
             throw new IllegalArgumentException(
-                "Target host " + host + " is not inside any relay peer's lanCidr. " +
-                "Set lanCidr on the relay peer first.");
+                "Target host " + host + " is not inside any relay peer's lanCidr, " +
+                "nor inside the Vaier server's own LAN CIDR. Set lanCidr on a relay peer first " +
+                "(or, on EC2, the server LAN CIDR is auto-detected from instance metadata).");
         }
 
         String fqdn = subdomain + "." + configResolver.getDomain();
@@ -287,14 +295,10 @@ public class PublishingService implements
             waitForLanDnsThenActivate(subdomain, fqdn, host, port, scheme, requiresAuth, directUrlDisabled));
     }
 
-    private boolean hostInsideAnyRelayLanCidr(String host) {
-        return forGettingPeerConfigurations.getAllPeerConfigs().stream()
-            .map(PeerConfiguration::lanCidr)
-            .filter(c -> c != null && !c.isBlank())
-            .anyMatch(c -> {
-                try { return Cidr.parse(c).contains(host); }
-                catch (IllegalArgumentException e) { return false; }
-            });
+    private boolean hostInsideAnyLanCidr(String host) {
+        return LanAnchor.resolve(host,
+            forGettingPeerConfigurations.getAllPeerConfigs(),
+            forResolvingServerLanCidr.resolve().orElse(null)).isPresent();
     }
 
     void waitForLanDnsThenActivate(String subdomain, String fqdn, String host, int port, String protocol,

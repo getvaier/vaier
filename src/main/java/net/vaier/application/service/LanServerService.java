@@ -4,14 +4,16 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.RegisterLanServerUseCase;
-import net.vaier.domain.Cidr;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @Slf4j
@@ -22,20 +24,24 @@ public class LanServerService implements
 
     private final ForPersistingLanServers forPersistingLanServers;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
+    private final ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     public LanServerService(ForPersistingLanServers forPersistingLanServers,
-                            ForGettingPeerConfigurations forGettingPeerConfigurations) {
+                            ForGettingPeerConfigurations forGettingPeerConfigurations,
+                            ForResolvingServerLanCidr forResolvingServerLanCidr) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
+        this.forResolvingServerLanCidr = forResolvingServerLanCidr;
     }
 
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
         LanServer.validate(name, lanAddress, runsDocker, dockerPort);
-        if (resolveRelay(lanAddress) == null) {
+        if (resolveAnchor(lanAddress).isEmpty()) {
             throw new IllegalArgumentException(
-                "lanAddress " + lanAddress + " is not inside any relay peer's lanCidr. " +
-                "Set lanCidr on the relay peer first.");
+                "lanAddress " + lanAddress + " is not inside any relay peer's lanCidr, " +
+                "nor inside the Vaier server's own LAN CIDR. Set lanCidr on a relay peer first " +
+                "(or, on EC2, the server LAN CIDR is auto-detected from instance metadata).");
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             name, lanAddress, runsDocker, dockerPort);
@@ -51,27 +57,16 @@ public class LanServerService implements
     @Override
     public List<LanServerView> getAll() {
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
         return forPersistingLanServers.getAll().stream()
-            .map(s -> new LanServerView(s, relayNameFor(s.lanAddress(), peers)))
+            .map(s -> new LanServerView(s,
+                LanAnchor.resolve(s.lanAddress(), peers, serverLanCidr).map(LanAnchor::name).orElse(null)))
             .toList();
     }
 
-    private PeerConfiguration resolveRelay(String lanAddress) {
-        return resolveRelay(lanAddress, forGettingPeerConfigurations.getAllPeerConfigs());
-    }
-
-    private PeerConfiguration resolveRelay(String lanAddress, List<PeerConfiguration> peers) {
-        return peers.stream()
-            .filter(p -> p.lanCidr() != null && !p.lanCidr().isBlank())
-            .filter(p -> {
-                try { return Cidr.parse(p.lanCidr()).contains(lanAddress); }
-                catch (IllegalArgumentException e) { return false; }
-            })
-            .findFirst().orElse(null);
-    }
-
-    private String relayNameFor(String lanAddress, List<PeerConfiguration> peers) {
-        PeerConfiguration relay = resolveRelay(lanAddress, peers);
-        return relay == null ? null : relay.name();
+    private Optional<LanAnchor> resolveAnchor(String lanAddress) {
+        return LanAnchor.resolve(lanAddress,
+            forGettingPeerConfigurations.getAllPeerConfigs(),
+            forResolvingServerLanCidr.resolve().orElse(null));
     }
 }

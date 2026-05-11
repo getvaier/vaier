@@ -6,6 +6,8 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -14,9 +16,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,8 +30,16 @@ class LanServerServiceTest {
 
     @Mock private ForPersistingLanServers forPersistingLanServers;
     @Mock private ForGettingPeerConfigurations forGettingPeerConfigurations;
+    @Mock private ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     @InjectMocks private LanServerService service;
+
+    @BeforeEach
+    void setUp() {
+        // register()/getAll() resolve the server LAN CIDR; default it to "absent" so the relay-only
+        // tests behave as before. Tests exercising the server-LAN-CIDR path override it.
+        lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
+    }
 
     private static PeerConfiguration relay(String name, String ip, String lanCidr) {
         return new PeerConfiguration(name, ip, "", MachineType.UBUNTU_SERVER, lanCidr, null);
@@ -104,6 +116,31 @@ class LanServerServiceTest {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void register_lanAddressInsideServerLanCidr_noRelayPeers_persists() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        service.register("vpc-box", "172.31.5.20", true, 2375);
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue()).isEqualTo(new LanServer("vpc-box", "172.31.5.20", true, 2375));
+    }
+
+    @Test
+    void register_lanAddressOutsideRelaysAndServerLanCidr_throwsAndDoesNotPersist() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        assertThatThrownBy(() -> service.register("x", "10.99.99.99", false, null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("lanCidr");
+        verify(forPersistingLanServers, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
     // --- delete ---
 
     @Test
@@ -142,5 +179,32 @@ class LanServerServiceTest {
 
         assertThat(views).hasSize(1);
         assertThat(views.get(0).relayPeerName()).isNull();
+    }
+
+    @Test
+    void getAll_serverAnchoredLanServer_relayNameIsVaierServer() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("vpc-box", "172.31.5.20", true, 2375)
+        ));
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        List<LanServerView> views = service.getAll();
+
+        assertThat(views).hasSize(1);
+        assertThat(views.get(0).relayPeerName()).isEqualTo("Vaier server");
+    }
+
+    @Test
+    void getAll_relayPeerWinsOverServerLanCidrOnOverlap() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.3.50", true, 2375)
+        ));
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("192.168.0.0/16"));
+
+        assertThat(service.getAll().get(0).relayPeerName()).isEqualTo("apalveien5");
     }
 }
