@@ -179,14 +179,16 @@ The service is live at `https://subdomain.yourdomain.com`.
 
 ### Multiple services on one subdomain
 
-Set an optional **Path prefix** at publish time (e.g. `/auth`) to put more than one service behind a single subdomain. Traefik routes by `Host(...) && PathPrefix(...)`, so:
+Set an optional **Path prefix** at publish time (e.g. `/auth`) to put more than one service behind a single subdomain. Traefik routes by `Host(...) && PathPrefix(...)`, picks the more-specific rule first, and forwards the full path unchanged to the backend:
 
 ```
-app.yourdomain.com/auth/*  →  http://peer-or-lan-host:8081
-app.yourdomain.com/api/*   →  http://peer-or-lan-host:8080
+bmp.yourdomain.com         →  http://rig.yourdomain.com:8080
+bmp.yourdomain.com/auth/*  →  http://rig.yourdomain.com:8090/auth/*
 ```
 
-The first publish on a host creates the DNS CNAME; later siblings reuse it. Deleting a sibling leaves the CNAME alive; only when the last route on a host is removed does the CNAME go.
+(`/auth` reaches the backend intact — Vaier doesn't strip the prefix.)
+
+The first publish on a host creates the DNS CNAME; later routes — host-only or path-prefixed — reuse it. Deleting any sibling leaves the CNAME alive; only when the last route on a host is removed does the CNAME go.
 
 For publishing services from non-peer LAN machines (NAS, printers, extra Docker hosts), see [`docs/ADVANCED.md`](docs/ADVANCED.md).
 

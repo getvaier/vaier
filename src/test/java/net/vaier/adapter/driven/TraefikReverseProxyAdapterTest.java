@@ -310,6 +310,27 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
+    void addReverseProxyRoute_rootAndPathPrefixedOnSameHost_coexistWithSeparateRulesAndBackends() throws IOException {
+        // Host-only catch-all at port 8080; a more specific /auth route at port 8090.
+        // Traefik resolves overlap by rule length — the path-prefixed router wins for /auth/*.
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8080, false, null, null);
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8090, false, null, "/auth");
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("Host(`bmp.example.com`)");
+        assertThat(content).contains("Host(`bmp.example.com`) && PathPrefix(`/auth`)");
+        assertThat(content).contains("url: http://10.13.13.2:8080");
+        assertThat(content).contains("url: http://10.13.13.2:8090");
+
+        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
+        assertThat(routes).hasSize(2);
+        assertThat(routes).extracting(ReverseProxyRoute::getPathPrefix)
+            .containsExactlyInAnyOrder(null, "/auth");
+        assertThat(routes).extracting(ReverseProxyRoute::getPort)
+            .containsExactlyInAnyOrder(8080, 8090);
+    }
+
+    @Test
     void addReverseProxyRoute_withPathPrefix_routerAndServiceNamesIncludePathSlug() throws IOException {
         adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8081, false, null, "/auth");
 
