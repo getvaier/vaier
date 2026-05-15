@@ -323,6 +323,13 @@
                     <input type="checkbox" id="publishLanDirectUrlDisabled">
                     <label for="publishLanDirectUrlDisabled" title="When checked, the launchpad never links to the direct LAN URL.">Disable direct LAN URL</label>
                 </div>
+                <details id="publishLanAdvanced" style="margin-top:0.75rem;">
+                    <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
+                    <div class="form-group" style="margin-top:0.6rem;">
+                        <label class="form-label" for="publishLanRootRedirectPath" title="If set, visiting the service root (/) will redirect to this path">Root path redirect</label>
+                        <input type="text" id="publishLanRootRedirectPath" class="form-input" placeholder="e.g. /builder/ui/">
+                    </div>
+                </details>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" id="publishLanCancelBtn" onclick="hidePublishLanModal()">Cancel</button>
                     <button class="btn btn-primary"   id="publishLanSubmitBtn" onclick="submitPublishLan()">Publish</button>
@@ -861,6 +868,8 @@
             document.getElementById('publishLanProtocol').value = 'http';
             document.getElementById('publishLanRequiresAuth').checked = false;
             document.getElementById('publishLanDirectUrlDisabled').checked = false;
+            document.getElementById('publishLanRootRedirectPath').value = '';
+            document.getElementById('publishLanAdvanced').open = false;
             document.getElementById('publishLanRelayHint').textContent = '';
             document.getElementById('publishLanModal').classList.add('active');
             await loadLanServersForPublish();
@@ -878,6 +887,7 @@
             const protocol    = document.getElementById('publishLanProtocol').value;
             const requireAuth        = document.getElementById('publishLanRequiresAuth').checked;
             const directUrlDisabled  = document.getElementById('publishLanDirectUrlDisabled').checked;
+            const rootRedirectPath   = document.getElementById('publishLanRootRedirectPath').value.trim() || null;
 
             if (!machineName) { alert('Please select a LAN server'); return; }
             if (!subdomain)   { alert('Please enter a subdomain'); return; }
@@ -893,7 +903,7 @@
                 const response = await fetch('/published-services/lan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ subdomain, machineName, port, protocol, requireAuth, directUrlDisabled })
+                    body: JSON.stringify({ subdomain, machineName, port, protocol, requireAuth, directUrlDisabled, rootRedirectPath })
                 });
                 if (response.status === 400) {
                     alert(`Could not publish — make sure ${machineName}'s lanAddress is inside a relay peer's lanCidr.`);

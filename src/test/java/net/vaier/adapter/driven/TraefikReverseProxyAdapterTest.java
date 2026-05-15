@@ -208,7 +208,7 @@ class TraefikReverseProxyAdapterTest {
 
     @Test
     void addLanReverseProxyRoute_writesHttpsBackendUrlForHttpsProtocol() throws IOException {
-        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "https", false, false);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "https", false, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).contains("url: https://192.168.3.50:5000");
@@ -216,7 +216,7 @@ class TraefikReverseProxyAdapterTest {
 
     @Test
     void addLanReverseProxyRoute_writesHttpBackendUrlForHttpProtocol() throws IOException {
-        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).contains("url: http://192.168.3.50:5000");
@@ -224,7 +224,7 @@ class TraefikReverseProxyAdapterTest {
 
     @Test
     void addLanReverseProxyRoute_persistsLanServiceMarkerInYaml() throws IOException {
-        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).contains("x-vaier-lan-service");
@@ -233,7 +233,7 @@ class TraefikReverseProxyAdapterTest {
 
     @Test
     void addLanReverseProxyRoute_roundTripsAsLanTypedRoute() {
-        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "https", false, false);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "https", false, false, null);
 
         ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
         assertThat(route.getDomainName()).isEqualTo("nas.example.com");
@@ -245,7 +245,7 @@ class TraefikReverseProxyAdapterTest {
 
     @Test
     void addLanReverseProxyRoute_withRequiresAuth_addsAuthMiddleware() throws IOException {
-        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", true, false);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", true, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
@@ -253,10 +253,20 @@ class TraefikReverseProxyAdapterTest {
 
     @Test
     void addLanReverseProxyRoute_withDirectUrlDisabled_persistsFlag() {
-        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, true);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, true, null);
 
         ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
         assertThat(route.isDirectUrlDisabled()).isTrue();
+    }
+
+    @Test
+    void addLanReverseProxyRoute_withRootRedirectPath_writesRedirectMiddleware() throws IOException {
+        adapter.addLanReverseProxyRoute("app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/");
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("redirectRegex");
+        assertThat(content).contains("/builder/ui/");
+        assertThat(content).contains("app-example-com-redirect");
     }
 
     @Test

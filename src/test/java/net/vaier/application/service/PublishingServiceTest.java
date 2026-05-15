@@ -762,11 +762,11 @@ class PublishingServiceTest {
         ));
 
         assertThrows(IllegalArgumentException.class, () ->
-            service.publishLanService("nas", "10.99.99.99", 5000, "http", false, false)
+            service.publishLanService("nas", "10.99.99.99", 5000, "http", false, false, null)
         );
         verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
         verify(forPersistingReverseProxyRoutes, never()).addLanReverseProxyRoute(
-            anyString(), anyString(), anyInt(), anyString(), anyBoolean(), anyBoolean());
+            anyString(), anyString(), anyInt(), anyString(), anyBoolean(), anyBoolean(), any());
     }
 
     @Test
@@ -776,7 +776,7 @@ class PublishingServiceTest {
                 "apalveien5", "10.13.13.5", "", MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
         ));
 
-        service.publishLanService("nas", "192.168.3.50", 5000, "https", false, false);
+        service.publishLanService("nas", "192.168.3.50", 5000, "https", false, false, null);
 
         ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);
         verify(forPersistingDnsRecords).addDnsRecord(recordCaptor.capture(), any());
@@ -793,10 +793,10 @@ class PublishingServiceTest {
             .thenReturn(List.of(routeWithDomain("nas.example.com")));
 
         service.waitForLanDnsThenActivate(
-            "nas", "nas.example.com", "192.168.3.50", 5000, "https", true, true);
+            "nas", "nas.example.com", "192.168.3.50", 5000, "https", true, true, null);
 
         verify(forPersistingReverseProxyRoutes).addLanReverseProxyRoute(
-            "nas.example.com", "192.168.3.50", 5000, "https", true, true);
+            "nas.example.com", "192.168.3.50", 5000, "https", true, true, null);
     }
 
     @Test
@@ -804,7 +804,7 @@ class PublishingServiceTest {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
 
-        service.publishLanService("box", "172.31.5.20", 8080, "http", false, false);
+        service.publishLanService("box", "172.31.5.20", 8080, "http", false, false, null);
 
         ArgumentCaptor<DnsRecord> recordCaptor = ArgumentCaptor.forClass(DnsRecord.class);
         verify(forPersistingDnsRecords).addDnsRecord(recordCaptor.capture(), any());
@@ -817,8 +817,21 @@ class PublishingServiceTest {
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
 
         assertThrows(IllegalArgumentException.class, () ->
-            service.publishLanService("box", "10.99.99.99", 8080, "http", false, false));
+            service.publishLanService("box", "10.99.99.99", 8080, "http", false, false, null));
         verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
+    }
+
+    @Test
+    void publishLanService_writesRedirectMiddlewareWhenRootRedirectPathProvided() {
+        when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")));
+
+        service.waitForLanDnsThenActivate(
+            "app", "app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/");
+
+        verify(forPersistingReverseProxyRoutes).addLanReverseProxyRoute(
+            "app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/");
     }
 
     // --- deleteService ---

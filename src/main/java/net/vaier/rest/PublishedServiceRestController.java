@@ -81,13 +81,13 @@ public class PublishedServiceRestController {
         // A Docker-enabled LAN server can still have native (non-container) services that
         // need manual publish — don't reject based on runsDocker.
         String host = view.server().lanAddress();
-        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, machine={})",
+        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, machine={})",
             request.protocol(), host, request.port(), request.subdomain(),
-            request.requireAuth(), request.directUrlDisabled(), request.machineName());
+            request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(), request.machineName());
         try {
             publishLanServiceUseCase.publishLanService(
                 request.subdomain(), host, request.port(), request.protocol(),
-                request.requireAuth(), request.directUrlDisabled());
+                request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath());
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
             log.warn("LAN publish rejected: {}", e.getMessage());
@@ -151,7 +151,7 @@ public class PublishedServiceRestController {
     }
 
     record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {}
-    record PublishLanRequest(String subdomain, String machineName, int port, String protocol, boolean requireAuth, boolean directUrlDisabled) {}
+    record PublishLanRequest(String subdomain, String machineName, int port, String protocol, boolean requireAuth, boolean directUrlDisabled, String rootRedirectPath) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}

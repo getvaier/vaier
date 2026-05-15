@@ -872,12 +872,13 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
-                                        boolean requiresAuth, boolean directUrlDisabled) {
+                                        boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath) {
         loadConfig();
         if (config == null) config = new LinkedHashMap<>();
 
         String routerName = generateRouterName(dnsName);
         String serviceName = generateServiceName(dnsName);
+        String redirectMiddlewareName = routerName.replace("-router", "-redirect");
 
         Map<String, Object> http = getOrCreateNestedMap(config, "http");
         Map<String, Object> routers = getOrCreateNestedMapOrdered(http, "routers");
@@ -892,7 +893,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         Map<String, Object> tlsMap = new LinkedHashMap<>();
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
-        if (requiresAuth) routerConfig.put("middlewares", new ArrayList<>(List.of(ServiceNames.AUTH_MIDDLEWARE)));
+        List<String> middlewareList = new ArrayList<>();
+        if (requiresAuth) middlewareList.add(ServiceNames.AUTH_MIDDLEWARE);
+        if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
+        if (!middlewareList.isEmpty()) routerConfig.put("middlewares", middlewareList);
         routers.put(routerName, routerConfig);
 
         Map<String, Object> serviceConfig = new LinkedHashMap<>();
@@ -907,6 +911,15 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         services.put(serviceName, serviceConfig);
 
         if (requiresAuth) ensureAuthMiddlewareExists(http);
+        if (rootRedirectPath != null) {
+            Map<String, Object> middlewaresSection = getOrCreateNestedMapOrdered(http, "middlewares");
+            Map<String, Object> redirectRegex = new LinkedHashMap<>();
+            redirectRegex.put("regex", "^https://" + dnsName.replace(".", "\\.") + "/?$");
+            redirectRegex.put("replacement", "https://" + dnsName + rootRedirectPath);
+            Map<String, Object> redirectMiddleware = new LinkedHashMap<>();
+            redirectMiddleware.put("redirectRegex", redirectRegex);
+            middlewaresSection.put(redirectMiddlewareName, redirectMiddleware);
+        }
 
         addLanServiceMarker(dnsName, scheme);
         if (directUrlDisabled) {

@@ -219,7 +219,7 @@ public class PublishingService implements
         // peer's LAN or in the Vaier server's own subnet (server LAN CIDR).
         if (hostInsideAnyLanCidr(address)) {
             log.info("Address {} falls inside a relay peer's or the Vaier server's LAN CIDR — publishing as LAN service", address);
-            publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled);
+            publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled, rootRedirectPath);
             return;
         }
 
@@ -264,7 +264,7 @@ public class PublishingService implements
 
     @Override
     public void publishLanService(String subdomain, String host, int port, String protocol,
-                                  boolean requiresAuth, boolean directUrlDisabled) {
+                                  boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath) {
         ReverseProxyRoute.validateForPublication(subdomain + "." + configResolver.getDomain(), host, port);
         String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol.toLowerCase();
         if (!scheme.equals("http") && !scheme.equals("https")) {
@@ -280,8 +280,8 @@ public class PublishingService implements
 
         String fqdn = subdomain + "." + configResolver.getDomain();
         String serverFqdn = "vaier." + configResolver.getDomain();
-        log.info("Publishing LAN service: {} -> {}://{}:{} (auth: {}, directUrlDisabled: {})",
-            fqdn, scheme, host, port, requiresAuth, directUrlDisabled);
+        log.info("Publishing LAN service: {} -> {}://{}:{} (auth: {}, directUrlDisabled: {}, rootRedirectPath: {})",
+            fqdn, scheme, host, port, requiresAuth, directUrlDisabled, rootRedirectPath);
 
         DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
         DnsZone zone = new DnsZone(configResolver.getDomain());
@@ -292,7 +292,7 @@ public class PublishingService implements
         forPublishingEvents.publish("published-services", "publish-dns-created", subdomain);
 
         CompletableFuture.runAsync(() ->
-            waitForLanDnsThenActivate(subdomain, fqdn, host, port, scheme, requiresAuth, directUrlDisabled));
+            waitForLanDnsThenActivate(subdomain, fqdn, host, port, scheme, requiresAuth, directUrlDisabled, rootRedirectPath));
     }
 
     private boolean hostInsideAnyLanCidr(String host) {
@@ -302,7 +302,7 @@ public class PublishingService implements
     }
 
     void waitForLanDnsThenActivate(String subdomain, String fqdn, String host, int port, String protocol,
-                                   boolean requiresAuth, boolean directUrlDisabled) {
+                                   boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath) {
         long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             if (forResolvingDns.isResolvable(fqdn)) {
@@ -311,7 +311,7 @@ public class PublishingService implements
                 forPublishingEvents.publish("published-services", "publish-dns-propagated", subdomain);
                 try {
                     forPersistingReverseProxyRoutes.addLanReverseProxyRoute(
-                        fqdn, host, port, protocol, requiresAuth, directUrlDisabled);
+                        fqdn, host, port, protocol, requiresAuth, directUrlDisabled, rootRedirectPath);
                 } catch (Exception e) {
                     log.error("Failed to write Traefik LAN route for {}: {}", fqdn, e.getMessage(), e);
                     rollbackLan(subdomain, fqdn, false);

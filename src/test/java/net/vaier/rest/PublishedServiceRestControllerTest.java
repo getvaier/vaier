@@ -55,20 +55,35 @@ class PublishedServiceRestControllerTest {
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "relay")
         ));
         var request = new PublishedServiceRestController.PublishLanRequest(
-            "printer-ui", "printer", 9100, "http", false, false);
+            "printer-ui", "printer", 9100, "http", false, false, null);
 
         ResponseEntity<Void> response = controller.publishLanService(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(publishLanServiceUseCase).publishLanService(
-            "printer-ui", "192.168.3.20", 9100, "http", false, false);
+            "printer-ui", "192.168.3.20", 9100, "http", false, false, null);
+    }
+
+    @Test
+    void publishLanService_forwardsRootRedirectPathToUseCase() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("rig", "192.168.3.50", false, null), "relay")
+        ));
+        var request = new PublishedServiceRestController.PublishLanRequest(
+            "app", "rig", 3000, "http", false, false, "/builder/ui/");
+
+        ResponseEntity<Void> response = controller.publishLanService(request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(publishLanServiceUseCase).publishLanService(
+            "app", "192.168.3.50", 3000, "http", false, false, "/builder/ui/");
     }
 
     @Test
     void publishLanService_unknownMachineName_returns400() {
         when(getLanServersUseCase.getAll()).thenReturn(List.of());
         var request = new PublishedServiceRestController.PublishLanRequest(
-            "x", "ghost", 80, "http", false, false);
+            "x", "ghost", 80, "http", false, false, null);
 
         ResponseEntity<Void> response = controller.publishLanService(request);
 
@@ -85,13 +100,13 @@ class PublishedServiceRestControllerTest {
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "relay")
         ));
         var request = new PublishedServiceRestController.PublishLanRequest(
-            "nas-ui", "nas", 5000, "https", false, false);
+            "nas-ui", "nas", 5000, "https", false, false, null);
 
         ResponseEntity<Void> response = controller.publishLanService(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(publishLanServiceUseCase).publishLanService(
-            "nas-ui", "192.168.3.50", 5000, "https", false, false);
+            "nas-ui", "192.168.3.50", 5000, "https", false, false, null);
     }
 
     @Test
@@ -101,9 +116,9 @@ class PublishedServiceRestControllerTest {
         ));
         doThrow(new IllegalArgumentException("not in any lanCidr"))
             .when(publishLanServiceUseCase).publishLanService(
-                "printer-ui", "192.168.3.20", 9100, "http", false, false);
+                "printer-ui", "192.168.3.20", 9100, "http", false, false, null);
         var request = new PublishedServiceRestController.PublishLanRequest(
-            "printer-ui", "printer", 9100, "http", false, false);
+            "printer-ui", "printer", 9100, "http", false, false, null);
 
         ResponseEntity<Void> response = controller.publishLanService(request);
 
