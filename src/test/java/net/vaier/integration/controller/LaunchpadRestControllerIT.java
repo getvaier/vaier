@@ -28,8 +28,8 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsMappedServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("app.example.com", "10.0.0.1", State.OK, "https://app.example.com"),
-                new LaunchpadServiceUco("db.example.com", "10.0.0.2", State.OK, "http://10.0.0.2:8080")
+                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", State.OK, "https://app.example.com"),
+                new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", State.OK, "http://10.0.0.2:8080")
         ));
 
         mockMvc.perform(get("/launchpad/services"))
@@ -45,7 +45,7 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsUnreachableServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("down.example.com", "10.0.0.3", State.UNREACHABLE, "https://down.example.com")
+                new LaunchpadServiceUco("down.example.com", null, "10.0.0.3", State.UNREACHABLE, "https://down.example.com")
         ));
 
         mockMvc.perform(get("/launchpad/services"))

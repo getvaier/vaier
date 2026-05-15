@@ -300,9 +300,15 @@
                     </select>
                     <span id="publishLanRelayHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
                 </div>
-                <div class="form-group">
-                    <label class="form-label" for="publishLanSubdomain">Subdomain</label>
-                    <input type="text" id="publishLanSubdomain" class="form-input" placeholder="e.g. nas">
+                <div style="display:flex;gap:0.5rem;align-items:flex-end;">
+                    <div class="form-group" style="flex:1;margin-bottom:1rem;">
+                        <label class="form-label" for="publishLanSubdomain">Subdomain</label>
+                        <input type="text" id="publishLanSubdomain" class="form-input" placeholder="e.g. nas">
+                    </div>
+                    <div class="form-group" style="flex:1;margin-bottom:1rem;">
+                        <label class="form-label" for="publishLanPathPrefix" title="Optional. Scope this route to a path prefix so multiple services can share one subdomain.">Path prefix <span style="color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                        <input type="text" id="publishLanPathPrefix" class="form-input" placeholder="e.g. /auth">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="publishLanPort">Target port</label>
@@ -348,9 +354,15 @@
                 <div class="form-group" style="margin-bottom:0.5rem;">
                     <span style="color:var(--text-muted);font-size:0.8rem;" id="publishServiceLabel"></span>
                 </div>
-                <div class="form-group">
-                    <label class="form-label" for="publishSubdomain">Subdomain</label>
-                    <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
+                <div style="display:flex;gap:0.5rem;align-items:flex-end;">
+                    <div class="form-group" style="flex:1;margin-bottom:1rem;">
+                        <label class="form-label" for="publishSubdomain">Subdomain</label>
+                        <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
+                    </div>
+                    <div class="form-group" style="flex:1;margin-bottom:1rem;">
+                        <label class="form-label" for="publishPathPrefix" title="Optional. Scope this route to a path prefix so multiple services can share one subdomain.">Path prefix <span style="color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                        <input type="text" id="publishPathPrefix" class="form-input" placeholder="e.g. /auth">
+                    </div>
                 </div>
                 <div class="form-checkbox">
                     <input type="checkbox" id="publishRequiresAuth">
@@ -551,29 +563,32 @@
             const html = services.slice().sort((a, b) => a.name.localeCompare(b.name)).map(service => {
                 const dnsOk  = service.dnsState === 'OK';
                 const hostOk = service.state === 'OK';
-                const id         = cardId(service.name);
-                const isExpanded = expandedServices.has(service.name);
+                const uniqueName = service.name + (service.pathPrefix || '');
+                const id         = cardId(uniqueName);
+                const isExpanded = expandedServices.has(uniqueName);
                 const dotClass   = dnsOk && hostOk ? 'status-connected' : 'status-disconnected';
                 const authSlot   = service.authenticated
                     ? { kind: 'auth',    title: 'Authelia authentication required',         label: 'Auth' }
                     : { kind: 'no-auth', title: 'No authentication — service is publicly reachable', label: 'No auth' };
-                const serviceUrl = `https://${service.dnsAddress}`;
+                const pathSuffix = service.pathPrefix ? service.pathPrefix + '/' : '';
+                const serviceUrl = `https://${service.dnsAddress}${pathSuffix}`;
+                const displayHost = `${service.dnsAddress}${service.pathPrefix || ''}`;
                 const isSelf = service.dnsAddress.startsWith('vaier.');
 
                 // Parse "subdomain @ server" display name
                 const nameParts = service.name.split(' @ ');
-                const shortName = nameParts[0];
+                const shortName = nameParts[0] + (service.pathPrefix ? service.pathPrefix : '');
                 const peerName  = nameParts.length === 2 ? nameParts[1] : '';
                 const typeKind  = serviceTypeIcon(service);
                 const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'vaier': 'Service on the Vaier server', 'server': 'Service on a VPN peer' })[typeKind];
 
                 const urlValue = dnsOk && !isSelf
-                    ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}">${service.dnsAddress}</a>`
-                    : `<span style="color:var(--text-dim);font-family:var(--mono)">${service.dnsAddress}</span>`;
+                    ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}${service.pathPrefix || ''}">${displayHost}</a>`
+                    : `<span style="color:var(--text-dim);font-family:var(--mono)">${displayHost}</span>`;
 
                 return `
                 <div class="service-card">
-                    <div class="service-header" onclick="toggleService('${service.name.replace(/'/g, "\\'")}')">
+                    <div class="service-header" onclick="toggleService('${uniqueName.replace(/'/g, "\\'")}')">
                         <div class="service-header-left">
                             ${machineIconHtml(typeKind, typeTip, iconStatusClass(dotClass))}
                             <span class="service-name">${shortName}</span>
@@ -603,7 +618,7 @@
                                         ${service.authenticated ? 'checked' : ''}
                                         style="accent-color:var(--accent);cursor:pointer"
                                         title="When checked, Authelia authentication is required to reach this service."
-                                        onchange="setRequiresAuth('${service.dnsAddress}', this.checked)">
+                                        onchange="setRequiresAuth('${service.dnsAddress}', '${service.pathPrefix || ''}', this.checked)">
                                 </span>
                             </div>
                             <div class="detail-row">
@@ -616,7 +631,7 @@
                                            oninput="onRedirectInput('${service.dnsAddress}', '${id}')">
                                     <button class="btn btn-primary" id="redirect-save-${id}"
                                             style="flex-shrink:0" disabled
-                                            onclick="saveRedirect('${service.dnsAddress}', '${id}')">Save</button>
+                                            onclick="saveRedirect('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
                                 </span>
                             </div>
                             <div class="detail-row">
@@ -626,14 +641,14 @@
                                         ${service.directUrlDisabled ? 'checked' : ''}
                                         style="accent-color:var(--accent);cursor:pointer"
                                         title="When checked, the launchpad never links to the direct LAN URL."
-                                        onchange="setDirectUrlDisabled('${service.dnsAddress}', this.checked)">
+                                        onchange="setDirectUrlDisabled('${service.dnsAddress}', '${service.pathPrefix || ''}', this.checked)">
                                     <span style="margin-left:0.4rem;color:var(--text-muted);font-size:0.75rem">Disable</span>
                                 </span>
                             </div>
                         </div>
                         <div class="service-actions-row">
                             <div class="service-actions-left"></div>
-                            <button class="btn btn-small btn-danger" onclick="showDeleteModal('${service.dnsAddress}')">Delete</button>
+                            <button class="btn btn-small btn-danger" onclick="showDeleteModal('${service.dnsAddress}', '${service.pathPrefix || ''}')">Delete</button>
                         </div>
                     </div>
                 </div>`;
@@ -743,6 +758,7 @@
             document.getElementById('publishAddress').value          = address;
             document.getElementById('publishPort').value             = port;
             document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
+            document.getElementById('publishPathPrefix').value = '';
             document.getElementById('publishSubdomain').value        = sourceName === 'vaier-server' ? containerName : `${containerName}.${sourceName}`;
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceName} (${address}:${port})`;
@@ -869,6 +885,7 @@
             document.getElementById('publishLanRequiresAuth').checked = false;
             document.getElementById('publishLanDirectUrlDisabled').checked = false;
             document.getElementById('publishLanRootRedirectPath').value = '';
+            document.getElementById('publishLanPathPrefix').value = '';
             document.getElementById('publishLanAdvanced').open = false;
             document.getElementById('publishLanRelayHint').textContent = '';
             document.getElementById('publishLanModal').classList.add('active');
@@ -888,6 +905,7 @@
             const requireAuth        = document.getElementById('publishLanRequiresAuth').checked;
             const directUrlDisabled  = document.getElementById('publishLanDirectUrlDisabled').checked;
             const rootRedirectPath   = document.getElementById('publishLanRootRedirectPath').value.trim() || null;
+            const pathPrefix         = document.getElementById('publishLanPathPrefix').value.trim() || null;
 
             if (!machineName) { alert('Please select a LAN server'); return; }
             if (!subdomain)   { alert('Please enter a subdomain'); return; }
@@ -903,7 +921,7 @@
                 const response = await fetch('/published-services/lan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ subdomain, machineName, port, protocol, requireAuth, directUrlDisabled, rootRedirectPath })
+                    body: JSON.stringify({ subdomain, machineName, port, protocol, requireAuth, directUrlDisabled, rootRedirectPath, pathPrefix })
                 });
                 if (response.status === 400) {
                     alert(`Could not publish — make sure ${machineName}'s lanAddress is inside a relay peer's lanCidr.`);
@@ -927,17 +945,12 @@
             const address          = document.getElementById('publishAddress').value;
             const port             = parseInt(document.getElementById('publishPort').value);
             const rootRedirectPath = document.getElementById('publishRootRedirectPath').value || null;
+            const pathPrefix       = document.getElementById('publishPathPrefix').value.trim() || null;
             const subdomain          = document.getElementById('publishSubdomain').value.trim();
             const requiresAuth       = document.getElementById('publishRequiresAuth').checked;
             const directUrlDisabled  = document.getElementById('publishDirectUrlDisabled').checked;
 
             if (!subdomain) { alert('Please enter a subdomain'); return; }
-
-            const id = cardId(subdomain);
-            if (document.getElementById('proc-' + id) || document.getElementById('body-' + id)) {
-                alert(`"${subdomain}" is already active or being added.`);
-                return;
-            }
 
             const submitBtn = document.getElementById('publishSubmitBtn');
             const cancelBtn = document.getElementById('publishCancelBtn');
@@ -949,7 +962,7 @@
                 const response = await fetch('/published-services/publish', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath, directUrlDisabled })
+                    body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath, directUrlDisabled, pathPrefix })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -966,9 +979,14 @@
             }
         }
 
-        async function setDirectUrlDisabled(dnsAddress, disabled) {
+        function withPathQuery(url, pathPrefix) {
+            return pathPrefix ? `${url}?pathPrefix=${encodeURIComponent(pathPrefix)}` : url;
+        }
+
+        async function setDirectUrlDisabled(dnsAddress, pathPrefix, disabled) {
             try {
-                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, {
+                const response = await fetch(withPathQuery(
+                    `/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, pathPrefix), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ directUrlDisabled: disabled })
@@ -980,9 +998,10 @@
             }
         }
 
-        async function setRequiresAuth(dnsAddress, requiresAuth) {
+        async function setRequiresAuth(dnsAddress, pathPrefix, requiresAuth) {
             try {
-                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/auth`, {
+                const response = await fetch(withPathQuery(
+                    `/published-services/${encodeURIComponent(dnsAddress)}/auth`, pathPrefix), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ requiresAuth })
@@ -1001,13 +1020,14 @@
             btn.disabled = input.value.trim() === (input.dataset.original || '');
         }
 
-        async function saveRedirect(dnsAddress, id) {
+        async function saveRedirect(dnsAddress, pathPrefix, id) {
             const input = document.getElementById(`redirect-${id}`);
             const btn = document.getElementById(`redirect-save-${id}`);
             const path = input.value.trim() || null;
             btn.disabled = true;
             try {
-                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}/redirect`, {
+                const response = await fetch(withPathQuery(
+                    `/published-services/${encodeURIComponent(dnsAddress)}/redirect`, pathPrefix), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ rootRedirectPath: path })
@@ -1021,9 +1041,11 @@
             }
         }
 
-        function showDeleteModal(dnsAddress) {
-            document.getElementById('deleteServiceName').textContent = dnsAddress;
+        function showDeleteModal(dnsAddress, pathPrefix) {
+            const label = pathPrefix ? `${dnsAddress}${pathPrefix}` : dnsAddress;
+            document.getElementById('deleteServiceName').textContent = label;
             document.getElementById('deleteConfirmBtn').dataset.dns  = dnsAddress;
+            document.getElementById('deleteConfirmBtn').dataset.path = pathPrefix || '';
             document.getElementById('deleteModal').classList.add('active');
         }
 
@@ -1033,6 +1055,7 @@
 
         async function confirmDelete() {
             const dnsAddress = document.getElementById('deleteConfirmBtn').dataset.dns;
+            const pathPrefix = document.getElementById('deleteConfirmBtn').dataset.path || '';
             if (!dnsAddress) return;
             const deleteBtn = document.getElementById('deleteConfirmBtn');
             const cancelBtn = document.getElementById('deleteCancelBtn');
@@ -1040,7 +1063,10 @@
             cancelBtn.disabled = true;
             deleteBtn.textContent = 'Deleting…';
             try {
-                const response = await fetch(`/published-services/${encodeURIComponent(dnsAddress)}`, { method: 'DELETE' });
+                const url = pathPrefix
+                    ? `/published-services/${encodeURIComponent(dnsAddress)}?pathPrefix=${encodeURIComponent(pathPrefix)}`
+                    : `/published-services/${encodeURIComponent(dnsAddress)}`;
+                const response = await fetch(url, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 hideDeleteModal();
                 await Promise.all([fetchServices(), fetchPublishable()]);

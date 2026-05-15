@@ -164,11 +164,12 @@ public class PublishingService implements
         return getPublishedServices().stream()
             .filter(s -> s.dnsState() == DnsState.OK)
             .map(s -> {
-                ReverseProxyRoute route = routes.stream()
-                    .filter(r -> r.getDomainName().equals(s.dnsAddress()))
-                    .findFirst().orElse(null);
+                // Match by (dnsAddress, pathPrefix) — the unique key once path-based routes can
+                // share a host. The domain entity owns that uniqueness rule.
+                ReverseProxyRoute route = ReverseProxyRoute
+                    .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix()).orElse(null);
                 String directUrl = route == null ? null : route.directUrl(callerIp, peers, vpnClients);
-                return new LaunchpadServiceUco(s.dnsAddress(), s.hostAddress(), s.state(),
+                return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(), s.state(),
                     resolveLaunchpadUrl(s, directUrl));
             })
             .toList();
@@ -176,12 +177,15 @@ public class PublishingService implements
 
     private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {
         if (directUrl != null) return directUrl;
-        if (!s.authenticated()) return "https://" + s.dnsAddress();
+        // Path-based services land at https://host/pathPrefix/ so the tile click lands the user
+        // inside the right route scope; host-only services keep their existing https://host shape.
+        String pathSuffix = s.pathPrefix() == null ? "" : s.pathPrefix() + "/";
+        if (!s.authenticated()) return "https://" + s.dnsAddress() + pathSuffix;
         // Auth-protected services route via Authelia's login URL so the browser navigates to a
         // different origin first. Without this, openHAB-style PWAs serve a cached SPA from their
         // own service worker, the SPA hits /rest/* (which Authelia answers with 401, not 302),
         // and the user sees the app's own login looping instead of Authelia's.
-        String target = "https://" + s.dnsAddress() + "/";
+        String target = "https://" + s.dnsAddress() + (s.pathPrefix() == null ? "/" : s.pathPrefix() + "/");
         String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
         return "https://login." + configResolver.getDomain() + "/?rd=" + encoded;
     }
@@ -205,39 +209,56 @@ public class PublishingService implements
             route.getAuthInfo() != null,
             route.getRootRedirectPath(),
             route.isDirectUrlDisabled(),
-            route.isLanService()
+            route.isLanService(),
+            route.getPathPrefix()
         );
     }
 
     // --- PublishPeerServiceUseCase ---
 
     @Override
-    public void publishService(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
+    public void publishService(String address, int port, String subdomain, boolean requiresAuth,
+                               String rootRedirectPath, boolean directUrlDisabled, String pathPrefix) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
+
         // A LAN docker host's IP arrives here when the user clicks "+ Publish" on a discovered
         // LAN_SERVER service. Dispatch to the LAN flow so the route is marked isLanService=true
         // and the dashboard's direct-LAN URL bypass works (#180). The address may be on a relay
         // peer's LAN or in the Vaier server's own subnet (server LAN CIDR).
         if (hostInsideAnyLanCidr(address)) {
             log.info("Address {} falls inside a relay peer's or the Vaier server's LAN CIDR — publishing as LAN service", address);
-            publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled, rootRedirectPath);
+            publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled, rootRedirectPath, normalisedPath);
             return;
         }
 
         String fqdn = subdomain + "." + configResolver.getDomain();
         String serverFqdn = "vaier." + configResolver.getDomain();
 
-        log.info("Publishing service: {} -> {}:{} (auth: {}, directUrlDisabled: {})", fqdn, address, port, requiresAuth, directUrlDisabled);
+        List<ReverseProxyRoute> existing = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        if (ReverseProxyRoute.conflictsWithExisting(existing, fqdn, normalisedPath)) {
+            throw new IllegalArgumentException(
+                "A route already exists on " + fqdn +
+                (normalisedPath == null ? " (host-only)" : " for path " + normalisedPath));
+        }
 
-        DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
-        DnsZone zone = new DnsZone(configResolver.getDomain());
-        forPersistingDnsRecords.addDnsRecord(cname, zone);
-        log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
+        log.info("Publishing service: {} -> {}:{} (auth: {}, directUrlDisabled: {}, pathPrefix: {})",
+            fqdn, address, port, requiresAuth, directUrlDisabled, normalisedPath);
+
+        if (ReverseProxyRoute.hasSiblingOnHost(existing, fqdn)) {
+            log.info("Skipping DNS create for {} — sibling route already on this host", fqdn);
+        } else {
+            DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
+            DnsZone zone = new DnsZone(configResolver.getDomain());
+            forPersistingDnsRecords.addDnsRecord(cname, zone);
+            log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
+        }
 
         pendingPublishes.put(subdomain, new PendingState(requiresAuth, false));
         pendingPublicationsService.track(address, port);
         forPublishingEvents.publish("published-services", "publish-dns-created", subdomain);
 
-        CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath, directUrlDisabled));
+        CompletableFuture.runAsync(() -> waitForDnsThenActivate(subdomain, fqdn, address, port, requiresAuth, rootRedirectPath, directUrlDisabled, normalisedPath));
     }
 
     @Override
@@ -264,7 +285,10 @@ public class PublishingService implements
 
     @Override
     public void publishLanService(String subdomain, String host, int port, String protocol,
-                                  boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath) {
+                                  boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                  String pathPrefix) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
         ReverseProxyRoute.validateForPublication(subdomain + "." + configResolver.getDomain(), host, port);
         String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol.toLowerCase();
         if (!scheme.equals("http") && !scheme.equals("https")) {
@@ -280,19 +304,31 @@ public class PublishingService implements
 
         String fqdn = subdomain + "." + configResolver.getDomain();
         String serverFqdn = "vaier." + configResolver.getDomain();
-        log.info("Publishing LAN service: {} -> {}://{}:{} (auth: {}, directUrlDisabled: {}, rootRedirectPath: {})",
-            fqdn, scheme, host, port, requiresAuth, directUrlDisabled, rootRedirectPath);
 
-        DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
-        DnsZone zone = new DnsZone(configResolver.getDomain());
-        forPersistingDnsRecords.addDnsRecord(cname, zone);
-        log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
+        List<ReverseProxyRoute> existing = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        if (ReverseProxyRoute.conflictsWithExisting(existing, fqdn, normalisedPath)) {
+            throw new IllegalArgumentException(
+                "A route already exists on " + fqdn +
+                (normalisedPath == null ? " (host-only)" : " for path " + normalisedPath));
+        }
+
+        log.info("Publishing LAN service: {} -> {}://{}:{} (auth: {}, directUrlDisabled: {}, rootRedirectPath: {}, pathPrefix: {})",
+            fqdn, scheme, host, port, requiresAuth, directUrlDisabled, rootRedirectPath, normalisedPath);
+
+        if (ReverseProxyRoute.hasSiblingOnHost(existing, fqdn)) {
+            log.info("Skipping DNS create for {} — sibling route already on this host", fqdn);
+        } else {
+            DnsRecord cname = new DnsRecord(fqdn + ".", DnsRecordType.CNAME, 300L, List.of(serverFqdn + "."));
+            DnsZone zone = new DnsZone(configResolver.getDomain());
+            forPersistingDnsRecords.addDnsRecord(cname, zone);
+            log.info("Created DNS CNAME {} -> {}", fqdn, serverFqdn);
+        }
 
         pendingPublishes.put(subdomain, new PendingState(requiresAuth, false));
         forPublishingEvents.publish("published-services", "publish-dns-created", subdomain);
 
         CompletableFuture.runAsync(() ->
-            waitForLanDnsThenActivate(subdomain, fqdn, host, port, scheme, requiresAuth, directUrlDisabled, rootRedirectPath));
+            waitForLanDnsThenActivate(subdomain, fqdn, host, port, scheme, requiresAuth, directUrlDisabled, rootRedirectPath, normalisedPath));
     }
 
     private boolean hostInsideAnyLanCidr(String host) {
@@ -302,7 +338,8 @@ public class PublishingService implements
     }
 
     void waitForLanDnsThenActivate(String subdomain, String fqdn, String host, int port, String protocol,
-                                   boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath) {
+                                   boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                   String pathPrefix) {
         long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             if (forResolvingDns.isResolvable(fqdn)) {
@@ -311,15 +348,15 @@ public class PublishingService implements
                 forPublishingEvents.publish("published-services", "publish-dns-propagated", subdomain);
                 try {
                     forPersistingReverseProxyRoutes.addLanReverseProxyRoute(
-                        fqdn, host, port, protocol, requiresAuth, directUrlDisabled, rootRedirectPath);
+                        fqdn, host, port, protocol, requiresAuth, directUrlDisabled, rootRedirectPath, pathPrefix);
                 } catch (Exception e) {
                     log.error("Failed to write Traefik LAN route for {}: {}", fqdn, e.getMessage(), e);
-                    rollbackLan(subdomain, fqdn, false);
+                    rollbackLan(subdomain, fqdn, false, pathPrefix);
                     return;
                 }
                 if (!waitForTraefikRoute(fqdn)) {
                     log.warn("Traefik did not pick up LAN route for {}; rolling back", fqdn);
-                    rollbackLan(subdomain, fqdn, true);
+                    rollbackLan(subdomain, fqdn, true, pathPrefix);
                     return;
                 }
                 pendingPublishes.remove(subdomain);
@@ -332,20 +369,32 @@ public class PublishingService implements
         }
         log.warn("DNS propagation timed out for {} after {}s", fqdn, dnsTimeoutMillis / 1000);
         forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
-        rollbackLan(subdomain, fqdn, false);
+        rollbackLan(subdomain, fqdn, false, pathPrefix);
     }
 
-    private void rollbackLan(String subdomain, String fqdn, boolean removeRoute) {
+    private void rollbackLan(String subdomain, String fqdn, boolean removeRoute, String pathPrefix) {
         if (removeRoute) {
-            try { forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn); }
-            catch (Exception e) { log.warn("Failed to remove Traefik route during LAN rollback for {}: {}", fqdn, e.getMessage()); }
+            try {
+                ReverseProxyRoute.findByFqdnAndPath(
+                        forPersistingReverseProxyRoutes.getReverseProxyRoutes(), fqdn, pathPrefix)
+                    .ifPresentOrElse(
+                        r -> forPersistingReverseProxyRoutes.deleteReverseProxyRoute(r.getName()),
+                        () -> forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn));
+            } catch (Exception e) {
+                log.warn("Failed to remove Traefik route during LAN rollback for {}: {}", fqdn, e.getMessage());
+            }
         }
-        try {
-            forPersistingDnsRecords.deleteDnsRecord(fqdn + ".", DnsRecordType.CNAME,
-                new DnsZone(configResolver.getDomain()));
-            log.info("Rolled back CNAME for {}", fqdn);
-        } catch (Exception e) {
-            log.warn("Failed to remove CNAME during LAN rollback for {}: {}", fqdn, e.getMessage());
+        List<ReverseProxyRoute> remaining = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        if (ReverseProxyRoute.hasSiblingOnHost(remaining, fqdn)) {
+            log.info("Skipping LAN CNAME rollback for {} — sibling routes remain", fqdn);
+        } else {
+            try {
+                forPersistingDnsRecords.deleteDnsRecord(fqdn + ".", DnsRecordType.CNAME,
+                    new DnsZone(configResolver.getDomain()));
+                log.info("Rolled back CNAME for {}", fqdn);
+            } catch (Exception e) {
+                log.warn("Failed to remove CNAME during LAN rollback for {}: {}", fqdn, e.getMessage());
+            }
         }
         pendingPublishes.remove(subdomain);
         invalidatePublishedServicesCache();
@@ -353,7 +402,8 @@ public class PublishingService implements
         forPublishingEvents.publish("published-services", "service-updated", subdomain);
     }
 
-    void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {
+    void waitForDnsThenActivate(String subdomain, String fqdn, String address, int port, boolean requiresAuth,
+                                String rootRedirectPath, boolean directUrlDisabled, String pathPrefix) {
         long deadline = System.currentTimeMillis() + dnsTimeoutMillis;
         while (System.currentTimeMillis() < deadline) {
             if (forResolvingDns.isResolvable(fqdn)) {
@@ -365,19 +415,19 @@ public class PublishingService implements
                     log.info("Normalized backend address {} -> {} for {}", address, persistedAddress, fqdn);
                 }
                 try {
-                    forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, persistedAddress, port, requiresAuth, rootRedirectPath);
+                    forPersistingReverseProxyRoutes.addReverseProxyRoute(fqdn, persistedAddress, port, requiresAuth, rootRedirectPath, pathPrefix);
                 } catch (Exception e) {
                     log.error("Failed to write Traefik route for {}: {}", fqdn, e.getMessage(), e);
-                    rollback(subdomain, fqdn, address, port, false);
+                    rollback(subdomain, fqdn, address, port, false, pathPrefix);
                     return;
                 }
                 if (directUrlDisabled) {
-                    forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(fqdn, true);
+                    forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(fqdn, pathPrefix, true);
                 }
                 log.info("Created Traefik route for {}", fqdn);
                 if (!waitForTraefikRoute(fqdn)) {
                     log.warn("Traefik did not pick up route for {}; rolling back", fqdn);
-                    rollback(subdomain, fqdn, address, port, true);
+                    rollback(subdomain, fqdn, address, port, true, pathPrefix);
                     return;
                 }
                 pendingPublicationsService.untrack(address, port);
@@ -392,23 +442,34 @@ public class PublishingService implements
         }
         log.warn("DNS propagation timed out for {} after {}s — Traefik route NOT written to avoid invalid certificate", fqdn, dnsTimeoutMillis / 1000);
         forPublishingEvents.publish("published-services", "publish-dns-timeout", subdomain);
-        rollback(subdomain, fqdn, address, port, false);
+        rollback(subdomain, fqdn, address, port, false, pathPrefix);
     }
 
-    private void rollback(String subdomain, String fqdn, String address, int port, boolean removeRoute) {
+    private void rollback(String subdomain, String fqdn, String address, int port, boolean removeRoute, String pathPrefix) {
         if (removeRoute) {
             try {
-                forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);
+                ReverseProxyRoute.findByFqdnAndPath(
+                        forPersistingReverseProxyRoutes.getReverseProxyRoutes(), fqdn, pathPrefix)
+                    .ifPresentOrElse(
+                        r -> forPersistingReverseProxyRoutes.deleteReverseProxyRoute(r.getName()),
+                        () -> forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn));
             } catch (Exception e) {
                 log.warn("Failed to remove Traefik route during rollback for {}: {}", fqdn, e.getMessage());
             }
         }
-        try {
-            forPersistingDnsRecords.deleteDnsRecord(fqdn + ".", DnsRecordType.CNAME,
-                new DnsZone(configResolver.getDomain()));
-            log.info("Rolled back CNAME for {}", fqdn);
-        } catch (Exception e) {
-            log.warn("Failed to remove CNAME during rollback for {}: {}", fqdn, e.getMessage());
+        // Only roll the CNAME back if no sibling routes still depend on it — the domain helper
+        // decides what "sibling" means.
+        List<ReverseProxyRoute> remaining = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        if (ReverseProxyRoute.hasSiblingOnHost(remaining, fqdn)) {
+            log.info("Skipping CNAME rollback for {} — sibling routes remain", fqdn);
+        } else {
+            try {
+                forPersistingDnsRecords.deleteDnsRecord(fqdn + ".", DnsRecordType.CNAME,
+                    new DnsZone(configResolver.getDomain()));
+                log.info("Rolled back CNAME for {}", fqdn);
+            } catch (Exception e) {
+                log.warn("Failed to remove CNAME during rollback for {}: {}", fqdn, e.getMessage());
+            }
         }
         pendingPublicationsService.untrack(address, port);
         pendingPublishes.remove(subdomain);
@@ -435,40 +496,67 @@ public class PublishingService implements
     // --- DeletePublishedServiceUseCase ---
 
     @Override
-    public void deleteService(String fqdn) {
+    public void deleteService(String fqdn, String pathPrefix) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
+
         boolean isMandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
             .anyMatch(sub -> fqdn.equals(sub + "." + configResolver.getDomain()));
         if (isMandatory) {
             throw new IllegalArgumentException("Cannot delete built-in service: " + fqdn);
         }
-        log.info("Deleting service: {}", fqdn);
+        log.info("Deleting service: {} (pathPrefix: {})", fqdn, normalisedPath);
 
-        forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);
-        log.info("Deleted Traefik route for {}", fqdn);
+        if (normalisedPath == null) {
+            // Legacy host-only delete: remove all routes via the dnsName-keyed helper, which
+            // resolves to the conventional <fqdn>-router name. Preserves prior behaviour.
+            forPersistingReverseProxyRoutes.deleteReverseProxyRouteByDnsName(fqdn);
+        } else {
+            // Path-based delete: find the specific route and remove only it.
+            List<ReverseProxyRoute> existing = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+            ReverseProxyRoute target = ReverseProxyRoute.findByFqdnAndPath(existing, fqdn, normalisedPath)
+                .orElseThrow(() -> new IllegalArgumentException(
+                    "No route found for " + fqdn + " with pathPrefix " + normalisedPath));
+            forPersistingReverseProxyRoutes.deleteReverseProxyRoute(target.getName());
+        }
+        log.info("Deleted Traefik route for {} ({})", fqdn, normalisedPath);
 
-        waitForTraefikRouteDeletion(fqdn);
+        waitForTraefikRouteDeletion(fqdn, normalisedPath);
 
-        forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(configResolver.getDomain()));
-        log.info("Deleted DNS CNAME for {}", fqdn);
+        // Only delete the CNAME when no sibling routes still use this host. The domain helper
+        // decides what "sibling" means; the service just orchestrates.
+        List<ReverseProxyRoute> remaining = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        if (ReverseProxyRoute.hasSiblingOnHost(remaining, fqdn)) {
+            log.info("Skipping DNS delete for {} — sibling routes still on this host", fqdn);
+        } else {
+            forPersistingDnsRecords.deleteDnsRecord(fqdn, DnsRecordType.CNAME, new DnsZone(configResolver.getDomain()));
+            log.info("Deleted DNS CNAME for {}", fqdn);
+        }
         invalidatePublishedServicesCache();
     }
 
-    private void waitForTraefikRouteDeletion(String fqdn) {
+    private void waitForTraefikRouteDeletion(String fqdn, String pathPrefix) {
         long deadline = System.currentTimeMillis() + 15_000;
         int consecutiveAbsent = 0;
         while (System.currentTimeMillis() < deadline) {
-            boolean stillPresent = forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
-                .anyMatch(r -> r.getDomainName().equals(fqdn));
+            // For host-only delete, "absent" means no route on this fqdn at all. For path-based
+            // delete, "absent" means no route on this (fqdn, pathPrefix). The domain knows what
+            // route uniqueness means.
+            boolean stillPresent = pathPrefix == null
+                ? forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+                    .anyMatch(r -> r.getDomainName().equals(fqdn))
+                : ReverseProxyRoute.findByFqdnAndPath(
+                    forPersistingReverseProxyRoutes.getReverseProxyRoutes(), fqdn, pathPrefix).isPresent();
             if (!stillPresent) {
                 consecutiveAbsent++;
                 if (consecutiveAbsent >= 2) {
-                    log.info("Traefik confirmed route deletion for {}", fqdn);
+                    log.info("Traefik confirmed route deletion for {} ({})", fqdn, pathPrefix);
                     return;
                 }
             } else {
                 consecutiveAbsent = 0;
             }
-            log.debug("Waiting for Traefik to remove route for {}", fqdn);
+            log.debug("Waiting for Traefik to remove route for {} ({})", fqdn, pathPrefix);
             try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
         log.warn("Traefik did not remove route for {} within 15s, proceeding anyway", fqdn);
@@ -533,30 +621,36 @@ public class PublishingService implements
     // --- ToggleServiceAuthUseCase ---
 
     @Override
-    public void setAuthentication(String dnsName, boolean requiresAuth) {
+    public void setAuthentication(String dnsName, String pathPrefix, boolean requiresAuth) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
         requireNonMandatory(dnsName, "Cannot change auth for built-in service: ");
-        log.info("Setting auth={} for {}", requiresAuth, dnsName);
-        forPersistingReverseProxyRoutes.setRouteAuthentication(dnsName, requiresAuth);
+        log.info("Setting auth={} for {} ({})", requiresAuth, dnsName, normalisedPath);
+        forPersistingReverseProxyRoutes.setRouteAuthentication(dnsName, normalisedPath, requiresAuth);
         invalidatePublishedServicesCache();
     }
 
     // --- ToggleServiceDirectUrlDisabledUseCase ---
 
     @Override
-    public void setDirectUrlDisabled(String dnsName, boolean directUrlDisabled) {
+    public void setDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
         requireNonMandatory(dnsName, "Cannot change direct URL setting for built-in service: ");
-        log.info("Setting directUrlDisabled={} for {}", directUrlDisabled, dnsName);
-        forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(dnsName, directUrlDisabled);
+        log.info("Setting directUrlDisabled={} for {} ({})", directUrlDisabled, dnsName, normalisedPath);
+        forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(dnsName, normalisedPath, directUrlDisabled);
         invalidatePublishedServicesCache();
     }
 
     // --- EditServiceRedirectUseCase ---
 
     @Override
-    public void setRootRedirectPath(String dnsName, String rootRedirectPath) {
+    public void setRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
         requireNonMandatory(dnsName, "Cannot edit built-in service: ");
-        log.info("Setting root redirect path for {} to {}", dnsName, rootRedirectPath);
-        forPersistingReverseProxyRoutes.setRouteRootRedirectPath(dnsName, rootRedirectPath);
+        log.info("Setting root redirect path for {} ({}) to {}", dnsName, normalisedPath, rootRedirectPath);
+        forPersistingReverseProxyRoutes.setRouteRootRedirectPath(dnsName, normalisedPath, rootRedirectPath);
         invalidatePublishedServicesCache();
     }
 

@@ -177,7 +177,11 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                 routes = routes.stream()
                     .map(r -> {
                         ReverseProxyRoute current = r;
-                        if (directUrlDisabled.contains(r.getDomainName())) {
+                        // Match either by router name (new path-aware format) or by FQDN
+                        // (legacy format — applies to host-only routes for backward compat).
+                        boolean disabled = directUrlDisabled.contains(r.getName())
+                            || (r.getPathPrefix() == null && directUrlDisabled.contains(r.getDomainName()));
+                        if (disabled) {
                             current = applyDirectUrlDisabledFlag(current, true);
                         }
                         if (lanMarkers.containsKey(r.getDomainName())) {
@@ -278,7 +282,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                     }
 
                     if (serviceConfig != null) {
-                        routes.addAll(extractServiceUrlsFromApi(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig));
+                        String pathPrefix = extractPathPrefixFromRule(routerConfig);
+                        routes.addAll(extractServiceUrlsFromApi(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig, pathPrefix));
                     }
                 }
             }
@@ -310,7 +315,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
                     if (serviceConfig != null) {
                         String rootRedirectPath = extractRootRedirectPath(routerName, routerMiddlewares, middlewares, domainName);
-                        routes.addAll(extractServiceUrls(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig, rootRedirectPath));
+                        String pathPrefix = extractPathPrefixFromRule(routerConfig);
+                        routes.addAll(extractServiceUrls(routerName, domainName, serviceName, authInfo, entryPoints, tlsConfig, routerMiddlewares, serviceConfig, rootRedirectPath, pathPrefix));
                     }
                 }
             }
@@ -377,7 +383,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private List<ReverseProxyRoute> extractServiceUrlsFromApi(String routerName, String domainName, String serviceName,
                                                                ReverseProxyRoute.AuthInfo authInfo, List<String> entryPoints,
                                                                ReverseProxyRoute.TlsConfig tlsConfig, List<String> middlewares,
-                                                               Map<String, Object> serviceConfig) {
+                                                               Map<String, Object> serviceConfig, String pathPrefix) {
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
         // Handle loadBalancer configuration from API
@@ -392,7 +398,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                     if (url != null) {
                         AddressPort addressPort = parseUrl(url);
                         routes.add(new ReverseProxyRoute(routerName, domainName, addressPort.address,
-                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares));
+                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares,
+                            null, false, false, null, pathPrefix));
                     }
                 }
             }
@@ -404,7 +411,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private List<ReverseProxyRoute> extractServiceUrls(String routerName, String domainName, String serviceName,
                                                         ReverseProxyRoute.AuthInfo authInfo, List<String> entryPoints,
                                                         ReverseProxyRoute.TlsConfig tlsConfig, List<String> middlewares,
-                                                        Map<String, Object> serviceConfig, String rootRedirectPath) {
+                                                        Map<String, Object> serviceConfig, String rootRedirectPath,
+                                                        String pathPrefix) {
         List<ReverseProxyRoute> routes = new ArrayList<>();
 
         // Handle loadBalancer configuration
@@ -419,7 +427,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                     if (url != null) {
                         AddressPort addressPort = parseUrl(url);
                         routes.add(new ReverseProxyRoute(routerName, domainName, addressPort.address,
-                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares, rootRedirectPath));
+                            addressPort.port, serviceName, authInfo, entryPoints, tlsConfig, middlewares,
+                            rootRedirectPath, false, false, null, pathPrefix));
                     }
                 }
             }
@@ -792,16 +801,17 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * @param requiresAuth Whether to add the auth-middleware
      */
     @Override
-    public void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth, String rootRedirectPath) {
+    public void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
+                                     String rootRedirectPath, String pathPrefix) {
         loadConfig();
 
         if (config == null) {
             config = new LinkedHashMap<>();
         }
 
-        // Generate router name and service name from DNS name
-        String routerName = generateRouterName(dnsName);
-        String serviceName = generateServiceName(dnsName);
+        // Generate router name and service name from DNS name + optional path slug
+        String routerName = generateRouterName(dnsName, pathPrefix);
+        String serviceName = generateServiceName(dnsName, pathPrefix);
         String redirectMiddlewareName = routerName.replace("-router", "-redirect");
 
         // Create HTTP section if it doesn't exist (using LinkedHashMap to preserve order)
@@ -813,7 +823,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         // Add router configuration with standard defaults
         Map<String, Object> routerConfig = new LinkedHashMap<>();
-        routerConfig.put("rule", "Host(`" + dnsName + "`)");
+        routerConfig.put("rule", pathPrefix == null
+            ? "Host(`" + dnsName + "`)"
+            : "Host(`" + dnsName + "`) && PathPrefix(`" + pathPrefix + "`)");
 
         // Standard entryPoints
         List<String> entryPoints = new ArrayList<>();
@@ -872,12 +884,13 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
-                                        boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath) {
+                                        boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                        String pathPrefix) {
         loadConfig();
         if (config == null) config = new LinkedHashMap<>();
 
-        String routerName = generateRouterName(dnsName);
-        String serviceName = generateServiceName(dnsName);
+        String routerName = generateRouterName(dnsName, pathPrefix);
+        String serviceName = generateServiceName(dnsName, pathPrefix);
         String redirectMiddlewareName = routerName.replace("-router", "-redirect");
 
         Map<String, Object> http = getOrCreateNestedMap(config, "http");
@@ -885,7 +898,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         Map<String, Object> services = getOrCreateNestedMapOrdered(http, "services");
 
         Map<String, Object> routerConfig = new LinkedHashMap<>();
-        routerConfig.put("rule", "Host(`" + dnsName + "`)");
+        routerConfig.put("rule", pathPrefix == null
+            ? "Host(`" + dnsName + "`)"
+            : "Host(`" + dnsName + "`) && PathPrefix(`" + pathPrefix + "`)");
         List<String> entryPoints = new ArrayList<>();
         entryPoints.add(ServiceNames.ENTRY_POINT_WEBSECURE);
         routerConfig.put("entryPoints", entryPoints);
@@ -925,7 +940,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         if (directUrlDisabled) {
             // setRouteDirectUrlDisabled does its own loadConfig+saveConfig, so save first.
             saveConfig();
-            setRouteDirectUrlDisabled(dnsName, true);
+            setRouteDirectUrlDisabled(dnsName, pathPrefix, true);
             return;
         }
 
@@ -964,11 +979,44 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-router"
      */
     private String generateRouterName(String dnsName) {
-        return dnsName.replace(".", "-") + "-router";
+        return generateRouterName(dnsName, null);
     }
 
     private String generateServiceName(String dnsName) {
-        return dnsName.replace(".", "-") + "-service";
+        return generateServiceName(dnsName, null);
+    }
+
+    /**
+     * Router name including a path-derived slug so multiple path-based routes on one host don't
+     * collide. {@code pathPrefix=null} produces the same name as the host-only form, preserving
+     * compatibility with pre-pathPrefix YAML files.
+     */
+    private String generateRouterName(String dnsName, String pathPrefix) {
+        String slug = pathSlug(pathPrefix);
+        return dnsName.replace(".", "-") + (slug.isEmpty() ? "" : "-" + slug) + "-router";
+    }
+
+    private String generateServiceName(String dnsName, String pathPrefix) {
+        String slug = pathSlug(pathPrefix);
+        return dnsName.replace(".", "-") + (slug.isEmpty() ? "" : "-" + slug) + "-service";
+    }
+
+    /** "/auth" → "auth", "/builder/ui" → "builder-ui", null/"" → "". */
+    private String pathSlug(String pathPrefix) {
+        if (pathPrefix == null || pathPrefix.isBlank()) return "";
+        String trimmed = pathPrefix.startsWith("/") ? pathPrefix.substring(1) : pathPrefix;
+        return trimmed.replace('/', '-');
+    }
+
+    /**
+     * Extract the {@code PathPrefix(`/...`)} value from a router rule, if present.
+     */
+    private String extractPathPrefixFromRule(Map<String, Object> routerConfig) {
+        String rule = (String) routerConfig.get("rule");
+        if (rule == null) return null;
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("PathPrefix\\s*\\(\\s*`([^`]+)`\\s*\\)");
+        java.util.regex.Matcher matcher = pattern.matcher(rule);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     /**
@@ -1140,38 +1188,45 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     @Override
-    public void setRouteAuthentication(String dnsName, boolean requiresAuth) {
+    public void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth) {
         loadConfig();
 
         Map<String, Object> http = getNestedMap(config, "http");
         if (http == null) throw new RuntimeException("No HTTP configuration found");
 
         Map<String, Object> routers = getNestedMap(http, "routers");
-        String routerName = generateRouterName(dnsName);
+        String routerName = generateRouterName(dnsName, pathPrefix);
         if (routers == null || !routers.containsKey(routerName)) {
             throw new RuntimeException("Router not found: " + routerName);
         }
 
         Map<String, Object> routerConfig = castToMap(routers.get(routerName));
+
+        // Preserve the redirect middleware if it's already on this router; only toggle the auth one.
+        @SuppressWarnings("unchecked")
+        List<String> existing = routerConfig.get("middlewares") instanceof List
+            ? new ArrayList<>((List<String>) routerConfig.get("middlewares"))
+            : new ArrayList<>();
+        existing.remove(ServiceNames.AUTH_MIDDLEWARE);
         if (requiresAuth) {
-            routerConfig.put("middlewares", new ArrayList<>(List.of(ServiceNames.AUTH_MIDDLEWARE)));
+            existing.add(0, ServiceNames.AUTH_MIDDLEWARE);
             ensureAuthMiddlewareExists(http);
-        } else {
-            routerConfig.remove("middlewares");
         }
+        if (existing.isEmpty()) routerConfig.remove("middlewares");
+        else routerConfig.put("middlewares", existing);
 
         saveConfig();
     }
 
     @Override
-    public void setRouteRootRedirectPath(String dnsName, String rootRedirectPath) {
+    public void setRouteRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath) {
         loadConfig();
 
         Map<String, Object> http = getNestedMap(config, "http");
         if (http == null) throw new RuntimeException("No HTTP configuration found");
 
         Map<String, Object> routers = getNestedMap(http, "routers");
-        String routerName = generateRouterName(dnsName);
+        String routerName = generateRouterName(dnsName, pathPrefix);
         if (routers == null || !routers.containsKey(routerName)) {
             throw new RuntimeException("Router not found: " + routerName);
         }
@@ -1309,18 +1364,26 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private static final String LAN_SERVICE_KEY = "x-vaier-lan-service";
 
     @Override
-    public void setRouteDirectUrlDisabled(String dnsName, boolean directUrlDisabled) {
+    public void setRouteDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled) {
         loadConfig();
         if (config == null) config = new LinkedHashMap<>();
         Object raw = config.get(DIRECT_URL_DISABLED_KEY);
         List<String> disabled = (raw instanceof List<?> list)
             ? new ArrayList<>(list.stream().map(Object::toString).toList())
             : new ArrayList<>();
+        // Key by router name (path-aware). For host-only routes that's the same shape as the
+        // legacy "<fqdn>-router" name. On flip-on, also strip any legacy bare-FQDN entry to
+        // avoid two stale representations of the same route in the YAML.
+        String routerName = generateRouterName(dnsName, pathPrefix);
         boolean changed;
         if (directUrlDisabled) {
-            changed = !disabled.contains(dnsName) && disabled.add(dnsName);
+            boolean removedLegacy = pathPrefix == null && disabled.remove(dnsName);
+            boolean added = !disabled.contains(routerName) && disabled.add(routerName);
+            changed = removedLegacy || added;
         } else {
-            changed = disabled.remove(dnsName);
+            boolean removedLegacy = pathPrefix == null && disabled.remove(dnsName);
+            boolean removedNew = disabled.remove(routerName);
+            changed = removedLegacy || removedNew;
         }
         if (changed) {
             if (disabled.isEmpty()) config.remove(DIRECT_URL_DISABLED_KEY);
@@ -1343,7 +1406,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return new ReverseProxyRoute(
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
-            r.getRootRedirectPath(), disabled, r.isLanService(), r.getProtocol()
+            r.getRootRedirectPath(), disabled, r.isLanService(), r.getProtocol(), r.getPathPrefix()
         );
     }
 
@@ -1351,7 +1414,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return new ReverseProxyRoute(
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
-            r.getRootRedirectPath(), r.isDirectUrlDisabled(), true, protocol
+            r.getRootRedirectPath(), r.isDirectUrlDisabled(), true, protocol, r.getPathPrefix()
         );
     }
 

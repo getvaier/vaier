@@ -11,6 +11,7 @@ import net.vaier.domain.port.ForResolvingPeerNames;
 
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Getter
 @ToString
@@ -18,6 +19,8 @@ public class ReverseProxyRoute {
 
     public static final int MIN_PORT = 1;
     public static final int MAX_PORT = 65535;
+
+    private static final Pattern PATH_PREFIX_PATTERN = Pattern.compile("^/[A-Za-z0-9._\\-]+(/[A-Za-z0-9._\\-]+)*$");
 
     private final String name;
     private final String domainName;
@@ -32,11 +35,12 @@ public class ReverseProxyRoute {
     private final boolean directUrlDisabled;
     private final boolean isLanService;
     private final String protocol;
+    private final String pathPrefix;
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
-                             boolean isLanService, String protocol) {
+                             boolean isLanService, String protocol, String pathPrefix) {
         this.name = name;
         this.domainName = domainName;
         this.address = address;
@@ -50,19 +54,28 @@ public class ReverseProxyRoute {
         this.directUrlDisabled = directUrlDisabled;
         this.isLanService = isLanService;
         this.protocol = protocol;
+        this.pathPrefix = pathPrefix;
+    }
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
+                             List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
+                             boolean isLanService, String protocol) {
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, null);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
-             rootRedirectPath, directUrlDisabled, false, null);
+             rootRedirectPath, directUrlDisabled, false, null, null);
     }
 
     public static ReverseProxyRoute lanRoute(String name, String domainName, String host, int port,
                                              String protocol, String service) {
         return new ReverseProxyRoute(name, domainName, host, port, service, null, null, null, null,
-            null, false, true, protocol);
+            null, false, true, protocol, null);
     }
 
     public static void validateForPublication(String dnsName, String address, int port) {
@@ -80,6 +93,69 @@ public class ReverseProxyRoute {
         if (dnsName == null || dnsName.isBlank()) {
             throw new IllegalArgumentException("dnsName must not be blank");
         }
+    }
+
+    /**
+     * Normalises operator-supplied path prefixes. Null, blank, and "/" all collapse to null (= no
+     * PathPrefix, i.e. the route catches everything on its host). A trailing slash is stripped so
+     * the Traefik matcher behaves predictably — {@code PathPrefix("/auth")} matches both
+     * {@code /auth} and {@code /auth/...}, whereas {@code PathPrefix("/auth/")} would miss bare
+     * {@code /auth}.
+     */
+    public static String normalisePathPrefix(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty() || trimmed.equals("/")) return null;
+        if (trimmed.length() > 1 && trimmed.endsWith("/")) trimmed = trimmed.substring(0, trimmed.length() - 1);
+        return trimmed;
+    }
+
+    /**
+     * Validates an already-normalised path prefix. Null is allowed (means "no PathPrefix"). Anything
+     * else must start with {@code /}, contain no whitespace or URL-reserved characters, and have at
+     * least one alphanumeric/-/_/. character after the leading slash.
+     */
+    public static void validatePathPrefix(String pathPrefix) {
+        if (pathPrefix == null) return;
+        if (!PATH_PREFIX_PATTERN.matcher(pathPrefix).matches()) {
+            throw new IllegalArgumentException(
+                "pathPrefix must start with '/' and contain only letters, digits, '-', '_', '.', and '/' " +
+                "(was: " + pathPrefix + ")");
+        }
+    }
+
+    // --- domain rules over a list of existing routes ---
+
+    /**
+     * True iff any route in {@code existing} sits on the same FQDN — regardless of pathPrefix.
+     * The publish flow uses this to decide whether the DNS CNAME already exists and the create can
+     * be skipped; the delete flow uses it to decide whether a CNAME can be reclaimed.
+     */
+    public static boolean hasSiblingOnHost(List<ReverseProxyRoute> existing, String fqdn) {
+        return existing.stream().anyMatch(r -> fqdn.equals(r.getDomainName()));
+    }
+
+    /**
+     * True iff any route in {@code existing} shares both the FQDN and the (already-normalised)
+     * pathPrefix — i.e. publishing on top of it would be a duplicate that Traefik couldn't
+     * disambiguate. Null pathPrefix matches another null pathPrefix (two host-only routes
+     * collide).
+     */
+    public static boolean conflictsWithExisting(List<ReverseProxyRoute> existing, String fqdn,
+                                                String pathPrefix) {
+        return existing.stream().anyMatch(r ->
+            fqdn.equals(r.getDomainName()) && java.util.Objects.equals(pathPrefix, r.getPathPrefix()));
+    }
+
+    /**
+     * Find the route with the given FQDN + pathPrefix in {@code existing}. Used by delete flows to
+     * resolve a user-facing (fqdn, pathPrefix) tuple into a specific routerName.
+     */
+    public static java.util.Optional<ReverseProxyRoute> findByFqdnAndPath(List<ReverseProxyRoute> existing,
+                                                                          String fqdn, String pathPrefix) {
+        return existing.stream()
+            .filter(r -> fqdn.equals(r.getDomainName()) && java.util.Objects.equals(pathPrefix, r.getPathPrefix()))
+            .findFirst();
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service, AuthInfo authInfo) {
@@ -169,7 +245,13 @@ public class ReverseProxyRoute {
         if (peerEndpointIp == null) return null;
         if (!peerEndpointIp.equals(callerIp)) return null;
 
-        String suffix = (rootRedirectPath == null || rootRedirectPath.isBlank()) ? "" : rootRedirectPath;
+        // Path-based routes pass the prefix through to the backend (no StripPrefix middleware
+        // on the Traefik side), so the direct LAN bypass URL must include it too — otherwise
+        // bare http://backend:port/ hits a different path than the routed one.
+        String pathPart = (pathPrefix == null) ? "" : pathPrefix;
+        String redirectSuffix = (rootRedirectPath == null || rootRedirectPath.isBlank()) ? "" : rootRedirectPath;
+        // When both are set, redirect takes precedence as the user's intended landing path.
+        String suffix = redirectSuffix.isEmpty() ? (pathPart.isEmpty() ? "" : pathPart + "/") : redirectSuffix;
         if (isLanService) {
             String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol;
             return scheme + "://" + address + ":" + port + suffix;

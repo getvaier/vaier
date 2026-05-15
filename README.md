@@ -20,7 +20,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | Feature | Description |
 |---------|-------------|
 | **VPN peer management** | Create, delete, and monitor WireGuard peers with downloadable configs (QR code, `.conf`, docker-compose, or setup script). |
-| **Service publishing** | Publish any container on a peer as a public HTTPS subdomain in one click, with automatic rollback if the flow fails. |
+| **Service publishing** | Publish any container on a peer as a public HTTPS subdomain in one click — or share one subdomain across several services via path prefixes (`host/auth/*`, `host/api/*`, …). Automatic rollback if the flow fails. |
 | **Smart launchpad** | A dashboard that links to every published service, switching to direct LAN URLs when you're on the same network. |
 | **Reverse proxy** | Traefik dynamic config generated automatically, with per-service Authelia toggle and root-path redirect. |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
@@ -176,6 +176,17 @@ After creating a peer, download its config and connect. Vaier shows the peer's h
 4. Vaier creates the DNS CNAME, the Traefik route, and (optionally) Authelia middleware.
 
 The service is live at `https://subdomain.yourdomain.com`.
+
+### Multiple services on one subdomain
+
+Set an optional **Path prefix** at publish time (e.g. `/auth`) to put more than one service behind a single subdomain. Traefik routes by `Host(...) && PathPrefix(...)`, so:
+
+```
+app.yourdomain.com/auth/*  →  http://peer-or-lan-host:8081
+app.yourdomain.com/api/*   →  http://peer-or-lan-host:8080
+```
+
+The first publish on a host creates the DNS CNAME; later siblings reuse it. Deleting a sibling leaves the CNAME alive; only when the last route on a host is removed does the CNAME go.
 
 For publishing services from non-peer LAN machines (NAS, printers, extra Docker hosts), see [`docs/ADVANCED.md`](docs/ADVANCED.md).
 

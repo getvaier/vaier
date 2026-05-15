@@ -373,8 +373,9 @@ public class VpnService implements
             routes.stream()
                 .filter(route -> peerIp.equals(route.getAddress()))
                 .forEach(route -> {
-                    log.info("Deleting published service {} pointing to peer {}", route.getDomainName(), peerName);
-                    deletePublishedServiceUseCase.deleteService(route.getDomainName());
+                    log.info("Deleting published service {} (path: {}) pointing to peer {}",
+                        route.getDomainName(), route.getPathPrefix(), peerName);
+                    deletePublishedServiceUseCase.deleteService(route.getDomainName(), route.getPathPrefix());
                 });
         });
     }

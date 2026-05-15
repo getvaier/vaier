@@ -60,6 +60,121 @@ class ReverseProxyRouteTest {
                 .hasMessageContaining("dnsName");
     }
 
+    // --- pathPrefix ---
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   ", "/", "  /  "})
+    void normalisePathPrefix_blankOrRoot_returnsNull(String input) {
+        assertThat(ReverseProxyRoute.normalisePathPrefix(input)).isNull();
+    }
+
+    @Test
+    void normalisePathPrefix_stripsTrailingSlash() {
+        assertThat(ReverseProxyRoute.normalisePathPrefix("/auth/")).isEqualTo("/auth");
+        assertThat(ReverseProxyRoute.normalisePathPrefix("/builder/ui/")).isEqualTo("/builder/ui");
+    }
+
+    @Test
+    void normalisePathPrefix_preservesGoodValueUnchanged() {
+        assertThat(ReverseProxyRoute.normalisePathPrefix("/auth")).isEqualTo("/auth");
+        assertThat(ReverseProxyRoute.normalisePathPrefix("/CorpoWebserver")).isEqualTo("/CorpoWebserver");
+    }
+
+    @Test
+    void normalisePathPrefix_trimsWhitespace() {
+        assertThat(ReverseProxyRoute.normalisePathPrefix("  /auth  ")).isEqualTo("/auth");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"auth", "auth/", "//double", "/foo bar", "/foo?bar", "/foo#bar", "/foo&bar"})
+    void validatePathPrefix_rejectsBadShapes(String bad) {
+        assertThatThrownBy(() -> ReverseProxyRoute.validatePathPrefix(bad))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("pathPrefix");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/auth", "/builder/ui", "/CorpoWebserver", "/a-b_c.d", "/x/y/z"})
+    void validatePathPrefix_acceptsGoodShapes(String good) {
+        assertThatCode(() -> ReverseProxyRoute.validatePathPrefix(good)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void validatePathPrefix_acceptsNull() {
+        assertThatCode(() -> ReverseProxyRoute.validatePathPrefix(null)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void pathPrefix_retainedByGetter() {
+        ReverseProxyRoute route = new ReverseProxyRoute("route", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/auth");
+
+        assertThat(route.getPathPrefix()).isEqualTo("/auth");
+    }
+
+    @Test
+    void pathPrefix_defaultsToNullWhenUsingShorterConstructor() {
+        ReverseProxyRoute route = new ReverseProxyRoute("route", "bmp.example.com", "10.0.0.1", 8080, "svc", null);
+
+        assertThat(route.getPathPrefix()).isNull();
+    }
+
+    // --- domain rules over existing-routes lists ---
+
+    @Test
+    void hasSiblingOnHost_emptyList_false() {
+        assertThat(ReverseProxyRoute.hasSiblingOnHost(List.of(), "bmp.example.com")).isFalse();
+    }
+
+    @Test
+    void hasSiblingOnHost_matchingDomain_true_regardlessOfPath() {
+        ReverseProxyRoute existing = pathRoute("bmp.example.com", "/auth");
+        assertThat(ReverseProxyRoute.hasSiblingOnHost(List.of(existing), "bmp.example.com")).isTrue();
+    }
+
+    @Test
+    void hasSiblingOnHost_differentDomain_false() {
+        ReverseProxyRoute existing = pathRoute("other.example.com", "/auth");
+        assertThat(ReverseProxyRoute.hasSiblingOnHost(List.of(existing), "bmp.example.com")).isFalse();
+    }
+
+    @Test
+    void conflictsWithExisting_sameDomainAndPath_true() {
+        ReverseProxyRoute existing = pathRoute("bmp.example.com", "/auth");
+        assertThat(ReverseProxyRoute.conflictsWithExisting(List.of(existing), "bmp.example.com", "/auth")).isTrue();
+    }
+
+    @Test
+    void conflictsWithExisting_sameDomainDifferentPath_false() {
+        ReverseProxyRoute existing = pathRoute("bmp.example.com", "/auth");
+        assertThat(ReverseProxyRoute.conflictsWithExisting(List.of(existing), "bmp.example.com", "/CorpoWebserver")).isFalse();
+    }
+
+    @Test
+    void conflictsWithExisting_bothNullPaths_true() {
+        ReverseProxyRoute existing = route("bmp.example.com", "10.0.0.1", 8080);
+        assertThat(ReverseProxyRoute.conflictsWithExisting(List.of(existing), "bmp.example.com", null)).isTrue();
+    }
+
+    @Test
+    void findByFqdnAndPath_found_returnsRoute() {
+        ReverseProxyRoute target = pathRoute("bmp.example.com", "/auth");
+        ReverseProxyRoute other = pathRoute("bmp.example.com", "/CorpoWebserver");
+        assertThat(ReverseProxyRoute.findByFqdnAndPath(List.of(target, other), "bmp.example.com", "/auth"))
+            .contains(target);
+    }
+
+    @Test
+    void findByFqdnAndPath_notFound_returnsEmpty() {
+        assertThat(ReverseProxyRoute.findByFqdnAndPath(List.of(), "bmp.example.com", "/auth")).isEmpty();
+    }
+
+    private static ReverseProxyRoute pathRoute(String domain, String path) {
+        return new ReverseProxyRoute("route", domain, "10.0.0.1", 8080, "svc", null,
+            null, null, null, null, false, false, null, path);
+    }
+
     // --- dnsState ---
 
     @Test

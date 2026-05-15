@@ -232,8 +232,9 @@
             return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
         }
 
-        function serviceName(dnsAddress) {
-            return dnsAddress.split('.')[0];
+        function serviceName(service) {
+            const base = service.dnsAddress.split('.')[0];
+            return service.pathPrefix ? base + service.pathPrefix : base;
         }
 
         function peerName(dnsAddress, hostAddress) {
@@ -245,14 +246,14 @@
 
         function renderTile(service) {
             const url    = service.url;
-            const name   = serviceName(service.dnsAddress);
+            const name   = serviceName(service);
             const color  = avatarColor(name);
             const letter = name.charAt(0).toUpperCase();
             const peer   = peerName(service.dnsAddress, service.hostAddress);
 
             const tile = document.createElement('a');
             tile.href = url;
-            tile.target = service.dnsAddress;
+            tile.target = service.dnsAddress + (service.pathPrefix || '');
             tile.rel = '';
             tile.className = service.state === 'OK' ? 'tile' : 'tile down';
 
@@ -332,7 +333,7 @@
 
                 for (const peer of sortedPeers) {
                     const peerServices = byPeer.get(peer).sort((a, b) =>
-                        serviceName(a.dnsAddress).localeCompare(serviceName(b.dnsAddress))
+                        serviceName(a).localeCompare(serviceName(b))
                     );
 
                     const section = document.createElement('div');

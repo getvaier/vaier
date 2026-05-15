@@ -41,6 +41,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -571,8 +572,8 @@ class VpnServiceTest {
 
         service.deletePeer("alice");
 
-        verify(deletePublishedServiceUseCase).deleteService("app.example.com");
-        verify(deletePublishedServiceUseCase, never()).deleteService("other.example.com");
+        verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
+        verify(deletePublishedServiceUseCase, never()).deleteService(eq("other.example.com"), any());
     }
 
     @Test
@@ -586,8 +587,8 @@ class VpnServiceTest {
 
         service.deletePeer("alice");
 
-        verify(deletePublishedServiceUseCase).deleteService("app1.example.com");
-        verify(deletePublishedServiceUseCase).deleteService("app2.example.com");
+        verify(deletePublishedServiceUseCase).deleteService("app1.example.com", null);
+        verify(deletePublishedServiceUseCase).deleteService("app2.example.com", null);
     }
 
     @Test
@@ -623,7 +624,7 @@ class VpnServiceTest {
 
         service.deletePeer("10.13.13.2");
 
-        verify(deletePublishedServiceUseCase).deleteService("app.example.com");
+        verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
         verify(vpnPeerDeleter).deletePeer("alice");
     }
 
@@ -638,7 +639,7 @@ class VpnServiceTest {
         service.deletePeer("alice");
 
         var order = inOrder(deletePublishedServiceUseCase, vpnPeerDeleter);
-        order.verify(deletePublishedServiceUseCase).deleteService("app.example.com");
+        order.verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
         order.verify(vpnPeerDeleter).deletePeer("alice");
     }
 

@@ -468,6 +468,73 @@ class PublishingServiceTest {
         assertThat(record.values()).containsExactly("vaier.example.com.");
     }
 
+    // --- pathPrefix-aware publish (Phase B) ---
+
+    @Test
+    void publishService_pathPrefix_passesPathThroughToTraefik() {
+        when(forResolvingDns.isResolvable("bmp.example.com")).thenReturn(true);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of())
+            .thenReturn(List.of(routeWithDomain("bmp.example.com")));
+
+        service.waitForDnsThenActivate("bmp", "bmp.example.com", "10.13.13.6", 8081, false, null, false, "/auth");
+
+        verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
+            "bmp.example.com", "10.13.13.6", 8081, false, null, "/auth");
+    }
+
+    @Test
+    void publishService_siblingRouteOnSameHost_skipsCnameCreate() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("bmp.example.com")));
+
+        service.publishService("10.13.13.6", 8081, "bmp", false, null, false, "/auth");
+
+        verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
+    }
+
+    @Test
+    void publishService_duplicateFqdnAndPath_throws() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+                null, null, null, null, null, false, false, null, "/auth")));
+
+        assertThrows(IllegalArgumentException.class, () ->
+            service.publishService("10.13.13.6", 8081, "bmp", false, null, false, "/auth"));
+    }
+
+    @Test
+    void deleteService_lastRouteOnHost_deletesCname() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(routeWithDomain("app.example.com")))   // before delete
+            .thenReturn(List.of())                                       // after delete (drained)
+            .thenReturn(List.of())
+            .thenReturn(List.of());
+
+        service.deleteService("app.example.com");
+
+        verify(forPersistingDnsRecords).deleteDnsRecord(eq("app.example.com"), eq(DnsRecordType.CNAME), any());
+    }
+
+    @Test
+    void deleteService_siblingRoutesRemain_doesNotDeleteCname() {
+        ReverseProxyRoute auth = new ReverseProxyRoute("auth", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/auth");
+        ReverseProxyRoute corpo = new ReverseProxyRoute("corpo", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/CorpoWebserver");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(auth, corpo))   // findByFqdnAndPath
+            .thenReturn(List.of(corpo))         // wait-for-traefik-deletion (first poll: still seems present? path-aware so absent)
+            .thenReturn(List.of(corpo))
+            .thenReturn(List.of(corpo))         // hasSiblingOnHost check after deletion
+            .thenReturn(List.of(corpo));
+
+        service.deleteService("bmp.example.com", "/auth");
+
+        verify(forPersistingReverseProxyRoutes).deleteReverseProxyRoute("auth");
+        verify(forPersistingDnsRecords, never()).deleteDnsRecord(any(), any(), any());
+    }
+
     @Test
     void getPublishStatus_routeExistsInTraefik_returnsTrueTrue() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
@@ -546,10 +613,10 @@ class PublishingServiceTest {
             .thenReturn(List.of())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         InOrder inOrder = inOrder(forPersistingReverseProxyRoutes, forPublishingEvents);
-        inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
+        inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null, null);
         inOrder.verify(forPublishingEvents).publish("published-services", "publish-traefik-active", "app");
         verify(forPersistingReverseProxyRoutes, atLeast(2)).getReverseProxyRoutes();
     }
@@ -568,7 +635,7 @@ class PublishingServiceTest {
         // Prime cache
         service.getPublishedServices();
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         // Cache should have been invalidated -> next call re-fetches
         service.getPublishedServices();
@@ -582,11 +649,11 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, true);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, true, null);
 
         InOrder inOrder = inOrder(forPersistingReverseProxyRoutes);
-        inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null);
-        inOrder.verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", true);
+        inOrder.verify(forPersistingReverseProxyRoutes).addReverseProxyRoute("app.example.com", "10.0.0.1", 8080, false, null, null);
+        inOrder.verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, true);
     }
 
     @Test
@@ -595,9 +662,9 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -606,9 +673,9 @@ class PublishingServiceTest {
         ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 100L);
         ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
-        verify(forPersistingReverseProxyRoutes, never()).addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any());
+        verify(forPersistingReverseProxyRoutes, never()).addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -617,7 +684,7 @@ class PublishingServiceTest {
         ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 50L);
         ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         verify(forPublishingEvents).publish("published-services", "publish-dns-timeout", "app");
     }
@@ -628,7 +695,7 @@ class PublishingServiceTest {
         ReflectionTestUtils.setField(service, "dnsTimeoutMillis", 50L);
         ReflectionTestUtils.setField(service, "dnsRetryIntervalMillis", 10L);
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         verify(forPersistingDnsRecords).deleteDnsRecord(
             eq("app.example.com."),
@@ -641,9 +708,9 @@ class PublishingServiceTest {
     void waitForDnsThenActivate_traefikAddThrows_deletesCnameAndEmitsRollback() {
         when(forResolvingDns.isResolvable("app.example.com")).thenReturn(true);
         doThrow(new RuntimeException("traefik boom")).when(forPersistingReverseProxyRoutes)
-            .addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any());
+            .addReverseProxyRoute(anyString(), anyString(), anyInt(), anyBoolean(), any(), any());
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         verify(forPersistingDnsRecords).deleteDnsRecord(
             eq("app.example.com."),
@@ -659,7 +726,7 @@ class PublishingServiceTest {
         ReflectionTestUtils.setField(service, "traefikActivationTimeoutMillis", 50L);
         ReflectionTestUtils.setField(service, "traefikActivationRetryIntervalMillis", 10L);
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         verify(forPersistingReverseProxyRoutes).deleteReverseProxyRouteByDnsName("app.example.com");
         verify(forPersistingDnsRecords).deleteDnsRecord(
@@ -675,7 +742,7 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.0.0.1", 8080, false, null, false, null);
 
         verify(forPublishingEvents, never()).publish(anyString(), eq("publish-rolled-back"), anyString());
         verify(forPersistingDnsRecords, never()).deleteDnsRecord(anyString(), any(), any());
@@ -689,10 +756,10 @@ class PublishingServiceTest {
         when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("172.20.0.3")))
             .thenReturn(Optional.of("vaier"));
 
-        service.waitForDnsThenActivate("app", "app.example.com", "172.20.0.3", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "172.20.0.3", 8080, false, null, false, null);
 
         verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
-            "app.example.com", "vaier", 8080, false, null);
+            "app.example.com", "vaier", 8080, false, null, null);
     }
 
     @Test
@@ -703,10 +770,10 @@ class PublishingServiceTest {
         when(forGettingServerInfo.findContainerNameByIp(any(Server.class), eq("10.13.13.3")))
             .thenReturn(Optional.empty());
 
-        service.waitForDnsThenActivate("app", "app.example.com", "10.13.13.3", 8080, false, null, false);
+        service.waitForDnsThenActivate("app", "app.example.com", "10.13.13.3", 8080, false, null, false, null);
 
         verify(forPersistingReverseProxyRoutes).addReverseProxyRoute(
-            "app.example.com", "10.13.13.3", 8080, false, null);
+            "app.example.com", "10.13.13.3", 8080, false, null, null);
     }
 
     @Test
@@ -766,7 +833,7 @@ class PublishingServiceTest {
         );
         verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
         verify(forPersistingReverseProxyRoutes, never()).addLanReverseProxyRoute(
-            anyString(), anyString(), anyInt(), anyString(), anyBoolean(), anyBoolean(), any());
+            anyString(), anyString(), anyInt(), anyString(), anyBoolean(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -793,10 +860,10 @@ class PublishingServiceTest {
             .thenReturn(List.of(routeWithDomain("nas.example.com")));
 
         service.waitForLanDnsThenActivate(
-            "nas", "nas.example.com", "192.168.3.50", 5000, "https", true, true, null);
+            "nas", "nas.example.com", "192.168.3.50", 5000, "https", true, true, null, null);
 
         verify(forPersistingReverseProxyRoutes).addLanReverseProxyRoute(
-            "nas.example.com", "192.168.3.50", 5000, "https", true, true, null);
+            "nas.example.com", "192.168.3.50", 5000, "https", true, true, null, null);
     }
 
     @Test
@@ -828,10 +895,10 @@ class PublishingServiceTest {
             .thenReturn(List.of(routeWithDomain("app.example.com")));
 
         service.waitForLanDnsThenActivate(
-            "app", "app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/");
+            "app", "app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/", null);
 
         verify(forPersistingReverseProxyRoutes).addLanReverseProxyRoute(
-            "app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/");
+            "app.example.com", "192.168.3.50", 3000, "http", false, false, "/builder/ui/", null);
     }
 
     // --- deleteService ---
@@ -1155,28 +1222,28 @@ class PublishingServiceTest {
     void setAuthentication_true_delegatesToPort() {
         service.setAuthentication("app.example.com", true);
 
-        verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", true);
+        verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", null, true);
     }
 
     @Test
     void setAuthentication_false_delegatesToPort() {
         service.setAuthentication("app.example.com", false);
 
-        verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", false);
+        verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", null, false);
     }
 
     @Test
     void setAuthentication_rejectsVaierService() {
         assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("vaier.example.com", true));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
     }
 
     @Test
     void setAuthentication_rejectsAuthService() {
         assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("login.example.com", false));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -1202,21 +1269,21 @@ class PublishingServiceTest {
     void setDirectUrlDisabled_true_delegatesToPort() {
         service.setDirectUrlDisabled("app.example.com", true);
 
-        verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", true);
+        verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, true);
     }
 
     @Test
     void setDirectUrlDisabled_false_delegatesToPort() {
         service.setDirectUrlDisabled("app.example.com", false);
 
-        verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", false);
+        verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, false);
     }
 
     @Test
     void setDirectUrlDisabled_rejectsVaierService() {
         assertThrows(IllegalArgumentException.class, () -> service.setDirectUrlDisabled("vaier.example.com", true));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -1241,14 +1308,14 @@ class PublishingServiceTest {
     void setRootRedirectPath_delegatesToPort() {
         service.setRootRedirectPath("app.example.com", "/dashboard/");
 
-        verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", "/dashboard/");
+        verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, "/dashboard/");
     }
 
     @Test
     void setRootRedirectPath_nullPath_removesRedirect() {
         service.setRootRedirectPath("app.example.com", null);
 
-        verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null);
+        verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, null);
     }
 
     @Test
@@ -1272,7 +1339,7 @@ class PublishingServiceTest {
         assertThrows(IllegalArgumentException.class,
             () -> service.setRootRedirectPath("vaier.example.com", "/admin/"));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), anyString());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
     }
 
     @Test
@@ -1280,7 +1347,7 @@ class PublishingServiceTest {
         assertThrows(IllegalArgumentException.class,
             () -> service.setRootRedirectPath("login.example.com", "/admin/"));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), anyString());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
     }
 
     // --- ignoreService ---

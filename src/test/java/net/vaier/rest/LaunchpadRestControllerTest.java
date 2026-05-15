@@ -37,8 +37,8 @@ class LaunchpadRestControllerTest {
     @Test
     void getServices_returnsLaunchpadServices() {
         var services = List.of(
-            new LaunchpadServiceUco("app.example.com", "10.0.0.1", State.OK, null),
-            new LaunchpadServiceUco("db.example.com", "10.0.0.2", State.OK, null)
+            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", State.OK, null),
+            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", State.OK, null)
         );
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(services);
 

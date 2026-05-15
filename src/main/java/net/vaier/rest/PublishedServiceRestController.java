@@ -60,11 +60,18 @@ public class PublishedServiceRestController {
 
     @PostMapping("/publish")
     public ResponseEntity<Void> publishService(@RequestBody PublishRequest request) {
-        log.info("Publishing service: {}:{} as {}.* (auth={}, directUrlDisabled={})",
-            request.address(), request.port(), request.subdomain(), request.requiresAuth(), request.directUrlDisabled());
-        publishPeerServiceUseCase.publishService(
-            request.address(), request.port(), request.subdomain(),
-            request.requiresAuth(), request.rootRedirectPath(), request.directUrlDisabled());
+        log.info("Publishing service: {}:{} as {}.* (auth={}, directUrlDisabled={}, pathPrefix={})",
+            request.address(), request.port(), request.subdomain(), request.requiresAuth(),
+            request.directUrlDisabled(), request.pathPrefix());
+        try {
+            publishPeerServiceUseCase.publishService(
+                request.address(), request.port(), request.subdomain(),
+                request.requiresAuth(), request.rootRedirectPath(), request.directUrlDisabled(),
+                request.pathPrefix());
+        } catch (IllegalArgumentException e) {
+            log.warn("Publish rejected: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
         return ResponseEntity.ok().build();
     }
 
@@ -81,13 +88,15 @@ public class PublishedServiceRestController {
         // A Docker-enabled LAN server can still have native (non-container) services that
         // need manual publish — don't reject based on runsDocker.
         String host = view.server().lanAddress();
-        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, machine={})",
+        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, pathPrefix={}, machine={})",
             request.protocol(), host, request.port(), request.subdomain(),
-            request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(), request.machineName());
+            request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
+            request.pathPrefix(), request.machineName());
         try {
             publishLanServiceUseCase.publishLanService(
                 request.subdomain(), host, request.port(), request.protocol(),
-                request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath());
+                request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
+                request.pathPrefix());
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
             log.warn("LAN publish rejected: {}", e.getMessage());
@@ -96,25 +105,31 @@ public class PublishedServiceRestController {
     }
 
     @PatchMapping("/{dnsName:.+}/auth")
-    public ResponseEntity<Void> setAuth(@PathVariable String dnsName, @RequestBody AuthRequest request) {
-        log.info("Setting auth={} for {}", request.requiresAuth(), dnsName);
-        toggleServiceAuthUseCase.setAuthentication(dnsName, request.requiresAuth());
+    public ResponseEntity<Void> setAuth(@PathVariable String dnsName,
+                                        @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                        @RequestBody AuthRequest request) {
+        log.info("Setting auth={} for {} (pathPrefix: {})", request.requiresAuth(), dnsName, pathPrefix);
+        toggleServiceAuthUseCase.setAuthentication(dnsName, pathPrefix, request.requiresAuth());
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 
     @PatchMapping("/{dnsName:.+}/redirect")
-    public ResponseEntity<Void> setRedirect(@PathVariable String dnsName, @RequestBody RedirectRequest request) {
-        log.info("Setting rootRedirectPath={} for {}", request.rootRedirectPath(), dnsName);
-        editServiceRedirectUseCase.setRootRedirectPath(dnsName, request.rootRedirectPath());
+    public ResponseEntity<Void> setRedirect(@PathVariable String dnsName,
+                                            @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                            @RequestBody RedirectRequest request) {
+        log.info("Setting rootRedirectPath={} for {} (pathPrefix: {})", request.rootRedirectPath(), dnsName, pathPrefix);
+        editServiceRedirectUseCase.setRootRedirectPath(dnsName, pathPrefix, request.rootRedirectPath());
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 
     @PatchMapping("/{dnsName:.+}/direct-url-disabled")
-    public ResponseEntity<Void> setDirectUrlDisabled(@PathVariable String dnsName, @RequestBody DirectUrlDisabledRequest request) {
-        log.info("Setting directUrlDisabled={} for {}", request.directUrlDisabled(), dnsName);
-        toggleServiceDirectUrlDisabledUseCase.setDirectUrlDisabled(dnsName, request.directUrlDisabled());
+    public ResponseEntity<Void> setDirectUrlDisabled(@PathVariable String dnsName,
+                                                     @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                                     @RequestBody DirectUrlDisabledRequest request) {
+        log.info("Setting directUrlDisabled={} for {} (pathPrefix: {})", request.directUrlDisabled(), dnsName, pathPrefix);
+        toggleServiceDirectUrlDisabledUseCase.setDirectUrlDisabled(dnsName, pathPrefix, request.directUrlDisabled());
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
@@ -131,9 +146,15 @@ public class PublishedServiceRestController {
     }
 
     @DeleteMapping("/{dnsName:.+}")
-    public ResponseEntity<Void> deleteService(@PathVariable String dnsName) {
-        log.info("Deleting published service: {}", dnsName);
-        deletePublishedServiceUseCase.deleteService(dnsName);
+    public ResponseEntity<Void> deleteService(@PathVariable String dnsName,
+                                              @RequestParam(value = "pathPrefix", required = false) String pathPrefix) {
+        log.info("Deleting published service: {} (pathPrefix: {})", dnsName, pathPrefix);
+        try {
+            deletePublishedServiceUseCase.deleteService(dnsName, pathPrefix);
+        } catch (IllegalArgumentException e) {
+            log.warn("Delete rejected: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
@@ -150,8 +171,10 @@ public class PublishedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
-    record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath, boolean directUrlDisabled) {}
-    record PublishLanRequest(String subdomain, String machineName, int port, String protocol, boolean requireAuth, boolean directUrlDisabled, String rootRedirectPath) {}
+    record PublishRequest(String address, int port, String subdomain, boolean requiresAuth, String rootRedirectPath,
+                          boolean directUrlDisabled, String pathPrefix) {}
+    record PublishLanRequest(String subdomain, String machineName, int port, String protocol, boolean requireAuth,
+                             boolean directUrlDisabled, String rootRedirectPath, String pathPrefix) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}

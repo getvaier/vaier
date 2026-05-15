@@ -277,6 +277,64 @@ class TraefikReverseProxyAdapterTest {
         assertThat(route.isLanService()).isFalse();
     }
 
+    // --- pathPrefix (Phase B) ---
+
+    @Test
+    void addReverseProxyRoute_withPathPrefix_writesHostAndPathPrefixRule() throws IOException {
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8081, false, null, "/auth");
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("Host(`bmp.example.com`) && PathPrefix(`/auth`)");
+    }
+
+    @Test
+    void addReverseProxyRoute_withoutPathPrefix_writesHostOnlyRule() throws IOException {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, null);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("Host(`app.example.com`)");
+        assertThat(content).doesNotContain("PathPrefix");
+    }
+
+    @Test
+    void addReverseProxyRoute_twoPathPrefixesOnSameHost_coexistAsSeparateRouters() {
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8081, false, null, "/auth");
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8080, false, null, "/CorpoWebserver");
+
+        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
+        assertThat(routes).hasSize(2);
+        assertThat(routes).extracting(ReverseProxyRoute::getPathPrefix)
+            .containsExactlyInAnyOrder("/auth", "/CorpoWebserver");
+        assertThat(routes).extracting(ReverseProxyRoute::getDomainName)
+            .containsExactly("bmp.example.com", "bmp.example.com");
+    }
+
+    @Test
+    void addReverseProxyRoute_withPathPrefix_routerAndServiceNamesIncludePathSlug() throws IOException {
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8081, false, null, "/auth");
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("bmp-example-com-auth-router");
+        assertThat(content).contains("bmp-example-com-auth-service");
+    }
+
+    @Test
+    void addReverseProxyRoute_pathPrefixIsRoundTripped() {
+        adapter.addReverseProxyRoute("bmp.example.com", "10.13.13.2", 8081, false, null, "/auth");
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getPathPrefix()).isEqualTo("/auth");
+    }
+
+    @Test
+    void addLanReverseProxyRoute_withPathPrefix_writesHostAndPathPrefixRule() throws IOException {
+        adapter.addLanReverseProxyRoute("app.example.com", "192.168.3.50", 3000, "http", false, false, null, "/builder/ui");
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).contains("Host(`app.example.com`) && PathPrefix(`/builder/ui`)");
+        assertThat(content).contains("app-example-com-builder-ui-router");
+    }
+
     // --- ForManagingIgnoredServices ---
 
     @Test

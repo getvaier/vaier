@@ -4,14 +4,47 @@ import net.vaier.domain.ReverseProxyRoute;
 import java.util.List;
 
 public interface ForPersistingReverseProxyRoutes {
-    void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth, String rootRedirectPath);
+    /**
+     * Add a route. {@code pathPrefix} may be null for a host-only route, or a normalised path like
+     * {@code "/auth"} to add a path-scoped route that coexists with others on the same host.
+     * Router/service names include a path-derived slug so multiple routes on one host don't collide.
+     */
+    void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
+                              String rootRedirectPath, String pathPrefix);
     void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
-                                 boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath);
+                                 boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                 String pathPrefix);
+
+    /** Convenience overload for the common host-only case. */
+    default void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
+                                      String rootRedirectPath) {
+        addReverseProxyRoute(dnsName, address, port, requiresAuth, rootRedirectPath, null);
+    }
+    /** Convenience overload for the common host-only case. */
+    default void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
+                                         boolean requiresAuth, boolean directUrlDisabled,
+                                         String rootRedirectPath) {
+        addLanReverseProxyRoute(dnsName, host, port, protocol, requiresAuth, directUrlDisabled,
+            rootRedirectPath, null);
+    }
+
     List<ReverseProxyRoute> getReverseProxyRoutes();
     void updateReverseProxyRoute(String routeName, ReverseProxyRoute updatedRoute);
     void deleteReverseProxyRoute(String routeName);
     void deleteReverseProxyRouteByDnsName(String dnsName);
-    void setRouteAuthentication(String dnsName, boolean requiresAuth);
-    void setRouteRootRedirectPath(String dnsName, String rootRedirectPath);
-    void setRouteDirectUrlDisabled(String dnsName, boolean directUrlDisabled);
+
+    /** Path-aware setters target a specific (dnsName, pathPrefix) router. */
+    void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth);
+    void setRouteRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath);
+    void setRouteDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled);
+
+    default void setRouteAuthentication(String dnsName, boolean requiresAuth) {
+        setRouteAuthentication(dnsName, null, requiresAuth);
+    }
+    default void setRouteRootRedirectPath(String dnsName, String rootRedirectPath) {
+        setRouteRootRedirectPath(dnsName, null, rootRedirectPath);
+    }
+    default void setRouteDirectUrlDisabled(String dnsName, boolean directUrlDisabled) {
+        setRouteDirectUrlDisabled(dnsName, null, directUrlDisabled);
+    }
 }
