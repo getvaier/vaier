@@ -1,0 +1,265 @@
+:root {
+    --bg:           #1e1e1e;
+    --bg-panel:     #252526;
+    --bg-card:      #2d2d30;
+    --bg-hover:     #2a2d2e;
+    --bg-input:     #3c3c3c;
+    --border:       #3c3c3c;
+    --border-hi:    #555;
+    --text:         #d4d4d4;
+    --text-muted:   #858585;
+    --text-dim:     #5a5a5a;
+    --accent:       #4fc3f7;
+    --accent-hover: #81d4fa;
+    --green:        #4ec9b0;
+    --red:          #f48771;
+    --orange:       #ce9178;
+    --yellow:       #dcdcaa;
+    --mono:         'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+/* Top navigation bar — shared across all pages */
+.topbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 0 1rem;
+    height: 48px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-shrink: 0;
+}
+
+.topbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 0.75rem;
+    color: var(--accent);
+    font-size: 0.88rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.topbar-brand:hover { text-decoration: none; color: var(--accent); }
+.topbar-brand svg { flex-shrink: 0; }
+
+.topbar-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.topbar-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    height: 32px;
+    border-radius: 3px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.82rem;
+    border: 1px solid transparent;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+}
+
+.topbar-item:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+    text-decoration: none;
+}
+
+.topbar-item.active {
+    color: var(--accent);
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+
+.topbar-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+.topbar-user {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* Page header — IDE tab/breadcrumb bar */
+.page-header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 0 1.5rem;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    position: sticky;
+    top: 48px;
+    z-index: 10;
+}
+
+.page-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.page-title svg {
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.page-header-actions {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+/* Buttons — minimal, launchpad-style */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 400;
+    font-family: inherit;
+    line-height: 1.5;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.btn:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+    border-color: var(--border);
+    text-decoration: none;
+}
+
+.btn-primary { color: var(--accent); }
+.btn-primary:hover {
+    color: var(--accent);
+    background: rgba(79, 195, 247, 0.12);
+    border-color: var(--accent);
+}
+
+.btn-secondary { color: var(--text-muted); }
+.btn-secondary:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+    border-color: var(--border);
+}
+
+.btn-large {
+    padding: 8px 16px;
+    font-size: 0.86rem;
+}
+
+/* Cards / Panels */
+.card {
+    background: var(--bg-card);
+    border-radius: 2px;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+}
+
+/* Section label */
+.section-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 1.5rem 0 0.6rem;
+}
+
+/* Badges */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.4rem;
+    height: 22px;
+    border-radius: 2px;
+    font-size: 0.7rem;
+    font-family: var(--mono);
+    white-space: nowrap;
+}
+
+.badge-success {
+    background: rgba(78, 201, 176, 0.12);
+    color: var(--green);
+    border: 1px solid rgba(78, 201, 176, 0.25);
+}
+
+.badge-warning {
+    background: rgba(206, 145, 120, 0.12);
+    color: var(--orange);
+    border: 1px solid rgba(206, 145, 120, 0.25);
+}
+
+/* Links */
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* Mobile */
+@media (max-width: 600px) {
+    .container { padding: 1rem; }
+
+    .topbar { padding: 0 8px; gap: 2px; }
+    .topbar-brand { margin-right: 2px; }
+    .topbar-nav { gap: 0; }
+    .topbar-item { padding: 6px 10px; gap: 0; }
+    .topbar-item .link-label { display: none; }
+
+    .page-header {
+        height: auto;
+        min-height: 44px;
+        padding: 6px 1rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .btn-large { padding: 10px 14px; font-size: 0.85rem; }
+}

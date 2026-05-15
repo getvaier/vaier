@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vaier — Self-hosted infrastructure for homelab developers</title>
+    <meta name="description" content="Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain — Vaier handles DNS, reverse proxy, and HTTPS automatically.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body { min-height: 100vh; }
+
+        .hero {
+            padding: 4.5rem 1.5rem 3rem;
+            max-width: 980px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .hero-logo {
+            display: inline-flex;
+            margin-bottom: 1.75rem;
+            filter: drop-shadow(0 0 24px rgba(79, 195, 247, 0.25));
+        }
+
+        .hero h1 {
+            font-size: 2.6rem;
+            font-weight: 600;
+            line-height: 1.15;
+            color: var(--text);
+            margin-bottom: 1.1rem;
+            letter-spacing: -0.01em;
+        }
+
+        .hero h1 .accent { color: var(--accent); }
+
+        .hero p.lede {
+            font-size: 1.02rem;
+            color: var(--text-muted);
+            max-width: 720px;
+            margin: 0 auto 2rem;
+            line-height: 1.6;
+        }
+
+        .hero-actions {
+            display: inline-flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .hero-badges {
+            margin-top: 2rem;
+            display: inline-flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--text-dim);
+        }
+
+        .hero-badges .badge-meta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.2rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg-panel);
+        }
+
+        .hero-badges .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 4px var(--green);
+        }
+
+        section {
+            padding: 3rem 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-heading {
+            display: flex;
+            align-items: baseline;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .section-heading h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text);
+            letter-spacing: -0.005em;
+        }
+
+        .section-heading .crumb {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-family: var(--mono);
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .feature {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 1.1rem 1.15rem;
+            transition: border-color 0.12s, background 0.12s;
+        }
+
+        .feature:hover {
+            border-color: var(--border-hi);
+            background: #303033;
+        }
+
+        .feature-icon {
+            color: var(--accent);
+            width: 22px;
+            height: 22px;
+            margin-bottom: 0.7rem;
+        }
+
+        .feature h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.35rem;
+        }
+
+        .feature p {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            line-height: 1.55;
+        }
+
+        .feature code {
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            color: var(--orange);
+            background: rgba(206, 145, 120, 0.08);
+            padding: 0 0.25rem;
+            border-radius: 2px;
+        }
+
+        .diagram-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 1.75rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .diagram-wrap svg { max-width: 100%; height: auto; }
+
+        .diagram-caption {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-align: center;
+            max-width: 720px;
+            line-height: 1.6;
+        }
+
+        .code {
+            background: #161616;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 0.9rem 1.1rem;
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            color: var(--text);
+            overflow-x: auto;
+            line-height: 1.7;
+            white-space: pre;
+        }
+
+        .code .comment { color: var(--text-dim); }
+        .code .cmd     { color: var(--green); }
+        .code .str     { color: var(--orange); }
+        .code .var     { color: var(--yellow); }
+
+        .steps {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .step {
+            display: grid;
+            grid-template-columns: 36px 1fr;
+            gap: 0.85rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 1.1rem 1.15rem;
+        }
+
+        .step-num {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--accent);
+            background: rgba(79, 195, 247, 0.12);
+            border: 1px solid rgba(79, 195, 247, 0.35);
+            border-radius: 2px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .step-body h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.45rem;
+        }
+
+        .step-body p {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            line-height: 1.55;
+            margin-bottom: 0.7rem;
+        }
+
+        .step-body p:last-child { margin-bottom: 0; }
+
+        .step-body code {
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            color: var(--orange);
+        }
+
+        .why {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+
+        .why-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 1.15rem;
+        }
+
+        .why-card .label {
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.5rem;
+        }
+
+        .why-card h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 0.6rem;
+        }
+
+        .why-card p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            background: var(--bg-panel);
+            padding: 2rem 1.5rem;
+            margin-top: 3rem;
+        }
+
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .footer-inner a { color: var(--text-muted); }
+        .footer-inner a:hover { color: var(--accent); text-decoration: none; }
+
+        .footer-links {
+            display: flex;
+            gap: 1.25rem;
+            flex-wrap: wrap;
+        }
+
+        .footer-brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--accent);
+        }
+
+        @media (max-width: 600px) {
+            .hero { padding: 2.5rem 1rem 2rem; }
+            .hero h1 { font-size: 1.85rem; }
+            .hero p.lede { font-size: 0.92rem; }
+            section { padding: 2rem 1rem; }
+            .section-heading h2 { font-size: 1.25rem; }
+            .why { grid-template-columns: 1fr; }
+            .diagram-wrap { padding: 1.25rem 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <a href="#top" class="topbar-brand" aria-label="Vaier">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
+                <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
+                <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
+                <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+            </svg>
+            <span>Vaier</span>
+        </a>
+        <nav class="topbar-nav">
+            <a href="#features" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="1.5" y="2" width="13" height="4.5" rx="1"/>
+                    <rect x="1.5" y="9.5" width="13" height="4.5" rx="1"/>
+                    <circle cx="4" cy="4.25" r="0.8" fill="currentColor" stroke="none"/>
+                    <circle cx="4" cy="11.75" r="0.8" fill="currentColor" stroke="none"/>
+                    <line x1="7" y1="4.25" x2="11" y2="4.25" stroke-width="1"/>
+                    <line x1="7" y1="11.75" x2="11" y2="11.75" stroke-width="1"/>
+                </svg>
+                <span class="link-label">Features</span>
+            </a>
+            <a href="#how" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
+                    <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
+                    <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
+                    <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+                <span class="link-label">How it works</span>
+            </a>
+            <a href="#quickstart" class="topbar-item">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 8 7 12 13 4"/>
+                </svg>
+                <span class="link-label">Quick start</span>
+            </a>
+        </nav>
+        <div class="topbar-user">
+            <a href="https://github.com/getvaier/vaier" class="topbar-item" target="_blank" rel="noopener" title="GitHub">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+                </svg>
+                <span class="link-label">GitHub</span>
+            </a>
+        </div>
+    </div>
+
+    <div class="page-header" id="top">
+        <div class="page-title">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 7 7 10 12 4"/>
+                <path d="M2 12h12"/>
+            </svg>
+            VAIER / README
+        </div>
+        <div class="page-header-actions">
+            <a href="#quickstart" class="btn btn-primary">Quick start</a>
+        </div>
+    </div>
+
+    <section class="hero">
+        <div class="hero-logo">
+            <svg width="84" height="84" viewBox="0 0 100 100" fill="none" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round">
+                <circle cx="50" cy="50" r="14" fill="#4fc3f7" stroke="none"/>
+                <line x1="16" y1="22" x2="38" y2="41"/>
+                <line x1="84" y1="22" x2="62" y2="41"/>
+                <line x1="16" y1="78" x2="38" y2="59"/>
+                <line x1="84" y1="78" x2="62" y2="59"/>
+                <circle cx="16" cy="22" r="9" fill="#4fc3f7" stroke="none"/>
+                <circle cx="84" cy="22" r="9" fill="#4fc3f7" stroke="none"/>
+                <circle cx="16" cy="78" r="9" fill="#4fc3f7" stroke="none"/>
+                <circle cx="84" cy="78" r="9" fill="#4fc3f7" stroke="none"/>
+            </svg>
+        </div>
+        <h1>Self-hosted infrastructure<br/>for <span class="accent">homelab developers</span>.</h1>
+        <p class="lede">
+            Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI.
+            Add a Docker container on any VPN peer, pick a subdomain — Vaier handles DNS,
+            reverse proxy, and HTTPS automatically.
+        </p>
+        <div class="hero-actions">
+            <a href="#quickstart" class="btn btn-primary btn-large">Get started</a>
+            <a href="https://github.com/getvaier/vaier" class="btn btn-secondary btn-large" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+        <div class="hero-badges">
+            <span class="badge-meta"><span class="dot"></span>Apache 2.0</span>
+            <span class="badge-meta">Java 21 · Spring Boot</span>
+            <span class="badge-meta">Single Docker Compose</span>
+            <span class="badge-meta">No database</span>
+        </div>
+    </section>
+
+    <section id="why">
+        <div class="section-heading">
+            <span class="crumb">// the problem</span>
+            <h2>Tired of maintaining a VPN, a reverse proxy, and a wall of DNS records?</h2>
+        </div>
+        <div class="why">
+            <div class="why-card">
+                <div class="label">// without vaier</div>
+                <h3>Six tools, six config files, six places to mess up</h3>
+                <p>
+                    You spin up a container on a homelab box. Now you need a WireGuard peer, a Route53
+                    CNAME, a Traefik dynamic-config entry, a Let's Encrypt cert, an Authelia rule, and
+                    a bookmark somewhere you'll actually find later. Every new service repeats the
+                    whole dance. Every drift is silent.
+                </p>
+            </div>
+            <div class="why-card">
+                <div class="label">// with vaier</div>
+                <h3>One UI. One click. One subdomain.</h3>
+                <p>
+                    Vaier discovers containers on every connected peer, lets you pick a subdomain,
+                    creates the DNS record, generates the Traefik route, provisions the cert,
+                    optionally gates it behind Authelia, and rolls back the entire flow if anything
+                    fails. Your homelab now feels like a PaaS.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section id="features">
+        <div class="section-heading">
+            <span class="crumb">// features</span>
+            <h2>Everything your homelab needs, in one binary.</h2>
+        </div>
+        <div class="features">
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="12" rx="2"/>
+                    <path d="M8 20h8M12 16v4"/>
+                </svg>
+                <h3>VPN peer management</h3>
+                <p>Create, delete, and monitor WireGuard peers. Download QR codes, <code>.conf</code> files, docker-compose, or setup scripts — whichever fits the peer type.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2v6M12 16v6M2 12h6M16 12h6M5 5l4 4M19 5l-4 4M5 19l4-4M19 19l-4-4"/>
+                </svg>
+                <h3>One-click service publishing</h3>
+                <p>Any container on any peer becomes a public HTTPS subdomain in one click — with automatic rollback if DNS or TLS fails.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+                <h3>Smart launchpad</h3>
+                <p>A dashboard linking every published service — automatically switching to direct LAN URLs when you're on the same network.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 12c4 0 4-6 9-6s5 6 9 6-4 6-9 6-5-6-9-6Z"/>
+                    <circle cx="12" cy="12" r="2.5"/>
+                </svg>
+                <h3>Reverse proxy on autopilot</h3>
+                <p>Traefik dynamic config is generated for you, with per-service Authelia toggle and root-path redirect built in.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="9"/>
+                    <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+                </svg>
+                <h3>DNS management</h3>
+                <p>Full CRUD for AWS Route53 zones and records — or skip AWS entirely and run in manual DNS mode if your domain lives elsewhere.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="9" cy="8" r="3.5"/>
+                    <path d="M2 21c0-4 3-7 7-7s7 3 7 7"/>
+                    <circle cx="17" cy="6" r="2.5"/>
+                    <path d="M22 15c0-2.5-2-4.5-4.5-4.5"/>
+                </svg>
+                <h3>User management</h3>
+                <p>Manage Authelia users and groups directly from the Vaier UI — no YAML editing required.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="5" width="18" height="14" rx="2"/>
+                    <path d="m3 7 9 7 9-7"/>
+                </svg>
+                <h3>Email notifications</h3>
+                <p>SMTP-powered password resets, plus admin alerts when any server-type peer or LAN machine goes up or down.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                    <path d="M3 9h18M9 3v18"/>
+                </svg>
+                <h3>Consistent branding</h3>
+                <p>Authelia login pages share Vaier's dark theme — the auth hand-off feels like one app, not two.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="how">
+        <div class="section-heading">
+            <span class="crumb">// how it fits together</span>
+            <h2>One server. WireGuard out to your peers. HTTPS in from the world.</h2>
+        </div>
+        <div class="diagram-wrap">
+            <svg viewBox="0 0 760 280" width="760" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture diagram">
+                <defs>
+                    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                        <path d="M0 0 L10 5 L0 10 Z" fill="#4fc3f7"/>
+                    </marker>
+                </defs>
+
+                <g transform="translate(20,110)">
+                    <rect width="120" height="60" rx="4" fill="#2d2d30" stroke="#3c3c3c"/>
+                    <text x="60" y="28" text-anchor="middle" fill="#d4d4d4" font-family="-apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">User browser</text>
+                    <text x="60" y="46" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">on the internet</text>
+                </g>
+
+                <g transform="translate(220,30)">
+                    <rect width="180" height="48" rx="4" fill="#2d2d30" stroke="#3c3c3c"/>
+                    <text x="90" y="22" text-anchor="middle" fill="#d4d4d4" font-family="-apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600">AWS Route53</text>
+                    <text x="90" y="38" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">resolves *.yourdomain.com</text>
+                </g>
+
+                <g transform="translate(220,110)">
+                    <rect width="220" height="60" rx="4" fill="#2d2d30" stroke="#4fc3f7" stroke-width="1.5"/>
+                    <text x="110" y="26" text-anchor="middle" fill="#4fc3f7" font-family="-apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Vaier server</text>
+                    <text x="110" y="44" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">Traefik · Authelia · WireGuard</text>
+                </g>
+
+                <g transform="translate(540,40)">
+                    <rect width="200" height="60" rx="4" fill="#2d2d30" stroke="#3c3c3c"/>
+                    <text x="100" y="26" text-anchor="middle" fill="#d4d4d4" font-family="-apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Peer 1</text>
+                    <text x="100" y="44" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">docker container :8080</text>
+                </g>
+
+                <g transform="translate(540,120)">
+                    <rect width="200" height="60" rx="4" fill="#2d2d30" stroke="#3c3c3c"/>
+                    <text x="100" y="26" text-anchor="middle" fill="#d4d4d4" font-family="-apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Peer 2</text>
+                    <text x="100" y="44" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">docker container :3000</text>
+                </g>
+
+                <g transform="translate(540,200)">
+                    <rect width="200" height="60" rx="4" fill="#2d2d30" stroke="#3c3c3c"/>
+                    <text x="100" y="26" text-anchor="middle" fill="#d4d4d4" font-family="-apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Peer 3</text>
+                    <text x="100" y="44" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">phone · laptop · NAS</text>
+                </g>
+
+                <path d="M140 125 Q 200 60 220 54" fill="none" stroke="#4fc3f7" stroke-width="1.4" marker-end="url(#arr)"/>
+                <text x="172" y="78" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">DNS</text>
+
+                <path d="M140 140 L 215 140" fill="none" stroke="#4fc3f7" stroke-width="1.4" marker-end="url(#arr)"/>
+                <text x="155" y="134" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">HTTPS</text>
+
+                <path d="M440 130 L 535 70" fill="none" stroke="#4fc3f7" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+                <path d="M440 140 L 535 150" fill="none" stroke="#4fc3f7" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+                <path d="M440 150 L 535 230" fill="none" stroke="#4fc3f7" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+                <text x="450" y="106" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">WireGuard tunnel</text>
+            </svg>
+            <p class="diagram-caption">
+                Every published service resolves via DNS to the single Vaier server, terminates TLS at
+                Traefik, optionally passes Authelia, and is proxied over WireGuard to the container
+                running on a peer. The peers never need a public IP.
+            </p>
+        </div>
+    </section>
+
+    <section id="quickstart">
+        <div class="section-heading">
+            <span class="crumb">// quick start</span>
+            <h2>From bare server to first HTTPS service in five steps.</h2>
+        </div>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">01</div>
+                <div class="step-body">
+                    <h3>Bring a Linux server with a public IP</h3>
+                    <p>An EC2 <code>t3.small</code> or equivalent. Open TCP 22, 80, 443 and UDP 51820. Bring a domain you control and (optionally) AWS Route53 credentials for full DNS automation.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">02</div>
+                <div class="step-body">
+                    <h3>Install Docker</h3>
+<pre class="code"><span class="comment"># run as your regular user, not root</span>
+<span class="cmd">curl</span> -fsSL https://get.docker.com | sh
+<span class="cmd">sudo</span> usermod -aG docker $USER   <span class="comment"># then log out and back in</span></pre>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">03</div>
+                <div class="step-body">
+                    <h3>Grab the compose file</h3>
+<pre class="code"><span class="cmd">mkdir</span> -p vaier &amp;&amp; <span class="cmd">cd</span> vaier
+<span class="cmd">curl</span> -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml \
+     -o docker-compose.yml</pre>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">04</div>
+                <div class="step-body">
+                    <h3>Pick a DNS mode and start the stack</h3>
+                    <p>Drop in <code>.env</code> with at minimum <code>VAIER_DOMAIN</code> and <code>ACME_EMAIL</code>. Add <code>VAIER_AWS_KEY</code> and <code>VAIER_AWS_SECRET</code> if you want Route53 automation, or leave them out and maintain DNS yourself.</p>
+<pre class="code"><span class="cmd">cat</span> &gt; .env &lt;&lt;EOF
+<span class="var">VAIER_DOMAIN</span>=<span class="str">yourdomain.com</span>
+<span class="var">ACME_EMAIL</span>=<span class="str">you@yourdomain.com</span>
+<span class="var">VAIER_AWS_KEY</span>=<span class="str">AKIA...</span>
+<span class="var">VAIER_AWS_SECRET</span>=<span class="str">...</span>
+EOF
+<span class="cmd">chmod</span> 600 .env
+<span class="cmd">docker</span> compose up -d</pre>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">05</div>
+                <div class="step-body">
+                    <h3>Sign in and own your homelab</h3>
+                    <p>Read the bootstrap admin password, log in at <code>https://vaier.yourdomain.com</code>, change it, and delete the file. From there you create peers, publish containers, and watch a dashboard fill itself in.</p>
+<pre class="code"><span class="cmd">cat</span> authelia/config/.bootstrap-admin-password
+<span class="comment"># log in at https://vaier.yourdomain.com, change the password, then:</span>
+<span class="cmd">rm</span> authelia/config/.bootstrap-admin-password</pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="who">
+        <div class="section-heading">
+            <span class="crumb">// who it's for</span>
+            <h2>Built for the self-hosted community.</h2>
+        </div>
+        <div class="why">
+            <div class="why-card">
+                <div class="label">// the homelabber</div>
+                <h3>One person. One server. A growing pile of containers.</h3>
+                <p>
+                    You're done patching together Caddy/Traefik configs by hand every time you stand
+                    up Plex, a Git server, or yet another self-hosted toy. Vaier is the layer that
+                    makes a single Linux box behave like a tiny private cloud.
+                </p>
+            </div>
+            <div class="why-card">
+                <div class="label">// the small team</div>
+                <h3>A handful of users, real auth, real DNS.</h3>
+                <p>
+                    Add teammates as Authelia users, gate sensitive services behind SSO, and let
+                    everyone find the apps via the launchpad. No spreadsheets of URLs. No "what's
+                    the password for X" pings.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-inner">
+            <a href="#top" class="footer-brand">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
+                    <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
+                    <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
+                    <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+                Vaier
+            </a>
+            <div class="footer-links">
+                <a href="https://github.com/getvaier/vaier">Source</a>
+                <a href="https://github.com/getvaier/vaier/issues">Issues</a>
+                <a href="https://hub.docker.com/r/getvaier/vaier">Docker Hub</a>
+                <a href="https://github.com/getvaier/vaier/blob/main/LICENSE">License</a>
+            </div>
+            <div>Apache 2.0 · Built for the self-hosted community.</div>
+        </div>
+    </footer>
+</body>
+</html>
