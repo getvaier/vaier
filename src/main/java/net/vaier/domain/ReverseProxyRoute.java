@@ -242,8 +242,21 @@ public class ReverseProxyRoute {
     }
 
     public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
+        return launchpadVisibility(dnsState, hostState, true);
+    }
+
+    /**
+     * Same as {@link #launchpadVisibility(DnsState, Server.State)} but also gates auth-protected
+     * routes on whether the launchpad viewer is authenticated. Per V1's auth model — Traefik
+     * forward-auth only, all logged-in users are admin — any non-null {@code authInfo} means
+     * "internal; log in first." An anonymous viewer therefore must not see those tiles at all
+     * (issue #207). Hidden-from-launchpad and DNS-not-propagated still win over auth gating.
+     */
+    public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState,
+                                                   boolean callerAuthenticated) {
         if (hiddenFromLaunchpad) return LaunchpadVisibility.NOT_VISIBLE;
         if (dnsState != DnsState.OK) return LaunchpadVisibility.NOT_VISIBLE;
+        if (authInfo != null && !callerAuthenticated) return LaunchpadVisibility.NOT_VISIBLE;
         if (hostState != Server.State.OK) return LaunchpadVisibility.VISIBLE_INACTIVE;
         return LaunchpadVisibility.VISIBLE_ACTIVE;
     }

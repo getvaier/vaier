@@ -374,6 +374,53 @@ class GetLaunchpadServicesTest {
         assertThat(result.get(0).displayName()).isEqualTo("Grafana Prod");
     }
 
+    // --- caller-authenticated gating (issue #207) ---
+
+    @Test
+    void getLaunchpadServices_authProtectedRoute_excludedWhenCallerAnonymous() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "route", "internal.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupDnsRecord("internal.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, false);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void getLaunchpadServices_authProtectedRoute_includedWhenCallerAuthenticated() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "route", "internal.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupDnsRecord("internal.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, true);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).dnsAddress()).isEqualTo("internal.example.com");
+    }
+
+    @Test
+    void getLaunchpadServices_publicRoute_includedWhenCallerAnonymous() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, false);
+
+        assertThat(result).hasSize(1);
+    }
+
     @Test
     void getLaunchpadServices_hiddenFromLaunchpadRoute_excludedFromResult() {
         ReverseProxyRoute hidden = new ReverseProxyRoute(

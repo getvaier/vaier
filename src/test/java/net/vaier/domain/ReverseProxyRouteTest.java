@@ -267,6 +267,45 @@ class ReverseProxyRouteTest {
             .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
     }
 
+    // --- caller-authenticated gating (issue #207) ---
+
+    @Test
+    void launchpadVisibility_authProtectedAndCallerAnonymous_notVisible() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "internal.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null));
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, false))
+            .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
+    }
+
+    @Test
+    void launchpadVisibility_authProtectedAndCallerAuthenticated_followsHealthRules() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "internal.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null));
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, true))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+        assertThat(route.launchpadVisibility(DnsState.OK, State.UNREACHABLE, true))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
+    }
+
+    @Test
+    void launchpadVisibility_publicRoute_visibleToAnonymousCaller() {
+        ReverseProxyRoute route = route("public.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, false))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+    }
+
+    @Test
+    void launchpadVisibility_hiddenWins_overCallerAuthenticated() {
+        ReverseProxyRoute hidden = new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, null, true);
+
+        assertThat(hidden.launchpadVisibility(DnsState.OK, State.OK, true))
+            .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
+    }
+
     // --- domain rules over existing-routes lists ---
 
     @Test

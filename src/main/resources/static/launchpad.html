@@ -329,11 +329,27 @@
             throw lastErr;
         }
 
+        // Try the Authelia-gated endpoint first — when the visitor has a session it returns the
+        // full list including auth-protected tiles. Anonymous loads either hit Authelia's
+        // {@code one_factor} redirect (we follow it to login.<domain> and {@code res.ok} stays
+        // true but the body isn't JSON) or get an explicit error; in both cases we fall back to
+        // the public-only endpoint at /launchpad/services.
+        async function fetchServices() {
+            try {
+                const res = await fetch('/launchpad/services-authenticated', { cache: 'no-store' });
+                if (res.ok) {
+                    const text = await res.text();
+                    try { return JSON.parse(text); } catch (_) { /* not JSON — Authelia login page */ }
+                }
+            } catch (_) { /* fall through */ }
+            const res = await fetchWithRetry('/launchpad/services');
+            return await res.json();
+        }
+
         async function load() {
             const container = document.getElementById('grid');
             try {
-                const res = await fetchWithRetry('/launchpad/services');
-                const services = await res.json();
+                const services = await fetchServices();
                 const external = services.filter(s => !s.dnsAddress.startsWith('vaier.'));
                 container.innerHTML = '';
                 _hasRendered = true;

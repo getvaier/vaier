@@ -16,6 +16,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,7 +42,7 @@ class LaunchpadRestControllerTest {
             new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, null, "app", "host=app.example.com"),
             new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, null, "db", "host=db.example.com")
         );
-        when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(services);
+        when(getLaunchpadServicesUseCase.getLaunchpadServices(any(), anyBoolean())).thenReturn(services);
 
         List<LaunchpadServiceUco> result = controller.getServices(mock(HttpServletRequest.class));
 
@@ -55,7 +57,7 @@ class LaunchpadRestControllerTest {
 
         controller.getServices(request);
 
-        verify(getLaunchpadServicesUseCase).getLaunchpadServices("192.168.3.42");
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(eq("192.168.3.42"), anyBoolean());
     }
 
     @Test
@@ -66,7 +68,7 @@ class LaunchpadRestControllerTest {
 
         controller.getServices(request);
 
-        verify(getLaunchpadServicesUseCase).getLaunchpadServices("192.168.3.42");
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(eq("192.168.3.42"), anyBoolean());
     }
 
     @Test
@@ -76,7 +78,7 @@ class LaunchpadRestControllerTest {
 
         controller.getServices(request);
 
-        verify(getLaunchpadServicesUseCase).getLaunchpadServices("203.0.113.99");
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(eq("203.0.113.99"), anyBoolean());
     }
 
     @Test
@@ -87,6 +89,42 @@ class LaunchpadRestControllerTest {
 
         controller.getServices(request);
 
-        verify(getLaunchpadServicesUseCase).getLaunchpadServices("172.20.0.5");
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(eq("172.20.0.5"), anyBoolean());
+    }
+
+    // --- split endpoints: public vs. Authelia-gated (issue #207) ---
+
+    @Test
+    void getServices_alwaysCallsUseCaseWithAuthenticatedFalse() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("172.20.0.5");
+
+        controller.getServices(request);
+
+        // /launchpad/services is reached by anonymous launchpad loads and intentionally never
+        // surfaces auth-protected tiles. The page calls /launchpad/services-authenticated when
+        // it wants the full list.
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(any(), eq(false));
+    }
+
+    @Test
+    void getServicesAuthenticated_callsUseCaseWithAuthenticatedTrue() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("172.20.0.5");
+
+        controller.getServicesAuthenticated(request);
+
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(any(), eq(true));
+    }
+
+    @Test
+    void getServicesAuthenticated_propagatesCallerIpLikeServices() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("172.20.0.5");
+        when(request.getHeader("X-Forwarded-For")).thenReturn("192.168.3.42");
+
+        controller.getServicesAuthenticated(request);
+
+        verify(getLaunchpadServicesUseCase).getLaunchpadServices(eq("192.168.3.42"), eq(true));
     }
 }

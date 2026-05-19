@@ -5,7 +5,23 @@ import java.util.List;
 
 public interface GetLaunchpadServicesUseCase {
 
-    List<LaunchpadServiceUco> getLaunchpadServices(String callerIp);
+    /**
+     * Convenience overload for callers (or tests) that don't need to differentiate
+     * anonymous vs. authenticated viewers — assumes authenticated, i.e. shows everything that's
+     * otherwise visible. Production traffic goes through the two-arg method via the controller.
+     */
+    default List<LaunchpadServiceUco> getLaunchpadServices(String callerIp) {
+        return getLaunchpadServices(callerIp, true);
+    }
+
+    /**
+     * Returns the launchpad tiles visible to this caller. {@code callerAuthenticated} gates
+     * auth-protected routes (issue #207): when false, any route with forward-auth is filtered
+     * out so anonymous viewers don't see internal-only services. The launchpad endpoint itself
+     * is anonymously reachable; this flag is set from Authelia's forwarded {@code Remote-User}
+     * header.
+     */
+    List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, boolean callerAuthenticated);
 
     /**
      * The launchpad's slice of a published service. The domain decides everything the client

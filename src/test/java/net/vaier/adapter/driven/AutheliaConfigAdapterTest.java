@@ -116,6 +116,10 @@ class AutheliaConfigAdapterTest {
         assertThat(content).contains("policy: bypass");
         assertThat(content).contains("/launchpad.html");
         assertThat(content).contains("/published-services/discover");
+        // /launchpad/services is the public services endpoint and must be reachable anonymously
+        // (issue #207); the authenticated sibling /launchpad/services-authenticated stays gated.
+        assertThat(content).contains("^/launchpad/services$");
+        assertThat(content).doesNotContain("^/launchpad/services-authenticated");
     }
 
     @Test

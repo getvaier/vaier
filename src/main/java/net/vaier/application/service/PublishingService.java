@@ -162,7 +162,7 @@ public class PublishingService implements
     }
 
     @Override
-    public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp) {
+    public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, boolean callerAuthenticated) {
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
@@ -175,7 +175,7 @@ public class PublishingService implements
             .flatMap(s -> ReverseProxyRoute
                 .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix())
                 .map(r -> {
-                    LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state());
+                    LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state(), callerAuthenticated);
                     if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
