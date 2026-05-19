@@ -15,6 +15,7 @@ import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
+import net.vaier.application.ToggleServiceLaunchpadVisibilityUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
 import org.springframework.http.MediaType;
@@ -38,6 +39,7 @@ public class PublishedServiceRestController {
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
     private final EditServiceRedirectUseCase editServiceRedirectUseCase;
     private final ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
+    private final ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     private final GetLanServersUseCase getLanServersUseCase;
@@ -134,6 +136,16 @@ public class PublishedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @PatchMapping("/{dnsName:.+}/hidden-from-launchpad")
+    public ResponseEntity<Void> setHiddenFromLaunchpad(@PathVariable String dnsName,
+                                                      @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                                      @RequestBody HiddenFromLaunchpadRequest request) {
+        log.info("Setting hiddenFromLaunchpad={} for {} (pathPrefix: {})", request.hiddenFromLaunchpad(), dnsName, pathPrefix);
+        toggleServiceLaunchpadVisibilityUseCase.setHiddenFromLaunchpad(dnsName, pathPrefix, request.hiddenFromLaunchpad());
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{subdomain}/status")
     public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
         var status = publishPeerServiceUseCase.getPublishStatus(subdomain);
@@ -179,5 +191,6 @@ public class PublishedServiceRestController {
     record AuthRequest(boolean requiresAuth) {}
     record RedirectRequest(String rootRedirectPath) {}
     record DirectUrlDisabledRequest(boolean directUrlDisabled) {}
+    record HiddenFromLaunchpadRequest(boolean hiddenFromLaunchpad) {}
     record IgnoreRequest(String key) {}
 }

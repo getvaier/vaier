@@ -3,7 +3,7 @@ package net.vaier.rest;
 import jakarta.servlet.http.HttpServletRequest;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
-import net.vaier.domain.Server.State;
+import net.vaier.domain.LaunchpadVisibility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,8 +37,8 @@ class LaunchpadRestControllerTest {
     @Test
     void getServices_returnsLaunchpadServices() {
         var services = List.of(
-            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", State.OK, null),
-            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", State.OK, null)
+            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, null),
+            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, null)
         );
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(services);
 

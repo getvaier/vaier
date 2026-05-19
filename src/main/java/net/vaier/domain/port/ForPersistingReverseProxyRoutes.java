@@ -37,6 +37,7 @@ public interface ForPersistingReverseProxyRoutes {
     void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth);
     void setRouteRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath);
     void setRouteDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled);
+    void setRouteHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad);
 
     default void setRouteAuthentication(String dnsName, boolean requiresAuth) {
         setRouteAuthentication(dnsName, null, requiresAuth);
@@ -46,5 +47,8 @@ public interface ForPersistingReverseProxyRoutes {
     }
     default void setRouteDirectUrlDisabled(String dnsName, boolean directUrlDisabled) {
         setRouteDirectUrlDisabled(dnsName, null, directUrlDisabled);
+    }
+    default void setRouteHiddenFromLaunchpad(String dnsName, boolean hiddenFromLaunchpad) {
+        setRouteHiddenFromLaunchpad(dnsName, null, hiddenFromLaunchpad);
     }
 }

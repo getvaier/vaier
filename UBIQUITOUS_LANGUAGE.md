@@ -71,6 +71,7 @@ The primary workflow. Always use these terms — the UI is built around them.
 | **Direct URL disabled** | Per-route opt-out (`directUrlDisabled`, persisted as `x-vaier-direct-url-disabled`). For services whose public origin differs from `http://lan:port` — Vaultwarden is the canonical case. |
 | **Auth-mediated tile URL** | The `https://login.<domain>/?rd=...` URL the launchpad hands out for auth-protected services when no direct-LAN bypass applies. Forces the browser to land on the Authelia origin first, so a PWA's service worker on the service origin can't serve a cached SPA that bypasses login. |
 | **Auth toggle** | The per-service Authelia forward-auth on/off switch. Stored as a Traefik middleware reference. |
+| **Hidden from launchpad** | Per-route operator switch (`hiddenFromLaunchpad`, persisted as `x-vaier-hidden-from-launchpad`). When on, the route is kept reachable but the launchpad never shows a tile for it. Use for internal APIs that back another service and don't need their own tile. Settable via `PATCH /published-services/{dnsName}/hidden-from-launchpad`. |
 | **Ignored service** | A publishable service the operator has chosen to hide from the discovered list. Persisted via `ForManagingIgnoredServices`. |
 
 Avoid: "expose", "deploy", "route" (as a verb for the user-facing publish action), "site", "endpoint" (ambiguous with WireGuard's endpoint).
@@ -123,6 +124,7 @@ Avoid: "vhost", "site", "auth provider".
 |------|------------|
 | **Launchpad** | The public read-only dashboard at `/launchpad.html` showing all published services as a tile grid. Suitable as a browser home page. Has its own API (`/launchpad/services`, `/favicon`); both are public. |
 | **Tile** | A single service card on the launchpad — service name, peer name, favicon, link. |
+| **Launchpad visibility** | Tri-state outcome the domain computes for each route (`domain.LaunchpadVisibility`): `NOT_VISIBLE` (operator hid it, or DNS not propagated — no tile rendered), `VISIBLE_INACTIVE` (tile shown but de-emphasised — backend currently unreachable), `VISIBLE_ACTIVE` (tile shown normally). Owned by `ReverseProxyRoute.launchpadVisibility`; new launchpad-visibility rules accrete there rather than in the application layer. |
 | **Caller IP** | The public IP of the launchpad visitor, used to decide whether to hand out the direct URL. Taken from `X-Forwarded-For` only when the immediate connection is from inside `launchpad.trusted-proxy-cidr` (default `172.20.0.0/16`); otherwise from `RemoteAddr`. |
 | **Trusted proxy CIDR** | The CIDR Vaier trusts to set `X-Forwarded-For`. Default is the Docker bridge subnet. |
 

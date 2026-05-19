@@ -120,6 +120,63 @@ class ReverseProxyRouteTest {
         assertThat(route.getPathPrefix()).isNull();
     }
 
+    // --- hiddenFromLaunchpad ---
+
+    @Test
+    void hiddenFromLaunchpad_retainedByFullConstructor() {
+        ReverseProxyRoute route = new ReverseProxyRoute("route", "api.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, null, true);
+
+        assertThat(route.isHiddenFromLaunchpad()).isTrue();
+    }
+
+    @Test
+    void hiddenFromLaunchpad_defaultsToFalseFromShorterConstructors() {
+        ReverseProxyRoute hostOnly = new ReverseProxyRoute("route", "app.example.com", "10.0.0.1", 8080, "svc", null);
+        ReverseProxyRoute pathRoute = new ReverseProxyRoute("route", "app.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/auth");
+        ReverseProxyRoute lanRoute = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+
+        assertThat(hostOnly.isHiddenFromLaunchpad()).isFalse();
+        assertThat(pathRoute.isHiddenFromLaunchpad()).isFalse();
+        assertThat(lanRoute.isHiddenFromLaunchpad()).isFalse();
+    }
+
+    // --- launchpadVisibility (domain rule consolidating every reason a route is shown/hidden) ---
+
+    @Test
+    void launchpadVisibility_dnsOkAndHostOk_visibleActive() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.OK))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+    }
+
+    @Test
+    void launchpadVisibility_dnsOkAndHostUnreachable_visibleInactive() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.UNREACHABLE))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
+    }
+
+    @Test
+    void launchpadVisibility_dnsNotPropagated_notVisible() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.NON_EXISTING, State.OK))
+            .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
+    }
+
+    @Test
+    void launchpadVisibility_hiddenFromLaunchpad_notVisibleEvenWhenHealthy() {
+        ReverseProxyRoute hidden = new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, null, true);
+
+        assertThat(hidden.launchpadVisibility(DnsState.OK, State.OK))
+            .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
+    }
+
     // --- domain rules over existing-routes lists ---
 
     @Test

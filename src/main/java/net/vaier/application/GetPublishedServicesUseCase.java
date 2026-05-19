@@ -19,19 +19,27 @@ public interface GetPublishedServicesUseCase {
         String rootRedirectPath,
         boolean directUrlDisabled,
         boolean isLanService,
-        String pathPrefix
+        String pathPrefix,
+        boolean hiddenFromLaunchpad
     ){
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled) {
             this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, false, null);
+                rootRedirectPath, directUrlDisabled, false, null, false);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled, boolean isLanService) {
             this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, null);
+                rootRedirectPath, directUrlDisabled, isLanService, null, false);
+        }
+        public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
+                                   int hostPort, State state, boolean authenticated,
+                                   String rootRedirectPath, boolean directUrlDisabled, boolean isLanService,
+                                   String pathPrefix) {
+            this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
+                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false);
         }
     }
 }

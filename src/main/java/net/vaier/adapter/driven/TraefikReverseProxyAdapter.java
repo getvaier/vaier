@@ -172,8 +172,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             }
 
             Set<String> directUrlDisabled = readDirectUrlDisabledDomains(config);
+            Set<String> hiddenFromLaunchpad = readHiddenFromLaunchpadRouters(config);
             Map<String, String> lanMarkers = readLanServiceMarkers(config);
-            if (!directUrlDisabled.isEmpty() || !lanMarkers.isEmpty()) {
+            if (!directUrlDisabled.isEmpty() || !hiddenFromLaunchpad.isEmpty() || !lanMarkers.isEmpty()) {
                 routes = routes.stream()
                     .map(r -> {
                         ReverseProxyRoute current = r;
@@ -183,6 +184,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                             || (r.getPathPrefix() == null && directUrlDisabled.contains(r.getDomainName()));
                         if (disabled) {
                             current = applyDirectUrlDisabledFlag(current, true);
+                        }
+                        if (hiddenFromLaunchpad.contains(r.getName())) {
+                            current = applyHiddenFromLaunchpadFlag(current, true);
                         }
                         if (lanMarkers.containsKey(r.getDomainName())) {
                             current = applyLanServiceMarker(current, lanMarkers.get(r.getDomainName()));
@@ -1361,6 +1365,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
     private static final String IGNORED_KEY = "x-vaier-ignored";
     private static final String DIRECT_URL_DISABLED_KEY = "x-vaier-direct-url-disabled";
+    private static final String HIDDEN_FROM_LAUNCHPAD_KEY = "x-vaier-hidden-from-launchpad";
     private static final String LAN_SERVICE_KEY = "x-vaier-lan-service";
 
     @Override
@@ -1406,7 +1411,49 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return new ReverseProxyRoute(
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
-            r.getRootRedirectPath(), disabled, r.isLanService(), r.getProtocol(), r.getPathPrefix()
+            r.getRootRedirectPath(), disabled, r.isLanService(), r.getProtocol(), r.getPathPrefix(),
+            r.isHiddenFromLaunchpad()
+        );
+    }
+
+    @Override
+    public void setRouteHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad) {
+        loadConfig();
+        if (config == null) config = new LinkedHashMap<>();
+        Object raw = config.get(HIDDEN_FROM_LAUNCHPAD_KEY);
+        List<String> hidden = (raw instanceof List<?> list)
+            ? new ArrayList<>(list.stream().map(Object::toString).toList())
+            : new ArrayList<>();
+        String routerName = generateRouterName(dnsName, pathPrefix);
+        boolean changed;
+        if (hiddenFromLaunchpad) {
+            changed = !hidden.contains(routerName) && hidden.add(routerName);
+        } else {
+            changed = hidden.remove(routerName);
+        }
+        if (changed) {
+            if (hidden.isEmpty()) config.remove(HIDDEN_FROM_LAUNCHPAD_KEY);
+            else config.put(HIDDEN_FROM_LAUNCHPAD_KEY, hidden);
+            saveConfig();
+        }
+    }
+
+    private Set<String> readHiddenFromLaunchpadRouters(Map<String, Object> cfg) {
+        if (cfg == null) return Set.of();
+        Object raw = cfg.get(HIDDEN_FROM_LAUNCHPAD_KEY);
+        if (raw instanceof List<?> list) {
+            return list.stream().map(Object::toString).collect(java.util.stream.Collectors.toSet());
+        }
+        return Set.of();
+    }
+
+    private ReverseProxyRoute applyHiddenFromLaunchpadFlag(ReverseProxyRoute r, boolean hidden) {
+        if (r.isHiddenFromLaunchpad() == hidden) return r;
+        return new ReverseProxyRoute(
+            r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
+            r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
+            r.getRootRedirectPath(), r.isDirectUrlDisabled(), r.isLanService(), r.getProtocol(),
+            r.getPathPrefix(), hidden
         );
     }
 
@@ -1414,7 +1461,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return new ReverseProxyRoute(
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
-            r.getRootRedirectPath(), r.isDirectUrlDisabled(), true, protocol, r.getPathPrefix()
+            r.getRootRedirectPath(), r.isDirectUrlDisabled(), true, protocol, r.getPathPrefix(),
+            r.isHiddenFromLaunchpad()
         );
     }
 

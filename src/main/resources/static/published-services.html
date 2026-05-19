@@ -645,6 +645,17 @@
                                     <span style="margin-left:0.4rem;color:var(--text-muted);font-size:0.75rem">Disable</span>
                                 </span>
                             </div>
+                            <div class="detail-row">
+                                <span class="detail-label" title="When checked, this service is hidden from the launchpad. Useful for internal APIs that exist to back another service and don't need their own tile.">Launchpad</span>
+                                <span class="detail-value">
+                                    <input type="checkbox" id="hideFromLaunchpad-${id}"
+                                        ${service.hiddenFromLaunchpad ? 'checked' : ''}
+                                        style="accent-color:var(--accent);cursor:pointer"
+                                        title="When checked, this service is hidden from the launchpad."
+                                        onchange="setHiddenFromLaunchpad('${service.dnsAddress}', '${service.pathPrefix || ''}', this.checked)">
+                                    <span style="margin-left:0.4rem;color:var(--text-muted);font-size:0.75rem">Hide</span>
+                                </span>
+                            </div>
                         </div>
                         <div class="service-actions-row">
                             <div class="service-actions-left"></div>
@@ -995,6 +1006,21 @@
                 await fetchServices();
             } catch (error) {
                 alert(`Failed to update direct LAN URL setting: ${error.message}`);
+            }
+        }
+
+        async function setHiddenFromLaunchpad(dnsAddress, pathPrefix, hidden) {
+            try {
+                const response = await fetch(withPathQuery(
+                    `/published-services/${encodeURIComponent(dnsAddress)}/hidden-from-launchpad`, pathPrefix), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hiddenFromLaunchpad: hidden })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                await fetchServices();
+            } catch (error) {
+                alert(`Failed to update launchpad visibility: ${error.message}`);
             }
         }
 

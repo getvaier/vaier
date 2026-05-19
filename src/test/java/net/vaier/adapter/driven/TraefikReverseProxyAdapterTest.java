@@ -189,6 +189,62 @@ class TraefikReverseProxyAdapterTest {
         assertThat(adapter2.getReverseProxyRoutes().getFirst().isDirectUrlDisabled()).isTrue();
     }
 
+    // --- setRouteHiddenFromLaunchpad ---
+
+    @Test
+    void setRouteHiddenFromLaunchpad_persistsFlagThatRoundTripsViaGetRoutes() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        adapter.setRouteHiddenFromLaunchpad("app.example.com", true);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isHiddenFromLaunchpad()).isTrue();
+    }
+
+    @Test
+    void setRouteHiddenFromLaunchpad_false_clearsFlag() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteHiddenFromLaunchpad("app.example.com", true);
+
+        adapter.setRouteHiddenFromLaunchpad("app.example.com", false);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isHiddenFromLaunchpad()).isFalse();
+    }
+
+    @Test
+    void getReverseProxyRoutes_unsetHiddenFromLaunchpad_defaultsToFalse() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.isHiddenFromLaunchpad()).isFalse();
+    }
+
+    @Test
+    void setRouteHiddenFromLaunchpad_persistsAcrossAdapterInstances() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteHiddenFromLaunchpad("app.example.com", true);
+
+        var adapter2 = new TraefikReverseProxyAdapter(
+            tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
+
+        assertThat(adapter2.getReverseProxyRoutes().getFirst().isHiddenFromLaunchpad()).isTrue();
+    }
+
+    @Test
+    void setRouteHiddenFromLaunchpad_pathBasedRoute_targetsCorrectSibling() {
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 8080, false, null, "/grafana");
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 9090, false, null, "/prometheus");
+
+        adapter.setRouteHiddenFromLaunchpad("svc.example.com", "/grafana", true);
+
+        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
+        ReverseProxyRoute grafana = routes.stream().filter(r -> "/grafana".equals(r.getPathPrefix())).findFirst().orElseThrow();
+        ReverseProxyRoute prometheus = routes.stream().filter(r -> "/prometheus".equals(r.getPathPrefix())).findFirst().orElseThrow();
+        assertThat(grafana.isHiddenFromLaunchpad()).isTrue();
+        assertThat(prometheus.isHiddenFromLaunchpad()).isFalse();
+    }
+
     // --- getReverseProxyRoutes with empty file ---
 
     @Test

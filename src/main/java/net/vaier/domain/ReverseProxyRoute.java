@@ -36,11 +36,13 @@ public class ReverseProxyRoute {
     private final boolean isLanService;
     private final String protocol;
     private final String pathPrefix;
+    private final boolean hiddenFromLaunchpad;
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
-                             boolean isLanService, String protocol, String pathPrefix) {
+                             boolean isLanService, String protocol, String pathPrefix,
+                             boolean hiddenFromLaunchpad) {
         this.name = name;
         this.domainName = domainName;
         this.address = address;
@@ -55,6 +57,15 @@ public class ReverseProxyRoute {
         this.isLanService = isLanService;
         this.protocol = protocol;
         this.pathPrefix = pathPrefix;
+        this.hiddenFromLaunchpad = hiddenFromLaunchpad;
+    }
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
+                             List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
+                             boolean isLanService, String protocol, String pathPrefix) {
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, pathPrefix, false);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
@@ -62,20 +73,20 @@ public class ReverseProxyRoute {
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
                              boolean isLanService, String protocol) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
-             rootRedirectPath, directUrlDisabled, isLanService, protocol, null);
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, null, false);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
-             rootRedirectPath, directUrlDisabled, false, null, null);
+             rootRedirectPath, directUrlDisabled, false, null, null, false);
     }
 
     public static ReverseProxyRoute lanRoute(String name, String domainName, String host, int port,
                                              String protocol, String service) {
         return new ReverseProxyRoute(name, domainName, host, port, service, null, null, null, null,
-            null, false, true, protocol, null);
+            null, false, true, protocol, null, false);
     }
 
     public static void validateForPublication(String dnsName, String address, int port) {
@@ -171,6 +182,25 @@ public class ReverseProxyRoute {
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig, List<String> middlewares,
                              String rootRedirectPath) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares, rootRedirectPath, false);
+    }
+
+    /**
+     * Consolidated launchpad-rendering state. Owns every reason a route may be hidden, inactive,
+     * or active so the launchpad use case stays a thin pass-through: new visibility rules accrete
+     * here, not in the application layer. Three outcomes:
+     * <ul>
+     *   <li>{@link LaunchpadVisibility#NOT_VISIBLE} — operator hid it, or DNS is not propagated
+     *       (the tile would link to a non-resolving host).</li>
+     *   <li>{@link LaunchpadVisibility#VISIBLE_INACTIVE} — the backend is currently unreachable;
+     *       render the tile but visually de-emphasised.</li>
+     *   <li>{@link LaunchpadVisibility#VISIBLE_ACTIVE} — DNS propagated, backend healthy.</li>
+     * </ul>
+     */
+    public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
+        if (hiddenFromLaunchpad) return LaunchpadVisibility.NOT_VISIBLE;
+        if (dnsState != DnsState.OK) return LaunchpadVisibility.NOT_VISIBLE;
+        if (hostState != Server.State.OK) return LaunchpadVisibility.VISIBLE_INACTIVE;
+        return LaunchpadVisibility.VISIBLE_ACTIVE;
     }
 
     public DnsState dnsState(List<DnsRecord> allDnsRecords) {

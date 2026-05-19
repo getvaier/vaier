@@ -145,6 +145,12 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
 
     @MockBean
+    protected ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
+
+    @MockBean
+    protected ResolveLanAnchorUseCase resolveLanAnchorUseCase;
+
+    @MockBean
     protected IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
 
     @MockBean

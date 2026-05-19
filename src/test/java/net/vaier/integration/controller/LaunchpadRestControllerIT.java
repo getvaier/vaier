@@ -1,7 +1,7 @@
 package net.vaier.integration.controller;
 
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
-import net.vaier.domain.Server.State;
+import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
 import org.junit.jupiter.api.Test;
 
@@ -28,30 +28,30 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsMappedServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", State.OK, "https://app.example.com"),
-                new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", State.OK, "http://10.0.0.2:8080")
+                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, "https://app.example.com"),
+                new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, "http://10.0.0.2:8080")
         ));
 
         mockMvc.perform(get("/launchpad/services"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$[0].dnsAddress").value("app.example.com"))
                .andExpect(jsonPath("$[0].hostAddress").value("10.0.0.1"))
-               .andExpect(jsonPath("$[0].state").value("OK"))
+               .andExpect(jsonPath("$[0].visibility").value("VISIBLE_ACTIVE"))
                .andExpect(jsonPath("$[0].url").value("https://app.example.com"))
                .andExpect(jsonPath("$[1].dnsAddress").value("db.example.com"))
                .andExpect(jsonPath("$[1].url").value("http://10.0.0.2:8080"));
     }
 
     @Test
-    void getServices_returnsUnreachableServices() throws Exception {
+    void getServices_returnsInactiveServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("down.example.com", null, "10.0.0.3", State.UNREACHABLE, "https://down.example.com")
+                new LaunchpadServiceUco("down.example.com", null, "10.0.0.3", LaunchpadVisibility.VISIBLE_INACTIVE, "https://down.example.com")
         ));
 
         mockMvc.perform(get("/launchpad/services"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$[0].dnsAddress").value("down.example.com"))
-               .andExpect(jsonPath("$[0].state").value("UNREACHABLE"));
+               .andExpect(jsonPath("$[0].visibility").value("VISIBLE_INACTIVE"));
     }
 
     @Test

@@ -111,6 +111,31 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
+    void setHiddenFromLaunchpad_togglesFlag() throws Exception {
+        mockMvc.perform(patch("/published-services/internal-api.example.com/hidden-from-launchpad")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"hiddenFromLaunchpad":true}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(toggleServiceLaunchpadVisibilityUseCase).setHiddenFromLaunchpad("internal-api.example.com", true);
+    }
+
+    @Test
+    void setHiddenFromLaunchpad_pathBasedRoute_includesPathPrefix() throws Exception {
+        mockMvc.perform(patch("/published-services/svc.example.com/hidden-from-launchpad")
+                       .param("pathPrefix", "/grafana")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"hiddenFromLaunchpad":true}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(toggleServiceLaunchpadVisibilityUseCase).setHiddenFromLaunchpad("svc.example.com", "/grafana", true);
+    }
+
+    @Test
     void setRedirect_updatesRootRedirectPath() throws Exception {
         mockMvc.perform(patch("/published-services/app.example.com/redirect")
                        .contentType(MediaType.APPLICATION_JSON)

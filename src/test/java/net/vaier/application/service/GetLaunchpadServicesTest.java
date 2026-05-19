@@ -4,7 +4,7 @@ import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
-import net.vaier.domain.Server.State;
+import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
@@ -82,7 +82,7 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
-    void getLaunchpadServices_unreachableHost_stateIsUnreachable() {
+    void getLaunchpadServices_unreachableHost_visibilityIsVisibleInactive() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
@@ -90,11 +90,11 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
-        assertThat(result.get(0).state()).isEqualTo(State.UNREACHABLE);
+        assertThat(result.get(0).visibility()).isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
     }
 
     @Test
-    void getLaunchpadServices_runningLocalService_stateIsOk() {
+    void getLaunchpadServices_runningLocalService_visibilityIsVisibleActive() {
         setupOneRoute("app.example.com", "my-container", 8080);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
@@ -105,7 +105,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
-        assertThat(result.get(0).state()).isEqualTo(State.OK);
+        assertThat(result.get(0).visibility()).isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
     }
 
     @Test
@@ -323,6 +323,29 @@ class GetLaunchpadServicesTest {
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
         assertThat(result.get(0).url()).isEqualTo("http://192.168.3.121:6875");
+    }
+
+    @Test
+    void getLaunchpadServices_hiddenFromLaunchpadRoute_excludedFromResult() {
+        ReverseProxyRoute hidden = new ReverseProxyRoute(
+            "internal-router", "internal-api.example.com", "10.0.0.5", 9000, "internal-svc",
+            null, null, null, null, null, false, false, null, null, true
+        );
+        ReverseProxyRoute visible = route("app.example.com", "10.0.0.1", 8080);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(hidden, visible));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("internal-api.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("app.example.com", DnsRecordType.CNAME, 300L, List.of())
+        ));
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).dnsAddress()).isEqualTo("app.example.com");
     }
 
     @Test

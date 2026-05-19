@@ -16,6 +16,7 @@ import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
 import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
+import net.vaier.application.ToggleServiceLaunchpadVisibilityUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsProvider;
@@ -25,6 +26,7 @@ import net.vaier.domain.DnsState;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
+import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
@@ -62,6 +64,7 @@ public class PublishingService implements
     GetPublishableServicesUseCase,
     ToggleServiceAuthUseCase,
     ToggleServiceDirectUrlDisabledUseCase,
+    ToggleServiceLaunchpadVisibilityUseCase,
     EditServiceRedirectUseCase,
     IgnorePublishableServiceUseCase,
     UnignorePublishableServiceUseCase {
@@ -161,17 +164,20 @@ public class PublishingService implements
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        // Match each enriched Uco back to its route by (dnsAddress, pathPrefix), then ask the
+        // domain for the consolidated launchpad visibility. NOT_VISIBLE entries are dropped;
+        // the rest carry the tri-state through so the launchpad client doesn't have to know why.
         return getPublishedServices().stream()
-            .filter(s -> s.dnsState() == DnsState.OK)
-            .map(s -> {
-                // Match by (dnsAddress, pathPrefix) — the unique key once path-based routes can
-                // share a host. The domain entity owns that uniqueness rule.
-                ReverseProxyRoute route = ReverseProxyRoute
-                    .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix()).orElse(null);
-                String directUrl = route == null ? null : route.directUrl(callerIp, peers, vpnClients);
-                return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(), s.state(),
-                    resolveLaunchpadUrl(s, directUrl));
-            })
+            .flatMap(s -> ReverseProxyRoute
+                .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix())
+                .map(r -> {
+                    LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state());
+                    if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
+                    return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
+                        visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)));
+                })
+                .filter(java.util.Objects::nonNull)
+                .stream())
             .toList();
     }
 
@@ -210,7 +216,8 @@ public class PublishingService implements
             route.getRootRedirectPath(),
             route.isDirectUrlDisabled(),
             route.isLanService(),
-            route.getPathPrefix()
+            route.getPathPrefix(),
+            route.isHiddenFromLaunchpad()
         );
     }
 
@@ -639,6 +646,18 @@ public class PublishingService implements
         requireNonMandatory(dnsName, "Cannot change direct URL setting for built-in service: ");
         log.info("Setting directUrlDisabled={} for {} ({})", directUrlDisabled, dnsName, normalisedPath);
         forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(dnsName, normalisedPath, directUrlDisabled);
+        invalidatePublishedServicesCache();
+    }
+
+    // --- ToggleServiceLaunchpadVisibilityUseCase ---
+
+    @Override
+    public void setHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
+        requireNonMandatory(dnsName, "Cannot change launchpad visibility for built-in service: ");
+        log.info("Setting hiddenFromLaunchpad={} for {} ({})", hiddenFromLaunchpad, dnsName, normalisedPath);
+        forPersistingReverseProxyRoutes.setRouteHiddenFromLaunchpad(dnsName, normalisedPath, hiddenFromLaunchpad);
         invalidatePublishedServicesCache();
     }
 

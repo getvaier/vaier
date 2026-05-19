@@ -255,7 +255,7 @@
             tile.href = url;
             tile.target = service.dnsAddress + (service.pathPrefix || '');
             tile.rel = '';
-            tile.className = service.state === 'OK' ? 'tile' : 'tile down';
+            tile.className = service.visibility === 'VISIBLE_ACTIVE' ? 'tile' : 'tile down';
 
             const iconDiv = document.createElement('div');
             iconDiv.className = 'tile-icon';
