@@ -1350,6 +1350,32 @@ class PublishingServiceTest {
         verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
     }
 
+    // --- PublishableService.ignoreKey() ---
+
+    @Test
+    void ignoreKey_forPeerService_combinesPeerNameContainerAndPort() {
+        PublishableService s = new PublishableService(
+            PublishableSource.PEER, "alpha", "10.0.0.1", "myapp", 8080, null, false);
+
+        assertThat(s.ignoreKey()).isEqualTo("alpha/myapp:8080");
+    }
+
+    @Test
+    void ignoreKey_forLanServer_combinesAddressContainerAndPort() {
+        PublishableService s = new PublishableService(
+            PublishableSource.LAN_SERVER, "alpha", "192.168.1.50", "myapp", 8080, null, false);
+
+        assertThat(s.ignoreKey()).isEqualTo("192.168.1.50/myapp:8080");
+    }
+
+    @Test
+    void ignoreKey_forVaierServer_combinesContainerAndPort() {
+        PublishableService s = new PublishableService(
+            PublishableSource.VAIER_SERVER, null, "127.0.0.1", "myapp", 8080, null, false);
+
+        assertThat(s.ignoreKey()).isEqualTo("myapp:8080");
+    }
+
     // --- ignoreService ---
 
     @Test

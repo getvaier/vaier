@@ -477,8 +477,8 @@
         }
 
         function discoverableTypeIcon(s) {
-            if (s.source === 'LAN_DOCKER_HOST') return 'lan';
-            if (s.source === 'VAIER_SERVER')    return 'vaier';
+            if (s.source === 'LAN_SERVER')   return 'lan';
+            if (s.source === 'VAIER_SERVER') return 'vaier';
             return 'server';
         }
 
@@ -684,12 +684,6 @@
         let showIgnored = false;
         let lastPublishableServices = [];
 
-        function ignoreKey(s) {
-            if (s.source === 'PEER')            return s.peerName + '/' + s.containerName + ':' + s.port;
-            if (s.source === 'LAN_DOCKER_HOST') return s.address  + '/' + s.containerName + ':' + s.port;
-            return s.containerName + ':' + s.port;
-        }
-
         function toggleShowIgnored() {
             showIgnored = document.getElementById('showIgnoredChk').checked;
             displayPublishable(lastPublishableServices);
@@ -710,7 +704,7 @@
             const html = visible.map(s => {
                 const isVaierServer = s.source === 'VAIER_SERVER';
                 const sourceLabel = isVaierServer ? 'Vaier server' : s.peerName;
-                const key = ignoreKey(s);
+                const key = s.ignoreKey;
                 const dimStyle = s.ignored ? 'opacity:0.55' : '';
                 const typeKind = discoverableTypeIcon(s);
                 const typeTip  = ({ 'lan': 'Discovered on a LAN Docker host', 'vaier': 'Discovered on the Vaier server', 'server': 'Discovered on a VPN peer' })[typeKind];
@@ -767,7 +761,7 @@
         // Re-render immediately so the click registers visibly — fetchPublishable() takes seconds
         // because it scrapes every peer and LAN Docker host. The next refresh reconciles authority.
         function applyIgnoredOptimistically(key, ignored) {
-            const svc = lastPublishableServices.find(s => ignoreKey(s) === key);
+            const svc = lastPublishableServices.find(s => s.ignoreKey === key);
             if (svc) {
                 svc.ignored = ignored;
                 displayPublishable(lastPublishableServices);

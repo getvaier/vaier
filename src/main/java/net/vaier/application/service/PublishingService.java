@@ -619,16 +619,8 @@ public class PublishingService implements
 
         Set<String> ignoredKeys = forManagingIgnoredServices.getIgnoredServiceKeys();
         return publishable.stream().distinct()
-            .map(s -> new PublishableService(s.source(), s.peerName(), s.address(), s.containerName(), s.port(), s.rootRedirectPath(), ignoredKeys.contains(ignoreKey(s))))
+            .map(s -> new PublishableService(s.source(), s.peerName(), s.address(), s.containerName(), s.port(), s.rootRedirectPath(), ignoredKeys.contains(s.ignoreKey())))
             .toList();
-    }
-
-    static String ignoreKey(PublishableService s) {
-        return switch (s.source()) {
-            case PEER            -> s.peerName() + "/" + s.containerName() + ":" + s.port();
-            case LAN_SERVER -> s.address()  + "/" + s.containerName() + ":" + s.port();
-            case VAIER_SERVER    -> s.containerName() + ":" + s.port();
-        };
     }
 
     // --- ToggleServiceAuthUseCase ---

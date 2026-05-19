@@ -1,5 +1,7 @@
 package net.vaier.application;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 
 public interface PublishPeerServiceUseCase {
@@ -33,7 +35,18 @@ public interface PublishPeerServiceUseCase {
         int port,
         String rootRedirectPath,
         boolean ignored
-    ) {}
+    ) {
+        // Stable identity used by the ignored-services persistence layer. Lives on the entity so the
+        // frontend doesn't recompute it from the source enum (and so the two can never drift apart).
+        @JsonProperty("ignoreKey")
+        public String ignoreKey() {
+            return switch (source) {
+                case PEER         -> peerName + "/" + containerName + ":" + port;
+                case LAN_SERVER   -> address  + "/" + containerName + ":" + port;
+                case VAIER_SERVER -> containerName + ":" + port;
+            };
+        }
+    }
 
     record PublishStatus(boolean dnsPropagated, boolean traefikActive) {}
 
