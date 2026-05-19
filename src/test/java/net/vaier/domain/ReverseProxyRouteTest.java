@@ -204,6 +204,34 @@ class ReverseProxyRouteTest {
         assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
     }
 
+    // --- launchpadFaviconQuery (domain owns the favicon lookup identity) ---
+
+    @Test
+    void launchpadFaviconQuery_hostOnly_emitsHostParamOnly() {
+        ReverseProxyRoute route = route("grafana.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadFaviconQuery()).isEqualTo("host=grafana.example.com");
+    }
+
+    @Test
+    void launchpadFaviconQuery_pathBased_includesPathPrefix() {
+        ReverseProxyRoute route = pathRoute("services.example.com", "/grafana");
+
+        assertThat(route.launchpadFaviconQuery())
+            .isEqualTo("host=services.example.com&pathPrefix=%2Fgrafana");
+    }
+
+    @Test
+    void launchpadFaviconQuery_pathBasedSiblings_differByPathPrefix() {
+        // The whole point: siblings on one FQDN must produce distinct queries so the
+        // launchpad doesn't fight over a single cache entry.
+        ReverseProxyRoute grafana = pathRoute("services.example.com", "/grafana");
+        ReverseProxyRoute jenkins = pathRoute("services.example.com", "/jenkins");
+
+        assertThat(grafana.launchpadFaviconQuery())
+            .isNotEqualTo(jenkins.launchpadFaviconQuery());
+    }
+
     // --- launchpadVisibility (domain rule consolidating every reason a route is shown/hidden) ---
 
     @Test

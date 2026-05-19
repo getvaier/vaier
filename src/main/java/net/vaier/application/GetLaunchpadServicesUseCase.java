@@ -16,10 +16,13 @@ public interface GetLaunchpadServicesUseCase {
      *       {@code pathPrefix}.</li>
      *   <li>{@code visibility} — tri-state outcome (NOT_VISIBLE entries are filtered out by the
      *       use case and never appear in this list).</li>
+     *   <li>{@code faviconQuery} — pre-built query string the client appends to {@code /favicon}.
+     *       Path-based siblings get distinct queries so they don't collide on the favicon cache.</li>
      * </ul>
      * {@code dnsAddress} and {@code pathPrefix} are still here because the client uses them to
      * derive the peer / subdomain sub-line and the browser-tab target.
      */
     record LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
-                               LaunchpadVisibility visibility, String url, String displayName) {}
+                               LaunchpadVisibility visibility, String url, String displayName,
+                               String faviconQuery) {}
 }

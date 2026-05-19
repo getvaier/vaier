@@ -278,8 +278,10 @@
             const iconDiv = document.createElement('div');
             iconDiv.className = 'tile-icon';
 
+            // faviconQuery is computed by the domain (host + pathPrefix when path-based) so the
+            // launchpad never has to decide what the favicon lookup identity is.
             const FAVICON_PATHS = [
-                `/favicon?host=${encodeURIComponent(service.dnsAddress)}`,
+                `/favicon?${service.faviconQuery}`,
             ];
 
             const img = document.createElement('img');

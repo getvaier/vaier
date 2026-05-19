@@ -16,8 +16,10 @@ public class FaviconController {
     }
 
     @GetMapping("/favicon")
-    public ResponseEntity<byte[]> getFavicon(@RequestParam String host) {
-        return faviconFetcher.fetch(host)
+    public ResponseEntity<byte[]> getFavicon(
+            @RequestParam String host,
+            @RequestParam(required = false) String pathPrefix) {
+        return faviconFetcher.fetch(host, pathPrefix)
                 .map(bytes -> ResponseEntity.ok()
                         .contentType(detectContentType(bytes))
                         .body(bytes))

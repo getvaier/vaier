@@ -28,8 +28,8 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsMappedServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, "https://app.example.com", "app"),
-                new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, "http://10.0.0.2:8080", "db")
+                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, "https://app.example.com", "app", "host=app.example.com"),
+                new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, "http://10.0.0.2:8080", "db", "host=db.example.com")
         ));
 
         mockMvc.perform(get("/launchpad/services"))
@@ -46,7 +46,7 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsInactiveServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any())).thenReturn(List.of(
-                new LaunchpadServiceUco("down.example.com", null, "10.0.0.3", LaunchpadVisibility.VISIBLE_INACTIVE, "https://down.example.com", "down")
+                new LaunchpadServiceUco("down.example.com", null, "10.0.0.3", LaunchpadVisibility.VISIBLE_INACTIVE, "https://down.example.com", "down", "host=down.example.com")
         ));
 
         mockMvc.perform(get("/launchpad/services"))

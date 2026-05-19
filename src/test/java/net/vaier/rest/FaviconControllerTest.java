@@ -24,9 +24,9 @@ class FaviconControllerTest {
     @Test
     void returns200WithBytesWhenFaviconFound() {
         byte[] icon = {0, 0, 1, 0};
-        when(faviconFetcher.fetch("sonarr.example.com")).thenReturn(Optional.of(icon));
+        when(faviconFetcher.fetch("sonarr.example.com", null)).thenReturn(Optional.of(icon));
 
-        ResponseEntity<byte[]> response = controller.getFavicon("sonarr.example.com");
+        ResponseEntity<byte[]> response = controller.getFavicon("sonarr.example.com", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isEqualTo(icon);
@@ -34,10 +34,21 @@ class FaviconControllerTest {
 
     @Test
     void returns404WhenFaviconNotFound() {
-        when(faviconFetcher.fetch("unknown.example.com")).thenReturn(Optional.empty());
+        when(faviconFetcher.fetch("unknown.example.com", null)).thenReturn(Optional.empty());
 
-        ResponseEntity<byte[]> response = controller.getFavicon("unknown.example.com");
+        ResponseEntity<byte[]> response = controller.getFavicon("unknown.example.com", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    void passesPathPrefixThroughToFetcher() {
+        byte[] icon = {(byte) 0x89, 'P', 'N', 'G'};
+        when(faviconFetcher.fetch("services.example.com", "/grafana")).thenReturn(Optional.of(icon));
+
+        ResponseEntity<byte[]> response = controller.getFavicon("services.example.com", "/grafana");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isEqualTo(icon);
     }
 }

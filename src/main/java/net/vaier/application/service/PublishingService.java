@@ -179,7 +179,7 @@ public class PublishingService implements
                     if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
-                        r.launchpadDisplayName(baseDomain));
+                        r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery());
                 })
                 .filter(java.util.Objects::nonNull)
                 .stream())

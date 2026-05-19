@@ -43,14 +43,21 @@ public class FaviconFetcher {
     }
 
     public Optional<byte[]> fetch(String host) {
-        if (cache.containsKey(host)) return cache.get(host);
+        return fetch(host, null);
+    }
 
-        String baseUrl = "https://" + host;
+    public Optional<byte[]> fetch(String host, String pathPrefix) {
+        String prefix = (pathPrefix == null) ? "" : pathPrefix;
+        String cacheKey = host + prefix;
+        if (cache.containsKey(cacheKey)) return cache.get(cacheKey);
+
+        String hostUrl = "https://" + host;
+        String prefixedUrl = hostUrl + prefix;
         Optional<byte[]> result = Optional.empty();
         try {
-            String html = fetchHtml(baseUrl);
+            String html = fetchHtml(prefixedUrl + "/");
             if (html != null) {
-                Optional<String> faviconUrl = extractFaviconUrl(html, baseUrl);
+                Optional<String> faviconUrl = extractFaviconUrl(html, prefixedUrl);
                 if (faviconUrl.isPresent()) {
                     Optional<byte[]> bytes = fetchBytes(faviconUrl.get());
                     if (bytes.isPresent()) result = bytes;
@@ -58,18 +65,29 @@ public class FaviconFetcher {
             }
         } catch (Exception ignored) {
         }
-        if (result.isEmpty()) result = fetchBytes(baseUrl + "/favicon.ico");
-        if (result.isEmpty()) result = fetchBytes(baseUrl + "/apple-touch-icon.png");
-        if (result.isEmpty()) result = fetchBytes(baseUrl + "/apple-touch-icon-precomposed.png");
+        if (result.isEmpty() && !prefix.isEmpty()) result = fetchBytes(prefixedUrl + "/favicon.ico");
+        if (result.isEmpty()) result = fetchBytes(hostUrl + "/favicon.ico");
+        if (result.isEmpty()) result = fetchBytes(hostUrl + "/apple-touch-icon.png");
+        if (result.isEmpty()) result = fetchBytes(hostUrl + "/apple-touch-icon-precomposed.png");
         if (result.isEmpty()) {
-            String serviceName = host.split("\\.")[0].toLowerCase();
-            for (String iconUrl : internetIconUrls(serviceName)) {
+            for (String iconUrl : internetIconUrls(cdnLookupName(host, prefix))) {
                 result = fetchBytes(iconUrl);
                 if (result.isPresent()) break;
             }
         }
-        cache.put(host, result);
+        cache.put(cacheKey, result);
         return result;
+    }
+
+    String cdnLookupName(String host, String pathPrefix) {
+        if (pathPrefix != null && !pathPrefix.isEmpty()) {
+            String trimmed = pathPrefix.replaceAll("^/+", "").replaceAll("/+$", "");
+            if (!trimmed.isEmpty()) {
+                String[] segments = trimmed.split("/");
+                return segments[segments.length - 1].toLowerCase();
+            }
+        }
+        return host.split("\\.")[0].toLowerCase();
     }
 
     Optional<String> extractFaviconUrl(String html, String baseUrl) {

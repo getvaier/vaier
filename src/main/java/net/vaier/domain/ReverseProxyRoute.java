@@ -9,6 +9,8 @@ import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForResolvingPeerNames;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -223,6 +225,20 @@ public class ReverseProxyRoute {
         if (launchpadAlias != null && !launchpadAlias.isBlank()) return launchpadAlias.trim();
         if (pathPrefix != null) return pathPrefix.substring(pathPrefix.lastIndexOf('/') + 1);
         return domainName.split("\\.")[0];
+    }
+
+    /**
+     * The query string the launchpad should send to {@code /favicon} for this route. The domain
+     * owns the lookup identity: host-only routes resolve a single icon per FQDN, while path-based
+     * routes use (FQDN, pathPrefix) so siblings under one host don't collide on the favicon cache
+     * (and the CDN-by-name fallback uses the path segment, not the shared subdomain).
+     */
+    public String launchpadFaviconQuery() {
+        String q = "host=" + URLEncoder.encode(domainName, StandardCharsets.UTF_8);
+        if (pathPrefix != null) {
+            q += "&pathPrefix=" + URLEncoder.encode(pathPrefix, StandardCharsets.UTF_8);
+        }
+        return q;
     }
 
     public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {

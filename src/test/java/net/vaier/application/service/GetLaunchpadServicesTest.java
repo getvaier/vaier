@@ -343,6 +343,22 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
+    void getLaunchpadServices_pathBasedRoute_faviconQueryCarriesPathPrefix() {
+        ReverseProxyRoute pathBased = new ReverseProxyRoute(
+            "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/grafana"
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(pathBased));
+        setupDnsRecord("svc.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).faviconQuery()).isEqualTo("host=svc.example.com&pathPrefix=%2Fgrafana");
+    }
+
+    @Test
     void getLaunchpadServices_aliasSet_displayNameIsAlias() {
         ReverseProxyRoute aliased = new ReverseProxyRoute(
             "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",

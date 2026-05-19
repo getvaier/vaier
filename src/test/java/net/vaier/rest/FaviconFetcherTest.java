@@ -81,6 +81,36 @@ class FaviconFetcherTest {
     }
 
     @Test
+    void cdnLookupNameUsesFinalPathPrefixSegmentWhenPresent() {
+        assertThat(service.cdnLookupName("services.example.com", "/grafana"))
+                .isEqualTo("grafana");
+    }
+
+    @Test
+    void cdnLookupNameUsesFinalSegmentOfMultiSegmentPathPrefix() {
+        assertThat(service.cdnLookupName("services.example.com", "/team/grafana"))
+                .isEqualTo("grafana");
+    }
+
+    @Test
+    void cdnLookupNameLowercasesPathSegment() {
+        assertThat(service.cdnLookupName("services.example.com", "/Grafana"))
+                .isEqualTo("grafana");
+    }
+
+    @Test
+    void cdnLookupNameFallsBackToFirstDnsLabelWhenPathPrefixIsNull() {
+        assertThat(service.cdnLookupName("pihole.example.com", null))
+                .isEqualTo("pihole");
+    }
+
+    @Test
+    void cdnLookupNameFallsBackToFirstDnsLabelWhenPathPrefixIsEmpty() {
+        assertThat(service.cdnLookupName("pihole.example.com", ""))
+                .isEqualTo("pihole");
+    }
+
+    @Test
     void returnsCachedResultWithoutFetching() {
         byte[] cached = {(byte) 0x89, 'P', 'N', 'G'};
         service.cache.put("cached.example.com", Optional.of(cached));
@@ -98,5 +128,29 @@ class FaviconFetcherTest {
         service.fetch("no-network.example.com");
 
         assertThat(service.cache).containsKey("no-network.example.com");
+    }
+
+    @Test
+    void cachesSeparatelyPerPathPrefix() {
+        // Path-based services share a hostname; each pathPrefix must have its own cache entry
+        // so siblings don't fight over a single lookup.
+        byte[] grafana = {(byte) 0x89, 'P', 'N', 'G'};
+        byte[] jenkins = {(byte) 0x89, 'P', 'N', 'J'};
+        service.cache.put("services.example.com/grafana", Optional.of(grafana));
+        service.cache.put("services.example.com/jenkins", Optional.of(jenkins));
+
+        assertThat(service.fetch("services.example.com", "/grafana")).contains(grafana);
+        assertThat(service.fetch("services.example.com", "/jenkins")).contains(jenkins);
+    }
+
+    @Test
+    void hostOnlyFetchAndNullPathPrefixFetchShareCacheEntry() {
+        // fetch(host) is just sugar for fetch(host, null); both must hit the same cache key.
+        byte[] cached = {(byte) 0x89, 'P', 'N', 'G'};
+        service.cache.put("solo.example.com", Optional.of(cached));
+
+        assertThat(service.fetch("solo.example.com")).contains(cached);
+        assertThat(service.fetch("solo.example.com", null)).contains(cached);
+        assertThat(service.fetch("solo.example.com", "")).contains(cached);
     }
 }
