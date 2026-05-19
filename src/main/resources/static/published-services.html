@@ -635,6 +635,19 @@
                                 </span>
                             </div>
                             <div class="detail-row">
+                                <span class="detail-label" title="Optional label shown on the launchpad tile. Leave blank to use the default (path-segment for path-based routes, subdomain otherwise).">Display name</span>
+                                <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                    <input type="text" id="alias-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                           value="${service.launchpadAlias || ''}"
+                                           data-original="${service.launchpadAlias || ''}"
+                                           placeholder="(default)"
+                                           oninput="onAliasInput('${service.dnsAddress}', '${id}')">
+                                    <button class="btn btn-primary" id="alias-save-${id}"
+                                            style="flex-shrink:0" disabled
+                                            onclick="saveAlias('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
+                                </span>
+                            </div>
+                            <div class="detail-row">
                                 <span class="detail-label" title="When checked, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
                                 <span class="detail-value">
                                     <input type="checkbox" id="dulDisabled-${id}"
@@ -1044,6 +1057,34 @@
             const btn = document.getElementById(`redirect-save-${id}`);
             if (!input || !btn) return;
             btn.disabled = input.value.trim() === (input.dataset.original || '');
+        }
+
+        function onAliasInput(dnsAddress, id) {
+            const input = document.getElementById(`alias-${id}`);
+            const btn = document.getElementById(`alias-save-${id}`);
+            if (!input || !btn) return;
+            btn.disabled = input.value.trim() === (input.dataset.original || '');
+        }
+
+        async function saveAlias(dnsAddress, pathPrefix, id) {
+            const input = document.getElementById(`alias-${id}`);
+            const btn = document.getElementById(`alias-save-${id}`);
+            const alias = input.value.trim();
+            btn.disabled = true;
+            try {
+                const response = await fetch(withPathQuery(
+                    `/published-services/${encodeURIComponent(dnsAddress)}/launchpad-alias`, pathPrefix), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ launchpadAlias: alias })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                input.dataset.original = alias;
+                await fetchServices();
+            } catch (error) {
+                btn.disabled = false;
+                alert(`Failed to update display name: ${error.message}`);
+            }
         }
 
         async function saveRedirect(dnsAddress, pathPrefix, id) {

@@ -37,12 +37,13 @@ public class ReverseProxyRoute {
     private final String protocol;
     private final String pathPrefix;
     private final boolean hiddenFromLaunchpad;
+    private final String launchpadAlias;
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
                              boolean isLanService, String protocol, String pathPrefix,
-                             boolean hiddenFromLaunchpad) {
+                             boolean hiddenFromLaunchpad, String launchpadAlias) {
         this.name = name;
         this.domainName = domainName;
         this.address = address;
@@ -58,6 +59,16 @@ public class ReverseProxyRoute {
         this.protocol = protocol;
         this.pathPrefix = pathPrefix;
         this.hiddenFromLaunchpad = hiddenFromLaunchpad;
+        this.launchpadAlias = launchpadAlias;
+    }
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
+                             List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
+                             boolean isLanService, String protocol, String pathPrefix,
+                             boolean hiddenFromLaunchpad) {
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, pathPrefix, hiddenFromLaunchpad, null);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
@@ -65,7 +76,7 @@ public class ReverseProxyRoute {
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
                              boolean isLanService, String protocol, String pathPrefix) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
-             rootRedirectPath, directUrlDisabled, isLanService, protocol, pathPrefix, false);
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, pathPrefix, false, null);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
@@ -73,20 +84,20 @@ public class ReverseProxyRoute {
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
                              boolean isLanService, String protocol) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
-             rootRedirectPath, directUrlDisabled, isLanService, protocol, null, false);
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, null, false, null);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled) {
         this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
-             rootRedirectPath, directUrlDisabled, false, null, null, false);
+             rootRedirectPath, directUrlDisabled, false, null, null, false, null);
     }
 
     public static ReverseProxyRoute lanRoute(String name, String domainName, String host, int port,
                                              String protocol, String service) {
         return new ReverseProxyRoute(name, domainName, host, port, service, null, null, null, null,
-            null, false, true, protocol, null, false);
+            null, false, true, protocol, null, false, null);
     }
 
     public static void validateForPublication(String dnsName, String address, int port) {
@@ -196,6 +207,24 @@ public class ReverseProxyRoute {
      *   <li>{@link LaunchpadVisibility#VISIBLE_ACTIVE} — DNS propagated, backend healthy.</li>
      * </ul>
      */
+    /**
+     * The label the launchpad tile should display for this route. Precedence:
+     * <ol>
+     *   <li>operator-supplied {@code launchpadAlias} (non-blank) — wins always;</li>
+     *   <li>final segment of {@code pathPrefix} — for path-based routes the path is the
+     *       human-meaningful part (e.g. {@code /grafana} → {@code "grafana"});</li>
+     *   <li>first DNS label otherwise — {@code grafana.example.com} → {@code "grafana"}.</li>
+     * </ol>
+     * {@code baseDomain} is accepted for symmetry with other display helpers; currently unused
+     * because the first-label rule doesn't need it. Kept so future rules (e.g. multi-label
+     * sub-domains) don't have to thread it back in.
+     */
+    public String launchpadDisplayName(String baseDomain) {
+        if (launchpadAlias != null && !launchpadAlias.isBlank()) return launchpadAlias.trim();
+        if (pathPrefix != null) return pathPrefix.substring(pathPrefix.lastIndexOf('/') + 1);
+        return domainName.split("\\.")[0];
+    }
+
     public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
         if (hiddenFromLaunchpad) return LaunchpadVisibility.NOT_VISIBLE;
         if (dnsState != DnsState.OK) return LaunchpadVisibility.NOT_VISIBLE;

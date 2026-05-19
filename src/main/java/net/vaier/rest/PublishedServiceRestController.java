@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.EditServiceLaunchpadAliasUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
@@ -38,6 +39,7 @@ public class PublishedServiceRestController {
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
     private final EditServiceRedirectUseCase editServiceRedirectUseCase;
+    private final EditServiceLaunchpadAliasUseCase editServiceLaunchpadAliasUseCase;
     private final ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
     private final ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
@@ -146,6 +148,16 @@ public class PublishedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @PatchMapping("/{dnsName:.+}/launchpad-alias")
+    public ResponseEntity<Void> setLaunchpadAlias(@PathVariable String dnsName,
+                                                  @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                                  @RequestBody LaunchpadAliasRequest request) {
+        log.info("Setting launchpadAlias={} for {} (pathPrefix: {})", request.launchpadAlias(), dnsName, pathPrefix);
+        editServiceLaunchpadAliasUseCase.setLaunchpadAlias(dnsName, pathPrefix, request.launchpadAlias());
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{subdomain}/status")
     public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
         var status = publishPeerServiceUseCase.getPublishStatus(subdomain);
@@ -192,5 +204,6 @@ public class PublishedServiceRestController {
     record RedirectRequest(String rootRedirectPath) {}
     record DirectUrlDisabledRequest(boolean directUrlDisabled) {}
     record HiddenFromLaunchpadRequest(boolean hiddenFromLaunchpad) {}
+    record LaunchpadAliasRequest(String launchpadAlias) {}
     record IgnoreRequest(String key) {}
 }

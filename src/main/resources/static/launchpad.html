@@ -233,8 +233,15 @@
         }
 
         function serviceName(service) {
+            // displayName is computed by the domain (alias > path segment > subdomain).
+            // Fallback to the legacy derivation keeps things rendering during a partial deploy.
+            if (service.displayName) return service.displayName;
             const base = service.dnsAddress.split('.')[0];
             return service.pathPrefix ? base + service.pathPrefix : base;
+        }
+
+        function subdomain(dnsAddress) {
+            return dnsAddress.split('.')[0];
         }
 
         function peerName(dnsAddress, hostAddress) {
@@ -244,12 +251,23 @@
             return parts.length >= 2 ? parts[1] : 'Vaier server';
         }
 
+        function tileSubLine(service, peer) {
+            // Show the subdomain alongside the peer when the tile name has dropped it (path-based
+            // routes, or operator-aliased tiles). Keeps the host context visible without making
+            // every tile read "service/path".
+            const sub = subdomain(service.dnsAddress);
+            const name = serviceName(service);
+            if (name === sub) return peer;
+            return `${peer} · ${sub}`;
+        }
+
         function renderTile(service) {
             const url    = service.url;
             const name   = serviceName(service);
             const color  = avatarColor(name);
             const letter = name.charAt(0).toUpperCase();
             const peer   = peerName(service.dnsAddress, service.hostAddress);
+            const subLine = tileSubLine(service, peer);
 
             const tile = document.createElement('a');
             tile.href = url;
@@ -284,7 +302,7 @@
             infoDiv.className = 'tile-info';
             infoDiv.innerHTML = `
                 <div class="tile-name">${name}</div>
-                <div class="tile-peer">${peer}</div>
+                <div class="tile-peer">${subLine}</div>
             `;
 
             tile.appendChild(iconDiv);

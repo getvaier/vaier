@@ -326,6 +326,39 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
+    void getLaunchpadServices_pathBasedRoute_displayNameIsFinalPathSegment() {
+        ReverseProxyRoute pathBased = new ReverseProxyRoute(
+            "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/grafana"
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(pathBased));
+        setupDnsRecord("svc.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).displayName()).isEqualTo("grafana");
+    }
+
+    @Test
+    void getLaunchpadServices_aliasSet_displayNameIsAlias() {
+        ReverseProxyRoute aliased = new ReverseProxyRoute(
+            "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/grafana", false, "Grafana Prod"
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(aliased));
+        setupDnsRecord("svc.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).displayName()).isEqualTo("Grafana Prod");
+    }
+
+    @Test
     void getLaunchpadServices_hiddenFromLaunchpadRoute_excludedFromResult() {
         ReverseProxyRoute hidden = new ReverseProxyRoute(
             "internal-router", "internal-api.example.com", "10.0.0.5", 9000, "internal-svc",

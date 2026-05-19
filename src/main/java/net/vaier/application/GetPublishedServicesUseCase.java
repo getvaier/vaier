@@ -20,26 +20,34 @@ public interface GetPublishedServicesUseCase {
         boolean directUrlDisabled,
         boolean isLanService,
         String pathPrefix,
-        boolean hiddenFromLaunchpad
+        boolean hiddenFromLaunchpad,
+        String launchpadAlias
     ){
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled) {
             this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, false, null, false);
+                rootRedirectPath, directUrlDisabled, false, null, false, null);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled, boolean isLanService) {
             this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, null, false);
+                rootRedirectPath, directUrlDisabled, isLanService, null, false, null);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled, boolean isLanService,
                                    String pathPrefix) {
             this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false);
+                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false, null);
+        }
+        public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
+                                   int hostPort, State state, boolean authenticated,
+                                   String rootRedirectPath, boolean directUrlDisabled, boolean isLanService,
+                                   String pathPrefix, boolean hiddenFromLaunchpad) {
+            this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
+                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad, null);
         }
     }
 }

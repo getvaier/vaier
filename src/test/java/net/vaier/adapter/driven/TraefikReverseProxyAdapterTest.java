@@ -245,6 +245,62 @@ class TraefikReverseProxyAdapterTest {
         assertThat(prometheus.isHiddenFromLaunchpad()).isFalse();
     }
 
+    // --- setRouteLaunchpadAlias ---
+
+    @Test
+    void setRouteLaunchpadAlias_persistsAliasThatRoundTripsViaGetRoutes() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        adapter.setRouteLaunchpadAlias("app.example.com", "Grafana Prod");
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getLaunchpadAlias()).isEqualTo("Grafana Prod");
+    }
+
+    @Test
+    void setRouteLaunchpadAlias_null_clearsAlias() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteLaunchpadAlias("app.example.com", "Grafana Prod");
+
+        adapter.setRouteLaunchpadAlias("app.example.com", null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getLaunchpadAlias()).isNull();
+    }
+
+    @Test
+    void getReverseProxyRoutes_unsetLaunchpadAlias_defaultsToNull() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getLaunchpadAlias()).isNull();
+    }
+
+    @Test
+    void setRouteLaunchpadAlias_persistsAcrossAdapterInstances() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteLaunchpadAlias("app.example.com", "My App");
+
+        var adapter2 = new TraefikReverseProxyAdapter(
+            tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
+
+        assertThat(adapter2.getReverseProxyRoutes().getFirst().getLaunchpadAlias()).isEqualTo("My App");
+    }
+
+    @Test
+    void setRouteLaunchpadAlias_pathBasedRoute_targetsCorrectSibling() {
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 8080, false, null, "/grafana");
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 9090, false, null, "/prometheus");
+
+        adapter.setRouteLaunchpadAlias("svc.example.com", "/grafana", "Grafana Prod");
+
+        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
+        ReverseProxyRoute grafana = routes.stream().filter(r -> "/grafana".equals(r.getPathPrefix())).findFirst().orElseThrow();
+        ReverseProxyRoute prometheus = routes.stream().filter(r -> "/prometheus".equals(r.getPathPrefix())).findFirst().orElseThrow();
+        assertThat(grafana.getLaunchpadAlias()).isEqualTo("Grafana Prod");
+        assertThat(prometheus.getLaunchpadAlias()).isNull();
+    }
+
     // --- getReverseProxyRoutes with empty file ---
 
     @Test

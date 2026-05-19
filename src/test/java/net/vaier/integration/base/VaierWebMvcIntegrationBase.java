@@ -142,6 +142,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected EditServiceRedirectUseCase editServiceRedirectUseCase;
 
     @MockBean
+    protected EditServiceLaunchpadAliasUseCase editServiceLaunchpadAliasUseCase;
+
+    @MockBean
     protected ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
 
     @MockBean

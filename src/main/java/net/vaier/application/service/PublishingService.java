@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.EditServiceLaunchpadAliasUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
@@ -66,6 +67,7 @@ public class PublishingService implements
     ToggleServiceDirectUrlDisabledUseCase,
     ToggleServiceLaunchpadVisibilityUseCase,
     EditServiceRedirectUseCase,
+    EditServiceLaunchpadAliasUseCase,
     IgnorePublishableServiceUseCase,
     UnignorePublishableServiceUseCase {
 
@@ -164,9 +166,11 @@ public class PublishingService implements
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        String baseDomain = configResolver.getDomain();
         // Match each enriched Uco back to its route by (dnsAddress, pathPrefix), then ask the
-        // domain for the consolidated launchpad visibility. NOT_VISIBLE entries are dropped;
-        // the rest carry the tri-state through so the launchpad client doesn't have to know why.
+        // domain for the consolidated launchpad visibility and tile label. NOT_VISIBLE entries
+        // are dropped; the rest carry the tri-state and display name through so the launchpad
+        // client doesn't have to know why a service is shown or how it should be labelled.
         return getPublishedServices().stream()
             .flatMap(s -> ReverseProxyRoute
                 .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix())
@@ -174,7 +178,8 @@ public class PublishingService implements
                     LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state());
                     if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
-                        visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)));
+                        visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
+                        r.launchpadDisplayName(baseDomain));
                 })
                 .filter(java.util.Objects::nonNull)
                 .stream())
@@ -217,7 +222,8 @@ public class PublishingService implements
             route.isDirectUrlDisabled(),
             route.isLanService(),
             route.getPathPrefix(),
-            route.isHiddenFromLaunchpad()
+            route.isHiddenFromLaunchpad(),
+            route.getLaunchpadAlias()
         );
     }
 
@@ -658,6 +664,19 @@ public class PublishingService implements
         requireNonMandatory(dnsName, "Cannot change launchpad visibility for built-in service: ");
         log.info("Setting hiddenFromLaunchpad={} for {} ({})", hiddenFromLaunchpad, dnsName, normalisedPath);
         forPersistingReverseProxyRoutes.setRouteHiddenFromLaunchpad(dnsName, normalisedPath, hiddenFromLaunchpad);
+        invalidatePublishedServicesCache();
+    }
+
+    // --- EditServiceLaunchpadAliasUseCase ---
+
+    @Override
+    public void setLaunchpadAlias(String dnsName, String pathPrefix, String launchpadAlias) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
+        requireNonMandatory(dnsName, "Cannot set launchpad alias for built-in service: ");
+        String alias = (launchpadAlias == null || launchpadAlias.isBlank()) ? null : launchpadAlias.trim();
+        log.info("Setting launchpadAlias={} for {} ({})", alias, dnsName, normalisedPath);
+        forPersistingReverseProxyRoutes.setRouteLaunchpadAlias(dnsName, normalisedPath, alias);
         invalidatePublishedServicesCache();
     }
 

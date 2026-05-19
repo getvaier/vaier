@@ -142,6 +142,68 @@ class ReverseProxyRouteTest {
         assertThat(lanRoute.isHiddenFromLaunchpad()).isFalse();
     }
 
+    // --- launchpadAlias + launchpadDisplayName (domain rule for tile label) ---
+
+    @Test
+    void launchpadAlias_retainedByFullConstructor() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, null, false, "Grafana Prod");
+
+        assertThat(route.getLaunchpadAlias()).isEqualTo("Grafana Prod");
+    }
+
+    @Test
+    void launchpadAlias_defaultsToNullFromShorterConstructors() {
+        ReverseProxyRoute hostOnly = new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc", null);
+
+        assertThat(hostOnly.getLaunchpadAlias()).isNull();
+    }
+
+    @Test
+    void launchpadDisplayName_hostOnly_returnsSubdomain() {
+        ReverseProxyRoute route = route("grafana.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
+    }
+
+    @Test
+    void launchpadDisplayName_hostOnlyOnNestedSubdomain_returnsFirstLabel() {
+        // grafana.myserver.example.com → "grafana"
+        ReverseProxyRoute route = route("grafana.myserver.example.com", "10.13.13.2", 8080);
+
+        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
+    }
+
+    @Test
+    void launchpadDisplayName_pathBased_returnsLastPathSegment() {
+        ReverseProxyRoute route = pathRoute("svc.example.com", "/grafana");
+
+        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
+    }
+
+    @Test
+    void launchpadDisplayName_pathBasedNested_returnsFinalSegment() {
+        ReverseProxyRoute route = pathRoute("svc.example.com", "/api/v1");
+
+        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("v1");
+    }
+
+    @Test
+    void launchpadDisplayName_aliasWins_overPathAndSubdomain() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "svc.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/grafana", false, "Grafana Prod");
+
+        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("Grafana Prod");
+    }
+
+    @Test
+    void launchpadDisplayName_blankAliasIgnored() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "grafana.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, null, false, "   ");
+
+        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
+    }
+
     // --- launchpadVisibility (domain rule consolidating every reason a route is shown/hidden) ---
 
     @Test

@@ -136,6 +136,31 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
+    void setLaunchpadAlias_setsAlias() throws Exception {
+        mockMvc.perform(patch("/published-services/svc.example.com/launchpad-alias")
+                       .param("pathPrefix", "/grafana")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"launchpadAlias":"Grafana Prod"}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(editServiceLaunchpadAliasUseCase).setLaunchpadAlias("svc.example.com", "/grafana", "Grafana Prod");
+    }
+
+    @Test
+    void setLaunchpadAlias_blankClearsAlias() throws Exception {
+        mockMvc.perform(patch("/published-services/app.example.com/launchpad-alias")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"launchpadAlias":""}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(editServiceLaunchpadAliasUseCase).setLaunchpadAlias("app.example.com", null, "");
+    }
+
+    @Test
     void setRedirect_updatesRootRedirectPath() throws Exception {
         mockMvc.perform(patch("/published-services/app.example.com/redirect")
                        .contentType(MediaType.APPLICATION_JSON)
