@@ -570,8 +570,7 @@
                 const authSlot   = service.authenticated
                     ? { kind: 'auth',    title: 'Authelia authentication required',         label: 'Auth' }
                     : { kind: 'no-auth', title: 'No authentication — service is publicly reachable', label: 'No auth' };
-                const pathSuffix = service.pathPrefix ? service.pathPrefix + '/' : '';
-                const serviceUrl = `https://${service.dnsAddress}${pathSuffix}`;
+                const serviceUrl = `https://${service.dnsAddress}${service.pathPrefix || ''}`;
                 const displayHost = `${service.dnsAddress}${service.pathPrefix || ''}`;
                 const isSelf = service.dnsAddress.startsWith('vaier.');
 

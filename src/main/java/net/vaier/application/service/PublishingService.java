@@ -188,15 +188,16 @@ public class PublishingService implements
 
     private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {
         if (directUrl != null) return directUrl;
-        // Path-based services land at https://host/pathPrefix/ so the tile click lands the user
-        // inside the right route scope; host-only services keep their existing https://host shape.
-        String pathSuffix = s.pathPrefix() == null ? "" : s.pathPrefix() + "/";
+        // Path-based services land at https://host/pathPrefix (no trailing slash) — some apps
+        // serve different content for /path vs /path/, so let the target redirect to its
+        // preferred shape itself. Host-only services keep their existing https://host shape.
+        String pathSuffix = s.pathPrefix() == null ? "" : s.pathPrefix();
         if (!s.authenticated()) return "https://" + s.dnsAddress() + pathSuffix;
         // Auth-protected services route via Authelia's login URL so the browser navigates to a
         // different origin first. Without this, openHAB-style PWAs serve a cached SPA from their
         // own service worker, the SPA hits /rest/* (which Authelia answers with 401, not 302),
         // and the user sees the app's own login looping instead of Authelia's.
-        String target = "https://" + s.dnsAddress() + (s.pathPrefix() == null ? "/" : s.pathPrefix() + "/");
+        String target = "https://" + s.dnsAddress() + (s.pathPrefix() == null ? "/" : s.pathPrefix());
         String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
         return "https://login." + configResolver.getDomain() + "/?rd=" + encoded;
     }

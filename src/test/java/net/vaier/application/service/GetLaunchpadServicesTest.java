@@ -359,6 +359,43 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
+    void getLaunchpadServices_publicPathRoute_urlHasNoTrailingSlash() {
+        // Destination apps can serve different content for `/path/` vs `/path` (e.g. CorpoWebserver
+        // returns its dashboard at /CorpoWebserver/stat but a different page at .../stat/). Let the
+        // target redirect to its preferred shape itself instead of forcing a trailing slash.
+        ReverseProxyRoute pathBased = new ReverseProxyRoute(
+            "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/grafana"
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(pathBased));
+        setupDnsRecord("svc.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).url()).isEqualTo("https://svc.example.com/grafana");
+    }
+
+    @Test
+    void getLaunchpadServices_authProtectedPathRoute_autheliaReturnTargetHasNoTrailingSlash() {
+        ReverseProxyRoute pathBased = new ReverseProxyRoute(
+            "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null),
+            null, null, null, null, false, false, null, "/grafana"
+        );
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(pathBased));
+        setupDnsRecord("svc.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).url())
+            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fsvc.example.com%2Fgrafana");
+    }
+
+    @Test
     void getLaunchpadServices_aliasSet_displayNameIsAlias() {
         ReverseProxyRoute aliased = new ReverseProxyRoute(
             "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
