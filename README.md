@@ -28,6 +28,8 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down. |
 | **Consistent branding** | Authelia login pages share Vaier's dark theme so the auth hand-off feels seamless. |
 
+![docs/launchpad.png](docs/launchpad.png)
+
 ---
 
 ## How it fits together
@@ -47,8 +49,6 @@ flowchart LR
 ```
 
 Every published service resolves via Route53 to the single Vaier server, terminates TLS at Traefik, optionally passes Authelia, and is proxied over WireGuard to the container running on a peer.
-
-![docs/launchpad.png](docs/launchpad.png)
 
 ---
 
