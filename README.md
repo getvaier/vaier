@@ -48,6 +48,8 @@ flowchart LR
 
 Every published service resolves via Route53 to the single Vaier server, terminates TLS at Traefik, optionally passes Authelia, and is proxied over WireGuard to the container running on a peer.
 
+![docs/launchpad.png](docs/launchpad.png)
+
 ---
 
 ## Prerequisites
