@@ -343,15 +343,18 @@
             tile.appendChild(iconDiv);
             tile.appendChild(infoDiv);
 
-            // image / version are present only for container-backed services (issue #210);
-            // a service published as a bare LAN host:port has no container, so no tooltip.
-            if (service.image) {
+            // image comes from a backing container (issue #210); version comes from that
+            // container or from a configured version endpoint — a service running natively on
+            // a LAN machine can report a version with no image. Show the tooltip for either.
+            if (service.image || service.version) {
                 const tip = document.createElement('div');
                 tip.className = 'tile-tooltip';
-                const imageLine = document.createElement('div');
-                imageLine.className = 'tt-image';
-                imageLine.textContent = service.image;
-                tip.appendChild(imageLine);
+                if (service.image) {
+                    const imageLine = document.createElement('div');
+                    imageLine.className = 'tt-image';
+                    imageLine.textContent = service.image;
+                    tip.appendChild(imageLine);
+                }
                 if (service.version) {
                     const versionLine = document.createElement('div');
                     versionLine.className = 'tt-version';

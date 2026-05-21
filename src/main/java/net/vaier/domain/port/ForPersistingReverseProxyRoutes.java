@@ -40,6 +40,10 @@ public interface ForPersistingReverseProxyRoutes {
     void setRouteHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad);
     /** {@code launchpadAlias} may be null or blank to clear the override; non-blank to set it. */
     void setRouteLaunchpadAlias(String dnsName, String pathPrefix, String launchpadAlias);
+    /** Sets (or, when either argument is null/blank, clears) the route's version endpoint — the
+     *  URL path Vaier GETs and the property name it reads the running version from. */
+    void setRouteVersionEndpoint(String dnsName, String pathPrefix, String versionEndpoint,
+                                 String versionProperty);
 
     default void setRouteAuthentication(String dnsName, boolean requiresAuth) {
         setRouteAuthentication(dnsName, null, requiresAuth);
@@ -55,5 +59,8 @@ public interface ForPersistingReverseProxyRoutes {
     }
     default void setRouteLaunchpadAlias(String dnsName, String launchpadAlias) {
         setRouteLaunchpadAlias(dnsName, null, launchpadAlias);
+    }
+    default void setRouteVersionEndpoint(String dnsName, String versionEndpoint, String versionProperty) {
+        setRouteVersionEndpoint(dnsName, null, versionEndpoint, versionProperty);
     }
 }

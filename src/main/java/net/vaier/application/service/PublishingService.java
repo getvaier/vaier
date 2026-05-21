@@ -6,6 +6,7 @@ import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.EditServiceLaunchpadAliasUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
+import net.vaier.application.EditServiceVersionEndpointUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -38,6 +39,7 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingDns;
 import net.vaier.domain.port.ForResolvingPeerNames;
@@ -68,6 +70,7 @@ public class PublishingService implements
     ToggleServiceLaunchpadVisibilityUseCase,
     EditServiceRedirectUseCase,
     EditServiceLaunchpadAliasUseCase,
+    EditServiceVersionEndpointUseCase,
     IgnorePublishableServiceUseCase,
     UnignorePublishableServiceUseCase {
 
@@ -86,6 +89,7 @@ public class PublishingService implements
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
     private final GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
+    private final ForProbingServiceVersion forProbingServiceVersion;
 
     private volatile List<PublishedServiceUco> cache = null;
 
@@ -112,7 +116,8 @@ public class PublishingService implements
                              PendingPublicationsService pendingPublicationsService,
                              DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
                              DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase,
-                             GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase) {
+                             GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase,
+                             ForProbingServiceVersion forProbingServiceVersion) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
@@ -128,6 +133,7 @@ public class PublishingService implements
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
         this.getVaierServerDockerServicesUseCase = getVaierServerDockerServicesUseCase;
+        this.forProbingServiceVersion = forProbingServiceVersion;
     }
 
     @Override
@@ -171,6 +177,7 @@ public class PublishingService implements
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         String baseDomain = configResolver.getDomain();
         ContainerImageSnapshot images = containerImageSnapshot();
+        VersionProbeSnapshot probes = versionProbeSnapshot();
         // Match each enriched Uco back to its route by (dnsAddress, pathPrefix), then ask the
         // domain for the consolidated launchpad visibility, tile label, and backing container.
         // NOT_VISIBLE entries are dropped; the rest carry the tri-state, display name, and — when
@@ -184,11 +191,17 @@ public class PublishingService implements
                     if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
                     DockerService backing = r.backingContainer(images.vaierServerContainers(),
                         images.peerContainersByVpnIp(), images.lanServerContainersByAddress()).orElse(null);
+                    // A configured version endpoint (a service running natively on a LAN machine,
+                    // reporting its own version over HTTP) takes precedence over a container's
+                    // image tag; the image still comes only from a backing container, if any.
+                    String probedVersion = r.hasVersionEndpoint()
+                        ? probes.versionsByRouteName().get(r.getName()) : null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
                         r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery(),
                         backing == null ? null : backing.image(),
-                        backing == null ? null : backing.version());
+                        probedVersion != null ? probedVersion
+                            : (backing == null ? null : backing.version()));
                 })
                 .filter(java.util.Objects::nonNull)
                 .stream())
@@ -242,6 +255,50 @@ public class PublishingService implements
         return snapshot;
     }
 
+    private record VersionProbeSnapshot(Map<String, String> versionsByRouteName, long takenAtMillis) {}
+
+    private volatile VersionProbeSnapshot versionProbeSnapshot = null;
+
+    /**
+     * How long a version-probe snapshot stays fresh. Like {@link #containerImageSnapshotTtlMillis},
+     * this keeps the launchpad's aggressive reloads from re-probing every version endpoint — each
+     * probe is an HTTP GET to a possibly-slow LAN host.
+     */
+    long versionProbeSnapshotTtlMillis = 60_000;
+
+    /**
+     * A TTL-cached map of router name to probed version, for every route with a configured version
+     * endpoint (issue #210 — surfacing the version of a service that runs natively on a LAN
+     * machine, not as a discoverable container). Probes run concurrently so one unreachable
+     * endpoint doesn't hold up the rest; every probe failure is simply absent from the map.
+     */
+    private VersionProbeSnapshot versionProbeSnapshot() {
+        VersionProbeSnapshot snapshot = versionProbeSnapshot;
+        if (snapshot != null
+                && System.currentTimeMillis() - snapshot.takenAtMillis() < versionProbeSnapshotTtlMillis) {
+            return snapshot;
+        }
+        // The route owns the probe — it talks to the ForProbingServiceVersion driven port itself
+        // (see ReverseProxyRoute#probeVersion). This service only orchestrates: pick the routes,
+        // run the probes concurrently, cache the result. It must not call the port directly.
+        List<CompletableFuture<Map.Entry<String, String>>> probes =
+            forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+                .filter(ReverseProxyRoute::hasVersionEndpoint)
+                .map(r -> CompletableFuture.supplyAsync(() ->
+                    r.probeVersion(forProbingServiceVersion)
+                        .map(v -> Map.entry(r.getName(), v))
+                        .orElse(null)))
+                .toList();
+        Map<String, String> versions = probes.stream()
+            .map(CompletableFuture::join)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.toMap(
+                Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
+        snapshot = new VersionProbeSnapshot(versions, System.currentTimeMillis());
+        versionProbeSnapshot = snapshot;
+        return snapshot;
+    }
+
     private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {
         if (directUrl != null) return directUrl;
         // Path-based services land at https://host/pathPrefix (no trailing slash) — some apps
@@ -280,7 +337,9 @@ public class PublishingService implements
             route.isLanService(),
             route.getPathPrefix(),
             route.isHiddenFromLaunchpad(),
-            route.getLaunchpadAlias()
+            route.getLaunchpadAlias(),
+            route.getVersionEndpoint(),
+            route.getVersionProperty()
         );
     }
 
@@ -726,6 +785,22 @@ public class PublishingService implements
         String alias = (launchpadAlias == null || launchpadAlias.isBlank()) ? null : launchpadAlias.trim();
         log.info("Setting launchpadAlias={} for {} ({})", alias, dnsName, normalisedPath);
         forPersistingReverseProxyRoutes.setRouteLaunchpadAlias(dnsName, normalisedPath, alias);
+        invalidatePublishedServicesCache();
+    }
+
+    // --- EditServiceVersionEndpointUseCase ---
+
+    @Override
+    public void setVersionEndpoint(String dnsName, String pathPrefix, String versionEndpoint,
+                                   String versionProperty) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute.validatePathPrefix(normalisedPath);
+        requireNonMandatory(dnsName, "Cannot set version endpoint for built-in service: ");
+        String endpoint = (versionEndpoint == null || versionEndpoint.isBlank()) ? null : versionEndpoint.trim();
+        String property = (versionProperty == null || versionProperty.isBlank()) ? null : versionProperty.trim();
+        log.info("Setting versionEndpoint={} versionProperty={} for {} ({})",
+            endpoint, property, dnsName, normalisedPath);
+        forPersistingReverseProxyRoutes.setRouteVersionEndpoint(dnsName, normalisedPath, endpoint, property);
         invalidatePublishedServicesCache();
     }
 

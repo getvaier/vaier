@@ -21,6 +21,7 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingDns;
 import net.vaier.domain.port.ForResolvingPeerNames;
@@ -95,6 +96,9 @@ class PublishingServiceTest {
 
     @Mock
     GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
+
+    @Mock
+    ForProbingServiceVersion forProbingServiceVersion;
 
     @InjectMocks
     PublishingService service;
@@ -1348,6 +1352,57 @@ class PublishingServiceTest {
             () -> service.setRootRedirectPath("login.example.com", "/admin/"));
 
         verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
+    }
+
+    // --- setVersionEndpoint ---
+
+    @Test
+    void setVersionEndpoint_delegatesToPort() {
+        service.setVersionEndpoint("app.example.com", "/sys/metrics?name[]=system_info", "display");
+
+        verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint(
+            "app.example.com", null, "/sys/metrics?name[]=system_info", "display");
+    }
+
+    @Test
+    void setVersionEndpoint_pathBasedRoute_passesPathPrefix() {
+        service.setVersionEndpoint("svc.example.com", "/grafana", "/sys/metrics", "display");
+
+        verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint(
+            "svc.example.com", "/grafana", "/sys/metrics", "display");
+    }
+
+    @Test
+    void setVersionEndpoint_blankEndpoint_clearsByPassingNull() {
+        service.setVersionEndpoint("app.example.com", "   ", "display");
+
+        verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint(
+            "app.example.com", null, null, "display");
+    }
+
+    @Test
+    void setVersionEndpoint_rejectsVaierService() {
+        assertThrows(IllegalArgumentException.class,
+            () -> service.setVersionEndpoint("vaier.example.com", "/sys/metrics", "display"));
+
+        verify(forPersistingReverseProxyRoutes, never())
+            .setRouteVersionEndpoint(anyString(), any(), any(), any());
+    }
+
+    @Test
+    void setVersionEndpoint_invalidatesCache() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            route("other.example.com", "10.0.0.2", 9090)
+        ));
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+
+        service.getPublishedServices(); // prime cache
+        service.setVersionEndpoint("app.example.com", "/sys/metrics", "display");
+        service.getPublishedServices(); // should refetch
+
+        verify(forPersistingDnsRecords, times(2)).getDnsZones();
     }
 
     // --- PublishableService.ignoreKey() ---

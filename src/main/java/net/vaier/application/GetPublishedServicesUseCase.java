@@ -21,7 +21,9 @@ public interface GetPublishedServicesUseCase {
         boolean isLanService,
         String pathPrefix,
         boolean hiddenFromLaunchpad,
-        String launchpadAlias
+        String launchpadAlias,
+        String versionEndpoint,
+        String versionProperty
     ){
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -48,6 +50,14 @@ public interface GetPublishedServicesUseCase {
                                    String pathPrefix, boolean hiddenFromLaunchpad) {
             this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad, null);
+        }
+        public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
+                                   int hostPort, State state, boolean authenticated,
+                                   String rootRedirectPath, boolean directUrlDisabled, boolean isLanService,
+                                   String pathPrefix, boolean hiddenFromLaunchpad, String launchpadAlias) {
+            this(name, dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
+                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
+                launchpadAlias, null, null);
         }
     }
 }

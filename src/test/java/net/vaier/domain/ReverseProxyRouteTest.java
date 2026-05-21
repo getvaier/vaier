@@ -4,6 +4,7 @@ import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -12,6 +13,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -547,6 +549,96 @@ class ReverseProxyRouteTest {
         assertThat(route.backingContainer(List.of(unrelated),
             Map.of("10.13.13.6", List.of()), Map.of()))
             .isEmpty();
+    }
+
+    @Test
+    void backingContainer_lanNativeService_doesNotMatchContainerByPrivatePort() {
+        // A service running natively on a machine that is also a registered LAN server. The
+        // route's port is the host port the native process binds; a container on the same
+        // machine happens to listen on that port internally but is published elsewhere. The
+        // container's host port can never collide with the native process's, so matching must
+        // be on the published (host) port only — the native service has no backing container.
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "r", "app.example.com", "192.168.3.50", 8080, "http", "svc");
+        DockerService unrelated = new DockerService("id", "unrelated", "nginx:1.27", "1.27",
+            List.of(new PortMapping(8080, 32768, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(),
+            Map.of(), Map.of("192.168.3.50", List.of(unrelated))))
+            .isEmpty();
+    }
+
+    @Test
+    void backingContainer_peerRoute_doesNotMatchContainerByPrivatePort() {
+        // Same rule for peer containers: the route stores the published port, so a container
+        // that merely listens on that port internally (but is published elsewhere) is not it.
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.6", 8080);
+        DockerService unrelated = new DockerService("id", "unrelated", "nginx:1.27", "1.27",
+            List.of(new PortMapping(8080, 32768, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(),
+            Map.of("10.13.13.6", List.of(unrelated)), Map.of()))
+            .isEmpty();
+    }
+
+    // --- version endpoint (issue #210 — LAN-native version) ---
+
+    @Test
+    void hasVersionEndpoint_trueOnlyWhenBothEndpointAndPropertySet() {
+        assertThat(versionRoute("/sys/metrics", "display").hasVersionEndpoint()).isTrue();
+        assertThat(versionRoute(null, null).hasVersionEndpoint()).isFalse();
+        assertThat(versionRoute("/sys/metrics", null).hasVersionEndpoint()).isFalse();
+        assertThat(versionRoute("/sys/metrics", "  ").hasVersionEndpoint()).isFalse();
+        assertThat(versionRoute("", "display").hasVersionEndpoint()).isFalse();
+    }
+
+    @Test
+    void versionProbeUrl_buildsUrlFromServiceAddressAndRelativeEndpoint() {
+        ReverseProxyRoute route = versionRoute("sys/metrics?name[]=system_info", "display");
+        assertThat(route.versionProbeUrl())
+            .isEqualTo("http://192.168.3.50:9000/sys/metrics?name[]=system_info");
+    }
+
+    @Test
+    void versionProbeUrl_keepsLeadingSlashEndpointAsSinglePath() {
+        ReverseProxyRoute route = versionRoute("/status", "display");
+        assertThat(route.versionProbeUrl()).isEqualTo("http://192.168.3.50:9000/status");
+    }
+
+    @Test
+    void versionProbeUrl_usesAbsoluteEndpointVerbatim() {
+        ReverseProxyRoute route = versionRoute("https://other.host:8443/v", "display");
+        assertThat(route.versionProbeUrl()).isEqualTo("https://other.host:8443/v");
+    }
+
+    @Test
+    void versionProbeUrl_isNullWhenNoEndpointConfigured() {
+        assertThat(versionRoute(null, null).versionProbeUrl()).isNull();
+    }
+
+    @Test
+    void probeVersion_delegatesToProberWithBuiltUrlAndProperty() {
+        ReverseProxyRoute route = versionRoute("sys/metrics?name[]=system_info", "display");
+        ForProbingServiceVersion prober = (url, property) ->
+            "http://192.168.3.50:9000/sys/metrics?name[]=system_info".equals(url) && "display".equals(property)
+                ? Optional.of("5.0.0.0") : Optional.empty();
+
+        assertThat(route.probeVersion(prober)).contains("5.0.0.0");
+    }
+
+    @Test
+    void probeVersion_emptyAndDoesNotCallProber_whenNoEndpointConfigured() {
+        ReverseProxyRoute route = versionRoute(null, null);
+        ForProbingServiceVersion prober = (url, property) -> {
+            throw new AssertionError("prober must not be invoked when no version endpoint is configured");
+        };
+
+        assertThat(route.probeVersion(prober)).isEmpty();
+    }
+
+    private static ReverseProxyRoute versionRoute(String endpoint, String property) {
+        return new ReverseProxyRoute("r", "app.example.com", "192.168.3.50", 9000, "svc", null,
+            null, null, null, null, false, true, "http", null, false, null, endpoint, property);
     }
 
     // --- displayName ---

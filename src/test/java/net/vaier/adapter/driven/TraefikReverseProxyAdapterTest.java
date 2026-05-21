@@ -301,6 +301,67 @@ class TraefikReverseProxyAdapterTest {
         assertThat(prometheus.getLaunchpadAlias()).isNull();
     }
 
+    // --- setRouteVersionEndpoint ---
+
+    @Test
+    void setRouteVersionEndpoint_persistsEndpointAndPropertyThatRoundTripViaGetRoutes() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        adapter.setRouteVersionEndpoint("app.example.com", "/sys/metrics?name[]=system_info", "display");
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getVersionEndpoint()).isEqualTo("/sys/metrics?name[]=system_info");
+        assertThat(route.getVersionProperty()).isEqualTo("display");
+    }
+
+    @Test
+    void setRouteVersionEndpoint_blankEndpoint_clearsIt() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteVersionEndpoint("app.example.com", "/sys/metrics", "display");
+
+        adapter.setRouteVersionEndpoint("app.example.com", "", "display");
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getVersionEndpoint()).isNull();
+        assertThat(route.getVersionProperty()).isNull();
+    }
+
+    @Test
+    void getReverseProxyRoutes_unsetVersionEndpoint_defaultsToNull() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getVersionEndpoint()).isNull();
+        assertThat(route.getVersionProperty()).isNull();
+    }
+
+    @Test
+    void setRouteVersionEndpoint_persistsAcrossAdapterInstances() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteVersionEndpoint("app.example.com", "/status", "build");
+
+        var adapter2 = new TraefikReverseProxyAdapter(
+            tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
+
+        ReverseProxyRoute route = adapter2.getReverseProxyRoutes().getFirst();
+        assertThat(route.getVersionEndpoint()).isEqualTo("/status");
+        assertThat(route.getVersionProperty()).isEqualTo("build");
+    }
+
+    @Test
+    void setRouteVersionEndpoint_pathBasedRoute_targetsCorrectSibling() {
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 8080, false, null, "/grafana");
+        adapter.addReverseProxyRoute("svc.example.com", "10.13.13.2", 9090, false, null, "/prometheus");
+
+        adapter.setRouteVersionEndpoint("svc.example.com", "/grafana", "/sys/metrics", "display");
+
+        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
+        ReverseProxyRoute grafana = routes.stream().filter(r -> "/grafana".equals(r.getPathPrefix())).findFirst().orElseThrow();
+        ReverseProxyRoute prometheus = routes.stream().filter(r -> "/prometheus".equals(r.getPathPrefix())).findFirst().orElseThrow();
+        assertThat(grafana.getVersionEndpoint()).isEqualTo("/sys/metrics");
+        assertThat(prometheus.getVersionEndpoint()).isNull();
+    }
+
     // --- getReverseProxyRoutes with empty file ---
 
     @Test

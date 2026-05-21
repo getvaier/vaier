@@ -647,6 +647,24 @@
                                 </span>
                             </div>
                             <div class="detail-row">
+                                <span class="detail-label" title="Read this service's running version over HTTP and show it on its launchpad tile. Endpoint is a path on the service (or a full URL); property is the label name to read the version from. Useful for services not backed by a discoverable container (e.g. running natively on a LAN machine).">Version endpoint</span>
+                                <span class="detail-value" style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap">
+                                    <input type="text" id="verEndpoint-${id}" class="form-input" style="flex:2;min-width:0;max-width:170px"
+                                           value="${service.versionEndpoint || ''}"
+                                           data-original="${service.versionEndpoint || ''}"
+                                           placeholder="/sys/metrics"
+                                           oninput="onVersionEndpointInput('${id}')">
+                                    <input type="text" id="verProperty-${id}" class="form-input" style="flex:1;min-width:0;max-width:100px"
+                                           value="${service.versionProperty || ''}"
+                                           data-original="${service.versionProperty || ''}"
+                                           placeholder="property"
+                                           oninput="onVersionEndpointInput('${id}')">
+                                    <button class="btn btn-primary" id="verEndpoint-save-${id}"
+                                            style="flex-shrink:0" disabled
+                                            onclick="saveVersionEndpoint('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
+                                </span>
+                            </div>
+                            <div class="detail-row">
                                 <span class="detail-label" title="When checked, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
                                 <span class="detail-value">
                                     <input type="checkbox" id="dulDisabled-${id}"
@@ -1077,6 +1095,39 @@
             } catch (error) {
                 btn.disabled = false;
                 alert(`Failed to update display name: ${error.message}`);
+            }
+        }
+
+        function onVersionEndpointInput(id) {
+            const ep = document.getElementById(`verEndpoint-${id}`);
+            const prop = document.getElementById(`verProperty-${id}`);
+            const btn = document.getElementById(`verEndpoint-save-${id}`);
+            if (!ep || !prop || !btn) return;
+            btn.disabled = ep.value.trim() === (ep.dataset.original || '')
+                && prop.value.trim() === (prop.dataset.original || '');
+        }
+
+        async function saveVersionEndpoint(dnsAddress, pathPrefix, id) {
+            const ep = document.getElementById(`verEndpoint-${id}`);
+            const prop = document.getElementById(`verProperty-${id}`);
+            const btn = document.getElementById(`verEndpoint-save-${id}`);
+            const endpoint = ep.value.trim();
+            const property = prop.value.trim();
+            btn.disabled = true;
+            try {
+                const response = await fetch(withPathQuery(
+                    `/published-services/${encodeURIComponent(dnsAddress)}/version-endpoint`, pathPrefix), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ versionEndpoint: endpoint, versionProperty: property })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                ep.dataset.original = endpoint;
+                prop.dataset.original = property;
+                await fetchServices();
+            } catch (error) {
+                btn.disabled = false;
+                alert(`Failed to update version endpoint: ${error.message}`);
             }
         }
 

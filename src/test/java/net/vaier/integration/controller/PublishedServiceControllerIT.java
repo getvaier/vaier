@@ -161,6 +161,33 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
+    void setVersionEndpoint_setsEndpointAndProperty() throws Exception {
+        mockMvc.perform(patch("/published-services/app.example.com/version-endpoint")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"versionEndpoint":"/sys/metrics?name[]=system_info","versionProperty":"display"}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(editServiceVersionEndpointUseCase).setVersionEndpoint(
+            "app.example.com", null, "/sys/metrics?name[]=system_info", "display");
+    }
+
+    @Test
+    void setVersionEndpoint_pathBasedRoute_passesPathPrefix() throws Exception {
+        mockMvc.perform(patch("/published-services/svc.example.com/version-endpoint")
+                       .param("pathPrefix", "/grafana")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"versionEndpoint":"/status","versionProperty":"build"}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(editServiceVersionEndpointUseCase).setVersionEndpoint(
+            "svc.example.com", "/grafana", "/status", "build");
+    }
+
+    @Test
     void setRedirect_updatesRootRedirectPath() throws Exception {
         mockMvc.perform(patch("/published-services/app.example.com/redirect")
                        .contentType(MediaType.APPLICATION_JSON)

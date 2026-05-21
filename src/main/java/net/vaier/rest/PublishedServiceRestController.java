@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.EditServiceLaunchpadAliasUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
+import net.vaier.application.EditServiceVersionEndpointUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.GetPublishedServicesUseCase;
@@ -40,6 +41,7 @@ public class PublishedServiceRestController {
     private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
     private final EditServiceRedirectUseCase editServiceRedirectUseCase;
     private final EditServiceLaunchpadAliasUseCase editServiceLaunchpadAliasUseCase;
+    private final EditServiceVersionEndpointUseCase editServiceVersionEndpointUseCase;
     private final ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
     private final ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
@@ -158,6 +160,18 @@ public class PublishedServiceRestController {
         return ResponseEntity.ok().build();
     }
 
+    @PatchMapping("/{dnsName:.+}/version-endpoint")
+    public ResponseEntity<Void> setVersionEndpoint(@PathVariable String dnsName,
+                                                   @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                                   @RequestBody VersionEndpointRequest request) {
+        log.info("Setting versionEndpoint={} versionProperty={} for {} (pathPrefix: {})",
+            request.versionEndpoint(), request.versionProperty(), dnsName, pathPrefix);
+        editServiceVersionEndpointUseCase.setVersionEndpoint(
+            dnsName, pathPrefix, request.versionEndpoint(), request.versionProperty());
+        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{subdomain}/status")
     public PublishStatusResponse getPublishStatus(@PathVariable String subdomain) {
         var status = publishPeerServiceUseCase.getPublishStatus(subdomain);
@@ -205,5 +219,6 @@ public class PublishedServiceRestController {
     record DirectUrlDisabledRequest(boolean directUrlDisabled) {}
     record HiddenFromLaunchpadRequest(boolean hiddenFromLaunchpad) {}
     record LaunchpadAliasRequest(String launchpadAlias) {}
+    record VersionEndpointRequest(String versionEndpoint, String versionProperty) {}
     record IgnoreRequest(String key) {}
 }

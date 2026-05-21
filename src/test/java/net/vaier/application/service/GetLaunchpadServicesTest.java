@@ -13,6 +13,7 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.junit.jupiter.api.BeforeEach;
@@ -64,6 +65,9 @@ class GetLaunchpadServicesTest {
 
     @Mock
     DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+
+    @Mock
+    ForProbingServiceVersion forProbingServiceVersion;
 
     @InjectMocks
     PublishingService service;
@@ -586,6 +590,81 @@ class GetLaunchpadServicesTest {
         service.getLaunchpadServices(null);
 
         verify(discoverPeerContainersUseCase, times(2)).discoverAll();
+    }
+
+    // --- version endpoint (issue #210 — LAN-native version) ---
+
+    @Test
+    void getLaunchpadServices_lanNativeServiceWithVersionEndpoint_carriesProbedVersion() {
+        ReverseProxyRoute lan = new ReverseProxyRoute("route", "app.example.com", "192.168.3.50", 9000,
+            "svc", null, null, null, null, null, false, true, "http", null, false, null,
+            "/sys/metrics?name[]=system_info", "display");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(lan));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        when(forProbingServiceVersion.probeVersion(
+                "http://192.168.3.50:9000/sys/metrics?name[]=system_info", "display"))
+            .thenReturn(Optional.of("v.5.0.0.0_DEV#a0fdfff02ba"));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).version()).isEqualTo("v.5.0.0.0_DEV#a0fdfff02ba");
+        assertThat(result.get(0).image()).isNull();
+    }
+
+    @Test
+    void getLaunchpadServices_versionEndpointOverridesBackingContainerVersion() {
+        ReverseProxyRoute route = new ReverseProxyRoute("route", "app.example.com", "grafana", 3000,
+            "svc", null, null, null, null, null, false, false, null, null, false, null,
+            "/status", "build");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "grafana", "grafana/grafana:11.3.0", "11.3.0",
+                List.of(new DockerService.PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running")));
+        when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("custom-5.0"));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).version()).isEqualTo("custom-5.0");
+        assertThat(result.get(0).image()).isEqualTo("grafana/grafana:11.3.0");
+    }
+
+    @Test
+    void getLaunchpadServices_reusesVersionProbeWithinTtl() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(versionRoute()));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("1.0"));
+
+        service.getLaunchpadServices(null);
+        service.getLaunchpadServices(null);
+
+        verify(forProbingServiceVersion, times(1)).probeVersion(any(), any());
+    }
+
+    @Test
+    void getLaunchpadServices_reProbesVersionAfterTtlExpires() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(versionRoute()));
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("1.0"));
+        service.versionProbeSnapshotTtlMillis = -1;
+
+        service.getLaunchpadServices(null);
+        service.getLaunchpadServices(null);
+
+        verify(forProbingServiceVersion, times(2)).probeVersion(any(), any());
+    }
+
+    private ReverseProxyRoute versionRoute() {
+        return new ReverseProxyRoute("route", "app.example.com", "192.168.3.50", 9000, "svc", null,
+            null, null, null, null, false, true, "http", null, false, null, "/sys/metrics", "display");
     }
 
     private VpnClient vpnClient(String allowedIps, String endpointIp) {

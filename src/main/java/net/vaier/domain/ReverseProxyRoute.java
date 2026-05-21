@@ -7,6 +7,7 @@ import lombok.ToString;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
 
 import java.net.URLEncoder;
@@ -40,12 +41,15 @@ public class ReverseProxyRoute {
     private final String pathPrefix;
     private final boolean hiddenFromLaunchpad;
     private final String launchpadAlias;
+    private final String versionEndpoint;
+    private final String versionProperty;
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
                              AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
                              List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
                              boolean isLanService, String protocol, String pathPrefix,
-                             boolean hiddenFromLaunchpad, String launchpadAlias) {
+                             boolean hiddenFromLaunchpad, String launchpadAlias,
+                             String versionEndpoint, String versionProperty) {
         this.name = name;
         this.domainName = domainName;
         this.address = address;
@@ -62,6 +66,18 @@ public class ReverseProxyRoute {
         this.pathPrefix = pathPrefix;
         this.hiddenFromLaunchpad = hiddenFromLaunchpad;
         this.launchpadAlias = launchpadAlias;
+        this.versionEndpoint = versionEndpoint;
+        this.versionProperty = versionProperty;
+    }
+
+    public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
+                             AuthInfo authInfo, List<String> entryPoints, TlsConfig tlsConfig,
+                             List<String> middlewares, String rootRedirectPath, boolean directUrlDisabled,
+                             boolean isLanService, String protocol, String pathPrefix,
+                             boolean hiddenFromLaunchpad, String launchpadAlias) {
+        this(name, domainName, address, port, service, authInfo, entryPoints, tlsConfig, middlewares,
+             rootRedirectPath, directUrlDisabled, isLanService, protocol, pathPrefix, hiddenFromLaunchpad,
+             launchpadAlias, null, null);
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service,
@@ -306,10 +322,15 @@ public class ReverseProxyRoute {
      * time: a LAN-service route resolves against the LAN server at {@code address}; a peer route
      * against the VPN peer whose IP is {@code address}; otherwise the route is backed by a
      * Vaier-server container, matched by container name (the usual persisted address) or, failing
-     * that, by port. Empty when nothing matches — a LAN service published as a bare host:port, an
-     * unreachable host, or a stopped/removed container. A peer route whose peer is present but has
-     * no matching container deliberately does <em>not</em> fall back to Vaier-server matching, so
-     * an unrelated local container on the same port is never mis-attributed.
+     * that, by port. Port matching is on the container's <em>published</em> (host) port only —
+     * the route always stores the host port, and a container's internal port is irrelevant to
+     * which service it backs. Matching the internal port would mis-attribute a container to an
+     * unrelated service that merely binds the same host port natively (e.g. a service running
+     * directly on a machine that is also a registered LAN server). Empty when nothing matches —
+     * a LAN service published as a bare host:port, a service running natively (not in Docker),
+     * an unreachable host, or a stopped/removed container. A peer route whose peer is present but
+     * has no matching container deliberately does <em>not</em> fall back to Vaier-server
+     * matching, so an unrelated local container on the same port is never mis-attributed.
      *
      * @param vaierServerContainers        containers on the Vaier server itself
      * @param peerContainersByVpnIp        containers per VPN peer, keyed by the peer's VPN IP
@@ -320,20 +341,67 @@ public class ReverseProxyRoute {
             Map<String, List<DockerService>> peerContainersByVpnIp,
             Map<String, List<DockerService>> lanServerContainersByAddress) {
         if (isLanService) {
-            return firstListeningOnPort(lanServerContainersByAddress.get(address));
+            return firstPublishedOnPort(lanServerContainersByAddress.get(address));
         }
         if (peerContainersByVpnIp.containsKey(address)) {
-            return firstListeningOnPort(peerContainersByVpnIp.get(address));
+            return firstPublishedOnPort(peerContainersByVpnIp.get(address));
         }
         return vaierServerContainers.stream()
             .filter(c -> address.equals(c.containerName()))
             .findFirst()
-            .or(() -> firstListeningOnPort(vaierServerContainers));
+            .or(() -> firstPublishedOnPort(vaierServerContainers));
     }
 
-    private java.util.Optional<DockerService> firstListeningOnPort(List<DockerService> candidates) {
+    /**
+     * The first container that publishes this route's port on its host. Match is on the
+     * <em>published</em> (host) port — never the container's internal port — so a container is
+     * only ever attributed to the service actually reachable at that host port.
+     */
+    private java.util.Optional<DockerService> firstPublishedOnPort(List<DockerService> candidates) {
         if (candidates == null) return java.util.Optional.empty();
-        return candidates.stream().filter(c -> c.listensOnPort(port)).findFirst();
+        return candidates.stream()
+            .filter(c -> c.ports().stream()
+                .anyMatch(m -> m.publicPort() != null && m.publicPort() == port))
+            .findFirst();
+    }
+
+    /**
+     * True when this route has an operator-configured version endpoint — both the endpoint and
+     * the property name must be set. The launchpad uses it to surface the running version of a
+     * service that is <em>not</em> a discoverable container (typically one running natively on a
+     * LAN machine), read over HTTP rather than from the Docker API (issue #210).
+     */
+    public boolean hasVersionEndpoint() {
+        return versionEndpoint != null && !versionEndpoint.isBlank()
+            && versionProperty != null && !versionProperty.isBlank();
+    }
+
+    /**
+     * The absolute URL to GET for this route's version. An operator-supplied endpoint that is
+     * already absolute ({@code http(s)://…}) is used verbatim; otherwise it is treated as a path
+     * (with or without a leading slash) appended to the service's own {@code protocol://address:port}.
+     * Null when no version endpoint is configured.
+     */
+    public String versionProbeUrl() {
+        if (!hasVersionEndpoint()) return null;
+        String endpoint = versionEndpoint.trim();
+        if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) return endpoint;
+        String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol;
+        String path = endpoint.startsWith("/") ? endpoint : "/" + endpoint;
+        return scheme + "://" + address + ":" + port + path;
+    }
+
+    /**
+     * This route's running version, read from its configured version endpoint via the
+     * {@code prober} driven port. The route owns the interaction end to end: it decides whether
+     * there is an endpoint worth probing and builds the URL, then delegates the HTTP call to the
+     * port — the application service only passes the port in. Mirrors how {@link #displayName}
+     * takes {@link ForResolvingPeerNames}; the service must never call the port itself and feed
+     * the result back. Empty when no endpoint is configured or the probe yields nothing.
+     */
+    public java.util.Optional<String> probeVersion(ForProbingServiceVersion prober) {
+        if (!hasVersionEndpoint()) return java.util.Optional.empty();
+        return prober.probeVersion(versionProbeUrl(), versionProperty);
     }
 
     public String displayName(String baseDomain, List<DockerService> localServices,

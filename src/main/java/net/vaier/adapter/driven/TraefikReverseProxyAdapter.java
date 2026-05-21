@@ -175,8 +175,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             Set<String> hiddenFromLaunchpad = readHiddenFromLaunchpadRouters(config);
             Map<String, String> launchpadAliases = readLaunchpadAliases(config);
             Map<String, String> lanMarkers = readLanServiceMarkers(config);
+            Map<String, Map<String, String>> versionEndpoints = readVersionEndpoints(config);
             if (!directUrlDisabled.isEmpty() || !hiddenFromLaunchpad.isEmpty()
-                || !launchpadAliases.isEmpty() || !lanMarkers.isEmpty()) {
+                || !launchpadAliases.isEmpty() || !lanMarkers.isEmpty() || !versionEndpoints.isEmpty()) {
                 routes = routes.stream()
                     .map(r -> {
                         ReverseProxyRoute current = r;
@@ -195,6 +196,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
                         }
                         if (lanMarkers.containsKey(r.getDomainName())) {
                             current = applyLanServiceMarker(current, lanMarkers.get(r.getDomainName()));
+                        }
+                        if (versionEndpoints.containsKey(r.getName())) {
+                            Map<String, String> v = versionEndpoints.get(r.getName());
+                            current = applyVersionEndpoint(current, v.get("endpoint"), v.get("property"));
                         }
                         return current;
                     })
@@ -1373,6 +1378,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private static final String HIDDEN_FROM_LAUNCHPAD_KEY = "x-vaier-hidden-from-launchpad";
     private static final String LAUNCHPAD_ALIAS_KEY = "x-vaier-launchpad-alias";
     private static final String LAN_SERVICE_KEY = "x-vaier-lan-service";
+    private static final String VERSION_ENDPOINT_KEY = "x-vaier-version-endpoint";
 
     @Override
     public void setRouteDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled) {
@@ -1418,7 +1424,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
             r.getRootRedirectPath(), disabled, r.isLanService(), r.getProtocol(), r.getPathPrefix(),
-            r.isHiddenFromLaunchpad()
+            r.isHiddenFromLaunchpad(), r.getLaunchpadAlias(), r.getVersionEndpoint(), r.getVersionProperty()
         );
     }
 
@@ -1459,7 +1465,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
             r.getRootRedirectPath(), r.isDirectUrlDisabled(), r.isLanService(), r.getProtocol(),
-            r.getPathPrefix(), hidden, r.getLaunchpadAlias()
+            r.getPathPrefix(), hidden, r.getLaunchpadAlias(), r.getVersionEndpoint(), r.getVersionProperty()
         );
     }
 
@@ -1507,7 +1513,66 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
             r.getRootRedirectPath(), r.isDirectUrlDisabled(), r.isLanService(), r.getProtocol(),
-            r.getPathPrefix(), r.isHiddenFromLaunchpad(), alias
+            r.getPathPrefix(), r.isHiddenFromLaunchpad(), alias, r.getVersionEndpoint(), r.getVersionProperty()
+        );
+    }
+
+    @Override
+    public void setRouteVersionEndpoint(String dnsName, String pathPrefix, String versionEndpoint,
+                                        String versionProperty) {
+        loadConfig();
+        if (config == null) config = new LinkedHashMap<>();
+        Object raw = config.get(VERSION_ENDPOINT_KEY);
+        Map<String, Object> endpoints = (raw instanceof Map<?, ?> map)
+            ? new LinkedHashMap<>(map.entrySet().stream().collect(java.util.stream.Collectors.toMap(
+                e -> e.getKey().toString(), Map.Entry::getValue, (a, b) -> b, LinkedHashMap::new)))
+            : new LinkedHashMap<>();
+        String routerName = generateRouterName(dnsName, pathPrefix);
+        String endpoint = (versionEndpoint == null || versionEndpoint.isBlank()) ? null : versionEndpoint.trim();
+        String property = (versionProperty == null || versionProperty.isBlank()) ? null : versionProperty.trim();
+        boolean changed;
+        // Both halves are required — a probe needs an endpoint to GET and a property to read.
+        if (endpoint == null || property == null) {
+            changed = endpoints.remove(routerName) != null;
+        } else {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("endpoint", endpoint);
+            entry.put("property", property);
+            changed = !entry.equals(endpoints.put(routerName, entry));
+        }
+        if (changed) {
+            if (endpoints.isEmpty()) config.remove(VERSION_ENDPOINT_KEY);
+            else config.put(VERSION_ENDPOINT_KEY, endpoints);
+            saveConfig();
+        }
+    }
+
+    private Map<String, Map<String, String>> readVersionEndpoints(Map<String, Object> cfg) {
+        if (cfg == null) return Map.of();
+        Object raw = cfg.get(VERSION_ENDPOINT_KEY);
+        if (!(raw instanceof Map<?, ?> map)) return Map.of();
+        Map<String, Map<String, String>> result = new LinkedHashMap<>();
+        map.forEach((k, v) -> {
+            if (k != null && v instanceof Map<?, ?> entry) {
+                Object endpoint = entry.get("endpoint");
+                Object property = entry.get("property");
+                if (endpoint != null && property != null) {
+                    Map<String, String> parsed = new LinkedHashMap<>();
+                    parsed.put("endpoint", endpoint.toString());
+                    parsed.put("property", property.toString());
+                    result.put(k.toString(), parsed);
+                }
+            }
+        });
+        return result;
+    }
+
+    private ReverseProxyRoute applyVersionEndpoint(ReverseProxyRoute r, String endpoint, String property) {
+        return new ReverseProxyRoute(
+            r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
+            r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
+            r.getRootRedirectPath(), r.isDirectUrlDisabled(), r.isLanService(), r.getProtocol(),
+            r.getPathPrefix(), r.isHiddenFromLaunchpad(), r.getLaunchpadAlias(), endpoint, property
         );
     }
 
@@ -1516,7 +1581,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             r.getName(), r.getDomainName(), r.getAddress(), r.getPort(), r.getService(),
             r.getAuthInfo(), r.getEntryPoints(), r.getTlsConfig(), r.getMiddlewares(),
             r.getRootRedirectPath(), r.isDirectUrlDisabled(), true, protocol, r.getPathPrefix(),
-            r.isHiddenFromLaunchpad(), r.getLaunchpadAlias()
+            r.isHiddenFromLaunchpad(), r.getLaunchpadAlias(), r.getVersionEndpoint(), r.getVersionProperty()
         );
     }
 
