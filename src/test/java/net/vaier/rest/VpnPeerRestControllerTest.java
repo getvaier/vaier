@@ -9,9 +9,11 @@ import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
@@ -41,6 +43,7 @@ class VpnPeerRestControllerTest {
     @Mock GenerateDockerComposeUseCase generateDockerComposeUseCase;
     @Mock GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     @Mock UpdateLanCidrUseCase updateLanCidrUseCase;
+    @Mock RenamePeerUseCase renamePeerUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock SseEventPublisher sseEventPublisher;
     @Mock ForGeolocatingIps forGeolocatingIps;
@@ -143,6 +146,112 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanCidr("apalveien5", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(409);
+        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void renamePeer_renamesAndReturnsNoContent() {
+        var request = new VpnPeerRestController.RenamePeerRequest("workstation");
+
+        var response = controller.renamePeer("laptop", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(renamePeerUseCase).renamePeer("laptop", "workstation");
+        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void renamePeer_returns404WhenPeerNotFound() {
+        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+            .when(renamePeerUseCase).renamePeer("ghost", "phantom");
+
+        var response = controller.renamePeer("ghost", new VpnPeerRestController.RenamePeerRequest("phantom"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString(),
+                                                    org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void renamePeer_returns409WhenNewNameAlreadyTaken() {
+        doThrow(new IllegalStateException("A peer named desktop already exists"))
+            .when(renamePeerUseCase).renamePeer("laptop", "desktop");
+
+        var response = controller.renamePeer("laptop", new VpnPeerRestController.RenamePeerRequest("desktop"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+    }
+
+    @Test
+    void renamePeer_returns400WhenNewNameInvalid() {
+        doThrow(new IllegalArgumentException("New peer name is empty after sanitisation"))
+            .when(renamePeerUseCase).renamePeer("laptop", "   ");
+
+        var response = controller.renamePeer("laptop", new VpnPeerRestController.RenamePeerRequest("   "));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void createPeer_passesDescriptionToUseCase() {
+        var created = new CreatePeerUseCase.CreatedPeerUco(
+                "nas", "10.13.13.5", "pub", "priv", "[Interface]", MachineType.UBUNTU_SERVER);
+        when(createPeerUseCase.createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server"))
+                .thenReturn(created);
+        var request = new VpnPeerRestController.CreatePeerRequest(
+                "nas", MachineType.UBUNTU_SERVER, null, null, "Home media server");
+
+        var response = controller.createPeer(request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(createPeerUseCase).createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server");
+    }
+
+    @Test
+    void listPeers_includesPeerDescription() {
+        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", "0", "0", "0");
+        when(vpnClientService.getClients()).thenReturn(List.of(client));
+        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
+        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(
+                Optional.of(new GetPeerConfigUseCase.PeerConfigResult(
+                        "nas", "10.13.13.2", "", MachineType.UBUNTU_SERVER, null, null, "Home media server")));
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.description()).isEqualTo("Home media server");
+    }
+
+    @Test
+    void updateDescription_updatesAndReturnsNoContent() {
+        var request = new VpnPeerRestController.UpdateDescriptionRequest("Home media server");
+
+        var response = controller.updateDescription("nas", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forUpdatingPeerConfigurations).updateDescription("nas", "Home media server");
+        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void updateDescription_nullBodyIsTreatedAsClear() {
+        var response = controller.updateDescription("nas", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(forUpdatingPeerConfigurations).updateDescription("nas", null);
+    }
+
+    @Test
+    void updateDescription_returns404WhenPeerNotFound() {
+        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+            .when(forUpdatingPeerConfigurations).updateDescription("ghost", "anything");
+        var request = new VpnPeerRestController.UpdateDescriptionRequest("anything");
+
+        var response = controller.updateDescription("ghost", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
         verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());

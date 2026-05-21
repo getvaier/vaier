@@ -6,7 +6,8 @@ public final class WireGuardPeerConfig {
 
     public static String generate(String privateKey, String ipAddress, String serverPublicKey,
                                   String presharedKey, String serverEndpoint,
-                                  MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet) {
+                                  MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
+                                  String description) {
         // lanCidr is intentionally NOT appended to the client-side AllowedIPs: doing so makes
         // wg-quick install a route for that CIDR via wg0 on the relay peer, which hijacks the
         // relay's own LAN. lanCidr is still recorded in the # VAIER metadata below so that
@@ -14,7 +15,7 @@ public final class WireGuardPeerConfig {
         // install script (#170) installs ip_forward + iptables MASQUERADE/FORWARD on the relay.
         String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
 
-        String vaierJson = vaierJson(peerType, lanCidr, lanAddress);
+        String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description);
 
         String dnsLine = peerType.isServerType()
                 ? ""
@@ -36,7 +37,7 @@ public final class WireGuardPeerConfig {
                 serverPublicKey, presharedKey, serverEndpoint, allowedIps);
     }
 
-    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress) {
+    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress, String description) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
         boolean serverType = peerType == MachineType.UBUNTU_SERVER;
@@ -46,7 +47,36 @@ public final class WireGuardPeerConfig {
         if (serverType && lanAddress != null && !lanAddress.isBlank()) {
             sb.append(",\"lanAddress\":\"").append(lanAddress).append("\"");
         }
+        // description is an operator-supplied label that applies to any peer type, so unlike
+        // lanCidr/lanAddress it is not gated on server type. It is free text, hence JSON-escaped.
+        if (description != null && !description.isBlank()) {
+            sb.append(",\"description\":\"").append(escapeJson(description)).append("\"");
+        }
         sb.append("}");
+        return sb.toString();
+    }
+
+    private static String escapeJson(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"'  -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
         return sb.toString();
     }
 }

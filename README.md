@@ -166,6 +166,10 @@ Create peers from the Vaier UI. The peer type determines WireGuard defaults and 
 | Ubuntu server with Docker | Self-hosted services on a Linux host | VPN subnet only | docker-compose, setup script |
 | Windows server with Docker | Self-hosted services on a Windows Docker host | VPN subnet only | docker-compose |
 
+Each machine — VPN peer or LAN server — can carry an optional **description**, a free-text note (e.g. "Home media server (NUC, Ubuntu 22.04)") set on the Add Machine form and editable inline on the expanded card. It shows as a muted subtitle under the machine name so its purpose is obvious at a glance.
+
+Peers and LAN servers can be **renamed** in place — expand the card and edit the **Name** field. Renaming a peer just moves its config files; the live tunnel and any published services keep working.
+
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 
 ---

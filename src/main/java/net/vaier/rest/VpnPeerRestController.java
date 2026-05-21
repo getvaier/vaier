@@ -7,6 +7,7 @@ import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
@@ -45,6 +46,7 @@ public class VpnPeerRestController {
     private final GenerateDockerComposeUseCase generateDockerComposeUseCase;
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     private final UpdateLanCidrUseCase updateLanCidrUseCase;
+    private final RenamePeerUseCase renamePeerUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final SseEventPublisher sseEventPublisher;
     private final ForGeolocatingIps forGeolocatingIps;
@@ -70,6 +72,7 @@ public class VpnPeerRestController {
                                 .orElse(MachineType.UBUNTU_SERVER);
                         String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
                         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
+                        String description = cfg.map(GetPeerConfigUseCase.PeerConfigResult::description).orElse(null);
                         Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
                             ? forGeolocatingIps.locate(client.endpointIp())
                             : Optional.empty();
@@ -85,6 +88,7 @@ public class VpnPeerRestController {
                                 peerType.name(),
                                 lanCidr,
                                 lanAddress,
+                                description,
                                 geo.map(GeoLocation::latitude).orElse(null),
                                 geo.map(GeoLocation::longitude).orElse(null),
                                 geo.map(GeoLocation::city).orElse(null),
@@ -128,7 +132,8 @@ public class VpnPeerRestController {
                 request.name(),
                 peerType,
                 request.lanCidr(),
-                request.lanAddress()
+                request.lanAddress(),
+                request.description()
         );
 
         CreatePeerResponse response = new CreatePeerResponse(
@@ -141,6 +146,31 @@ public class VpnPeerRestController {
 
         sseEventPublisher.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{peerName}")
+    public ResponseEntity<Void> renamePeer(
+            @PathVariable String peerName,
+            @RequestBody(required = false) RenamePeerRequest request) {
+        String newName = request != null ? request.newName() : null;
+        log.info("Renaming peer {} to {}", peerName, newName);
+        try {
+            renamePeerUseCase.renamePeer(peerName, newName);
+            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            return ResponseEntity.noContent().build();
+        } catch (net.vaier.domain.PeerNotFoundException e) {
+            log.warn("Peer not found for rename: {}", peerName);
+            return ResponseEntity.notFound().build();
+        } catch (IllegalStateException e) {
+            log.warn("Rename conflict for peer {}: {}", peerName, e.getMessage());
+            return ResponseEntity.status(409).build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Bad rename request for peer {}: {}", peerName, e.getMessage());
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            log.error("Failed to rename peer {}: {}", peerName, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @DeleteMapping("/{peerIdentifier}")
@@ -206,6 +236,28 @@ public class VpnPeerRestController {
             return ResponseEntity.status(409).build();
         } catch (Exception e) {
             log.error("Failed to update lan cidr for peer {}: {}", peerName, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PatchMapping("/{peerName}/description")
+    public ResponseEntity<Void> updateDescription(
+            @PathVariable String peerName,
+            @RequestBody(required = false) UpdateDescriptionRequest request) {
+        String description = request != null ? request.description() : null;
+        log.info("Updating description for peer {}", peerName);
+        try {
+            forUpdatingPeerConfigurations.updateDescription(peerName, description);
+            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            return ResponseEntity.noContent().build();
+        } catch (net.vaier.domain.PeerNotFoundException e) {
+            log.warn("Peer not found for description update: {}", peerName);
+            return ResponseEntity.notFound().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Bad description request for peer {}: {}", peerName, e.getMessage());
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            log.error("Failed to update description for peer {}: {}", peerName, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -334,6 +386,7 @@ public class VpnPeerRestController {
             String peerType,
             String lanCidr,
             String lanAddress,
+            String description,
             Double latitude,
             Double longitude,
             String city,
@@ -344,7 +397,8 @@ public class VpnPeerRestController {
             String name,
             MachineType peerType,
             String lanCidr,
-            String lanAddress
+            String lanAddress,
+            String description
     ) {}
 
     public record CreatePeerResponse(
@@ -361,6 +415,14 @@ public class VpnPeerRestController {
 
     public record UpdateLanCidrRequest(
             String lanCidr
+    ) {}
+
+    public record UpdateDescriptionRequest(
+            String description
+    ) {}
+
+    public record RenamePeerRequest(
+            String newName
     ) {}
 
     public record PeerConfigResponse(

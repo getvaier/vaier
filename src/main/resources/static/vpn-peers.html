@@ -100,6 +100,31 @@
             min-width: 0;
         }
 
+        .peer-name-block {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            gap: 0.05rem;
+            /* Fill the header row so .machine-caps' margin-left:auto still pushes the
+               relay/Docker icons to the right edge, as before the name+description stack. */
+            flex: 1;
+        }
+
+        .peer-name-row {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            min-width: 0;
+        }
+
+        .peer-desc {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .machine-icon {
             display: inline-flex;
             align-items: center;
@@ -446,6 +471,11 @@
             <div class="form-group">
                 <label class="form-label" for="peerName">Name</label>
                 <input type="text" id="peerName" class="form-input" placeholder="e.g. laptop, phone, nas">
+            </div>
+            <div class="form-group" id="descriptionGroup">
+                <label class="form-label" for="peerDescription">Description (optional)</label>
+                <input type="text" id="peerDescription" class="form-input" maxlength="200"
+                       placeholder="e.g. Home media server (NUC, Ubuntu 22.04)">
             </div>
             <div class="form-group">
                 <label class="form-label" for="peerType">Type</label>
@@ -837,13 +867,44 @@
                 <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
                         ${machineIconHtml('lan', 'LAN server (no VPN; behind a relay or in the server\'s subnet)', iconStatusClass(statusClass))}
-                        <span class="peer-name">${server.name}</span>
-                        ${capabilitySlotsHtml([null, dockerSlot])}
+                        <div class="peer-name-block">
+                            <div class="peer-name-row">
+                                <span class="peer-name">${server.name}</span>
+                                ${capabilitySlotsHtml([null, dockerSlot])}
+                            </div>
+                            ${server.description ? `<div class="peer-desc" title="${escapeHtml(server.description)}">${escapeHtml(server.description)}</div>` : ''}
+                        </div>
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Name</span>
+                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                <input type="text" id="lan-name-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                       value="${escapeHtml(server.name)}"
+                                       data-original="${escapeHtml(server.name)}"
+                                       oninput="onLanServerNameInput('${server.name.replace(/'/g, "\\'")}')">
+                                <button class="btn btn-primary" id="lan-name-save-${id}"
+                                        style="flex-shrink:0" disabled
+                                        onclick="saveLanServerName('${server.name.replace(/'/g, "\\'")}')">Save</button>
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Description</span>
+                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                <input type="text" id="lan-desc-${id}" class="form-input" style="flex:1;min-width:0;max-width:320px"
+                                       maxlength="200"
+                                       value="${escapeHtml(server.description || '')}"
+                                       data-original="${escapeHtml(server.description || '')}"
+                                       placeholder="e.g. Synology NAS in the closet"
+                                       oninput="onLanServerDescriptionInput('${server.name.replace(/'/g, "\\'")}')">
+                                <button class="btn btn-primary" id="lan-desc-save-${id}"
+                                        style="flex-shrink:0" disabled
+                                        onclick="saveLanServerDescription('${server.name.replace(/'/g, "\\'")}')">Save</button>
+                            </span>
+                        </div>
                         <div class="detail-row">
                             <span class="detail-label">LAN address</span>
                             <span class="detail-value">${portText}</span>
@@ -952,13 +1013,44 @@
                 <div class="peer-header" onclick="togglePeer('${peer.name.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
                         ${machineIconHtml(iconKind, typeTooltip, iconStatusClass(statusClass), 'hdr-icon-' + id)}
-                        <span class="peer-name">${peer.name}</span>
-                        ${capabilitySlotsHtml([relaySlot, dockerSlot])}
+                        <div class="peer-name-block">
+                            <div class="peer-name-row">
+                                <span class="peer-name">${peer.name}</span>
+                                ${capabilitySlotsHtml([relaySlot, dockerSlot])}
+                            </div>
+                            ${peer.description ? `<div class="peer-desc" title="${escapeHtml(peer.description)}">${escapeHtml(peer.description)}</div>` : ''}
+                        </div>
                     </div>
                     <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Name</span>
+                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                <input type="text" id="peer-name-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                       value="${escapeHtml(peer.name)}"
+                                       data-original="${escapeHtml(peer.name)}"
+                                       oninput="onPeerNameInput('${peer.name.replace(/'/g, "\\'")}')">
+                                <button class="btn btn-primary" id="peer-name-save-${id}"
+                                        style="flex-shrink:0" disabled
+                                        onclick="savePeerName('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Description</span>
+                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                <input type="text" id="peer-desc-${id}" class="form-input" style="flex:1;min-width:0;max-width:320px"
+                                       maxlength="200"
+                                       value="${escapeHtml(peer.description || '')}"
+                                       data-original="${escapeHtml(peer.description || '')}"
+                                       placeholder="e.g. Home media server"
+                                       oninput="onDescriptionInput('${peer.name.replace(/'/g, "\\'")}')">
+                                <button class="btn btn-primary" id="peer-desc-save-${id}"
+                                        style="flex-shrink:0" disabled
+                                        onclick="saveDescription('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                            </span>
+                        </div>
                         <div class="detail-row">
                             <span class="detail-label">IP Address</span>
                             <span class="detail-value">${vpnIp}</span>
@@ -1065,6 +1157,7 @@
         function showCreatePeerModal() {
             document.getElementById('createPeerModal').classList.add('active');
             document.getElementById('peerName').value = '';
+            document.getElementById('peerDescription').value = '';
             document.getElementById('peerType').value = 'UBUNTU_SERVER';
             document.getElementById('lanCidr').value = '';
             document.getElementById('lanAddress').value = '';
@@ -1174,6 +1267,7 @@
         async function createPeer() {
             const name = document.getElementById('peerName').value.trim();
             const type = document.getElementById('peerType').value;
+            const description = document.getElementById('peerDescription').value.trim() || null;
             if (!name) { displayError('Please enter a name'); return; }
 
             const submitBtn = document.getElementById('createPeerSubmitBtn');
@@ -1196,7 +1290,7 @@
                     const response = await fetch('/lan-servers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, lanAddress, runsDocker, dockerPort })
+                        body: JSON.stringify({ name, lanAddress, runsDocker, dockerPort, description })
                     });
                     if (response.status === 400) {
                         displayError(`${lanAddress} isn't routable — not inside any relay peer's lanCidr or the Vaier server's own subnet.`);
@@ -1207,12 +1301,12 @@
                     displaySuccess(`LAN server "${name}" added`);
                     fetchLanServers();
                 } else {
-                    const lanCidr    = document.getElementById('lanCidr').value.trim() || null;
-                    const lanAddress = document.getElementById('lanAddress').value.trim() || null;
+                    const lanCidr     = document.getElementById('lanCidr').value.trim() || null;
+                    const lanAddress  = document.getElementById('lanAddress').value.trim() || null;
                     const response = await fetch('/vpn/peers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, peerType: type, lanCidr, lanAddress })
+                        body: JSON.stringify({ name, peerType: type, lanCidr, lanAddress, description })
                     });
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const createdPeer = await response.json();
@@ -1257,6 +1351,138 @@
             } catch (error) {
                 displayError(`Failed to save LAN address: ${error.message}`);
                 onLanAddressInput(peerName);
+            }
+        }
+
+        function onDescriptionInput(peerName) {
+            const id = cardId(peerName);
+            const input = document.getElementById(`peer-desc-${id}`);
+            const btn = document.getElementById(`peer-desc-save-${id}`);
+            if (!input || !btn) return;
+            btn.disabled = input.value.trim() === (input.dataset.original || '');
+        }
+
+        async function saveDescription(peerName) {
+            const id = cardId(peerName);
+            const input = document.getElementById(`peer-desc-${id}`);
+            const btn = document.getElementById(`peer-desc-save-${id}`);
+            const description = input.value.trim();
+            btn.disabled = true;
+            try {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}/description`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                input.dataset.original = description;
+                displaySuccess(`Description saved for "${peerName}"`);
+                fetchPeers();
+            } catch (error) {
+                displayError(`Failed to save description: ${error.message}`);
+                onDescriptionInput(peerName);
+            }
+        }
+
+        function onPeerNameInput(peerName) {
+            const id = cardId(peerName);
+            const input = document.getElementById(`peer-name-${id}`);
+            const btn = document.getElementById(`peer-name-save-${id}`);
+            if (!input || !btn) return;
+            const v = input.value.trim();
+            btn.disabled = v === '' || v === (input.dataset.original || '');
+        }
+
+        async function savePeerName(peerName) {
+            const id = cardId(peerName);
+            const input = document.getElementById(`peer-name-${id}`);
+            const btn = document.getElementById(`peer-name-save-${id}`);
+            const newName = input.value.trim();
+            if (!newName) return;
+            btn.disabled = true;
+            try {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ newName })
+                });
+                if (response.status === 409) {
+                    displayError(`A machine named "${newName}" already exists`);
+                    onPeerNameInput(peerName);
+                    return;
+                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                displaySuccess(`Renamed "${peerName}"`);
+                fetchPeers();
+            } catch (error) {
+                displayError(`Failed to rename machine: ${error.message}`);
+                onPeerNameInput(peerName);
+            }
+        }
+
+        function onLanServerNameInput(serverName) {
+            const id = cardId('lan-server:' + serverName);
+            const input = document.getElementById(`lan-name-${id}`);
+            const btn = document.getElementById(`lan-name-save-${id}`);
+            if (!input || !btn) return;
+            const v = input.value.trim();
+            btn.disabled = v === '' || v === (input.dataset.original || '');
+        }
+
+        async function saveLanServerName(serverName) {
+            const id = cardId('lan-server:' + serverName);
+            const input = document.getElementById(`lan-name-${id}`);
+            const btn = document.getElementById(`lan-name-save-${id}`);
+            const newName = input.value.trim();
+            if (!newName) return;
+            btn.disabled = true;
+            try {
+                const response = await fetch(`/lan-servers/${encodeURIComponent(serverName)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ newName })
+                });
+                if (response.status === 409) {
+                    displayError(`A LAN server named "${newName}" already exists`);
+                    onLanServerNameInput(serverName);
+                    return;
+                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                displaySuccess(`Renamed "${serverName}"`);
+                fetchLanServers();
+            } catch (error) {
+                displayError(`Failed to rename LAN server: ${error.message}`);
+                onLanServerNameInput(serverName);
+            }
+        }
+
+        function onLanServerDescriptionInput(serverName) {
+            const id = cardId('lan-server:' + serverName);
+            const input = document.getElementById(`lan-desc-${id}`);
+            const btn = document.getElementById(`lan-desc-save-${id}`);
+            if (!input || !btn) return;
+            btn.disabled = input.value.trim() === (input.dataset.original || '');
+        }
+
+        async function saveLanServerDescription(serverName) {
+            const id = cardId('lan-server:' + serverName);
+            const input = document.getElementById(`lan-desc-${id}`);
+            const btn = document.getElementById(`lan-desc-save-${id}`);
+            const description = input.value.trim();
+            btn.disabled = true;
+            try {
+                const response = await fetch(`/lan-servers/${encodeURIComponent(serverName)}/description`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                input.dataset.original = description;
+                displaySuccess(`Description saved for "${serverName}"`);
+                fetchLanServers();
+            } catch (error) {
+                displayError(`Failed to save description: ${error.message}`);
+                onLanServerDescriptionInput(serverName);
             }
         }
 

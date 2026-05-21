@@ -9,4 +9,8 @@ public interface RegisterLanServerUseCase {
      * existing name replaces the prior entry.
      */
     void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort);
+
+    /** As above, with an optional free-text {@code description}. */
+    void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                  String description);
 }

@@ -97,4 +97,80 @@ class LanServerTest {
         assertThat(server.runsDocker()).isFalse();
         assertThat(server.dockerPort()).isNull();
     }
+
+    // --- hasName / renamedTo (#55) ---
+
+    @Test
+    void hasName_matchesOnlyExactName() {
+        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
+
+        assertThat(nas.hasName("nas")).isTrue();
+        assertThat(nas.hasName("NAS")).isFalse();
+        assertThat(nas.hasName("nas2")).isFalse();
+    }
+
+    @Test
+    void renamedTo_copiesWithNewNameKeepingAddressAndDockerSettings() {
+        LanServer renamed = new LanServer("nas", "192.168.1.50", true, 2375).renamedTo("media-nas");
+
+        assertThat(renamed.name()).isEqualTo("media-nas");
+        assertThat(renamed.lanAddress()).isEqualTo("192.168.1.50");
+        assertThat(renamed.runsDocker()).isTrue();
+        assertThat(renamed.dockerPort()).isEqualTo(2375);
+    }
+
+    @Test
+    void renamedTo_trimsNewName() {
+        assertThat(new LanServer("nas", "192.168.1.50", false, null).renamedTo("  media-nas  ").name())
+            .isEqualTo("media-nas");
+    }
+
+    @Test
+    void renamedTo_rejectsBlankName() {
+        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
+
+        assertThatThrownBy(() -> nas.renamedTo("   "))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // --- description (#54) ---
+
+    @Test
+    void fourArgConstructor_defaultsDescriptionToNull() {
+        assertThat(new LanServer("nas", "192.168.1.50", false, null).description()).isNull();
+    }
+
+    @Test
+    void withDescription_setsTheDescriptionKeepingEverythingElse() {
+        LanServer s = new LanServer("nas", "192.168.1.50", true, 2375).withDescription("Synology in the closet");
+
+        assertThat(s.description()).isEqualTo("Synology in the closet");
+        assertThat(s.name()).isEqualTo("nas");
+        assertThat(s.lanAddress()).isEqualTo("192.168.1.50");
+        assertThat(s.runsDocker()).isTrue();
+        assertThat(s.dockerPort()).isEqualTo(2375);
+    }
+
+    @Test
+    void withDescription_trimsTheValue() {
+        assertThat(new LanServer("nas", "192.168.1.50", false, null).withDescription("  spaced  ").description())
+            .isEqualTo("spaced");
+    }
+
+    @Test
+    void withDescription_blankOrNullClearsTheDescription() {
+        LanServer base = new LanServer("nas", "192.168.1.50", false, null, "old text");
+
+        assertThat(base.withDescription("   ").description()).isNull();
+        assertThat(base.withDescription(null).description()).isNull();
+    }
+
+    @Test
+    void renamedTo_carriesDescriptionOver() {
+        LanServer renamed = new LanServer("nas", "192.168.1.50", false, null, "Synology")
+            .renamedTo("storage-box");
+
+        assertThat(renamed.name()).isEqualTo("storage-box");
+        assertThat(renamed.description()).isEqualTo("Synology");
+    }
 }

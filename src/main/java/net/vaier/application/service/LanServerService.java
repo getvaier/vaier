@@ -4,7 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.RegisterLanServerUseCase;
+import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
+import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -14,6 +16,7 @@ import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 @Service
@@ -21,6 +24,8 @@ import java.util.Optional;
 public class LanServerService implements
     RegisterLanServerUseCase,
     DeleteLanServerUseCase,
+    RenameLanServerUseCase,
+    UpdateLanServerDescriptionUseCase,
     GetLanServersUseCase,
     ResolveLanAnchorUseCase {
 
@@ -38,6 +43,12 @@ public class LanServerService implements
 
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
+        register(name, lanAddress, runsDocker, dockerPort, null);
+    }
+
+    @Override
+    public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                         String description) {
         LanServer.validate(name, lanAddress, runsDocker, dockerPort);
         if (resolveLanAnchor(lanAddress).isEmpty()) {
             throw new IllegalArgumentException(
@@ -47,13 +58,50 @@ public class LanServerService implements
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             name, lanAddress, runsDocker, dockerPort);
-        forPersistingLanServers.save(new LanServer(name, lanAddress, runsDocker, dockerPort));
+        forPersistingLanServers.save(new LanServer(name, lanAddress, runsDocker, dockerPort, description));
+    }
+
+    @Override
+    public void updateDescription(String name, String description) {
+        // withDescription owns the normalisation rule; the service only finds the entry and saves.
+        LanServer existing = forPersistingLanServers.getAll().stream()
+            .filter(s -> s.hasName(name))
+            .findFirst()
+            .orElseThrow(() -> new NoSuchElementException("LAN server not found: " + name));
+        forPersistingLanServers.save(existing.withDescription(description));
+        log.info("Updated description for LAN server {}", name);
     }
 
     @Override
     public void delete(String name) {
         log.info("Deleting LAN server: {}", name);
         forPersistingLanServers.deleteByName(name);
+    }
+
+    @Override
+    public void rename(String currentName, String newName) {
+        // The naming rule and the renamed-copy live on the LanServer entity; the service only
+        // orchestrates the lookup, the collision guard and the persistence calls.
+        List<LanServer> all = forPersistingLanServers.getAll();
+        LanServer existing = all.stream()
+            .filter(s -> s.hasName(currentName))
+            .findFirst()
+            .orElseThrow(() -> new NoSuchElementException("LAN server not found: " + currentName));
+
+        LanServer renamed = existing.renamedTo(newName);
+
+        if (renamed.hasName(currentName)) {
+            log.info("Rename no-op: LAN server {} already has that name", currentName);
+            return;
+        }
+        if (all.stream().anyMatch(s -> s.hasName(renamed.name()))) {
+            throw new IllegalStateException("A LAN server named " + renamed.name() + " already exists");
+        }
+
+        // save() upserts by name, so write the new entry then drop the old one.
+        forPersistingLanServers.save(renamed);
+        forPersistingLanServers.deleteByName(currentName);
+        log.info("Renamed LAN server {} to {}", currentName, renamed.name());
     }
 
     @Override

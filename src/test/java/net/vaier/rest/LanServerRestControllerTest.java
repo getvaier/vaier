@@ -6,7 +6,9 @@ import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
+import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
+import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,8 @@ import static org.mockito.Mockito.when;
 class LanServerRestControllerTest {
 
     @Mock RegisterLanServerUseCase registerLanServerUseCase;
+    @Mock RenameLanServerUseCase renameLanServerUseCase;
+    @Mock UpdateLanServerDescriptionUseCase updateLanServerDescriptionUseCase;
     @Mock DeleteLanServerUseCase deleteLanServerUseCase;
     @Mock GetLanServersUseCase getLanServersUseCase;
     @Mock GetLanServerReachabilityUseCase reachabilityUseCase;
@@ -69,29 +73,29 @@ class LanServerRestControllerTest {
 
     @Test
     void register_runsDockerTrueWithDockerPort_delegatesToUseCase() {
-        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, 2375);
+        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, 2375, null);
 
         ResponseEntity<Void> response = controller.register(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375);
+        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, null);
     }
 
     @Test
     void register_runsDockerFalseWithoutDockerPort_delegatesToUseCase() {
-        var request = new LanServerRestController.RegisterRequest("printer", "192.168.3.20", false, null);
+        var request = new LanServerRestController.RegisterRequest("printer", "192.168.3.20", false, null, null);
 
         ResponseEntity<Void> response = controller.register(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(registerLanServerUseCase).register("printer", "192.168.3.20", false, null);
+        verify(registerLanServerUseCase).register("printer", "192.168.3.20", false, null, null);
     }
 
     @Test
     void register_runsDockerTrueWithoutDockerPort_returns400() {
         doThrow(new IllegalArgumentException("dockerPort is required"))
-            .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null);
-        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null);
+            .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null);
+        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null);
 
         ResponseEntity<Void> response = controller.register(request);
 
@@ -101,8 +105,8 @@ class LanServerRestControllerTest {
     @Test
     void register_useCaseThrowsIllegalArgument_returns400() {
         doThrow(new IllegalArgumentException("not in any lanCidr"))
-            .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375);
-        var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375);
+            .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null);
+        var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375, null);
 
         ResponseEntity<Void> response = controller.register(request);
 
@@ -180,8 +184,8 @@ class LanServerRestControllerTest {
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5"),
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5")
         ));
-        when(reachabilityUseCase.getReachability("nas")).thenReturn(Reachability.UNKNOWN);
-        when(reachabilityUseCase.getReachability("printer")).thenReturn(Reachability.OK);
+        when(reachabilityUseCase.getReachability("192.168.3.50")).thenReturn(Reachability.UNKNOWN);
+        when(reachabilityUseCase.getReachability("192.168.3.20")).thenReturn(Reachability.OK);
 
         var response = controller.list();
 
@@ -198,16 +202,88 @@ class LanServerRestControllerTest {
         assertThat(response.get(1).reachability()).isEqualTo("OK");
     }
 
+    // --- rename (#55) ---
+
+    @Test
+    void rename_returns204OnSuccess() {
+        var response = controller.rename("nas", new LanServerRestController.RenameRequest("media-nas"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(renameLanServerUseCase).rename("nas", "media-nas");
+    }
+
+    @Test
+    void rename_returns404WhenLanServerNotFound() {
+        doThrow(new java.util.NoSuchElementException("LAN server not found: ghost"))
+            .when(renameLanServerUseCase).rename("ghost", "phantom");
+
+        var response = controller.rename("ghost", new LanServerRestController.RenameRequest("phantom"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    void rename_returns409WhenNewNameAlreadyTaken() {
+        doThrow(new IllegalStateException("A LAN server named printer already exists"))
+            .when(renameLanServerUseCase).rename("nas", "printer");
+
+        var response = controller.rename("nas", new LanServerRestController.RenameRequest("printer"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+    }
+
+    @Test
+    void rename_returns400WhenNewNameBlank() {
+        doThrow(new IllegalArgumentException("New LAN server name must not be blank"))
+            .when(renameLanServerUseCase).rename("nas", "  ");
+
+        var response = controller.rename("nas", new LanServerRestController.RenameRequest("  "));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    // --- description (#54) ---
+
+    @Test
+    void register_passesDescriptionToUseCase() {
+        var request = new LanServerRestController.RegisterRequest(
+                "nas", "192.168.3.50", true, 2375, "Synology NAS");
+
+        controller.register(request);
+
+        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, "Synology NAS");
+    }
+
+    @Test
+    void updateDescription_returns204OnSuccess() {
+        var response = controller.updateDescription(
+                "nas", new LanServerRestController.UpdateDescriptionRequest("Synology in the closet"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(updateLanServerDescriptionUseCase).updateDescription("nas", "Synology in the closet");
+    }
+
+    @Test
+    void updateDescription_returns404WhenLanServerNotFound() {
+        doThrow(new java.util.NoSuchElementException("LAN server not found: ghost"))
+            .when(updateLanServerDescriptionUseCase).updateDescription("ghost", "anything");
+
+        var response = controller.updateDescription(
+                "ghost", new LanServerRestController.UpdateDescriptionRequest("anything"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+    }
+
     @Test
     void list_includesLastSeenEpochSecFromReachabilityUseCase() {
         when(getLanServersUseCase.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5"),
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5")
         ));
-        when(reachabilityUseCase.getReachability("nas")).thenReturn(Reachability.OK);
-        when(reachabilityUseCase.getReachability("printer")).thenReturn(Reachability.UNKNOWN);
-        when(reachabilityUseCase.getLastSeenEpochSec("nas")).thenReturn(1714000000L);
-        when(reachabilityUseCase.getLastSeenEpochSec("printer")).thenReturn(null);
+        when(reachabilityUseCase.getReachability("192.168.3.50")).thenReturn(Reachability.OK);
+        when(reachabilityUseCase.getReachability("192.168.3.20")).thenReturn(Reachability.UNKNOWN);
+        when(reachabilityUseCase.getLastSeenEpochSec("192.168.3.50")).thenReturn(1714000000L);
+        when(reachabilityUseCase.getLastSeenEpochSec("192.168.3.20")).thenReturn(null);
 
         var response = controller.list();
 

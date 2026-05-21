@@ -20,6 +20,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -252,5 +253,106 @@ class LanServerServiceTest {
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("192.168.0.0/16"));
 
         assertThat(service.getAll().get(0).relayPeerName()).isEqualTo("apalveien5");
+    }
+
+    // --- rename (#55) ---
+
+    @Test
+    void rename_persistsNewNameAndRemovesOldKeepingAddressAndDockerSettings() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
+
+        service.rename("nas", "media-nas");
+
+        ArgumentCaptor<LanServer> saved = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(saved.capture());
+        assertThat(saved.getValue().name()).isEqualTo("media-nas");
+        assertThat(saved.getValue().lanAddress()).isEqualTo("192.168.1.50");
+        assertThat(saved.getValue().runsDocker()).isTrue();
+        assertThat(saved.getValue().dockerPort()).isEqualTo(2375);
+        verify(forPersistingLanServers).deleteByName("nas");
+    }
+
+    @Test
+    void rename_throwsWhenLanServerNotFound() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.rename("ghost", "phantom"))
+            .isInstanceOf(java.util.NoSuchElementException.class);
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forPersistingLanServers, never()).deleteByName(any());
+    }
+
+    @Test
+    void rename_rejectsNameAlreadyUsedByAnotherLanServer() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.1.50", false, null),
+            new LanServer("printer", "192.168.1.60", false, null)
+        ));
+
+        assertThatThrownBy(() -> service.rename("nas", "printer"))
+            .isInstanceOf(IllegalStateException.class);
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forPersistingLanServers, never()).deleteByName(any());
+    }
+
+    @Test
+    void rename_isNoOpWhenNameUnchanged() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", false, null)));
+
+        service.rename("nas", "nas");
+
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forPersistingLanServers, never()).deleteByName(any());
+    }
+
+    @Test
+    void rename_rejectsBlankNewName() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", false, null)));
+
+        assertThatThrownBy(() -> service.rename("nas", "  "))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forPersistingLanServers, never()).deleteByName(any());
+    }
+
+    // --- description (#54) ---
+
+    @Test
+    void register_withDescription_persistsItOnTheLanServer() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        service.register("nas", "192.168.3.50", true, 2375, "Synology NAS");
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().description()).isEqualTo("Synology NAS");
+    }
+
+    @Test
+    void updateDescription_savesLanServerWithNewDescription() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
+
+        service.updateDescription("nas", "Synology in the closet");
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().name()).isEqualTo("nas");
+        assertThat(captor.getValue().description()).isEqualTo("Synology in the closet");
+        assertThat(captor.getValue().lanAddress()).isEqualTo("192.168.1.50");
+    }
+
+    @Test
+    void updateDescription_throwsWhenLanServerNotFound() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.updateDescription("ghost", "anything"))
+            .isInstanceOf(java.util.NoSuchElementException.class);
+        verify(forPersistingLanServers, never()).save(any());
     }
 }

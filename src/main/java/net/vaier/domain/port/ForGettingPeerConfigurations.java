@@ -19,15 +19,21 @@ public interface ForGettingPeerConfigurations {
         String configContent,
         MachineType peerType,
         String lanCidr,
-        String lanAddress
+        String lanAddress,
+        String description
     ) {
         public PeerConfiguration(String name, String ipAddress, String configContent) {
-            this(name, ipAddress, configContent, MachineType.UBUNTU_SERVER, null, null);
+            this(name, ipAddress, configContent, MachineType.UBUNTU_SERVER, null, null, null);
         }
 
         public PeerConfiguration(String name, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr) {
-            this(name, ipAddress, configContent, peerType, lanCidr, null);
+            this(name, ipAddress, configContent, peerType, lanCidr, null, null);
+        }
+
+        public PeerConfiguration(String name, String ipAddress, String configContent,
+                                 MachineType peerType, String lanCidr, String lanAddress) {
+            this(name, ipAddress, configContent, peerType, lanCidr, lanAddress, null);
         }
     }
 }

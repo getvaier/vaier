@@ -166,4 +166,22 @@ class LanServerFileAdapterTest {
         assertThat(migrated.getAll()).isEmpty();
         assertThat(Files.exists(tempDir.resolve("lan-servers.yml"))).isFalse();
     }
+
+    // --- description (#54) ---
+
+    @Test
+    void save_withDescription_thenGetAll_roundTripsTheDescription() {
+        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, "Synology in the closet"));
+
+        assertThat(adapter.getAll()).containsExactly(
+            new LanServer("nas", "192.168.3.50", true, 2375, "Synology in the closet"));
+    }
+
+    @Test
+    void getAll_lanServerWithoutDescription_readsBackNullDescription() {
+        // A pre-#54 lan-servers.yml entry has no `description` key — it must still load.
+        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+
+        assertThat(adapter.getAll().get(0).description()).isNull();
+    }
 }

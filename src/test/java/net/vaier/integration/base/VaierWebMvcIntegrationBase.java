@@ -117,6 +117,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
 
     @MockBean
+    protected RenamePeerUseCase renamePeerUseCase;
+
+    @MockBean
     protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
 
     @MockBean
@@ -191,6 +194,12 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- LAN server use cases ---
     @MockBean
     protected RegisterLanServerUseCase registerLanServerUseCase;
+
+    @MockBean
+    protected RenameLanServerUseCase renameLanServerUseCase;
+
+    @MockBean
+    protected UpdateLanServerDescriptionUseCase updateLanServerDescriptionUseCase;
 
     @MockBean
     protected DeleteLanServerUseCase deleteLanServerUseCase;

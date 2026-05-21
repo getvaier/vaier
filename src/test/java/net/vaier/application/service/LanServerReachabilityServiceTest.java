@@ -60,7 +60,7 @@ class LanServerReachabilityServiceTest {
 
     @Test
     void getReachability_beforeAnyProbe_returnsUnknown() {
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.UNKNOWN);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.UNKNOWN);
     }
 
     @Test
@@ -73,7 +73,7 @@ class LanServerReachabilityServiceTest {
 
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -87,7 +87,7 @@ class LanServerReachabilityServiceTest {
 
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -99,7 +99,7 @@ class LanServerReachabilityServiceTest {
 
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.DOWN);
     }
 
     @Test
@@ -114,7 +114,7 @@ class LanServerReachabilityServiceTest {
 
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("nas")).isEqualTo(Reachability.OK);
+        assertThat(service.getReachability("192.168.3.50")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -163,17 +163,17 @@ class LanServerReachabilityServiceTest {
             view("printer", "192.168.3.20", false, null)
         ));
         refreshN(CONFIRM);
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.DOWN);
 
         when(getLanServersUseCase.getAll()).thenReturn(List.of());
         service.refreshAll();
 
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.UNKNOWN);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.UNKNOWN);
     }
 
     @Test
     void getLastSeenEpochSec_beforeAnyProbe_returnsNull() {
-        assertThat(service.getLastSeenEpochSec("printer")).isNull();
+        assertThat(service.getLastSeenEpochSec("192.168.3.20")).isNull();
     }
 
     @Test
@@ -188,7 +188,7 @@ class LanServerReachabilityServiceTest {
         service.refreshAll();
         long after = System.currentTimeMillis() / 1000;
 
-        assertThat(service.getLastSeenEpochSec("printer"))
+        assertThat(service.getLastSeenEpochSec("192.168.3.20"))
             .isNotNull()
             .isBetween(before, after);
     }
@@ -204,7 +204,7 @@ class LanServerReachabilityServiceTest {
 
         service.refreshAll();
 
-        assertThat(service.getLastSeenEpochSec("printer")).isNotNull();
+        assertThat(service.getLastSeenEpochSec("192.168.3.20")).isNotNull();
     }
 
     @Test
@@ -216,7 +216,7 @@ class LanServerReachabilityServiceTest {
 
         service.refreshAll();
 
-        assertThat(service.getLastSeenEpochSec("printer")).isNull();
+        assertThat(service.getLastSeenEpochSec("192.168.3.20")).isNull();
     }
 
     @Test
@@ -230,15 +230,15 @@ class LanServerReachabilityServiceTest {
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
         refreshN(CONFIRM);
-        Long firstSeen = service.getLastSeenEpochSec("printer");
+        Long firstSeen = service.getLastSeenEpochSec("192.168.3.20");
         assertThat(firstSeen).isNotNull();
 
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.DOWN);
-        assertThat(service.getLastSeenEpochSec("printer")).isEqualTo(firstSeen);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.DOWN);
+        assertThat(service.getLastSeenEpochSec("192.168.3.20")).isEqualTo(firstSeen);
     }
 
     @Test
@@ -249,12 +249,12 @@ class LanServerReachabilityServiceTest {
         when(forProbingTcp.probe(eq("192.168.3.20"), eq(80), anyInt()))
             .thenReturn(ProbeResult.CONNECTED);
         service.refreshAll();
-        assertThat(service.getLastSeenEpochSec("printer")).isNotNull();
+        assertThat(service.getLastSeenEpochSec("192.168.3.20")).isNotNull();
 
         when(getLanServersUseCase.getAll()).thenReturn(List.of());
         service.refreshAll();
 
-        assertThat(service.getLastSeenEpochSec("printer")).isNull();
+        assertThat(service.getLastSeenEpochSec("192.168.3.20")).isNull();
     }
 
     @Test
@@ -346,7 +346,7 @@ class LanServerReachabilityServiceTest {
         service.refreshAll(); // back to OK before threshold hit
 
         verify(notifier, never()).notifyAdmins(org.mockito.ArgumentMatchers.any());
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -361,12 +361,12 @@ class LanServerReachabilityServiceTest {
 
         for (int i = 0; i < CONFIRM - 1; i++) {
             service.refreshAll();
-            assertThat(service.getReachability("printer"))
+            assertThat(service.getReachability("192.168.3.20"))
                 .as("must stay UNKNOWN until %d consecutive probes confirm", CONFIRM)
                 .isEqualTo(Reachability.UNKNOWN);
         }
         service.refreshAll();
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+        assertThat(service.getReachability("192.168.3.20")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -400,7 +400,7 @@ class LanServerReachabilityServiceTest {
 
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("printer")).isEqualTo(Reachability.OK);
+        assertThat(service.getReachability("192.168.3.108")).isEqualTo(Reachability.OK);
     }
 
     @Test
@@ -412,7 +412,7 @@ class LanServerReachabilityServiceTest {
 
         refreshN(CONFIRM);
 
-        assertThat(service.getReachability("ghost")).isEqualTo(Reachability.DOWN);
+        assertThat(service.getReachability("192.168.3.99")).isEqualTo(Reachability.DOWN);
     }
 
     @Test
@@ -444,9 +444,30 @@ class LanServerReachabilityServiceTest {
         service.refreshAll();
         long after = System.currentTimeMillis() / 1000;
 
-        assertThat(service.getLastSeenEpochSec("printer"))
+        assertThat(service.getLastSeenEpochSec("192.168.3.108"))
             .isNotNull()
             .isBetween(before, after);
+    }
+
+    @Test
+    void reachability_isKeyedByAddress_soRenameDoesNotResetIt() {
+        // A LAN server keeps its lanAddress across a rename; reachability is keyed by address,
+        // so a rename must not wipe the confirmed status back to UNKNOWN.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("nas", "192.168.3.50", false, null)
+        ));
+        when(forProbingTcp.probe(eq("192.168.3.50"), eq(80), anyInt()))
+            .thenReturn(ProbeResult.CONNECTED);
+        refreshN(CONFIRM);
+        assertThat(service.getReachability("192.168.3.50")).isEqualTo(Reachability.OK);
+
+        // Same host, renamed: same address, different name.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("storage-box", "192.168.3.50", false, null)
+        ));
+        service.refreshAll();
+
+        assertThat(service.getReachability("192.168.3.50")).isEqualTo(Reachability.OK);
     }
 
     private static LanServerView view(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {

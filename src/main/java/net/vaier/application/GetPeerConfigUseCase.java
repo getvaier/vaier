@@ -16,10 +16,16 @@ public interface GetPeerConfigUseCase {
         String configContent,
         MachineType peerType,
         String lanCidr,
-        String lanAddress
+        String lanAddress,
+        String description
     ) {
         public PeerConfigResult(String name, String ipAddress, String configContent, MachineType peerType) {
-            this(name, ipAddress, configContent, peerType, null, null);
+            this(name, ipAddress, configContent, peerType, null, null, null);
+        }
+
+        public PeerConfigResult(String name, String ipAddress, String configContent,
+                                MachineType peerType, String lanCidr, String lanAddress) {
+            this(name, ipAddress, configContent, peerType, lanCidr, lanAddress, null);
         }
     }
 }

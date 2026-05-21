@@ -3,18 +3,19 @@ package net.vaier.application;
 public interface GetLanServerReachabilityUseCase {
 
     /**
-     * Look up the latest cached "is the host on the network" status for the named LAN server.
-     * Returns {@link Reachability#UNKNOWN} if no probe has run yet.
+     * Look up the latest cached "is the host on the network" status for the LAN server at the
+     * given {@code lanAddress}. Returns {@link Reachability#UNKNOWN} if no probe has run yet.
+     * Keyed by address (not name) so the status survives a LAN server rename.
      */
-    Reachability getReachability(String lanServerName);
+    Reachability getReachability(String lanAddress);
 
     /**
      * Epoch-second timestamp of the most recent successful probe (CONNECTED or REFUSED) for
-     * the named LAN server, or {@code null} if it has never responded since startup. The
-     * value is preserved across subsequent unreachable probes — the UI uses it for the same
-     * "Last seen 5m ago" affordance VPN peers get from their WireGuard handshake.
+     * the LAN server at {@code lanAddress}, or {@code null} if it has never responded since
+     * startup. The value is preserved across subsequent unreachable probes — the UI uses it
+     * for the same "Last seen 5m ago" affordance VPN peers get from their WireGuard handshake.
      */
-    Long getLastSeenEpochSec(String lanServerName);
+    Long getLastSeenEpochSec(String lanAddress);
 
     /**
      * Force a fresh probe of every registered LAN server now (skipping the schedule).

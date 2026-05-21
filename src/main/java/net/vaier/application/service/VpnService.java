@@ -18,6 +18,7 @@ import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
@@ -26,6 +27,7 @@ import net.vaier.config.ServiceNames;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerName;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
@@ -36,6 +38,7 @@ import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForRenamingVpnPeers;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
@@ -69,6 +72,7 @@ public class VpnService implements
     GenerateDockerComposeUseCase,
     GetServerLocationUseCase,
     UpdateLanCidrUseCase,
+    RenamePeerUseCase,
     SyncLanRoutesUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
@@ -96,6 +100,7 @@ public class VpnService implements
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     private final ForSyncingLanRoutes forSyncingLanRoutes;
+    private final ForRenamingVpnPeers forRenamingVpnPeers;
     private DockerClient dockerClient;
 
     public VpnService(ConfigResolver configResolver,
@@ -110,7 +115,8 @@ public class VpnService implements
                       ForGeolocatingIps forGeolocatingIps,
                       ForUpdatingPeerConfigurations forUpdatingPeerConfigurations,
                       ForUpdatingServerAllowedIps forUpdatingServerAllowedIps,
-                      ForSyncingLanRoutes forSyncingLanRoutes) {
+                      ForSyncingLanRoutes forSyncingLanRoutes,
+                      ForRenamingVpnPeers forRenamingVpnPeers) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -124,6 +130,7 @@ public class VpnService implements
         this.forUpdatingPeerConfigurations = forUpdatingPeerConfigurations;
         this.forUpdatingServerAllowedIps = forUpdatingServerAllowedIps;
         this.forSyncingLanRoutes = forSyncingLanRoutes;
+        this.forRenamingVpnPeers = forRenamingVpnPeers;
     }
 
     @PostConstruct
@@ -257,13 +264,13 @@ public class VpnService implements
             config = peerConfigProvider.getPeerConfigByName(peerIdentifier);
         }
 
-        return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress()));
+        return config.map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress(), c.description()));
     }
 
     @Override
     public Optional<PeerConfigResult> getPeerConfigByIp(String ipAddress) {
         return peerConfigProvider.getPeerConfigByIp(ipAddress)
-                .map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress()));
+                .map(c -> new PeerConfigResult(c.name(), c.ipAddress(), c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress(), c.description()));
     }
 
     // --- GenerateDockerComposeUseCase ---
@@ -384,23 +391,29 @@ public class VpnService implements
 
     @Override
     public CreatedPeerUco createPeer(String peerName) {
-        return createPeer(peerName, MachineType.UBUNTU_SERVER, null, null);
+        return createPeer(peerName, MachineType.UBUNTU_SERVER, null, null, null);
     }
 
     @Override
     public CreatedPeerUco createPeer(String peerName, MachineType peerType, String lanCidr) {
-        return createPeer(peerName, peerType, lanCidr, null);
+        return createPeer(peerName, peerType, lanCidr, null, null);
     }
 
     @Override
     public CreatedPeerUco createPeer(String peerName, MachineType peerType, String lanCidr, String lanAddress) {
+        return createPeer(peerName, peerType, lanCidr, lanAddress, null);
+    }
+
+    @Override
+    public CreatedPeerUco createPeer(String peerName, MachineType peerType, String lanCidr, String lanAddress,
+                                     String description) {
         // Strict CIDR validation BEFORE any state change. Closes #195 — keeps shell-injection
         // payloads out of `wg set ... allowed-ips` and `ip route del` even though those sinks
         // are now argv-style.
         if (lanCidr != null && !lanCidr.isBlank()) {
             net.vaier.domain.Cidr.validateLanCidr(lanCidr);
         }
-        peerName = peerName.trim().replaceAll("[^a-zA-Z0-9_-]", "-").replaceAll("-{2,}", "-").replaceAll("^-|-$", "");
+        peerName = PeerName.sanitized(peerName).value();
         log.info("Creating peer {} on interface {} (peerType: {}, lanCidr: {}, lanAddress: {})",
                 peerName, wireguardInterface, peerType, lanCidr, lanAddress);
 
@@ -424,7 +437,8 @@ public class VpnService implements
             Files.createDirectories(peerDir);
 
             String clientConfig = WireGuardPeerConfig.generate(
-                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, lanAddress, vpnSubnet);
+                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, lanAddress, vpnSubnet,
+                    description);
 
             Path peerConfigPath = peerDir.resolve(peerName + ".conf");
             Files.writeString(peerConfigPath, clientConfig);
@@ -441,6 +455,29 @@ public class VpnService implements
             log.error("Error creating peer", e);
             throw new RuntimeException("Failed to create peer: " + e.getMessage(), e);
         }
+    }
+
+    // --- RenamePeerUseCase ---
+
+    @Override
+    public void renamePeer(String currentName, String newName) {
+        // PeerName owns the naming rule — the service only orchestrates the lookup + rename.
+        PeerName target = PeerName.sanitized(newName);
+
+        peerConfigProvider.getPeerConfigByName(currentName)
+            .orElseThrow(() -> new net.vaier.domain.PeerNotFoundException("Peer not found: " + currentName));
+
+        if (target.isSameAs(currentName)) {
+            log.info("Rename no-op: peer {} already has that name", currentName);
+            return;
+        }
+
+        if (peerConfigProvider.getPeerConfigByName(target.value()).isPresent()) {
+            throw new IllegalStateException("A peer named " + target.value() + " already exists");
+        }
+
+        forRenamingVpnPeers.renamePeer(currentName, target.value());
+        log.info("Renamed peer {} to {}", currentName, target.value());
     }
 
     private String executeInContainer(String... command) throws IOException, InterruptedException {

@@ -88,8 +88,9 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
                     Object runsDockerObj = m.get("runsDocker");
                     boolean runsDocker = runsDockerObj instanceof Boolean b ? b : false;
                     Integer dockerPort = m.get("dockerPort") instanceof Number n ? n.intValue() : null;
+                    String description = asString(m.get("description"));
                     if (name != null && lanAddress != null) {
-                        result.add(new LanServer(name, lanAddress, runsDocker, dockerPort));
+                        result.add(new LanServer(name, lanAddress, runsDocker, dockerPort, description));
                     }
                 }
             }
@@ -132,6 +133,9 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
             entry.put("runsDocker", s.runsDocker());
             if (s.runsDocker() && s.dockerPort() != null) {
                 entry.put("dockerPort", s.dockerPort());
+            }
+            if (s.description() != null) {
+                entry.put("description", s.description());
             }
             serialized.add(entry);
         }

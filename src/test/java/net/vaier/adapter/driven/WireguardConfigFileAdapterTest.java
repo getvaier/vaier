@@ -298,6 +298,169 @@ class WireguardConfigFileAdapterTest {
             () -> adapter.updateLanCidr("ghost", "192.168.3.0/24"));
     }
 
+    // --- VAIER metadata (description, #54) ---
+
+    @Test
+    void getPeerConfigByName_parsesDescriptionFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"Home media server\"}");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("nuc");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().description()).isEqualTo("Home media server");
+    }
+
+    @Test
+    void getPeerConfigByName_descriptionNullWhenAbsentFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("nuc");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().description()).isNull();
+    }
+
+    @Test
+    void getPeerConfigByName_parsesDescriptionWithEscapedCharacters() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"NAS \\\"box\\\" at C:\\\\data\"}");
+
+        Optional<PeerConfiguration> result = adapter.getPeerConfigByName("nuc");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().description()).isEqualTo("NAS \"box\" at C:\\data");
+    }
+
+    @Test
+    void updateDescription_writesDescriptionIntoVaierMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        adapter.updateDescription("nuc", "Raspberry Pi in garage");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.description()).isEqualTo("Raspberry Pi in garage");
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+    }
+
+    @Test
+    void updateDescription_preservesPeerTypeLanCidrAndLanAddress() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\",\"lanAddress\":\"192.168.3.121\"}");
+
+        adapter.updateDescription("apalveien5", "Spain relay");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.description()).isEqualTo("Spain relay");
+        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
+        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
+    }
+
+    @Test
+    void updateDescription_blankClearsExistingValue() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"old text\"}");
+
+        adapter.updateDescription("nuc", "");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.description()).isNull();
+    }
+
+    @Test
+    void updateDescription_addsVaierCommentWhenMissing() throws IOException {
+        createPeerConf("nuc", "10.13.13.7");
+
+        adapter.updateDescription("nuc", "Home media server");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.description()).isEqualTo("Home media server");
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+    }
+
+    @Test
+    void updateDescription_roundTripsSpecialCharacters() throws IOException {
+        createPeerConf("nuc", "10.13.13.7");
+
+        adapter.updateDescription("nuc", "NAS \"box\" — line1\nline2");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.description()).isEqualTo("NAS \"box\" — line1\nline2");
+    }
+
+    @Test
+    void updateDescription_throwsWhenPeerDoesNotExist() {
+        assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
+        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
+            () -> adapter.updateDescription("ghost", "anything"));
+    }
+
+    @Test
+    void updateLanAddress_preservesExistingDescription() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"keep me\"}");
+
+        adapter.updateLanAddress("nuc", "192.168.3.121");
+
+        assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().description()).isEqualTo("keep me");
+    }
+
+    @Test
+    void updateLanCidr_preservesExistingDescription() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"keep me\"}");
+
+        adapter.updateLanCidr("nuc", "192.168.3.0/24");
+
+        assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().description()).isEqualTo("keep me");
+    }
+
+    // --- renamePeer (#55) ---
+
+    @Test
+    void renamePeer_movesDirectoryAndConfFile() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+
+        adapter.renamePeer("laptop", "workstation");
+
+        assertThat(adapter.getPeerConfigByName("laptop")).isEmpty();
+        PeerConfiguration renamed = adapter.getPeerConfigByName("workstation").orElseThrow();
+        assertThat(renamed.name()).isEqualTo("workstation");
+        assertThat(renamed.ipAddress()).isEqualTo("10.13.13.2");
+        assertThat(Files.exists(configDir.resolve("workstation").resolve("workstation.conf"))).isTrue();
+        assertThat(Files.exists(configDir.resolve("laptop"))).isFalse();
+    }
+
+    @Test
+    void renamePeer_preservesConfigContentAndVaierMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("spain", "10.13.13.4",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.1.0/24\",\"description\":\"Spain relay\"}");
+
+        adapter.renamePeer("spain", "spain-relay");
+
+        PeerConfiguration renamed = adapter.getPeerConfigByName("spain-relay").orElseThrow();
+        assertThat(renamed.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+        assertThat(renamed.lanCidr()).isEqualTo("192.168.1.0/24");
+        assertThat(renamed.description()).isEqualTo("Spain relay");
+    }
+
+    @Test
+    void renamePeer_throwsWhenPeerDoesNotExist() {
+        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
+            () -> adapter.renamePeer("ghost", "phantom"));
+    }
+
+    @Test
+    void renamePeer_throwsWhenTargetNameAlreadyExists() throws IOException {
+        createPeerConf("laptop", "10.13.13.2");
+        createPeerConf("desktop", "10.13.13.3");
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+            () -> adapter.renamePeer("laptop", "desktop"));
+        assertThat(adapter.getPeerConfigByName("laptop")).isPresent();
+        assertThat(adapter.getPeerConfigByName("desktop")).isPresent();
+    }
+
     // --- getAllPeerConfigs ---
 
     @Test

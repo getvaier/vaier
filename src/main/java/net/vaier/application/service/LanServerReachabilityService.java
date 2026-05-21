@@ -43,6 +43,9 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private final ForPingingHost forPingingHost;
     private final ForPublishingEvents forPublishingEvents;
     private final NotifyAdminsOfPeerTransitionUseCase notifier;
+    // All four maps are keyed by the LAN server's lanAddress, not its name. A host's
+    // reachability is a property of its address — keying by address keeps the probe history
+    // intact across a rename (the name changes, the address does not).
     private final Map<String, Reachability> cache = new ConcurrentHashMap<>();
     private final Map<String, Long> lastSeenEpochSec = new ConcurrentHashMap<>();
     private final Map<String, Reachability> pendingState = new ConcurrentHashMap<>();
@@ -61,13 +64,13 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     }
 
     @Override
-    public Reachability getReachability(String lanServerName) {
-        return cache.getOrDefault(lanServerName, Reachability.UNKNOWN);
+    public Reachability getReachability(String lanAddress) {
+        return cache.getOrDefault(lanAddress, Reachability.UNKNOWN);
     }
 
     @Override
-    public Long getLastSeenEpochSec(String lanServerName) {
-        return lastSeenEpochSec.get(lanServerName);
+    public Long getLastSeenEpochSec(String lanAddress) {
+        return lastSeenEpochSec.get(lanAddress);
     }
 
     @Override
@@ -79,26 +82,27 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         // Docker scrape result to produce green / yellow / red for Docker hosts.
         for (var view : getLanServersUseCase.getAll()) {
             LanServer server = view.server();
-            String name = server.name();
-            seen.add(name);
+            // Key everything by lanAddress: the host's reachability survives a rename.
+            String key = server.lanAddress();
+            seen.add(key);
             Reachability r = probe(server.lanAddress());
             // Only stamp lastSeen on a successful raw probe — independent of debounce, since
             // a one-off TCP success still proves the host was alive at that moment.
             if (r == Reachability.OK) {
-                lastSeenEpochSec.put(name, System.currentTimeMillis() / 1000);
+                lastSeenEpochSec.put(key, System.currentTimeMillis() / 1000);
             }
             // Debounce: only commit to the published cache (and therefore to the email path)
             // once the same probe result has held for REQUIRED_CONSECUTIVE_PROBES cycles.
-            Reachability candidate = pendingState.get(name);
-            int count = (candidate == r ? pendingCount.getOrDefault(name, 0) : 0) + 1;
+            Reachability candidate = pendingState.get(key);
+            int count = (candidate == r ? pendingCount.getOrDefault(key, 0) : 0) + 1;
             if (count >= REQUIRED_CONSECUTIVE_PROBES) {
-                pendingState.remove(name);
-                pendingCount.remove(name);
-                Reachability prev = cache.put(name, r);
+                pendingState.remove(key);
+                pendingCount.remove(key);
+                Reachability prev = cache.put(key, r);
                 maybeNotifyTransition(server, prev, r);
             } else {
-                pendingState.put(name, r);
-                pendingCount.put(name, count);
+                pendingState.put(key, r);
+                pendingCount.put(key, count);
             }
         }
         cache.keySet().retainAll(seen);
@@ -119,7 +123,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         // storm on restart. Same rule the VPN PeerConnectivityTracker applies.
         if (previous == null || previous == current) return;
         boolean connected = current == Reachability.OK;
-        Long lastSeen = lastSeenEpochSec.get(server.name());
+        Long lastSeen = lastSeenEpochSec.get(server.lanAddress());
         PeerSnapshot snapshot = new PeerSnapshot(
                 server.name(),
                 MachineType.LAN_SERVER,

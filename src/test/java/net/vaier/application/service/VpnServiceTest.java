@@ -17,6 +17,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForRenamingVpnPeers;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
@@ -60,6 +61,7 @@ class VpnServiceTest {
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     @Mock ForSyncingLanRoutes forSyncingLanRoutes;
+    @Mock ForRenamingVpnPeers forRenamingVpnPeers;
 
     @InjectMocks VpnService service;
 
@@ -914,6 +916,68 @@ class VpnServiceTest {
 
         verifyNoInteractions(peerConfigProvider, forUpdatingServerAllowedIps,
             forUpdatingPeerConfigurations, forGettingVpnClients);
+    }
+
+    // --- renamePeer (#55) ---
+
+    @Test
+    void renamePeer_validatesExistenceAndDelegatesToPort() {
+        when(peerConfigProvider.getPeerConfigByName("laptp"))
+            .thenReturn(Optional.of(new PeerConfiguration("laptp", "10.13.13.2", "config")));
+        when(peerConfigProvider.getPeerConfigByName("laptop")).thenReturn(Optional.empty());
+
+        service.renamePeer("laptp", "laptop");
+
+        verify(forRenamingVpnPeers).renamePeer("laptp", "laptop");
+    }
+
+    @Test
+    void renamePeer_sanitisesNewNameBeforeRenaming() {
+        when(peerConfigProvider.getPeerConfigByName("nas"))
+            .thenReturn(Optional.of(new PeerConfiguration("nas", "10.13.13.2", "config")));
+        when(peerConfigProvider.getPeerConfigByName("media-server")).thenReturn(Optional.empty());
+
+        service.renamePeer("nas", "media server!!");
+
+        verify(forRenamingVpnPeers).renamePeer("nas", "media-server");
+    }
+
+    @Test
+    void renamePeer_throwsWhenPeerNotFound() {
+        when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.renamePeer("ghost", "phantom"))
+            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+        verifyNoInteractions(forRenamingVpnPeers);
+    }
+
+    @Test
+    void renamePeer_rejectsNameAlreadyTakenByAnotherPeer() {
+        when(peerConfigProvider.getPeerConfigByName("laptop"))
+            .thenReturn(Optional.of(new PeerConfiguration("laptop", "10.13.13.2", "config")));
+        when(peerConfigProvider.getPeerConfigByName("desktop"))
+            .thenReturn(Optional.of(new PeerConfiguration("desktop", "10.13.13.3", "config")));
+
+        assertThatThrownBy(() -> service.renamePeer("laptop", "desktop"))
+            .isInstanceOf(IllegalStateException.class);
+        verify(forRenamingVpnPeers, never()).renamePeer(any(), any());
+    }
+
+    @Test
+    void renamePeer_isNoOpWhenNameUnchanged() {
+        when(peerConfigProvider.getPeerConfigByName("laptop"))
+            .thenReturn(Optional.of(new PeerConfiguration("laptop", "10.13.13.2", "config")));
+
+        service.renamePeer("laptop", "laptop");
+
+        verify(forRenamingVpnPeers, never()).renamePeer(any(), any());
+    }
+
+    @Test
+    void renamePeer_rejectsBlankNewName() {
+        assertThatThrownBy(() -> service.renamePeer("laptop", "   "))
+            .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(forRenamingVpnPeers, peerConfigProvider);
     }
 
     // silence unused field warning — MachineType is referenced in Javadoc of PeerConfigResult ctor via record definition
