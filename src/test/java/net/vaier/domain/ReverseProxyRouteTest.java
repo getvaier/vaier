@@ -11,6 +11,7 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -476,6 +477,76 @@ class ReverseProxyRouteTest {
         ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "box.example.com", "10.99.99.99", 8080, "http", "svc");
 
         assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16")).isEqualTo(State.UNREACHABLE);
+    }
+
+    // --- backingContainer (issue #210) ---
+
+    @Test
+    void backingContainer_peerRoute_matchesContainerByVpnIpAndPublicPort() {
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.6", 6875);
+        DockerService bookstack = new DockerService("id", "bookstack",
+            "linuxserver/bookstack:24.05", "24.05",
+            List.of(new PortMapping(80, 6875, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(),
+            Map.of("10.13.13.6", List.of(bookstack)), Map.of()))
+            .contains(bookstack);
+    }
+
+    @Test
+    void backingContainer_vaierServerRoute_matchesContainerByName() {
+        ReverseProxyRoute route = route("app.example.com", "grafana", 3000);
+        DockerService grafana = new DockerService("id", "grafana",
+            "grafana/grafana:11.3.0", "11.3.0",
+            List.of(new PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(grafana), Map.of(), Map.of()))
+            .contains(grafana);
+    }
+
+    @Test
+    void backingContainer_vaierServerRoute_matchesContainerByPortWhenAddressIsNotAName() {
+        // Containers off the Vaier network are published on the docker gateway IP + public port.
+        ReverseProxyRoute route = route("app.example.com", "172.20.0.1", 9000);
+        DockerService app = new DockerService("id", "some-app", "ghcr.io/acme/app:2.1", "2.1",
+            List.of(new PortMapping(8080, 9000, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(app), Map.of(), Map.of()))
+            .contains(app);
+    }
+
+    @Test
+    void backingContainer_lanServiceRoute_matchesLanServerContainerByAddress() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "r", "photos.example.com", "192.168.3.50", 2342, "http", "svc");
+        DockerService photoprism = new DockerService("id", "photoprism",
+            "photoprism/photoprism:240915", "240915",
+            List.of(new PortMapping(2342, 2342, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(),
+            Map.of(), Map.of("192.168.3.50", List.of(photoprism))))
+            .contains(photoprism);
+    }
+
+    @Test
+    void backingContainer_lanServicePublishedAsBareHostPort_returnsEmpty() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "r", "printer.example.com", "192.168.3.99", 631, "http", "svc");
+
+        assertThat(route.backingContainer(List.of(), Map.of(), Map.of())).isEmpty();
+    }
+
+    @Test
+    void backingContainer_peerRouteWithNoMatchingContainer_doesNotFallBackToVaierServer() {
+        // The peer is known (reachable) but its container is gone — must not mis-attribute a
+        // Vaier-server container that happens to listen on the same port.
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.6", 8080);
+        DockerService unrelated = new DockerService("id", "unrelated", "nginx:1.27", "1.27",
+            List.of(new PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running");
+
+        assertThat(route.backingContainer(List.of(unrelated),
+            Map.of("10.13.13.6", List.of()), Map.of()))
+            .isEmpty();
     }
 
     // --- displayName ---

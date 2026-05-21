@@ -1,5 +1,7 @@
 package net.vaier.application.service;
 
+import net.vaier.application.DiscoverLanServerContainersUseCase;
+import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
@@ -26,6 +28,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,6 +59,12 @@ class GetLaunchpadServicesTest {
     @Mock
     ConfigResolver configResolver;
 
+    @Mock
+    DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
+
+    @Mock
+    DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+
     @InjectMocks
     PublishingService service;
 
@@ -65,6 +75,8 @@ class GetLaunchpadServicesTest {
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
         lenient().when(forResolvingPeerNames.resolvePeerNameByIp(org.mockito.ArgumentMatchers.anyString()))
             .thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        lenient().when(discoverLanServerContainersUseCase.discoverAllLanServerContainers()).thenReturn(List.of());
     }
 
     @Test
@@ -496,6 +508,84 @@ class GetLaunchpadServicesTest {
         List<LaunchpadServiceUco> result = service.getLaunchpadServices("51.175.8.217");
 
         assertThat(result.get(0).url()).isEqualTo("https://app.example.com");
+    }
+
+    // --- backing container image (issue #210) ---
+
+    @Test
+    void getLaunchpadServices_peerService_carriesBackingContainerImage() {
+        setupOneRoute("app.example.com", "10.13.13.6", 6875);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+            new DiscoverPeerContainersUseCase.PeerContainers("apalveien5", "10.13.13.6", "OK",
+                List.of(new DockerService("id", "bookstack", "linuxserver/bookstack:24.05", "24.05",
+                    List.of(new DockerService.PortMapping(80, 6875, "tcp", "0.0.0.0")), List.of(), "running")),
+                false, "")));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).image()).isEqualTo("linuxserver/bookstack:24.05");
+        assertThat(result.get(0).version()).isEqualTo("24.05");
+    }
+
+    @Test
+    void getLaunchpadServices_vaierServerService_carriesBackingContainerImage() {
+        setupOneRoute("app.example.com", "grafana", 3000);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "grafana", "grafana/grafana:11.3.0", "11.3.0",
+                List.of(new DockerService.PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running")));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).image()).isEqualTo("grafana/grafana:11.3.0");
+        assertThat(result.get(0).version()).isEqualTo("11.3.0");
+    }
+
+    @Test
+    void getLaunchpadServices_lanServicePublishedAsBareHostPort_hasNoImage() {
+        ReverseProxyRoute lan = ReverseProxyRoute.lanRoute(
+            "route", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(lan));
+        setupDnsRecord("nas.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).image()).isNull();
+        assertThat(result.get(0).version()).isNull();
+    }
+
+    @Test
+    void getLaunchpadServices_reusesContainerDiscoveryWithinTtl() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        service.getLaunchpadServices(null);
+        service.getLaunchpadServices(null);
+
+        verify(discoverPeerContainersUseCase, times(1)).discoverAll();
+    }
+
+    @Test
+    void getLaunchpadServices_rediscoversContainersAfterTtlExpires() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        service.containerImageSnapshotTtlMillis = -1;
+
+        service.getLaunchpadServices(null);
+        service.getLaunchpadServices(null);
+
+        verify(discoverPeerContainersUseCase, times(2)).discoverAll();
     }
 
     private VpnClient vpnClient(String allowedIps, String endpointIp) {

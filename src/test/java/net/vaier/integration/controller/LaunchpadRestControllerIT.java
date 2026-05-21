@@ -30,7 +30,7 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getServices_returnsMappedServices() throws Exception {
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any(), anyBoolean())).thenReturn(List.of(
-                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, "https://app.example.com", "app", "host=app.example.com"),
+                new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, "https://app.example.com", "app", "host=app.example.com", "grafana/grafana:11.3.0", "11.3.0"),
                 new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, "http://10.0.0.2:8080", "db", "host=db.example.com")
         ));
 
@@ -41,6 +41,8 @@ class LaunchpadRestControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(jsonPath("$[0].visibility").value("VISIBLE_ACTIVE"))
                .andExpect(jsonPath("$[0].displayName").value("app"))
                .andExpect(jsonPath("$[0].url").value("https://app.example.com"))
+               .andExpect(jsonPath("$[0].image").value("grafana/grafana:11.3.0"))
+               .andExpect(jsonPath("$[0].version").value("11.3.0"))
                .andExpect(jsonPath("$[1].dnsAddress").value("db.example.com"))
                .andExpect(jsonPath("$[1].url").value("http://10.0.0.2:8080"));
     }

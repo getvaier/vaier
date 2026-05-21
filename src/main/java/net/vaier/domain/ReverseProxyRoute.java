@@ -298,6 +298,44 @@ public class ReverseProxyRoute {
         return hostState(localServices, vpnClients);
     }
 
+    /**
+     * The container backing this route, located among the containers discovered on each kind of
+     * host. The launchpad uses this to surface the running Docker image + version on a tile.
+     *
+     * <p>Matching mirrors how a route's {@code address}/{@code port} were assigned at publish
+     * time: a LAN-service route resolves against the LAN server at {@code address}; a peer route
+     * against the VPN peer whose IP is {@code address}; otherwise the route is backed by a
+     * Vaier-server container, matched by container name (the usual persisted address) or, failing
+     * that, by port. Empty when nothing matches — a LAN service published as a bare host:port, an
+     * unreachable host, or a stopped/removed container. A peer route whose peer is present but has
+     * no matching container deliberately does <em>not</em> fall back to Vaier-server matching, so
+     * an unrelated local container on the same port is never mis-attributed.
+     *
+     * @param vaierServerContainers        containers on the Vaier server itself
+     * @param peerContainersByVpnIp        containers per VPN peer, keyed by the peer's VPN IP
+     * @param lanServerContainersByAddress containers per LAN server, keyed by its LAN address
+     */
+    public java.util.Optional<DockerService> backingContainer(
+            List<DockerService> vaierServerContainers,
+            Map<String, List<DockerService>> peerContainersByVpnIp,
+            Map<String, List<DockerService>> lanServerContainersByAddress) {
+        if (isLanService) {
+            return firstListeningOnPort(lanServerContainersByAddress.get(address));
+        }
+        if (peerContainersByVpnIp.containsKey(address)) {
+            return firstListeningOnPort(peerContainersByVpnIp.get(address));
+        }
+        return vaierServerContainers.stream()
+            .filter(c -> address.equals(c.containerName()))
+            .findFirst()
+            .or(() -> firstListeningOnPort(vaierServerContainers));
+    }
+
+    private java.util.Optional<DockerService> firstListeningOnPort(List<DockerService> candidates) {
+        if (candidates == null) return java.util.Optional.empty();
+        return candidates.stream().filter(c -> c.listensOnPort(port)).findFirst();
+    }
+
     public String displayName(String baseDomain, List<DockerService> localServices,
                               List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver) {
         return displayName(baseDomain, localServices, vpnClients, peerNameResolver, List.of());

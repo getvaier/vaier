@@ -34,11 +34,26 @@ public interface GetLaunchpadServicesUseCase {
      *       use case and never appear in this list).</li>
      *   <li>{@code faviconQuery} — pre-built query string the client appends to {@code /favicon}.
      *       Path-based siblings get distinct queries so they don't collide on the favicon cache.</li>
+     *   <li>{@code image} / {@code version} — the Docker image reference and resolved version of
+     *       the container backing this service (issue #210). Both are null when no container
+     *       backs the route — e.g. a service published as a bare LAN host:port.</li>
      * </ul>
      * {@code dnsAddress} and {@code pathPrefix} are still here because the client uses them to
      * derive the peer / subdomain sub-line and the browser-tab target.
      */
     record LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                LaunchpadVisibility visibility, String url, String displayName,
-                               String faviconQuery) {}
+                               String faviconQuery, String image, String version) {
+
+        /**
+         * Convenience constructor for a tile with no backing container — a service published as
+         * a bare LAN host:port has no Docker image, so {@code image} and {@code version} are null.
+         */
+        public LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
+                                   LaunchpadVisibility visibility, String url, String displayName,
+                                   String faviconQuery) {
+            this(dnsAddress, pathPrefix, hostAddress, visibility, url, displayName, faviconQuery,
+                null, null);
+        }
+    }
 }

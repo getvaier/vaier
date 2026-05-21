@@ -163,27 +163,83 @@ public class PublishingService implements
 
     @Override
     public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, boolean callerAuthenticated) {
+        List<PublishedServiceUco> published = getPublishedServices();
+        if (published.isEmpty()) return List.of();
+
         List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         String baseDomain = configResolver.getDomain();
+        ContainerImageSnapshot images = containerImageSnapshot();
         // Match each enriched Uco back to its route by (dnsAddress, pathPrefix), then ask the
-        // domain for the consolidated launchpad visibility and tile label. NOT_VISIBLE entries
-        // are dropped; the rest carry the tri-state and display name through so the launchpad
-        // client doesn't have to know why a service is shown or how it should be labelled.
-        return getPublishedServices().stream()
+        // domain for the consolidated launchpad visibility, tile label, and backing container.
+        // NOT_VISIBLE entries are dropped; the rest carry the tri-state, display name, and — when
+        // a container backs the route — its running Docker image/version through so the launchpad
+        // client doesn't have to know why a service is shown, how it's labelled, or what runs it.
+        return published.stream()
             .flatMap(s -> ReverseProxyRoute
                 .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix())
                 .map(r -> {
                     LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state(), callerAuthenticated);
                     if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
+                    DockerService backing = r.backingContainer(images.vaierServerContainers(),
+                        images.peerContainersByVpnIp(), images.lanServerContainersByAddress()).orElse(null);
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
-                        r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery());
+                        r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery(),
+                        backing == null ? null : backing.image(),
+                        backing == null ? null : backing.version());
                 })
                 .filter(java.util.Objects::nonNull)
                 .stream())
             .toList();
+    }
+
+    private record ContainerImageSnapshot(
+        List<DockerService> vaierServerContainers,
+        Map<String, List<DockerService>> peerContainersByVpnIp,
+        Map<String, List<DockerService>> lanServerContainersByAddress,
+        long takenAtMillis) {}
+
+    private volatile ContainerImageSnapshot containerImageSnapshot = null;
+
+    /**
+     * How long a discovered-container snapshot stays fresh. The launchpad reloads aggressively
+     * (tab focus, SSE, reconnect); without this TTL every reload would re-query every peer's and
+     * LAN server's Docker daemon over the VPN. 60s keeps reloads cheap while surfacing an image
+     * change within a minute.
+     */
+    long containerImageSnapshotTtlMillis = 60_000;
+
+    /**
+     * A TTL-cached snapshot of every discovered container, keyed so {@link ReverseProxyRoute}
+     * can resolve a route's backing image (issue #210). Discovery hits each peer's and LAN
+     * server's Docker daemon, so it is too expensive to repeat on every launchpad render.
+     */
+    private ContainerImageSnapshot containerImageSnapshot() {
+        ContainerImageSnapshot snapshot = containerImageSnapshot;
+        if (snapshot != null
+                && System.currentTimeMillis() - snapshot.takenAtMillis() < containerImageSnapshotTtlMillis) {
+            return snapshot;
+        }
+        Map<String, List<DockerService>> peerContainers = discoverPeerContainersUseCase.discoverAll().stream()
+            .filter(p -> p.vpnIp() != null)
+            .collect(java.util.stream.Collectors.toMap(
+                DiscoverPeerContainersUseCase.PeerContainers::vpnIp,
+                DiscoverPeerContainersUseCase.PeerContainers::containers,
+                (a, b) -> a));
+        Map<String, List<DockerService>> lanServerContainers = discoverLanServerContainersUseCase
+            .discoverAllLanServerContainers().stream()
+            .filter(h -> h.lanAddress() != null)
+            .collect(java.util.stream.Collectors.toMap(
+                DiscoverLanServerContainersUseCase.LanServerContainers::lanAddress,
+                DiscoverLanServerContainersUseCase.LanServerContainers::containers,
+                (a, b) -> a));
+        snapshot = new ContainerImageSnapshot(
+            forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer()),
+            peerContainers, lanServerContainers, System.currentTimeMillis());
+        containerImageSnapshot = snapshot;
+        return snapshot;
     }
 
     private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {

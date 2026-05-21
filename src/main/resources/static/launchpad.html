@@ -22,6 +22,7 @@
         }
 
         .tile {
+            position: relative;
             display: flex;
             flex-direction: row;
             align-items: center;
@@ -95,6 +96,38 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        /* Version tooltip — shows the backing container's Docker image on hover (issue #210). */
+        .tile-tooltip {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 8px;
+            z-index: 20;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-hi);
+            border-radius: 4px;
+            padding: 0.4rem 0.55rem;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.12s;
+        }
+
+        .tile:hover .tile-tooltip {
+            opacity: 1;
+        }
+
+        .tt-image {
+            color: var(--text);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        .tt-version {
+            color: var(--text-muted);
         }
 
         .loading {
@@ -309,6 +342,25 @@
 
             tile.appendChild(iconDiv);
             tile.appendChild(infoDiv);
+
+            // image / version are present only for container-backed services (issue #210);
+            // a service published as a bare LAN host:port has no container, so no tooltip.
+            if (service.image) {
+                const tip = document.createElement('div');
+                tip.className = 'tile-tooltip';
+                const imageLine = document.createElement('div');
+                imageLine.className = 'tt-image';
+                imageLine.textContent = service.image;
+                tip.appendChild(imageLine);
+                if (service.version) {
+                    const versionLine = document.createElement('div');
+                    versionLine.className = 'tt-version';
+                    versionLine.textContent = 'version ' + service.version;
+                    tip.appendChild(versionLine);
+                }
+                tile.appendChild(tip);
+            }
+
             return tile;
         }
 
