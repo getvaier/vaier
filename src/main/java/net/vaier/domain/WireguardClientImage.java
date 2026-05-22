@@ -1,5 +1,7 @@
 package net.vaier.domain;
 
+import java.util.List;
+
 /**
  * Canonical wireguard image that Vaier expects peers to run. Both the
  * server's docker-compose.yml and the generated client compose must pin
@@ -20,5 +22,16 @@ public final class WireguardClientImage {
 
     public static boolean matchesExpected(String image) {
         return EXPECTED.equals(image);
+    }
+
+    /**
+     * Whether any container in {@code containers} runs a WireGuard image other than the
+     * {@link #EXPECTED} tag — i.e. the peer should re-download its client compose.
+     */
+    public static boolean anyOutdated(List<DockerService> containers) {
+        return containers.stream()
+            .map(DockerService::image)
+            .filter(WireguardClientImage::isWireguardImage)
+            .anyMatch(image -> !matchesExpected(image));
     }
 }

@@ -11,12 +11,11 @@ import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
 import net.vaier.application.RefreshContainerStateUseCase;
-import net.vaier.config.ServiceNames;
 import net.vaier.domain.DockerService;
-import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
+import net.vaier.domain.VaierServerCatalogue;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -28,8 +27,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 @Service
 @Slf4j
@@ -40,17 +37,6 @@ public class ContainerService implements
     GetServerInfoUseCase,
     GetVaierServerDockerServicesUseCase,
     RefreshContainerStateUseCase {
-
-    private static final Set<String> EXCLUDED_NAMES = Set.of(
-        ServiceNames.WIREGUARD, ServiceNames.WIREGUARD_MASQUERADE,
-        ServiceNames.AUTHELIA, ServiceNames.REDIS, ServiceNames.VAIER
-    );
-
-    private record KnownService(Set<Integer> allowedPorts, String rootRedirectPath) {}
-
-    private static final Map<String, KnownService> KNOWN_SERVICES = Map.of(
-        ServiceNames.TRAEFIK, new KnownService(Set.of(8080), "/dashboard/")
-    );
 
     private final ForGettingServerInfo forGettingServerInfo;
     private final ForGettingVpnClients forGettingVpnClients;
@@ -167,7 +153,7 @@ public class ContainerService implements
                 Server server = new Server(vpnIp, 2375, false);
                 List<DockerService> containers = forGettingServerInfo.getServicesWithExposedPorts(server);
                 log.info("Discovered {} containers on peer {} ({})", containers.size(), peerName, vpnIp);
-                results.add(new PeerContainers(peerName, vpnIp, "OK", containers, isWireguardOutdated(containers), WireguardClientImage.EXPECTED));
+                results.add(new PeerContainers(peerName, vpnIp, "OK", containers, WireguardClientImage.anyOutdated(containers), WireguardClientImage.EXPECTED));
             } catch (Exception e) {
                 log.warn("Failed to query Docker on peer {} ({}): {}", peerName, vpnIp, e.getMessage());
                 results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of(), false, WireguardClientImage.EXPECTED));
@@ -228,49 +214,24 @@ public class ContainerService implements
     public List<PublishableService> getUnpublishedVaierServerServices(List<ReverseProxyRoute> existingRoutes) {
         List<PublishableService> result = new ArrayList<>();
         vaierServerContainersSnapshot.forEach(container -> {
-            String name = container.containerName().toLowerCase();
-            if (EXCLUDED_NAMES.contains(name)) return;
-
-            KnownService known = KNOWN_SERVICES.get(name);
+            String name = container.containerName();
+            if (VaierServerCatalogue.isExcluded(name)) return;
 
             container.ports().stream()
                 .filter(p -> "tcp".equals(p.type()))
-                .filter(p -> known == null || known.allowedPorts().contains(p.privatePort()))
-                .forEach(p -> {
-                    ServiceEndpoint ep = resolveEndpoint(container, p);
-                    if (ep == null) return;
-                    if (existingRoutes.stream().anyMatch(r -> r.getAddress().equals(ep.address()) && r.getPort() == ep.port())) return;
-                    result.add(new PublishableService(
+                .filter(p -> VaierServerCatalogue.isPublishablePort(name, p.privatePort()))
+                .forEach(p -> container.reachableEndpoint(p, vaierNetworkName, dockerGatewayIp)
+                    .filter(ep -> !ReverseProxyRoute.hasRouteFor(existingRoutes, ep.address(), ep.port()))
+                    .ifPresent(ep -> result.add(new PublishableService(
                         PublishableSource.VAIER_SERVER,
                         null,
                         ep.address(),
                         container.containerName(),
                         ep.port(),
-                        known != null ? known.rootRedirectPath() : null,
+                        VaierServerCatalogue.rootRedirectPath(name),
                         false
-                    ));
-                });
+                    ))));
         });
         return result;
     }
-
-    private boolean isWireguardOutdated(List<DockerService> containers) {
-        return containers.stream()
-                .map(DockerService::image)
-                .filter(WireguardClientImage::isWireguardImage)
-                .anyMatch(image -> !WireguardClientImage.matchesExpected(image));
-    }
-
-    private ServiceEndpoint resolveEndpoint(DockerService container, PortMapping p) {
-        boolean onVaierNetwork = container.networks().isEmpty() || container.networks().contains(vaierNetworkName);
-        if (onVaierNetwork) {
-            return new ServiceEndpoint(container.containerName(), p.privatePort());
-        }
-        if (p.publicPort() != null) {
-            return new ServiceEndpoint(dockerGatewayIp, p.publicPort());
-        }
-        return null;
-    }
-
-    private record ServiceEndpoint(String address, int port) {}
 }

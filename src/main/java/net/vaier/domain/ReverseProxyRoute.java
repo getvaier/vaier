@@ -188,6 +188,15 @@ public class ReverseProxyRoute {
     }
 
     /**
+     * True iff any route in {@code existing} already targets the given backend {@code address}
+     * and {@code port} — used to drop a container from the publishable-services list once it has
+     * been published.
+     */
+    public static boolean hasRouteFor(List<ReverseProxyRoute> existing, String address, int port) {
+        return existing.stream().anyMatch(r -> r.address.equals(address) && r.port == port);
+    }
+
+    /**
      * True iff any route in {@code existing} shares both the FQDN and the (already-normalised)
      * pathPrefix — i.e. publishing on top of it would be a duplicate that Traefik couldn't
      * disambiguate. Null pathPrefix matches another null pathPrefix (two host-only routes

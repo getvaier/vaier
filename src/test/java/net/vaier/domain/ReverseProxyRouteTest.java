@@ -455,6 +455,25 @@ class ReverseProxyRouteTest {
             .hasMessageContaining("protocol");
     }
 
+    @Test
+    void hasRouteFor_trueWhenAnExistingRouteSharesAddressAndPort() {
+        List<ReverseProxyRoute> existing = List.of(
+            route("a.example.com", "grafana", 3000),
+            route("b.example.com", "172.20.0.1", 8080));
+
+        assertThat(ReverseProxyRoute.hasRouteFor(existing, "grafana", 3000)).isTrue();
+        assertThat(ReverseProxyRoute.hasRouteFor(existing, "172.20.0.1", 8080)).isTrue();
+    }
+
+    @Test
+    void hasRouteFor_falseWhenAddressOrPortDiffers() {
+        List<ReverseProxyRoute> existing = List.of(route("a.example.com", "grafana", 3000));
+
+        assertThat(ReverseProxyRoute.hasRouteFor(existing, "grafana", 9999)).isFalse();
+        assertThat(ReverseProxyRoute.hasRouteFor(existing, "prometheus", 3000)).isFalse();
+        assertThat(ReverseProxyRoute.hasRouteFor(List.of(), "grafana", 3000)).isFalse();
+    }
+
     // --- hostState ---
 
     @Test

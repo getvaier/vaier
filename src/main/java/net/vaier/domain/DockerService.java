@@ -2,6 +2,7 @@ package net.vaier.domain;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public record DockerService(
         String containerId,
@@ -22,6 +23,33 @@ public record DockerService(
             .anyMatch(mapping -> mapping.containsPort(port) ||
                       (mapping.publicPort() != null && mapping.publicPort() == port));
     }
+
+    /**
+     * Whether this container is attached to {@code networkName} — or to no network at all, in
+     * which case it is assumed reachable by container name (some daemons report no network info).
+     */
+    public boolean isOnNetwork(String networkName) {
+        return networks.isEmpty() || networks.contains(networkName);
+    }
+
+    /**
+     * How {@code port} of this container is reached from the Vaier server: on the Vaier network,
+     * directly by container name + private port; otherwise via the Docker gateway IP + the
+     * published port. Empty when the container is off-network and the port is not published.
+     */
+    public Optional<ServiceEndpoint> reachableEndpoint(PortMapping port, String vaierNetworkName,
+                                                       String dockerGatewayIp) {
+        if (isOnNetwork(vaierNetworkName)) {
+            return Optional.of(new ServiceEndpoint(containerName, port.privatePort()));
+        }
+        if (port.publicPort() != null) {
+            return Optional.of(new ServiceEndpoint(dockerGatewayIp, port.publicPort()));
+        }
+        return Optional.empty();
+    }
+
+    /** An address+port at which a container's service is reachable. */
+    public record ServiceEndpoint(String address, int port) {}
 
     public static String versionFromLabels(Map<String, String> labels, String image) {
         if (labels != null) {
