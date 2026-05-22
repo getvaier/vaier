@@ -273,4 +273,18 @@ class WireGuardPeerConfigTest {
 
         assertThat(WireGuardPeerConfig.readIpAddress(config)).isEmpty();
     }
+
+    @Test
+    void serverAllowedIps_withoutLanCidr_isJustTheSlash32TunnelIp() {
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", null))
+            .isEqualTo("10.13.13.5/32");
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", "  "))
+            .isEqualTo("10.13.13.5/32");
+    }
+
+    @Test
+    void serverAllowedIps_withLanCidr_appendsItCommaJoinedWithoutSpaces() {
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", "192.168.1.0/24"))
+            .isEqualTo("10.13.13.5/32,192.168.1.0/24");
+    }
 }

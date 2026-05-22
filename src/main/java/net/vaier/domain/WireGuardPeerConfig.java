@@ -87,6 +87,19 @@ public final class WireGuardPeerConfig {
         return address.isEmpty() ? "" : address.split("/")[0];
     }
 
+    /**
+     * The server-side WireGuard {@code AllowedIPs} value for a peer: its {@code /32} tunnel IP,
+     * plus the relay {@code lanCidr} when one is set. Comma-joined with no spaces — {@code wg set
+     * ... allowed-ips} requires a single argv token and {@code wg-quick save} preserves it.
+     */
+    public static String serverAllowedIps(String ipAddress, String lanCidr) {
+        String allowedIps = ipAddress + "/32";
+        if (lanCidr != null && !lanCidr.isBlank()) {
+            return allowedIps + "," + lanCidr.trim();
+        }
+        return allowedIps;
+    }
+
     private static String escapeJson(String s) {
         StringBuilder sb = new StringBuilder(s.length() + 8);
         for (int i = 0; i < s.length(); i++) {

@@ -48,5 +48,21 @@ public interface ForGettingPeerConfigurations {
                                  MachineType peerType, String lanCidr, String lanAddress) {
             this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null);
         }
+
+        /**
+         * The peer — other than {@code excludingPeerId} — that already owns {@code lanCidr}, if
+         * any. A LAN CIDR may be routed by only one relay peer, so the caller rejects a non-empty
+         * result. Empty when {@code lanCidr} is null.
+         */
+        public static Optional<PeerConfiguration> lanCidrOwner(List<PeerConfiguration> peers,
+                                                               String lanCidr, String excludingPeerId) {
+            if (lanCidr == null) {
+                return Optional.empty();
+            }
+            return peers.stream()
+                .filter(p -> !p.id().equals(excludingPeerId))
+                .filter(p -> lanCidr.equals(p.lanCidr()))
+                .findFirst();
+        }
     }
 }

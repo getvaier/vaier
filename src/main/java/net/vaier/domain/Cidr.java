@@ -84,7 +84,7 @@ public final class Cidr {
      * a container name or any other non-literal is rejected outright, never resolved via DNS.
      */
     public boolean contains(String ip) {
-        if (!isStrictIpv4Literal(ip)) {
+        if (!isIpv4(ip)) {
             return false;
         }
         byte[] target;
@@ -106,8 +106,11 @@ public final class Cidr {
         return (network[fullBytes] & mask) == (target[fullBytes] & mask);
     }
 
-    /** True only for a strict dotted-quad IPv4 literal (no leading zeros, octets 0-255). */
-    private static boolean isStrictIpv4Literal(String s) {
+    /**
+     * True only for a strict dotted-quad IPv4 literal (no leading zeros, octets 0-255). The
+     * single home for "is this string an IP address rather than a hostname / peer name?".
+     */
+    public static boolean isIpv4(String s) {
         if (s == null) return false;
         var matcher = STRICT_IPV4.matcher(s);
         if (!matcher.matches()) return false;

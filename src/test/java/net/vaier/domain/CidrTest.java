@@ -79,6 +79,22 @@ class CidrTest {
     }
 
     @Test
+    void isIpv4_trueForStrictDottedQuads() {
+        assertThat(Cidr.isIpv4("10.13.13.2")).isTrue();
+        assertThat(Cidr.isIpv4("255.255.255.255")).isTrue();
+        assertThat(Cidr.isIpv4("0.0.0.0")).isTrue();
+    }
+
+    @Test
+    void isIpv4_falseForNonLiterals() {
+        assertThat(Cidr.isIpv4("my-peer")).isFalse();
+        assertThat(Cidr.isIpv4("10.13.13")).isFalse();
+        assertThat(Cidr.isIpv4("256.0.0.1")).isFalse();
+        assertThat(Cidr.isIpv4("10.13.13.2/32")).isFalse();
+        assertThat(Cidr.isIpv4(null)).isFalse();
+    }
+
+    @Test
     void parse_malformedCidr_throws() {
         assertThatThrownBy(() -> Cidr.parse("not-a-cidr"))
             .isInstanceOf(IllegalArgumentException.class);

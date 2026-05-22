@@ -191,7 +191,7 @@ public class VpnService implements
         log.info("Fetching config for peer: {}", peerIdentifier);
 
         Optional<ForGettingPeerConfigurations.PeerConfiguration> config;
-        if (peerIdentifier.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) {
+        if (net.vaier.domain.Cidr.isIpv4(peerIdentifier)) {
             config = peerConfigProvider.getPeerConfigByIp(peerIdentifier);
         } else {
             config = peerConfigProvider.getPeerConfigByName(peerIdentifier);
@@ -247,21 +247,17 @@ public class VpnService implements
         String normalized = (lanCidr == null || lanCidr.isBlank()) ? null : lanCidr.trim();
 
         if (normalized != null) {
-            for (ForGettingPeerConfigurations.PeerConfiguration other : peerConfigProvider.getAllPeerConfigs()) {
-                if (other.id().equals(peerName)) continue;
-                if (normalized.equals(other.lanCidr())) {
-                    throw new IllegalStateException(
-                        "LAN CIDR " + normalized + " already owned by peer " + other.name());
-                }
+            ForGettingPeerConfigurations.PeerConfiguration conflict =
+                ForGettingPeerConfigurations.PeerConfiguration
+                    .lanCidrOwner(peerConfigProvider.getAllPeerConfigs(), normalized, peer.id())
+                    .orElse(null);
+            if (conflict != null) {
+                throw new IllegalStateException(
+                    "LAN CIDR " + normalized + " already owned by peer " + conflict.name());
             }
         }
 
-        // Comma-separated, no spaces — `wg set ... allowed-ips X,Y` requires a single argv token,
-        // and the install script's wg-quick save will preserve this on disk.
-        String newAllowedIps = peer.ipAddress() + "/32";
-        if (normalized != null) {
-            newAllowedIps = newAllowedIps + "," + normalized;
-        }
+        String newAllowedIps = WireGuardPeerConfig.serverAllowedIps(peer.ipAddress(), normalized);
         forUpdatingServerAllowedIps.setPeerAllowedIps(peer.ipAddress(), newAllowedIps);
         forUpdatingPeerConfigurations.updateLanCidr(peerName, lanCidr);
         log.info("Updated lanCidr for peer {} to {} (server-side AllowedIPs: {})", peerName, normalized, newAllowedIps);
@@ -288,7 +284,7 @@ public class VpnService implements
         log.info("Deleting VPN peer: {}", peerIdentifier);
 
         String peerName = peerIdentifier;
-        if (peerIdentifier.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) {
+        if (net.vaier.domain.Cidr.isIpv4(peerIdentifier)) {
             String resolvedName = forResolvingPeerNames.resolvePeerNameByIp(peerIdentifier);
             if (resolvedName.equals(peerIdentifier)) {
                 log.error("Could not find peer name for IP: {}", peerIdentifier);
@@ -480,10 +476,7 @@ public class VpnService implements
         String pskFile = "/tmp/psk_" + System.currentTimeMillis();
         forExecutingInContainer.execute(wireguardContainerName, "sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
 
-        String serverAllowedIps = ipAddress + "/32";
-        if (lanCidr != null && !lanCidr.isBlank()) {
-            serverAllowedIps = serverAllowedIps + "," + lanCidr;
-        }
+        String serverAllowedIps = WireGuardPeerConfig.serverAllowedIps(ipAddress, lanCidr);
 
         // Argv-style — no shell, so user-supplied lanCidr cannot break out of `allowed-ips`.
         // Closes #195.

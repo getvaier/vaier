@@ -554,13 +554,12 @@ class VpnServiceTest {
     }
 
     @Test
-    void deletePeer_ipLikeStringWithHighOctets_matchesRegexAndAttemptsResolution() {
-        when(forResolvingPeerNames.resolvePeerNameByIp("999.999.999.999")).thenReturn("peer-x");
-        when(peerConfigProvider.getPeerConfigByName("peer-x")).thenReturn(Optional.empty());
-
+    void deletePeer_ipLikeStringWithOutOfRangeOctets_isTreatedAsAPeerName() {
+        // "999.999.999.999" is not a valid IPv4 literal, so it is taken as a peer name
+        // directly — no IP-to-name resolution is attempted.
         service.deletePeer("999.999.999.999");
 
-        verify(vpnPeerDeleter).deletePeer("peer-x");
+        verify(vpnPeerDeleter).deletePeer("999.999.999.999");
     }
 
     @Test
