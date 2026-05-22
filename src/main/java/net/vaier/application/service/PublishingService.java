@@ -4,9 +4,11 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.EditServiceLaunchpadAliasUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.EditServiceVersionEndpointUseCase;
+import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -16,6 +18,7 @@ import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
+import net.vaier.application.RefreshLaunchpadVersionsUseCase;
 import net.vaier.application.ToggleServiceAuthUseCase;
 import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
 import net.vaier.application.ToggleServiceLaunchpadVisibilityUseCase;
@@ -72,7 +75,8 @@ public class PublishingService implements
     EditServiceLaunchpadAliasUseCase,
     EditServiceVersionEndpointUseCase,
     IgnorePublishableServiceUseCase,
-    UnignorePublishableServiceUseCase {
+    UnignorePublishableServiceUseCase,
+    RefreshLaunchpadVersionsUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
@@ -87,7 +91,8 @@ public class PublishingService implements
     private final ForManagingIgnoredServices forManagingIgnoredServices;
     private final PendingPublicationsService pendingPublicationsService;
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
-    private final DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+    private final DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
+    private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     private final GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
     private final ForProbingServiceVersion forProbingServiceVersion;
 
@@ -115,7 +120,8 @@ public class PublishingService implements
                              ForManagingIgnoredServices forManagingIgnoredServices,
                              PendingPublicationsService pendingPublicationsService,
                              DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
-                             DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase,
+                             DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase,
+                             GetLanServerScrapeUseCase getLanServerScrapeUseCase,
                              GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase,
                              ForProbingServiceVersion forProbingServiceVersion) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
@@ -131,7 +137,8 @@ public class PublishingService implements
         this.forManagingIgnoredServices = forManagingIgnoredServices;
         this.pendingPublicationsService = pendingPublicationsService;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
-        this.discoverLanServerContainersUseCase = discoverLanServerContainersUseCase;
+        this.discoverVaierServerContainersUseCase = discoverVaierServerContainersUseCase;
+        this.getLanServerScrapeUseCase = getLanServerScrapeUseCase;
         this.getVaierServerDockerServicesUseCase = getVaierServerDockerServicesUseCase;
         this.forProbingServiceVersion = forProbingServiceVersion;
     }
@@ -176,8 +183,8 @@ public class PublishingService implements
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         String baseDomain = configResolver.getDomain();
-        ContainerImageSnapshot images = containerImageSnapshot();
-        VersionProbeSnapshot probes = versionProbeSnapshot();
+        ContainerImageSnapshot images = currentContainerImages();
+        Map<String, String> probedVersions = launchpadVersions;
         // Match each enriched Uco back to its route by (dnsAddress, pathPrefix), then ask the
         // domain for the consolidated launchpad visibility, tile label, and backing container.
         // NOT_VISIBLE entries are dropped; the rest carry the tri-state, display name, and — when
@@ -195,7 +202,7 @@ public class PublishingService implements
                     // reporting its own version over HTTP) takes precedence over a container's
                     // image tag; the image still comes only from a backing container, if any.
                     String probedVersion = r.hasVersionEndpoint()
-                        ? probes.versionsByRouteName().get(r.getName()) : null;
+                        ? probedVersions.get(r.getName()) : null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
                         r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery(),
@@ -212,73 +219,41 @@ public class PublishingService implements
     private record ContainerImageSnapshot(
         List<DockerService> vaierServerContainers,
         Map<String, List<DockerService>> peerContainersByVpnIp,
-        Map<String, List<DockerService>> lanServerContainersByAddress,
-        long takenAtMillis) {}
-
-    private volatile ContainerImageSnapshot containerImageSnapshot = null;
+        Map<String, List<DockerService>> lanServerContainersByAddress) {}
 
     /**
-     * How long a discovered-container snapshot stays fresh. The launchpad reloads aggressively
-     * (tab focus, SSE, reconnect); without this TTL every reload would re-query every peer's and
-     * LAN server's Docker daemon over the VPN. 60s keeps reloads cheap while surfacing an image
-     * change within a minute.
+     * Assembles the discovered-container view used to resolve each route's backing image
+     * (issue #210). Cheap to build per request: peer and LAN containers are served from the
+     * state-refresh caches, and only the local Docker socket is read live (sub-millisecond).
      */
-    long containerImageSnapshotTtlMillis = 60_000;
-
-    /**
-     * A TTL-cached snapshot of every discovered container, keyed so {@link ReverseProxyRoute}
-     * can resolve a route's backing image (issue #210). Discovery hits each peer's and LAN
-     * server's Docker daemon, so it is too expensive to repeat on every launchpad render.
-     */
-    private ContainerImageSnapshot containerImageSnapshot() {
-        ContainerImageSnapshot snapshot = containerImageSnapshot;
-        if (snapshot != null
-                && System.currentTimeMillis() - snapshot.takenAtMillis() < containerImageSnapshotTtlMillis) {
-            return snapshot;
-        }
+    private ContainerImageSnapshot currentContainerImages() {
         Map<String, List<DockerService>> peerContainers = discoverPeerContainersUseCase.discoverAll().stream()
             .filter(p -> p.vpnIp() != null)
             .collect(java.util.stream.Collectors.toMap(
                 DiscoverPeerContainersUseCase.PeerContainers::vpnIp,
                 DiscoverPeerContainersUseCase.PeerContainers::containers,
                 (a, b) -> a));
-        Map<String, List<DockerService>> lanServerContainers = discoverLanServerContainersUseCase
-            .discoverAllLanServerContainers().stream()
+        Map<String, List<DockerService>> lanServerContainers = getLanServerScrapeUseCase
+            .getLanServerContainers().stream()
             .filter(h -> h.lanAddress() != null)
             .collect(java.util.stream.Collectors.toMap(
                 DiscoverLanServerContainersUseCase.LanServerContainers::lanAddress,
                 DiscoverLanServerContainersUseCase.LanServerContainers::containers,
                 (a, b) -> a));
-        snapshot = new ContainerImageSnapshot(
-            forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer()),
-            peerContainers, lanServerContainers, System.currentTimeMillis());
-        containerImageSnapshot = snapshot;
-        return snapshot;
+        return new ContainerImageSnapshot(
+            discoverVaierServerContainersUseCase.discover(),
+            peerContainers, lanServerContainers);
     }
 
-    private record VersionProbeSnapshot(Map<String, String> versionsByRouteName, long takenAtMillis) {}
-
-    private volatile VersionProbeSnapshot versionProbeSnapshot = null;
-
     /**
-     * How long a version-probe snapshot stays fresh. Like {@link #containerImageSnapshotTtlMillis},
-     * this keeps the launchpad's aggressive reloads from re-probing every version endpoint — each
-     * probe is an HTTP GET to a possibly-slow LAN host.
+     * Router name → probed version, for every route with a configured version endpoint
+     * (issue #210). Served to the launchpad as a plain cache read; populated only by
+     * {@link #refreshLaunchpadVersions()}, which the state-refresh scheduler drives.
      */
-    long versionProbeSnapshotTtlMillis = 60_000;
+    private volatile Map<String, String> launchpadVersions = Map.of();
 
-    /**
-     * A TTL-cached map of router name to probed version, for every route with a configured version
-     * endpoint (issue #210 — surfacing the version of a service that runs natively on a LAN
-     * machine, not as a discoverable container). Probes run concurrently so one unreachable
-     * endpoint doesn't hold up the rest; every probe failure is simply absent from the map.
-     */
-    private VersionProbeSnapshot versionProbeSnapshot() {
-        VersionProbeSnapshot snapshot = versionProbeSnapshot;
-        if (snapshot != null
-                && System.currentTimeMillis() - snapshot.takenAtMillis() < versionProbeSnapshotTtlMillis) {
-            return snapshot;
-        }
+    @Override
+    public void refreshLaunchpadVersions() {
         // The route owns the probe — it talks to the ForProbingServiceVersion driven port itself
         // (see ReverseProxyRoute#probeVersion). This service only orchestrates: pick the routes,
         // run the probes concurrently, cache the result. It must not call the port directly.
@@ -290,14 +265,11 @@ public class PublishingService implements
                         .map(v -> Map.entry(r.getName(), v))
                         .orElse(null)))
                 .toList();
-        Map<String, String> versions = probes.stream()
+        launchpadVersions = probes.stream()
             .map(CompletableFuture::join)
             .filter(java.util.Objects::nonNull)
             .collect(java.util.stream.Collectors.toMap(
                 Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
-        snapshot = new VersionProbeSnapshot(versions, System.currentTimeMillis());
-        versionProbeSnapshot = snapshot;
-        return snapshot;
     }
 
     private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {
@@ -714,7 +686,7 @@ public class PublishingService implements
             )
             .forEach(publishable::add);
 
-        discoverLanServerContainersUseCase.discoverAllLanServerContainers().stream()
+        getLanServerScrapeUseCase.getLanServerContainers().stream()
             .filter(host -> "OK".equals(host.status()))
             .flatMap(host -> host.containers().stream()
                 .flatMap(container -> container.ports().stream()

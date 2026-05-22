@@ -2,6 +2,8 @@ package net.vaier.application.service;
 
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.DiscoverVaierServerContainersUseCase;
+import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
@@ -92,7 +94,10 @@ class PublishingServiceTest {
     DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
 
     @Mock
-    DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+    DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
+
+    @Mock
+    GetLanServerScrapeUseCase getLanServerScrapeUseCase;
 
     @Mock
     GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
@@ -1171,7 +1176,7 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
-        when(discoverLanServerContainersUseCase.discoverAllLanServerContainers()).thenReturn(List.of(
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of(
             okLanHost("nas", "192.168.1.50", 2375, "apalveien",
                 List.of(peerContainer("pihole", 80, "tcp")))
         ));
@@ -1194,7 +1199,7 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
-        when(discoverLanServerContainersUseCase.discoverAllLanServerContainers()).thenReturn(List.of(
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of(
             okLanHost("nas", "192.168.1.50", 2375, "apalveien",
                 List.of(peerContainer("pihole", 80, "tcp")))
         ));

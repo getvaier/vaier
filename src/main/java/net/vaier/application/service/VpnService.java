@@ -86,6 +86,10 @@ public class VpnService implements
     @Value("${wireguard.interface:wg0}")
     private String wireguardInterface;
 
+    // A healthy Docker host answers fast; keep timeouts short so a dead host fails fast.
+    private static final Duration DOCKER_CONNECTION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration DOCKER_RESPONSE_TIMEOUT = Duration.ofSeconds(15);
+
     private final ConfigResolver configResolver;
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
@@ -145,8 +149,8 @@ public class VpnService implements
             DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
                     .dockerHost(config.getDockerHost())
                     .maxConnections(100)
-                    .connectionTimeout(Duration.ofSeconds(30))
-                    .responseTimeout(Duration.ofSeconds(45))
+                    .connectionTimeout(DOCKER_CONNECTION_TIMEOUT)
+                    .responseTimeout(DOCKER_RESPONSE_TIMEOUT)
                     .build();
 
             dockerClient = DockerClientImpl.getInstance(config, httpClient);

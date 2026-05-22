@@ -33,6 +33,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,34 +58,60 @@ class ContainerServiceTest {
             VAIER_NETWORK, GATEWAY_IP);
     }
 
-    // --- discover (local) ---
+    // --- Vaier-server container scrape + discover cache (local) ---
 
     @Test
-    void discover_usesLocalDockerSocket() {
+    void scrapeVaierServerContainers_usesLocalDockerSocket() {
         List<DockerService> expected = List.of(dockerService("my-app", 8080));
         when(forGettingServerInfo.getServicesWithExposedPorts(
             argThat(s -> s.dockerHostUrl().equals("unix:///var/run/docker.sock"))
         )).thenReturn(expected);
 
-        assertThat(service.discover()).isSameAs(expected);
+        assertThat(service.scrapeVaierServerContainers()).isSameAs(expected);
     }
 
     @Test
-    void discover_returnsEmptyListWhenNoServicesRunning() {
+    void scrapeVaierServerContainers_returnsEmptyListWhenNoServicesRunning() {
         when(forGettingServerInfo.getServicesWithExposedPorts(
             argThat(s -> s.dockerHostUrl().equals("unix:///var/run/docker.sock"))
         )).thenReturn(List.of());
 
-        assertThat(service.discover()).isEmpty();
+        assertThat(service.scrapeVaierServerContainers()).isEmpty();
     }
 
     @Test
-    void discover_propagatesExceptionFromAdapter() {
+    void scrapeVaierServerContainers_propagatesExceptionFromAdapter() {
         when(forGettingServerInfo.getServicesWithExposedPorts(
             argThat(s -> s.dockerHostUrl().equals("unix:///var/run/docker.sock"))
         )).thenThrow(new RuntimeException("socket not found"));
 
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> service.discover());
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> service.scrapeVaierServerContainers());
+    }
+
+    @Test
+    void discover_beforeRefresh_returnsEmptySnapshot() {
+        assertThat(service.discover()).isEmpty();
+        verify(forGettingServerInfo, never()).getServicesWithExposedPorts(any());
+    }
+
+    @Test
+    void refresh_thenDiscover_servesTheScrapedVaierServerSnapshot() {
+        List<DockerService> expected = List.of(dockerService("my-app", 8080));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(expected);
+
+        service.refresh();
+
+        assertThat(service.discover()).isEqualTo(expected);
+    }
+
+    @Test
+    void refresh_whenVaierScrapeFails_keepsServingThePreviousSnapshot() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenThrow(new RuntimeException("socket not found"));
+
+        service.refresh();
+
+        assertThat(service.discover()).isEmpty();
     }
 
     // --- getServicesWithExposedPorts ---
@@ -104,7 +131,7 @@ class ContainerServiceTest {
     void discoverAll_noClients_returnsEmpty() {
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
 
-        assertThat(service.discoverAll()).isEmpty();
+        assertThat(service.scrapePeerContainers()).isEmpty();
     }
 
     @Test
@@ -116,7 +143,7 @@ class ContainerServiceTest {
         List<DockerService> containers = List.of(dockerService("my-app", 8080));
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(containers);
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("OK");
@@ -134,7 +161,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class)))
             .thenThrow(new RuntimeException("Connection refused"));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("UNREACHABLE");
@@ -159,7 +186,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> s != null && "10.13.13.3".equals(s.getAddress()))))
             .thenThrow(new RuntimeException("timeout"));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(2);
         assertThat(result).extracting(PeerContainers::status).containsExactly("OK", "UNREACHABLE");
@@ -173,7 +200,7 @@ class ContainerServiceTest {
             .thenReturn(Optional.of(peerConfig("charlie", "10.13.13.5", MachineType.UBUNTU_SERVER)));
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).vpnIp()).isEqualTo("10.13.13.5");
     }
@@ -185,7 +212,7 @@ class ContainerServiceTest {
         when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.10"))
             .thenReturn(Optional.of(peerConfig("phone", "10.13.13.10", MachineType.MOBILE_CLIENT)));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).isEmpty();
         verify(forGettingServerInfo, never()).getServicesWithExposedPorts(any());
@@ -198,7 +225,7 @@ class ContainerServiceTest {
         when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.11"))
             .thenReturn(Optional.of(peerConfig("laptop", "10.13.13.11", MachineType.WINDOWS_CLIENT)));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).isEmpty();
         verify(forGettingServerInfo, never()).getServicesWithExposedPorts(any());
@@ -212,7 +239,7 @@ class ContainerServiceTest {
             .thenReturn(Optional.of(peerConfig("server1", "10.13.13.2", MachineType.UBUNTU_SERVER)));
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("OK");
@@ -226,7 +253,7 @@ class ContainerServiceTest {
         when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))
             .thenReturn(Optional.of(peerConfig("server1", "10.13.13.5", MachineType.UBUNTU_SERVER)));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("UNREACHABLE");
@@ -241,7 +268,7 @@ class ContainerServiceTest {
             .thenReturn(Optional.empty());
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("OK");
@@ -266,7 +293,7 @@ class ContainerServiceTest {
             .thenReturn(Optional.of(peerConfig("server2", "10.13.13.3", MachineType.UBUNTU_SERVER)));
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(2);
         assertThat(result).extracting(PeerContainers::peerName).containsExactly("server1", "server2");
@@ -283,7 +310,7 @@ class ContainerServiceTest {
         when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))
             .thenReturn(Optional.of(peerConfig("server1", "10.13.13.5", MachineType.UBUNTU_SERVER)));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("UNREACHABLE");
@@ -300,7 +327,7 @@ class ContainerServiceTest {
             .thenReturn(Optional.of(peerConfig("server1", "10.13.13.5", MachineType.UBUNTU_SERVER)));
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo("OK");
@@ -315,7 +342,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(wireguardContainer(WireguardClientImage.EXPECTED)));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).wireguardOutdated()).isFalse();
     }
@@ -329,7 +356,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(wireguardContainer("lscr.io/linuxserver/wireguard:1.0.20210914-ls42")));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).wireguardExpectedImage()).isEqualTo(WireguardClientImage.EXPECTED);
     }
@@ -343,7 +370,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(wireguardContainer("lscr.io/linuxserver/wireguard:1.0.20210914-ls42")));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).wireguardOutdated()).isTrue();
     }
@@ -357,7 +384,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(wireguardContainer("lscr.io/linuxserver/wireguard:latest")));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).wireguardOutdated()).isTrue();
     }
@@ -371,7 +398,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(dockerService("app", 8080)));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).wireguardOutdated()).isFalse();
     }
@@ -385,9 +412,49 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenThrow(new RuntimeException("Connection refused"));
 
-        List<PeerContainers> result = service.discoverAll();
+        List<PeerContainers> result = service.scrapePeerContainers();
 
         assertThat(result.get(0).wireguardOutdated()).isFalse();
+    }
+
+    // --- refresh + discoverAll cache ---
+
+    @Test
+    void discoverAll_beforeRefresh_returnsEmptySnapshot() {
+        assertThat(service.discoverAll()).isEmpty();
+        verify(forGettingVpnClients, never()).getClients();
+    }
+
+    @Test
+    void refresh_thenDiscoverAll_servesTheScrapedSnapshot() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", MachineType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+
+        service.refresh();
+
+        List<PeerContainers> result = service.discoverAll();
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).peerName()).isEqualTo("alice");
+    }
+
+    @Test
+    void discoverAll_servesCachedSnapshotWithoutRescraping() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.2/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.2"))
+            .thenReturn(Optional.of(peerConfig("alice", "10.13.13.2", MachineType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+
+        service.refresh();
+        service.discoverAll();
+        service.discoverAll();
+        service.discoverAll();
+
+        // wg is queried once per refresh, not once per read.
+        verify(forGettingVpnClients, times(1)).getClients();
     }
 
     // --- getUnpublishedVaierServerServices ---
@@ -397,7 +464,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class)))
             .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD, 51820, "tcp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -405,7 +472,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.AUTHELIA, 9091, "tcp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -413,7 +480,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.REDIS, 6379, "tcp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -421,7 +488,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.VAIER, 8080, "tcp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -429,7 +496,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD_MASQUERADE, 8080, "tcp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -437,7 +504,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer(ServiceNames.TRAEFIK, 8080, "tcp")));
 
-        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
+        List<PublishableService> result = refreshThenGetUnpublished(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).containerName()).isEqualTo(ServiceNames.TRAEFIK);
@@ -451,7 +518,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("traefik", 80, "tcp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -459,7 +526,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
 
-        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
+        List<PublishableService> result = refreshThenGetUnpublished(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).containerName()).isEqualTo("my-app");
@@ -472,7 +539,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("my-app", 3000, "udp")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -481,7 +548,7 @@ class ContainerServiceTest {
             .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
         List<ReverseProxyRoute> existingRoutes = List.of(route("my-app", 3000));
 
-        assertThat(service.getUnpublishedVaierServerServices(existingRoutes)).isEmpty();
+        assertThat(refreshThenGetUnpublished(existingRoutes)).isEmpty();
     }
 
     @Test
@@ -489,7 +556,7 @@ class ContainerServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenThrow(new RuntimeException("Docker socket unavailable"));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -499,7 +566,7 @@ class ContainerServiceTest {
                 List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
                 List.of(VAIER_NETWORK), "running")));
 
-        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
+        List<PublishableService> result = refreshThenGetUnpublished(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).address()).isEqualTo("my-app");
@@ -513,7 +580,7 @@ class ContainerServiceTest {
                 List.of(new PortMapping(3001, 3001, "tcp", "0.0.0.0")),
                 List.of("uptime-kuma_default"), "running")));
 
-        List<PublishableService> result = service.getUnpublishedVaierServerServices(List.of());
+        List<PublishableService> result = refreshThenGetUnpublished(List.of());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).address()).isEqualTo(GATEWAY_IP);
@@ -528,7 +595,7 @@ class ContainerServiceTest {
                 List.of(new PortMapping(3001, null, "tcp", "0.0.0.0")),
                 List.of("some-other-network"), "running")));
 
-        assertThat(service.getUnpublishedVaierServerServices(List.of())).isEmpty();
+        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test
@@ -539,7 +606,7 @@ class ContainerServiceTest {
                 List.of("uptime-kuma_default"), "running")));
         List<ReverseProxyRoute> existingRoutes = List.of(route(GATEWAY_IP, 3001));
 
-        assertThat(service.getUnpublishedVaierServerServices(existingRoutes)).isEmpty();
+        assertThat(refreshThenGetUnpublished(existingRoutes)).isEmpty();
     }
 
     // --- helpers ---
@@ -703,5 +770,14 @@ class ContainerServiceTest {
 
     private ReverseProxyRoute route(String address, int port) {
         return new ReverseProxyRoute("route", "app.example.com", address, port, "svc", null);
+    }
+
+    /**
+     * getUnpublishedVaierServerServices reads ContainerService's cached snapshot, so a test
+     * must refresh() first to populate it from the stubbed Vaier-server Docker scrape.
+     */
+    private List<PublishableService> refreshThenGetUnpublished(List<ReverseProxyRoute> routes) {
+        service.refresh();
+        return service.getUnpublishedVaierServerServices(routes);
     }
 }

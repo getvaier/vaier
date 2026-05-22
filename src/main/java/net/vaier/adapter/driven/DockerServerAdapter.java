@@ -34,6 +34,12 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class DockerServerAdapter implements ForGettingServerInfo {
 
+    // Short timeouts: a healthy LAN/VPN Docker host answers in well under a second. A long
+    // connect timeout just means one unreachable host stalls a whole discovery sweep — keep
+    // it short so a dead host fails fast instead of blocking the background refresh.
+    private static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(15);
+
     private final Map<String, DockerClient> dockerClientCache = new HashMap<>();
     private final Map<String, DockerHttpClient> httpClientCache = new HashMap<>();
     private final Map<String, Server> serverCache = new HashMap<>();
@@ -133,8 +139,8 @@ public class DockerServerAdapter implements ForGettingServerInfo {
             DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
                 .dockerHost(config.getDockerHost())
                 .maxConnections(100)
-                .connectionTimeout(Duration.ofSeconds(30))
-                .responseTimeout(Duration.ofSeconds(45))
+                .connectionTimeout(CONNECTION_TIMEOUT)
+                .responseTimeout(RESPONSE_TIMEOUT)
                 .build();
             httpClientCache.put(key, httpClient);
 

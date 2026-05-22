@@ -10,6 +10,7 @@ import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
+import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
@@ -37,7 +38,8 @@ public class ContainerService implements
     DiscoverPeerContainersUseCase,
     DiscoverLanServerContainersUseCase,
     GetServerInfoUseCase,
-    GetVaierServerDockerServicesUseCase {
+    GetVaierServerDockerServicesUseCase,
+    RefreshContainerStateUseCase {
 
     private static final Set<String> EXCLUDED_NAMES = Set.of(
         ServiceNames.WIREGUARD, ServiceNames.WIREGUARD_MASQUERADE,
@@ -57,6 +59,19 @@ public class ContainerService implements
     private final GetLanServersUseCase getLanServersUseCase;
     private final String vaierNetworkName;
     private final String dockerGatewayIp;
+
+    /**
+     * Last peer-container scrape, served by {@link #discoverAll()}. Empty until the first
+     * {@link #refresh()} runs (the state-refresh scheduler triggers it shortly after startup).
+     */
+    private volatile List<PeerContainers> peerContainersSnapshot = List.of();
+
+    /**
+     * Last Vaier-server container scrape, served by {@link #discover()} and
+     * {@link #getUnpublishedVaierServerServices}. Listing and image-inspecting every container
+     * on a busy host is slow enough to be worth keeping off the request thread.
+     */
+    private volatile List<DockerService> vaierServerContainersSnapshot = List.of();
 
     @Autowired
     public ContainerService(ForGettingServerInfo forGettingServerInfo,
@@ -86,8 +101,13 @@ public class ContainerService implements
         this.dockerGatewayIp = dockerGatewayIp;
     }
 
+    /** Cache read — backed by {@link #refresh()}; the launchpad never scrapes Docker on-thread. */
     @Override
     public List<DockerService> discover() {
+        return vaierServerContainersSnapshot;
+    }
+
+    List<DockerService> scrapeVaierServerContainers() {
         return forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer());
     }
 
@@ -96,8 +116,31 @@ public class ContainerService implements
         return forGettingServerInfo.getServicesWithExposedPorts(server);
     }
 
+    /** Cache read — the launchpad and {@code /docker-services/peers} never scrape on-thread. */
     @Override
     public List<PeerContainers> discoverAll() {
+        return peerContainersSnapshot;
+    }
+
+    @Override
+    public void refresh() {
+        try {
+            peerContainersSnapshot = scrapePeerContainers();
+        } catch (Exception e) {
+            log.warn("Peer container scrape failed, keeping previous snapshot: {}", e.getMessage());
+        }
+        try {
+            vaierServerContainersSnapshot = scrapeVaierServerContainers();
+        } catch (Exception e) {
+            log.warn("Vaier-server container scrape failed, keeping previous snapshot: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Live scrape of every server-peer's Docker daemon over the VPN. Slow, and slow-to-fail
+     * for an unreachable peer — only {@link #refresh()} (driven by the scheduler) calls it.
+     */
+    List<PeerContainers> scrapePeerContainers() {
         List<VpnClient> clients = forGettingVpnClients.getClients();
         List<PeerContainers> results = new ArrayList<>();
 
@@ -184,34 +227,30 @@ public class ContainerService implements
     @Override
     public List<PublishableService> getUnpublishedVaierServerServices(List<ReverseProxyRoute> existingRoutes) {
         List<PublishableService> result = new ArrayList<>();
-        try {
-            forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer()).forEach(container -> {
-                String name = container.containerName().toLowerCase();
-                if (EXCLUDED_NAMES.contains(name)) return;
+        vaierServerContainersSnapshot.forEach(container -> {
+            String name = container.containerName().toLowerCase();
+            if (EXCLUDED_NAMES.contains(name)) return;
 
-                KnownService known = KNOWN_SERVICES.get(name);
+            KnownService known = KNOWN_SERVICES.get(name);
 
-                container.ports().stream()
-                    .filter(p -> "tcp".equals(p.type()))
-                    .filter(p -> known == null || known.allowedPorts().contains(p.privatePort()))
-                    .forEach(p -> {
-                        ServiceEndpoint ep = resolveEndpoint(container, p);
-                        if (ep == null) return;
-                        if (existingRoutes.stream().anyMatch(r -> r.getAddress().equals(ep.address()) && r.getPort() == ep.port())) return;
-                        result.add(new PublishableService(
-                            PublishableSource.VAIER_SERVER,
-                            null,
-                            ep.address(),
-                            container.containerName(),
-                            ep.port(),
-                            known != null ? known.rootRedirectPath() : null,
-                            false
-                        ));
-                    });
-            });
-        } catch (Exception e) {
-            log.warn("Failed to query Vaier server Docker socket: {}", e.getMessage());
-        }
+            container.ports().stream()
+                .filter(p -> "tcp".equals(p.type()))
+                .filter(p -> known == null || known.allowedPorts().contains(p.privatePort()))
+                .forEach(p -> {
+                    ServiceEndpoint ep = resolveEndpoint(container, p);
+                    if (ep == null) return;
+                    if (existingRoutes.stream().anyMatch(r -> r.getAddress().equals(ep.address()) && r.getPort() == ep.port())) return;
+                    result.add(new PublishableService(
+                        PublishableSource.VAIER_SERVER,
+                        null,
+                        ep.address(),
+                        container.containerName(),
+                        ep.port(),
+                        known != null ? known.rootRedirectPath() : null,
+                        false
+                    ));
+                });
+        });
         return result;
     }
 

@@ -1,7 +1,8 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.DiscoverVaierServerContainersUseCase;
+import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
@@ -64,7 +65,10 @@ class GetLaunchpadServicesTest {
     DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
 
     @Mock
-    DiscoverLanServerContainersUseCase discoverLanServerContainersUseCase;
+    DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
+
+    @Mock
+    GetLanServerScrapeUseCase getLanServerScrapeUseCase;
 
     @Mock
     ForProbingServiceVersion forProbingServiceVersion;
@@ -80,7 +84,7 @@ class GetLaunchpadServicesTest {
         lenient().when(forResolvingPeerNames.resolvePeerNameByIp(org.mockito.ArgumentMatchers.anyString()))
             .thenAnswer(inv -> inv.getArgument(0));
         lenient().when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
-        lenient().when(discoverLanServerContainersUseCase.discoverAllLanServerContainers()).thenReturn(List.of());
+        lenient().when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
     }
 
     @Test
@@ -539,7 +543,7 @@ class GetLaunchpadServicesTest {
         setupOneRoute("app.example.com", "grafana", 3000);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
-        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+        when(discoverVaierServerContainersUseCase.discover()).thenReturn(
             List.of(new DockerService("id", "grafana", "grafana/grafana:11.3.0", "11.3.0",
                 List.of(new DockerService.PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running")));
 
@@ -565,33 +569,6 @@ class GetLaunchpadServicesTest {
         assertThat(result.get(0).version()).isNull();
     }
 
-    @Test
-    void getLaunchpadServices_reusesContainerDiscoveryWithinTtl() {
-        setupOneRoute("app.example.com", "10.0.0.1", 8080);
-        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
-        setupEmptyVpnClients();
-        setupEmptyLocalServices();
-
-        service.getLaunchpadServices(null);
-        service.getLaunchpadServices(null);
-
-        verify(discoverPeerContainersUseCase, times(1)).discoverAll();
-    }
-
-    @Test
-    void getLaunchpadServices_rediscoversContainersAfterTtlExpires() {
-        setupOneRoute("app.example.com", "10.0.0.1", 8080);
-        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
-        setupEmptyVpnClients();
-        setupEmptyLocalServices();
-        service.containerImageSnapshotTtlMillis = -1;
-
-        service.getLaunchpadServices(null);
-        service.getLaunchpadServices(null);
-
-        verify(discoverPeerContainersUseCase, times(2)).discoverAll();
-    }
-
     // --- version endpoint (issue #210 — LAN-native version) ---
 
     @Test
@@ -607,6 +584,7 @@ class GetLaunchpadServicesTest {
                 "http://192.168.3.50:9000/sys/metrics?name[]=system_info", "display"))
             .thenReturn(Optional.of("v.5.0.0.0_DEV#a0fdfff02ba"));
 
+        service.refreshLaunchpadVersions();
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result).hasSize(1);
@@ -622,11 +600,12 @@ class GetLaunchpadServicesTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
-        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+        when(discoverVaierServerContainersUseCase.discover()).thenReturn(
             List.of(new DockerService("id", "grafana", "grafana/grafana:11.3.0", "11.3.0",
                 List.of(new DockerService.PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running")));
         when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("custom-5.0"));
 
+        service.refreshLaunchpadVersions();
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result.get(0).version()).isEqualTo("custom-5.0");
@@ -634,30 +613,28 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
-    void getLaunchpadServices_reusesVersionProbeWithinTtl() {
+    void getLaunchpadServices_readsCachedVersionsWithoutProbingOnTheReadPath() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(versionRoute()));
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
         setupEmptyLocalServices();
         when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("1.0"));
 
+        service.refreshLaunchpadVersions();
         service.getLaunchpadServices(null);
         service.getLaunchpadServices(null);
 
+        // Probing happens once, in the background refresh — never on a launchpad read.
         verify(forProbingServiceVersion, times(1)).probeVersion(any(), any());
     }
 
     @Test
-    void getLaunchpadServices_reProbesVersionAfterTtlExpires() {
+    void refreshLaunchpadVersions_reProbesEveryEndpointOnEachRun() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(versionRoute()));
-        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
-        setupEmptyVpnClients();
-        setupEmptyLocalServices();
         when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("1.0"));
-        service.versionProbeSnapshotTtlMillis = -1;
 
-        service.getLaunchpadServices(null);
-        service.getLaunchpadServices(null);
+        service.refreshLaunchpadVersions();
+        service.refreshLaunchpadVersions();
 
         verify(forProbingServiceVersion, times(2)).probeVersion(any(), any());
     }
