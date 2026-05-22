@@ -9,10 +9,23 @@ public class User {
 
     public static final int MIN_PASSWORD_LENGTH = 8;
 
+    /** The group whose members are Vaier administrators. */
+    public static final String ADMINS_GROUP = "admins";
+
     String name;
     String displayname;
     String email;
     List<String> groups;
+
+    /** Whether this user belongs to {@code group}. False when the user has no groups. */
+    public boolean isInGroup(String group) {
+        return groups != null && groups.contains(group);
+    }
+
+    /** Whether this user is a Vaier administrator — a member of {@link #ADMINS_GROUP}. */
+    public boolean isAdmin() {
+        return isInGroup(ADMINS_GROUP);
+    }
 
     public static void validateUsername(String username) {
         if (username == null || username.isBlank()) {

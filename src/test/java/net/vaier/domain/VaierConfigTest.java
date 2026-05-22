@@ -94,4 +94,16 @@ class VaierConfigTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("SMTP password");
     }
+
+    @Test
+    void isSmtpConfigured_trueWhenHostAndUsernameArePresent() {
+        assertThat(fullConfig().isSmtpConfigured()).isTrue();
+    }
+
+    @Test
+    void isSmtpConfigured_falseWhenHostOrUsernameMissing() {
+        assertThat(VaierConfig.builder().smtpUsername("mailer").build().isSmtpConfigured()).isFalse();
+        assertThat(VaierConfig.builder().smtpHost("smtp.example.com").build().isSmtpConfigured()).isFalse();
+        assertThat(VaierConfig.builder().build().isSmtpConfigured()).isFalse();
+    }
 }

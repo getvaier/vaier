@@ -7,7 +7,6 @@ import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.Machine;
-import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingMachines;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -53,22 +52,7 @@ public class MachineService implements GetMachinesUseCase, ForGettingMachines {
         List<Machine> result = new ArrayList<>();
 
         for (PeerConfiguration peer : peers) {
-            VpnClient client = clientsByIp.get(peer.ipAddress());
-            result.add(new Machine(
-                peer.name(),
-                peer.peerType(),
-                client == null ? null : client.publicKey(),
-                client == null ? null : client.allowedIps(),
-                client == null ? null : client.endpointIp(),
-                client == null ? null : client.endpointPort(),
-                client == null ? null : client.latestHandshake(),
-                client == null ? null : client.transferRx(),
-                client == null ? null : client.transferTx(),
-                peer.lanCidr(),
-                peer.lanAddress(),
-                peer.peerType().isServerType(),
-                null
-            ));
+            result.add(Machine.fromPeer(peer, clientsByIp.get(peer.ipAddress())));
         }
 
         for (LanServerView view : getLanServersUseCase.getAll()) {
@@ -76,15 +60,7 @@ public class MachineService implements GetMachinesUseCase, ForGettingMachines {
             String anchorLanCidr = LanAnchor.resolve(server.lanAddress(), peers, serverLanCidr)
                 .map(LanAnchor::cidr)
                 .orElse(null);
-            result.add(new Machine(
-                server.name(),
-                MachineType.LAN_SERVER,
-                null, null, null, null, null, null, null,
-                anchorLanCidr,
-                server.lanAddress(),
-                server.runsDocker(),
-                server.dockerPort()
-            ));
+            result.add(Machine.fromLanServer(server, anchorLanCidr));
         }
 
         return result;

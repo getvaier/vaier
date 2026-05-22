@@ -44,6 +44,12 @@ public class VaierConfig {
             .build();
     }
 
+    /** Whether SMTP is configured enough to send mail — both a host and a username are set. */
+    public boolean isSmtpConfigured() {
+        return smtpHost != null && !smtpHost.isBlank()
+            && smtpUsername != null && !smtpUsername.isBlank();
+    }
+
     /** The AWS key with all but its last four characters masked, for display. */
     public String maskedAwsKey() {
         if (awsKey == null || awsKey.length() <= 4) {
