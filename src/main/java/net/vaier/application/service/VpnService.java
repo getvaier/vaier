@@ -29,6 +29,7 @@ import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.WireguardClientImage;
@@ -138,7 +139,7 @@ public class VpnService implements
         try {
             log.info("Initializing Docker client for VpnService");
 
-            String dockerHost = getDockerHost();
+            String dockerHost = Server.localDockerHostUrl();
             log.info("Using Docker host: {}", dockerHost);
 
             DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
@@ -159,22 +160,6 @@ public class VpnService implements
         } catch (Exception e) {
             log.error("Failed to initialize Docker client: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to connect to Docker daemon", e);
-        }
-    }
-
-    private String getDockerHost() {
-        String dockerHost = System.getenv("DOCKER_HOST");
-        if (dockerHost != null && !dockerHost.isEmpty()) {
-            return dockerHost;
-        }
-
-        String os = System.getProperty("os.name").toLowerCase();
-        if (os.contains("win")) {
-            return "npipe:////./pipe/docker_engine";
-        } else if (os.contains("mac")) {
-            return "unix:///var/run/docker.sock";
-        } else {
-            return "unix:///var/run/docker.sock";
         }
     }
 

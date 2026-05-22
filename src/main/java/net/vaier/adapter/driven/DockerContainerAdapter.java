@@ -6,6 +6,7 @@ import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
+import net.vaier.domain.Server;
 import net.vaier.domain.port.ForRestartingContainers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -17,7 +18,7 @@ public class DockerContainerAdapter implements ForRestartingContainers {
     private final DockerClient dockerClient;
 
     public DockerContainerAdapter() {
-        String dockerHost = getDockerHost();
+        String dockerHost = Server.localDockerHostUrl();
         log.info("Using Docker host: {}", dockerHost);
 
         DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
@@ -32,27 +33,6 @@ public class DockerContainerAdapter implements ForRestartingContainers {
 
     DockerContainerAdapter(DockerClient dockerClient) {
         this.dockerClient = dockerClient;
-    }
-
-    private String getDockerHost() {
-        // Check environment variable first
-        String dockerHost = System.getenv("DOCKER_HOST");
-        if (dockerHost != null && !dockerHost.isEmpty()) {
-            return dockerHost;
-        }
-
-        // Detect platform
-        String os = System.getProperty("os.name").toLowerCase();
-        if (os.contains("win")) {
-            // Windows uses named pipes
-            return "npipe:////./pipe/docker_engine";
-        } else if (os.contains("mac")) {
-            // macOS can use Unix socket
-            return "unix:///var/run/docker.sock";
-        } else {
-            // Linux uses Unix socket
-            return "unix:///var/run/docker.sock";
-        }
     }
 
     @Override

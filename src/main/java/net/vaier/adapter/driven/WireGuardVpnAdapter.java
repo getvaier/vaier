@@ -7,6 +7,7 @@ import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
+import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.port.ForDeletingVpnPeers;
@@ -56,7 +57,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
         if (!isWindows) {
             try {
-                String dockerHost = resolveDockerHost();
+                String dockerHost = Server.localDockerHostUrl();
                 log.info("Docker host configured as: {}", dockerHost);
 
                 if (dockerHost.startsWith("unix://")) {
@@ -89,14 +90,6 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
                 throw new RuntimeException("Failed to connect to Docker daemon", e);
             }
         }
-    }
-
-    private static String resolveDockerHost() {
-        String env = System.getenv("DOCKER_HOST");
-        if (env != null && !env.isBlank()) {
-            return env;
-        }
-        return "unix:///var/run/docker.sock";
     }
 
     @PreDestroy

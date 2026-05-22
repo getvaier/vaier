@@ -39,6 +39,25 @@ public class Server {
         OK, UNREACHABLE
     }
 
+    /**
+     * Docker daemon URL for the host Vaier itself runs on: the {@code DOCKER_HOST}
+     * environment variable when set, otherwise an OS-aware default — a named pipe on
+     * Windows, the Unix socket everywhere else.
+     */
+    public static String localDockerHostUrl() {
+        return localDockerHostUrl(System.getenv("DOCKER_HOST"), System.getProperty("os.name"));
+    }
+
+    static String localDockerHostUrl(String dockerHostEnv, String osName) {
+        if (dockerHostEnv != null && !dockerHostEnv.isBlank()) {
+            return dockerHostEnv;
+        }
+        String os = osName == null ? "" : osName.toLowerCase();
+        return os.contains("win")
+            ? "npipe:////./pipe/docker_engine"
+            : "unix:///var/run/docker.sock";
+    }
+
     public static Server vaierServer() {
         String dockerHost = System.getenv("DOCKER_HOST");
         if (dockerHost != null && !dockerHost.isBlank()) {
