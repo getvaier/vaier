@@ -65,7 +65,7 @@ public class VpnPeerRestController {
             List<VpnClient> clients = vpnClientService.getClients();
             List<VpnPeerResponse> response = clients.stream()
                     .map(client -> {
-                        String peerIp = client.allowedIps().split("/")[0];
+                        String peerIp = client.vpnIp();
                         String id = peerNameResolver.resolvePeerNameByIp(peerIp);
                         var cfg = getPeerConfigUseCase.getPeerConfigByIp(peerIp);
                         MachineType peerType = cfg

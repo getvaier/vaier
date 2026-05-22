@@ -29,7 +29,7 @@ public class PeerStatsScheduler {
             List<VpnClient> clients = vpnClients.getClients();
             List<Map<String, Object>> stats = clients.stream()
                     .map(client -> {
-                        String peerIp = client.allowedIps().split("/")[0];
+                        String peerIp = client.vpnIp();
                         String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
                         return Map.<String, Object>of(
                                 "name", peerName != null ? peerName : peerIp,

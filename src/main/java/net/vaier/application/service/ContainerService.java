@@ -145,7 +145,7 @@ public class ContainerService implements
         List<PeerContainers> results = new ArrayList<>();
 
         for (VpnClient client : clients) {
-            String vpnIp = client.allowedIps().split("/")[0];
+            String vpnIp = client.vpnIp();
             String peerName = forResolvingPeerNames.resolvePeerNameByIp(vpnIp);
 
             MachineType peerType = forGettingPeerConfigurations.getPeerConfigByIp(vpnIp)

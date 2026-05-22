@@ -72,6 +72,42 @@ class VpnClientTest {
     }
 
     @Test
+    void vpnIp_stripsMaskFromSlash32Form() {
+        VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
+
+        assertThat(client.vpnIp()).isEqualTo("10.13.13.2");
+    }
+
+    @Test
+    void vpnIp_returnsBareIpWhenNoMask() {
+        VpnClient client = new VpnClient("pk", "10.13.13.2", "1.2.3.4", "51820", "0", "0", "0");
+
+        assertThat(client.vpnIp()).isEqualTo("10.13.13.2");
+    }
+
+    @Test
+    void vpnIp_returnsFirstEntryForRelayPeerWithLanCidr() {
+        // Relay peer: /32 VPN IP first, then a LAN CIDR — the tunnel IP is always the first entry.
+        VpnClient client = new VpnClient("pk", "10.13.13.5/32, 192.168.1.0/24", "1.2.3.4", "51820", "0", "0", "0");
+
+        assertThat(client.vpnIp()).isEqualTo("10.13.13.5");
+    }
+
+    @Test
+    void vpnIp_trimsSurroundingWhitespace() {
+        VpnClient client = new VpnClient("pk", "  10.13.13.2/32 ", "1.2.3.4", "51820", "0", "0", "0");
+
+        assertThat(client.vpnIp()).isEqualTo("10.13.13.2");
+    }
+
+    @Test
+    void vpnIp_whenAllowedIpsIsNull_returnsNull() {
+        VpnClient client = new VpnClient("pk", null, "1.2.3.4", "51820", "0", "0", "0");
+
+        assertThat(client.vpnIp()).isNull();
+    }
+
+    @Test
     void containsAddress_matchesSlash32PeerIp() {
         VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
 

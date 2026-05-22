@@ -46,7 +46,7 @@ public class MachineService implements GetMachinesUseCase, ForGettingMachines {
         Map<String, VpnClient> clientsByIp = getVpnClientsUseCase.getClients().stream()
             .filter(c -> c.allowedIps() != null && !c.allowedIps().isBlank())
             .collect(Collectors.toMap(
-                c -> c.allowedIps().split(",")[0].split("/")[0].trim(),
+                VpnClient::vpnIp,
                 c -> c,
                 (a, b) -> a));
 

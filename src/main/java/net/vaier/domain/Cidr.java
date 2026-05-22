@@ -6,12 +6,21 @@ import java.util.regex.Pattern;
 
 public final class Cidr {
 
+    // A single dotted-quad octet: 0, or 1-3 digits with no leading zero. Octet upper
+    // bound (0-255) is checked numerically by the callers below.
+    private static final String OCTET = "(0|[1-9][0-9]{0,2})";
+
     // Strict IPv4 CIDR boundary check — used at the controller boundary to reject
     // shell-metacharacter payloads before any user input reaches a process executor.
     // No alternation, no shell special chars, no IPv6, no whitespace, no hostnames,
     // no leading zeros. Octet/prefix bounds are checked numerically below.
     private static final Pattern STRICT_IPV4_CIDR = Pattern.compile(
-        "^(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})/([0-9]{1,2})$");
+        "^" + OCTET + "\\." + OCTET + "\\." + OCTET + "\\." + OCTET + "/([0-9]{1,2})$");
+
+    // Strict IPv4 address literal — same octet rules, no prefix. Used by contains() to
+    // confirm an address before parsing it, so a hostname is never resolved via DNS.
+    private static final Pattern STRICT_IPV4 = Pattern.compile(
+        "^" + OCTET + "\\." + OCTET + "\\." + OCTET + "\\." + OCTET + "$");
 
     private final byte[] network;
     private final int prefix;
@@ -70,7 +79,14 @@ public final class Cidr {
         return new Cidr(network, prefix);
     }
 
+    /**
+     * Whether this CIDR contains {@code ip}. The address must be a strict IPv4 literal —
+     * a container name or any other non-literal is rejected outright, never resolved via DNS.
+     */
     public boolean contains(String ip) {
+        if (!isStrictIpv4Literal(ip)) {
+            return false;
+        }
         byte[] target;
         try {
             target = InetAddress.getByName(ip).getAddress();
@@ -88,5 +104,16 @@ public final class Cidr {
         if (remainingBits == 0) return true;
         int mask = (0xFF << (8 - remainingBits)) & 0xFF;
         return (network[fullBytes] & mask) == (target[fullBytes] & mask);
+    }
+
+    /** True only for a strict dotted-quad IPv4 literal (no leading zeros, octets 0-255). */
+    private static boolean isStrictIpv4Literal(String s) {
+        if (s == null) return false;
+        var matcher = STRICT_IPV4.matcher(s);
+        if (!matcher.matches()) return false;
+        for (int i = 1; i <= 4; i++) {
+            if (Integer.parseInt(matcher.group(i)) > 255) return false;
+        }
+        return true;
     }
 }

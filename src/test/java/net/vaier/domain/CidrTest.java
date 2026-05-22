@@ -66,6 +66,19 @@ class CidrTest {
     }
 
     @Test
+    void contains_nonLiteralAddress_returnsFalseWithoutDnsLookup() {
+        // A container name or a partial/over-range dotted string must be rejected as a
+        // strict IPv4 literal — never resolved via DNS.
+        Cidr cidr = Cidr.parse("192.168.1.0/24");
+
+        assertThat(cidr.contains("my-container")).isFalse();
+        assertThat(cidr.contains("192.168.1")).isFalse();
+        assertThat(cidr.contains("192.168.1.999")).isFalse();
+        assertThat(cidr.contains("192.168.001.050")).isFalse();
+        assertThat(cidr.contains(null)).isFalse();
+    }
+
+    @Test
     void parse_malformedCidr_throws() {
         assertThatThrownBy(() -> Cidr.parse("not-a-cidr"))
             .isInstanceOf(IllegalArgumentException.class);

@@ -52,7 +52,7 @@ public class PeerConnectivityWatcher {
 
     private PeerSnapshot toSnapshot(VpnClient client) {
         if (client.allowedIps() == null || client.allowedIps().isBlank()) return null;
-        String peerIp = client.allowedIps().split(",")[0].split("/")[0].trim();
+        String peerIp = client.vpnIp();
         if (peerIp.isEmpty()) return null;
 
         String name = peerNameResolver.resolvePeerNameByIp(peerIp);
