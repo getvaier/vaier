@@ -15,13 +15,14 @@ import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
-import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.ServerLocationResolver;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.VpnSubnet;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForDeletingVpnPeers;
@@ -33,7 +34,6 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
-import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
 import net.vaier.domain.port.ForSyncingLanRoutes;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
@@ -44,11 +44,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @Slf4j
@@ -133,39 +133,13 @@ public class VpnService implements
 
     @Override
     public Optional<ServerLocation> getServerLocation() {
-        // Display label: prefer the human-friendly host name (CNAME or A record) the operator sees.
-        String displayHost = forResolvingPublicHost.resolve().map(PublicHost::value).orElse(null);
-
-        // For geolocation we need the actual public IP. On EC2 the public hostname resolves to a
-        // private VPC IP via split-horizon DNS, so we ask the port for a direct public IP first.
-        Optional<String> publicIp = forResolvingPublicHost.resolvePublicIp();
-        if (publicIp.isEmpty()) {
-            // Fall back to DNS-resolving the public host (works off-EC2 when DNS is honest).
-            Optional<PublicHost> host = forResolvingPublicHost.resolve();
-            if (host.isPresent()) {
-                String value = host.get().value();
-                String resolved = host.get().type() == DnsRecordType.A ? value : resolveHostnameToIp(value);
-                if (resolved != null) publicIp = Optional.of(resolved);
-            }
-        }
-        if (publicIp.isEmpty()) {
-            // Last resort: resolve vaier.<domain> via DNS.
-            String domain = configResolver.getDomain();
-            if (domain != null && !domain.isBlank()) {
-                String fallbackHost = new VaierHostnames(domain).vaierServerFqdn();
-                String resolved = resolveHostnameToIp(fallbackHost);
-                if (resolved != null) {
-                    publicIp = Optional.of(resolved);
-                    if (displayHost == null) displayHost = fallbackHost;
-                }
-            }
-        }
-        if (publicIp.isEmpty()) return Optional.empty();
-        if (displayHost == null) displayHost = publicIp.get();
-
-        final String label = displayHost;
-        return forGeolocatingIps.locate(publicIp.get())
-            .map(geo -> new ServerLocation(label, geo.latitude(), geo.longitude(), geo.city(), geo.country()));
+        // The domain owns the four-tier fallback + A-vs-CNAME branching; the service supplies the
+        // public-host port and a DNS resolver, then runs the geolocation lookup on the result.
+        return ServerLocationResolver
+            .resolve(forResolvingPublicHost, this::resolveHostnameToIp, configResolver.getDomain())
+            .flatMap(host -> forGeolocatingIps.locate(host.publicIp())
+                .map(geo -> new ServerLocation(host.displayLabel(),
+                    geo.latitude(), geo.longitude(), geo.city(), geo.country())));
     }
 
     private String resolveHostnameToIp(String hostname) {
@@ -407,9 +381,9 @@ public class VpnService implements
     }
 
     private String findNextAvailableIp() throws IOException {
+        // Service-side I/O: collect every peer's assigned tunnel IP from its .conf on disk.
+        List<String> assignedIps = new ArrayList<>();
         Path configPath = Paths.get(wireguardConfigPath);
-        AtomicInteger maxLastOctet = new AtomicInteger(1);
-
         if (Files.exists(configPath)) {
             try (var stream = Files.list(configPath)) {
                 stream.filter(Files::isDirectory)
@@ -417,16 +391,9 @@ public class VpnService implements
                             try {
                                 Path confFile = peerDir.resolve(peerDir.getFileName() + ".conf");
                                 if (Files.exists(confFile)) {
-                                    String content = Files.readString(confFile);
-                                    String ip = WireGuardPeerConfig.readIpAddress(content);
+                                    String ip = WireGuardPeerConfig.readIpAddress(Files.readString(confFile));
                                     if (!ip.isEmpty()) {
-                                        String[] parts = ip.split("\\.");
-                                        if (parts.length == 4) {
-                                            int lastOctet = Integer.parseInt(parts[3]);
-                                            if (lastOctet > maxLastOctet.get()) {
-                                                maxLastOctet.set(lastOctet);
-                                            }
-                                        }
+                                        assignedIps.add(ip);
                                     }
                                 }
                             } catch (Exception e) {
@@ -435,11 +402,8 @@ public class VpnService implements
                         });
             }
         }
-
-        int nextOctet = Math.max(maxLastOctet.get() + 1, 2);
-        String networkAddress = vpnSubnet.split("/")[0];
-        String prefix = networkAddress.substring(0, networkAddress.lastIndexOf('.') + 1);
-        return prefix + nextOctet;
+        // The domain owns the allocation rule (one past the highest octet, never the server's .1).
+        return new VpnSubnet(vpnSubnet).nextAvailableIp(assignedIps);
     }
 
     private String getServerPublicKey(String interfaceName) throws IOException, InterruptedException {
