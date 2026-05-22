@@ -10,6 +10,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig;
 import net.vaier.domain.port.ForGeolocatingIps;
@@ -60,6 +61,7 @@ class VpnServiceTest {
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     @Mock ForSyncingLanRoutes forSyncingLanRoutes;
+    @Mock ForExecutingInContainer forExecutingInContainer;
 
     @InjectMocks VpnService service;
 

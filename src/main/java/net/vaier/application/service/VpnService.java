@@ -1,14 +1,5 @@
 package net.vaier.application.service;
 
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.ExecCreateCmdResponse;
-import com.github.dockerjava.core.DefaultDockerClientConfig;
-import com.github.dockerjava.core.DockerClientConfig;
-import com.github.dockerjava.core.DockerClientImpl;
-import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
-import com.github.dockerjava.transport.DockerHttpClient;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.application.DeletePeerUseCase;
@@ -29,12 +20,12 @@ import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 import net.vaier.domain.ReverseProxyRoute;
-import net.vaier.domain.Server;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -49,12 +40,10 @@ import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -88,10 +77,6 @@ public class VpnService implements
     @Value("${wireguard.interface:wg0}")
     private String wireguardInterface;
 
-    // A healthy Docker host answers fast; keep timeouts short so a dead host fails fast.
-    private static final Duration DOCKER_CONNECTION_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration DOCKER_RESPONSE_TIMEOUT = Duration.ofSeconds(15);
-
     private final ConfigResolver configResolver;
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
@@ -105,7 +90,7 @@ public class VpnService implements
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     private final ForSyncingLanRoutes forSyncingLanRoutes;
-    private DockerClient dockerClient;
+    private final ForExecutingInContainer forExecutingInContainer;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -119,7 +104,8 @@ public class VpnService implements
                       ForGeolocatingIps forGeolocatingIps,
                       ForUpdatingPeerConfigurations forUpdatingPeerConfigurations,
                       ForUpdatingServerAllowedIps forUpdatingServerAllowedIps,
-                      ForSyncingLanRoutes forSyncingLanRoutes) {
+                      ForSyncingLanRoutes forSyncingLanRoutes,
+                      ForExecutingInContainer forExecutingInContainer) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -133,46 +119,7 @@ public class VpnService implements
         this.forUpdatingPeerConfigurations = forUpdatingPeerConfigurations;
         this.forUpdatingServerAllowedIps = forUpdatingServerAllowedIps;
         this.forSyncingLanRoutes = forSyncingLanRoutes;
-    }
-
-    @PostConstruct
-    public void init() {
-        try {
-            log.info("Initializing Docker client for VpnService");
-
-            String dockerHost = Server.localDockerHostUrl();
-            log.info("Using Docker host: {}", dockerHost);
-
-            DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                    .withDockerHost(dockerHost)
-                    .withDockerTlsVerify(false)
-                    .build();
-
-            DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
-                    .dockerHost(config.getDockerHost())
-                    .maxConnections(100)
-                    .connectionTimeout(DOCKER_CONNECTION_TIMEOUT)
-                    .responseTimeout(DOCKER_RESPONSE_TIMEOUT)
-                    .build();
-
-            dockerClient = DockerClientImpl.getInstance(config, httpClient);
-            dockerClient.pingCmd().exec();
-            log.info("Docker client initialized successfully for VpnService");
-        } catch (Exception e) {
-            log.error("Failed to initialize Docker client: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to connect to Docker daemon", e);
-        }
-    }
-
-    @PreDestroy
-    public void cleanup() {
-        if (dockerClient != null) {
-            try {
-                dockerClient.close();
-            } catch (Exception e) {
-                log.error("Error closing Docker client", e);
-            }
-        }
+        this.forExecutingInContainer = forExecutingInContainer;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -410,13 +357,14 @@ public class VpnService implements
                 name, id, wireguardInterface, peerType, lanCidr, lanAddress);
 
         try {
-            String privateKey = executeInContainer("wg", "genkey").trim();
+            String privateKey = forExecutingInContainer.execute(wireguardContainerName, "wg", "genkey").trim();
             log.info("Generated private key for peer {}", id);
 
-            String publicKey = executeInContainerWithInput(privateKey, "wg", "pubkey").trim();
+            String publicKey = forExecutingInContainer
+                .executeWithInput(wireguardContainerName, privateKey, "wg", "pubkey").trim();
             log.info("Generated public key for peer {}: {}", id, publicKey);
 
-            String presharedKey = executeInContainer("wg", "genpsk").trim();
+            String presharedKey = forExecutingInContainer.execute(wireguardContainerName, "wg", "genpsk").trim();
             log.info("Generated preshared key for peer {}", id);
 
             String ipAddress = findNextAvailableIp();
@@ -462,33 +410,6 @@ public class VpnService implements
         log.info("Set display name of peer {} to '{}'", peerId, newName);
     }
 
-    private String executeInContainer(String... command) throws IOException, InterruptedException {
-        ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(wireguardContainerName)
-                .withCmd(command)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec();
-
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-
-        dockerClient.execStartCmd(execCreateCmdResponse.getId())
-                .exec(new DockerExecCallback(stdout, stderr))
-                .awaitCompletion();
-
-        String stderrStr = stderr.toString();
-        if (!stderrStr.isEmpty()) {
-            log.debug("Command stderr: {}", stderrStr);
-        }
-
-        return stdout.toString();
-    }
-
-    private String executeInContainerWithInput(String input, String... command) throws IOException, InterruptedException {
-        String bashCommand = String.format("echo '%s' | %s", input, String.join(" ", command));
-        return executeInContainer("bash", "-c", bashCommand);
-    }
-
     private String findNextAvailableIp() throws IOException {
         Path configPath = Paths.get(wireguardConfigPath);
         AtomicInteger maxLastOctet = new AtomicInteger(1);
@@ -527,7 +448,7 @@ public class VpnService implements
 
     private String getServerPublicKey(String interfaceName) throws IOException, InterruptedException {
         log.info("Getting server public key from running interface {}", interfaceName);
-        String output = executeInContainer("wg", "show", interfaceName, "public-key");
+        String output = forExecutingInContainer.execute(wireguardContainerName, "wg", "show", interfaceName, "public-key");
         String publicKey = output.trim();
         log.info("Got server public key from interface: {}", publicKey);
         return publicKey;
@@ -557,7 +478,7 @@ public class VpnService implements
         // between vaier and wireguard containers; user-supplied lanCidr never reaches
         // this sink.
         String pskFile = "/tmp/psk_" + System.currentTimeMillis();
-        executeInContainer("sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
+        forExecutingInContainer.execute(wireguardContainerName, "sh", "-c", "echo '" + presharedKey + "' > " + pskFile);
 
         String serverAllowedIps = ipAddress + "/32";
         if (lanCidr != null && !lanCidr.isBlank()) {
@@ -566,49 +487,17 @@ public class VpnService implements
 
         // Argv-style — no shell, so user-supplied lanCidr cannot break out of `allowed-ips`.
         // Closes #195.
-        String output = executeInContainer("wg", "set", interfaceName,
+        String output = forExecutingInContainer.execute(wireguardContainerName, "wg", "set", interfaceName,
             "peer", publicKey, "preshared-key", pskFile, "allowed-ips", serverAllowedIps);
         log.info("Add peer output: {}", output);
 
-        executeInContainer("rm", "-f", pskFile);
+        forExecutingInContainer.execute(wireguardContainerName, "rm", "-f", pskFile);
 
-        String saveOutput = executeInContainer("wg-quick", "save", interfaceName);
+        String saveOutput = forExecutingInContainer.execute(wireguardContainerName, "wg-quick", "save", interfaceName);
         log.info("Save config output: {}", saveOutput);
 
-        restartWireGuardService();
+        forExecutingInContainer.restartWithMasqueradeSidecar(wireguardContainerName);
         log.info("WireGuard service restarted to apply NAT rules");
-    }
-
-    private void restartWireGuardService() {
-        try {
-            log.info("Restarting WireGuard container: {}", wireguardContainerName);
-            dockerClient.restartContainerCmd(wireguardContainerName)
-                    .withTimeout(30)
-                    .exec();
-
-            Thread.sleep(2000);
-
-            log.info("WireGuard container restarted successfully");
-
-            String masqueradeContainer = wireguardContainerName + "-masquerade";
-            try {
-                log.info("Restarting masquerade sidecar: {}", masqueradeContainer);
-                dockerClient.restartContainerCmd(masqueradeContainer)
-                        .withTimeout(15)
-                        .exec();
-                Thread.sleep(3000);
-                log.info("Masquerade sidecar restarted successfully");
-            } catch (Exception e) {
-                log.warn("Could not restart masquerade sidecar {}: {}", masqueradeContainer, e.getMessage());
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Interrupted while restarting WireGuard container", e);
-            throw new RuntimeException("Failed to restart WireGuard service", e);
-        } catch (Exception e) {
-            log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to restart WireGuard service", e);
-        }
     }
 
     private String generateScript(String peerName, String vpnIp, String serverUrl, String serverPort,
@@ -838,30 +727,4 @@ public class VpnService implements
         return sb.toString();
     }
 
-    private static class DockerExecCallback extends com.github.dockerjava.api.async.ResultCallbackTemplate<DockerExecCallback, com.github.dockerjava.api.model.Frame> {
-        private final ByteArrayOutputStream stdout;
-        private final ByteArrayOutputStream stderr;
-
-        public DockerExecCallback(ByteArrayOutputStream stdout, ByteArrayOutputStream stderr) {
-            this.stdout = stdout;
-            this.stderr = stderr;
-        }
-
-        @Override
-        public void onNext(com.github.dockerjava.api.model.Frame frame) {
-            try {
-                switch (frame.getStreamType()) {
-                    case STDOUT:
-                    case RAW:
-                        stdout.write(frame.getPayload());
-                        break;
-                    case STDERR:
-                        stderr.write(frame.getPayload());
-                        break;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to process Docker exec output", e);
-            }
-        }
-    }
 }

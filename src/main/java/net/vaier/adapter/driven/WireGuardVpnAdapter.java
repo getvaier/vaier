@@ -1,30 +1,19 @@
 package net.vaier.adapter.driven;
 
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.ExecCreateCmdResponse;
-import com.github.dockerjava.core.DefaultDockerClientConfig;
-import com.github.dockerjava.core.DockerClientConfig;
-import com.github.dockerjava.core.DockerClientImpl;
-import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
-import com.github.dockerjava.transport.DockerHttpClient;
-import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -48,59 +37,13 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     @Value("${wireguard.interface:wg0}")
     private String wireguardInterface;
 
-    private DockerClient dockerClient;
-    private boolean isWindows;
+    /** Windows is the local-dev path: {@code wg} runs as a native process, no Docker daemon. */
+    private final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
-    @PostConstruct
-    public void init() {
-        isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+    private final ForExecutingInContainer forExecutingInContainer;
 
-        if (!isWindows) {
-            try {
-                String dockerHost = Server.localDockerHostUrl();
-                log.info("Docker host configured as: {}", dockerHost);
-
-                if (dockerHost.startsWith("unix://")) {
-                    java.nio.file.Path socketPath = java.nio.file.Paths.get(dockerHost.substring("unix://".length()));
-                    if (!java.nio.file.Files.exists(socketPath)) {
-                        log.error("Docker socket not found at {}", socketPath);
-                        throw new RuntimeException("Docker socket not accessible");
-                    }
-                }
-
-                DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                    .withDockerHost(dockerHost)
-                    .withDockerTlsVerify(false)
-                    .build();
-
-                DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
-                    .dockerHost(config.getDockerHost())
-                    .maxConnections(100)
-                    .connectionTimeout(Duration.ofSeconds(30))
-                    .responseTimeout(Duration.ofSeconds(45))
-                    .build();
-
-                dockerClient = DockerClientImpl.getInstance(config, httpClient);
-                log.info("Docker client initialized for WireGuard container access");
-
-                dockerClient.pingCmd().exec();
-                log.info("Successfully connected to Docker daemon");
-            } catch (Exception e) {
-                log.error("Failed to initialize Docker client: {}", e.getMessage(), e);
-                throw new RuntimeException("Failed to connect to Docker daemon", e);
-            }
-        }
-    }
-
-    @PreDestroy
-    public void cleanup() {
-        if (dockerClient != null) {
-            try {
-                dockerClient.close();
-            } catch (Exception e) {
-                log.error("Error closing Docker client", e);
-            }
-        }
+    public WireGuardVpnAdapter(ForExecutingInContainer forExecutingInContainer) {
+        this.forExecutingInContainer = forExecutingInContainer;
     }
 
     private String executeWgCommand(String... wgArgs) throws IOException, InterruptedException {
@@ -154,117 +97,15 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
             containerName = wireguardContainerName;
         }
 
-        List<String> command = new ArrayList<>();
-        command.add("wg");
-        command.addAll(List.of(wgArgs));
-
-        ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(containerName)
-            .withCmd(command.toArray(new String[0]))
-            .withAttachStdout(true)
-            .withAttachStderr(true)
-            .exec();
-
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        String[] command = new String[wgArgs.length + 1];
+        command[0] = "wg";
+        System.arraycopy(wgArgs, 0, command, 1, wgArgs.length);
 
         try {
-            dockerClient.execStartCmd(execCreateCmdResponse.getId())
-                .exec(new DockerExecCallback(stdout, stderr))
-                .awaitCompletion();
+            return forExecutingInContainer.execute(containerName, command);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Docker exec interrupted", e);
-        }
-
-        String stderrStr = stderr.toString();
-        if (!stderrStr.isEmpty()) {
-            log.warn("WireGuard command stderr: {}", stderrStr);
-        }
-
-        return stdout.toString();
-    }
-
-    private static class DockerExecCallback extends com.github.dockerjava.api.async.ResultCallbackTemplate<DockerExecCallback, com.github.dockerjava.api.model.Frame> {
-        private final ByteArrayOutputStream stdout;
-        private final ByteArrayOutputStream stderr;
-
-        public DockerExecCallback(ByteArrayOutputStream stdout, ByteArrayOutputStream stderr) {
-            this.stdout = stdout;
-            this.stderr = stderr;
-        }
-
-        @Override
-        public void onNext(com.github.dockerjava.api.model.Frame frame) {
-            try {
-                switch (frame.getStreamType()) {
-                    case STDOUT:
-                    case RAW:
-                        stdout.write(frame.getPayload());
-                        break;
-                    case STDERR:
-                        stderr.write(frame.getPayload());
-                        break;
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to process Docker exec output", e);
-            }
-        }
-    }
-
-    private String executeInContainer(String... command) throws IOException, InterruptedException {
-        ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(wireguardContainerName)
-                .withCmd(command)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec();
-
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-
-        dockerClient.execStartCmd(execCreateCmdResponse.getId())
-                .exec(new DockerExecCallback(stdout, stderr))
-                .awaitCompletion();
-
-        String stderrStr = stderr.toString();
-        if (!stderrStr.isEmpty()) {
-            log.debug("Command stderr: {}", stderrStr);
-        }
-
-        return stdout.toString();
-    }
-
-    private String executeInContainerWithInput(String input, String... command) throws IOException, InterruptedException {
-        String bashCommand = String.format("echo '%s' | %s", input, String.join(" ", command));
-        return executeInContainer("bash", "-c", bashCommand);
-    }
-
-    private void restartWireGuardService() {
-        try {
-            log.info("Restarting WireGuard container: {}", wireguardContainerName);
-            dockerClient.restartContainerCmd(wireguardContainerName)
-                    .withTimeout(30)
-                    .exec();
-            Thread.sleep(2000);
-            log.info("WireGuard container restarted successfully");
-
-            String masqueradeContainer = wireguardContainerName + "-masquerade";
-            try {
-                log.info("Restarting masquerade sidecar: {}", masqueradeContainer);
-                dockerClient.restartContainerCmd(masqueradeContainer)
-                        .withTimeout(15)
-                        .exec();
-                Thread.sleep(3000);
-                log.info("Masquerade sidecar restarted successfully");
-            } catch (Exception e) {
-                log.warn("Could not restart masquerade sidecar {}: {}", masqueradeContainer, e.getMessage());
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Interrupted while restarting WireGuard container", e);
-            throw new RuntimeException("Failed to restart WireGuard service", e);
-        } catch (Exception e) {
-            log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to restart WireGuard service", e);
         }
     }
 
@@ -276,7 +117,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     }
 
     private PeerInfo findPeerInfoByIp(String interfaceName, String ipAddress) throws IOException, InterruptedException {
-        String output = executeInContainer("wg", "show", interfaceName, "dump");
+        String output = forExecutingInContainer.execute(wireguardContainerName, "wg", "show", interfaceName, "dump");
 
         try (var reader = new java.io.BufferedReader(new java.io.StringReader(output))) {
             String line;
@@ -336,11 +177,11 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
             // Argv-style — no shell, so user-supplied lanCidr cannot break out of `allowed-ips`.
             // Closes #195.
-            executeInContainer("wg", "set", wireguardInterface,
+            forExecutingInContainer.execute(wireguardContainerName, "wg", "set", wireguardInterface,
                 "peer", peerInfo.publicKey(), "allowed-ips", allowedIps);
 
             // Persist live runtime state to wg0.conf so it survives a container restart.
-            executeInContainer("wg-quick", "save", wireguardInterface);
+            forExecutingInContainer.execute(wireguardContainerName, "wg-quick", "save", wireguardInterface);
             log.info("Persisted new AllowedIPs for peer at {}", peerIpAddress);
 
             // wg set / wg-quick save mutate cryptokey routing but never install kernel
@@ -356,15 +197,15 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     private void reconcileKernelRoutes(RouteDelta routeDelta) throws IOException, InterruptedException {
         for (String cidr : routeDelta.toAdd()) {
             log.info("Installing kernel route: {} dev {}", cidr, wireguardInterface);
-            executeInContainer("ip", "route", "replace", cidr, "dev", wireguardInterface);
+            forExecutingInContainer.execute(wireguardContainerName, "ip", "route", "replace", cidr, "dev", wireguardInterface);
         }
         for (String cidr : routeDelta.toRemove()) {
             log.info("Removing kernel route: {} dev {}", cidr, wireguardInterface);
-            // Argv-style. executeInContainer already discards non-zero exits silently
+            // Argv-style. The exec port already discards non-zero exits silently
             // (the previous implementation used `2>/dev/null || true` in a shell wrapper
             // because the previous executor surfaced exit codes); we drop the shell so
             // user-supplied cidr cannot inject. Closes #195.
-            executeInContainer("ip", "route", "del", cidr, "dev", wireguardInterface);
+            forExecutingInContainer.execute(wireguardContainerName, "ip", "route", "del", cidr, "dev", wireguardInterface);
         }
     }
 
@@ -442,10 +283,12 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
             // Argv-style — no shell. publicKey is computed locally from `wg show`,
             // not user-supplied, but the sh-c pattern is being purged repo-wide. Closes #195.
-            String output = executeInContainer("wg", "set", wireguardInterface, "peer", publicKey, "remove");
+            String output = forExecutingInContainer.execute(
+                wireguardContainerName, "wg", "set", wireguardInterface, "peer", publicKey, "remove");
             log.info("Remove peer output: {}", output);
 
-            String saveOutput = executeInContainer("wg-quick", "save", wireguardInterface);
+            String saveOutput = forExecutingInContainer.execute(
+                wireguardContainerName, "wg-quick", "save", wireguardInterface);
             log.info("Save config output: {}", saveOutput);
 
             deleteDirectory(Paths.get(wireguardConfigPath, peerName));
