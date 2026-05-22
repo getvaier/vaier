@@ -164,6 +164,18 @@ public class ReverseProxyRoute {
         }
     }
 
+    /** Normalises a publish protocol: a blank value defaults to {@code http}; otherwise trimmed and lowercased. */
+    public static String normaliseProtocol(String raw) {
+        return (raw == null || raw.isBlank()) ? "http" : raw.trim().toLowerCase();
+    }
+
+    /** Validates an already-normalised protocol. Only {@code http} and {@code https} are allowed. */
+    public static void validateProtocol(String protocol) {
+        if (!"http".equals(protocol) && !"https".equals(protocol)) {
+            throw new IllegalArgumentException("protocol must be http or https (was " + protocol + ")");
+        }
+    }
+
     // --- domain rules over a list of existing routes ---
 
     /**
@@ -257,6 +269,26 @@ public class ReverseProxyRoute {
         return q;
     }
 
+    /**
+     * The URL the launchpad tile links to. A reachable direct-LAN URL wins (see {@link #directUrl});
+     * otherwise a public route links straight to its {@code https://} address, while an auth-protected
+     * route routes through Authelia's login URL so the browser navigates to that origin first —
+     * without it, SPA service workers serve a cached app that loops on its own login.
+     */
+    public String launchpadUrl(String callerIp, List<PeerConfiguration> peers,
+                               List<VpnClient> vpnClients, String baseDomain) {
+        String direct = directUrl(callerIp, peers, vpnClients);
+        if (direct != null) return direct;
+        // Path-based services land at https://host/pathPrefix (no trailing slash) — some apps
+        // serve different content for /path vs /path/, so let the target redirect itself.
+        if (authInfo == null) {
+            return "https://" + domainName + (pathPrefix == null ? "" : pathPrefix);
+        }
+        String target = "https://" + domainName + (pathPrefix == null ? "/" : pathPrefix);
+        String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
+        return "https://" + new VaierHostnames(baseDomain).autheliaHost() + "/?rd=" + encoded;
+    }
+
     public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
         return launchpadVisibility(dnsState, hostState, true);
     }
@@ -282,6 +314,18 @@ public class ReverseProxyRoute {
             .filter(r -> r.name().equals(domainName))
             .anyMatch(r -> r.type() == DnsRecordType.CNAME || r.type() == DnsRecordType.A);
         return found ? DnsState.OK : DnsState.NON_EXISTING;
+    }
+
+    /**
+     * As {@link #dnsState(List)}, but in {@link DnsProvider#MANUAL} mode the operator owns DNS and
+     * Vaier has no authoritative record set — so the state is assumed {@code OK} rather than
+     * rendering every published service as missing.
+     */
+    public DnsState dnsState(List<DnsRecord> allDnsRecords, DnsProvider dnsProvider) {
+        if (dnsProvider == DnsProvider.MANUAL) {
+            return DnsState.OK;
+        }
+        return dnsState(allDnsRecords);
     }
 
     public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients) {

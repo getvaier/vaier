@@ -406,6 +406,55 @@ class ReverseProxyRouteTest {
         assertThat(route.dnsState(records)).isEqualTo(DnsState.NON_EXISTING);
     }
 
+    // --- dnsState(provider) / launchpadUrl / protocol (#231) ---
+
+    @Test
+    void dnsState_manualProvider_isAlwaysOkRegardlessOfRecords() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.dnsState(List.of(), DnsProvider.MANUAL)).isEqualTo(DnsState.OK);
+    }
+
+    @Test
+    void dnsState_route53Provider_delegatesToTheRecordLookup() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.dnsState(List.of(), DnsProvider.ROUTE53)).isEqualTo(DnsState.NON_EXISTING);
+    }
+
+    @Test
+    void launchpadUrl_publicRoute_isTheDirectHttpsUrl() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://app.example.com");
+    }
+
+    @Test
+    void launchpadUrl_authProtectedRoute_routesThroughTheAutheliaLoginUrl() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "internal.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null));
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Finternal.example.com%2F");
+    }
+
+    @Test
+    void normaliseProtocol_defaultsBlankToHttpAndLowercases() {
+        assertThat(ReverseProxyRoute.normaliseProtocol(null)).isEqualTo("http");
+        assertThat(ReverseProxyRoute.normaliseProtocol("   ")).isEqualTo("http");
+        assertThat(ReverseProxyRoute.normaliseProtocol("HTTPS")).isEqualTo("https");
+    }
+
+    @Test
+    void validateProtocol_rejectsAnythingButHttpAndHttps() {
+        assertThatCode(() -> ReverseProxyRoute.validateProtocol("http")).doesNotThrowAnyException();
+        assertThatCode(() -> ReverseProxyRoute.validateProtocol("https")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> ReverseProxyRoute.validateProtocol("ftp"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("protocol");
+    }
+
     // --- hostState ---
 
     @Test

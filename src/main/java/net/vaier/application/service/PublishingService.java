@@ -24,7 +24,6 @@ import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
 import net.vaier.application.ToggleServiceLaunchpadVisibilityUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.config.ConfigResolver;
-import net.vaier.domain.DnsProvider;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
@@ -50,8 +49,6 @@ import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.springframework.stereotype.Service;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -204,7 +201,7 @@ public class PublishingService implements
                     String probedVersion = r.hasVersionEndpoint()
                         ? probedVersions.get(r.getName()) : null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
-                        visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
+                        visibility, r.launchpadUrl(callerIp, peers, vpnClients, baseDomain),
                         r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery(),
                         r.hostDisplayName(vpnClients, forResolvingPeerNames, peers),
                         backing == null ? null : backing.image(),
@@ -272,31 +269,11 @@ public class PublishingService implements
                 Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
     }
 
-    private String resolveLaunchpadUrl(PublishedServiceUco s, String directUrl) {
-        if (directUrl != null) return directUrl;
-        // Path-based services land at https://host/pathPrefix (no trailing slash) — some apps
-        // serve different content for /path vs /path/, so let the target redirect to its
-        // preferred shape itself. Host-only services keep their existing https://host shape.
-        String pathSuffix = s.pathPrefix() == null ? "" : s.pathPrefix();
-        if (!s.authenticated()) return "https://" + s.dnsAddress() + pathSuffix;
-        // Auth-protected services route via Authelia's login URL so the browser navigates to a
-        // different origin first. Without this, openHAB-style PWAs serve a cached SPA from their
-        // own service worker, the SPA hits /rest/* (which Authelia answers with 401, not 302),
-        // and the user sees the app's own login looping instead of Authelia's.
-        String target = "https://" + s.dnsAddress() + (s.pathPrefix() == null ? "/" : s.pathPrefix());
-        String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
-        return "https://login." + configResolver.getDomain() + "/?rd=" + encoded;
-    }
-
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices,
                                     String serverLanCidr) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
-        // In manual DNS mode the operator owns DNS — Vaier has no authoritative view, so
-        // assume records exist rather than rendering every published service as missing.
-        DnsState dnsState = configResolver.getDnsProvider() == DnsProvider.MANUAL
-            ? DnsState.OK
-            : route.dnsState(allDnsRecords);
+        DnsState dnsState = route.dnsState(allDnsRecords, configResolver.getDnsProvider());
         return new PublishedServiceUco(
             route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames, peers),
             route.getDomainName(),
@@ -392,10 +369,8 @@ public class PublishingService implements
         String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
         ReverseProxyRoute.validatePathPrefix(normalisedPath);
         ReverseProxyRoute.validateForPublication(subdomain + "." + configResolver.getDomain(), host, port);
-        String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol.toLowerCase();
-        if (!scheme.equals("http") && !scheme.equals("https")) {
-            throw new IllegalArgumentException("protocol must be http or https (was " + protocol + ")");
-        }
+        String scheme = ReverseProxyRoute.normaliseProtocol(protocol);
+        ReverseProxyRoute.validateProtocol(scheme);
 
         if (!hostInsideAnyLanCidr(host)) {
             throw new IllegalArgumentException(
