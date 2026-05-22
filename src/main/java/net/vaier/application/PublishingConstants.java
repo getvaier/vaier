@@ -7,5 +7,20 @@ public final class PublishingConstants {
 
     private PublishingConstants() {}
 
-    public static final Set<String> MANDATORY_SUBDOMAINS = Set.of(ServiceNames.VAIER, ServiceNames.AUTH);
+    /**
+     * The infrastructure subdomains Vaier publishes for itself — its own web UI and the
+     * Authelia login portal. They are created at setup and must never be deletable or listed
+     * as ordinary published services.
+     */
+    private static final Set<String> MANDATORY_SUBDOMAINS = Set.of(ServiceNames.VAIER, ServiceNames.AUTH);
+
+    /**
+     * Whether {@code fqdn} is one of Vaier's mandatory infrastructure hostnames — exactly
+     * {@code vaier.<baseDomain>} or {@code login.<baseDomain>}. The match is on the whole FQDN,
+     * so {@code vaier-test.example.com} is not mistaken for the mandatory {@code vaier.example.com}.
+     */
+    public static boolean isMandatory(String fqdn, String baseDomain) {
+        return MANDATORY_SUBDOMAINS.stream()
+            .anyMatch(sub -> (sub + "." + baseDomain).equals(fqdn));
+    }
 }

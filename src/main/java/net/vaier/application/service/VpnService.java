@@ -30,6 +30,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
+import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.WireguardClientImage;
@@ -204,7 +205,7 @@ public class VpnService implements
             // Last resort: resolve vaier.<domain> via DNS.
             String domain = configResolver.getDomain();
             if (domain != null && !domain.isBlank()) {
-                String fallbackHost = "vaier." + domain;
+                String fallbackHost = new VaierHostnames(domain).vaierServerFqdn();
                 String resolved = resolveHostnameToIp(fallbackHost);
                 if (resolved != null) {
                     publicIp = Optional.of(resolved);
@@ -537,7 +538,7 @@ public class VpnService implements
         String serverUrl;
 
         if (domain != null && !domain.isEmpty()) {
-            serverUrl = "vaier." + domain;
+            serverUrl = new VaierHostnames(domain).vaierServerFqdn();
         } else {
             serverUrl = System.getenv().getOrDefault("SERVERURL", "vaier.eilertsen.family");
         }

@@ -3,10 +3,10 @@ package net.vaier.adapter.driven;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.config.ConfigResolver;
-import net.vaier.config.ServiceNames;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsZone;
+import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 
 @Slf4j
@@ -29,8 +29,9 @@ public class ManualDnsAdapter implements ForPersistingDnsRecords {
     public List<DnsRecord> getDnsRecords(DnsZone dnsZone) {
         String domain = configResolver.getDomain();
         if (domain == null || !domain.equals(dnsZone.name())) return List.of();
-        String vaierHost = ServiceNames.VAIER + "." + domain;
-        String authHost = ServiceNames.AUTH + "." + domain;
+        VaierHostnames hostnames = new VaierHostnames(domain);
+        String vaierHost = hostnames.vaierServerFqdn();
+        String authHost = hostnames.autheliaHost();
         return List.of(
             new DnsRecord(vaierHost, DnsRecordType.CNAME, 300L, List.of(vaierHost)),
             new DnsRecord(authHost, DnsRecordType.CNAME, 300L, List.of(vaierHost))

@@ -1,5 +1,6 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
@@ -140,12 +141,11 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
     }
 
     private String generateConfig() {
-        String vaierFullDomain = "vaier." + vaierDomain;
-        String autheliaFullDomain = "login." + vaierDomain;
-        // Extract base domain from vaier domain (e.g., "vaier.eilertsen.family" -> "eilertsen.family")
-        String baseDomain = vaierFullDomain.contains(".")
-            ? vaierFullDomain.substring(vaierFullDomain.indexOf('.') + 1)
-            : vaierFullDomain;
+        VaierHostnames hostnames = new VaierHostnames(vaierDomain);
+        String vaierFullDomain = hostnames.vaierServerFqdn();
+        String autheliaFullDomain = hostnames.autheliaHost();
+        // vaierDomain is already the base domain — the cookie domain Authelia scopes sessions to.
+        String baseDomain = vaierDomain;
 
         String regexBaseDomain = baseDomain.replace(".", "\\.");
 

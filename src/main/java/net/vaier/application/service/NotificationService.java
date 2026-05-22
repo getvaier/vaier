@@ -7,6 +7,7 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierConfig;
+import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForSendingNotificationEmail;
@@ -108,7 +109,9 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
         }
         String domain = configResolver.getDomain();
         if (domain != null && !domain.isBlank()) {
-            body.append("\nVaier UI: https://vaier.").append(domain).append("/vpn-peers.html\n");
+            body.append("\nVaier UI: https://")
+                .append(new VaierHostnames(domain).vaierServerFqdn())
+                .append("/vpn-peers.html\n");
         }
         return body.toString();
     }

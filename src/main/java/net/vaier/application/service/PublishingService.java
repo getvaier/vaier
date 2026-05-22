@@ -28,6 +28,7 @@ import net.vaier.domain.DnsProvider;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
+import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
@@ -170,8 +171,7 @@ public class PublishingService implements
     }
 
     private boolean isInfrastructureRouter(ReverseProxyRoute route) {
-        return PublishingConstants.MANDATORY_SUBDOMAINS.stream()
-            .anyMatch(sub -> route.getDomainName().startsWith(sub + "."));
+        return PublishingConstants.isMandatory(route.getDomainName(), configResolver.getDomain());
     }
 
     @Override
@@ -335,7 +335,7 @@ public class PublishingService implements
         }
 
         String fqdn = subdomain + "." + configResolver.getDomain();
-        String serverFqdn = "vaier." + configResolver.getDomain();
+        String serverFqdn = new VaierHostnames(configResolver.getDomain()).vaierServerFqdn();
 
         List<ReverseProxyRoute> existing = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         if (ReverseProxyRoute.conflictsWithExisting(existing, fqdn, normalisedPath)) {
@@ -405,7 +405,7 @@ public class PublishingService implements
         }
 
         String fqdn = subdomain + "." + configResolver.getDomain();
-        String serverFqdn = "vaier." + configResolver.getDomain();
+        String serverFqdn = new VaierHostnames(configResolver.getDomain()).vaierServerFqdn();
 
         List<ReverseProxyRoute> existing = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         if (ReverseProxyRoute.conflictsWithExisting(existing, fqdn, normalisedPath)) {
@@ -602,9 +602,7 @@ public class PublishingService implements
         String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
         ReverseProxyRoute.validatePathPrefix(normalisedPath);
 
-        boolean isMandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
-            .anyMatch(sub -> fqdn.equals(sub + "." + configResolver.getDomain()));
-        if (isMandatory) {
+        if (PublishingConstants.isMandatory(fqdn, configResolver.getDomain())) {
             throw new IllegalArgumentException("Cannot delete built-in service: " + fqdn);
         }
         log.info("Deleting service: {} (pathPrefix: {})", fqdn, normalisedPath);
@@ -790,9 +788,7 @@ public class PublishingService implements
     }
 
     private void requireNonMandatory(String dnsName, String errorPrefix) {
-        boolean isMandatory = PublishingConstants.MANDATORY_SUBDOMAINS.stream()
-            .anyMatch(sub -> dnsName.equals(sub + "." + configResolver.getDomain()));
-        if (isMandatory) {
+        if (PublishingConstants.isMandatory(dnsName, configResolver.getDomain())) {
             throw new IllegalArgumentException(errorPrefix + dnsName);
         }
     }
