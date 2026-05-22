@@ -68,18 +68,7 @@ public class SettingsService implements
         forValidatingAwsCredentials.listHostedZones(awsKey, awsSecret);
 
         VaierConfig current = configPersistence.load().orElse(VaierConfig.builder().build());
-        VaierConfig updated = VaierConfig.builder()
-            .domain(current.getDomain())
-            .awsKey(awsKey)
-            .awsSecret(awsSecret)
-            .acmeEmail(current.getAcmeEmail())
-            .smtpHost(current.getSmtpHost())
-            .smtpPort(current.getSmtpPort())
-            .smtpUsername(current.getSmtpUsername())
-            .smtpSender(current.getSmtpSender())
-            .build();
-
-        configPersistence.save(updated);
+        configPersistence.save(current.withAwsCredentials(awsKey, awsSecret));
         log.info("AWS credentials updated");
     }
 
@@ -89,18 +78,7 @@ public class SettingsService implements
         smtpVerifier.verify(host, port, username, resolvedPassword);
 
         VaierConfig current = configPersistence.load().orElse(VaierConfig.builder().build());
-        VaierConfig updated = VaierConfig.builder()
-            .domain(current.getDomain())
-            .awsKey(current.getAwsKey())
-            .awsSecret(current.getAwsSecret())
-            .acmeEmail(current.getAcmeEmail())
-            .smtpHost(host)
-            .smtpPort(port)
-            .smtpUsername(username)
-            .smtpSender(sender)
-            .build();
-
-        configPersistence.save(updated);
+        configPersistence.save(current.withSmtpSettings(host, port, username, sender));
         log.info("SMTP settings updated for host: {}", host);
 
         smtpNotifierConfig.updateSmtpConfig(host, port, username, resolvedPassword, sender);
@@ -120,7 +98,7 @@ public class SettingsService implements
     private AppSettingsResult toResult(VaierConfig config) {
         return new AppSettingsResult(
             config.getDomain(),
-            maskAwsKey(config.getAwsKey()),
+            config.maskedAwsKey(),
             config.getAcmeEmail(),
             config.getSmtpHost(),
             config.getSmtpPort(),
@@ -130,19 +108,7 @@ public class SettingsService implements
         );
     }
 
-    private String maskAwsKey(String key) {
-        if (key == null || key.length() <= 4) {
-            return key;
-        }
-        return "****" + key.substring(key.length() - 4);
-    }
-
     private String resolveSmtpPassword(String provided) {
-        if (provided != null && !provided.isBlank()) {
-            return provided;
-        }
-        return storedPasswordReader.readStoredPassword()
-            .filter(p -> !p.isBlank())
-            .orElseThrow(() -> new IllegalArgumentException("SMTP password is required"));
+        return VaierConfig.resolveSmtpPassword(provided, storedPasswordReader.readStoredPassword());
     }
 }

@@ -3,13 +3,11 @@ package net.vaier.domain;
 import lombok.Builder;
 import lombok.Data;
 
-import java.util.regex.Pattern;
+import java.util.Optional;
 
 @Data
-@Builder
+@Builder(toBuilder = true)
 public class VaierConfig {
-
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     private String domain;
     private String awsKey;
@@ -27,9 +25,49 @@ public class VaierConfig {
         validateAcmeEmail(acmeEmail);
     }
 
+    /** A copy with the AWS credentials replaced; every other field carries over unchanged. */
+    public VaierConfig withAwsCredentials(String newAwsKey, String newAwsSecret) {
+        return toBuilder()
+            .awsKey(newAwsKey)
+            .awsSecret(newAwsSecret)
+            .build();
+    }
+
+    /** A copy with the SMTP settings replaced; every other field carries over unchanged. */
+    public VaierConfig withSmtpSettings(String newSmtpHost, int newSmtpPort,
+                                        String newSmtpUsername, String newSmtpSender) {
+        return toBuilder()
+            .smtpHost(newSmtpHost)
+            .smtpPort(newSmtpPort)
+            .smtpUsername(newSmtpUsername)
+            .smtpSender(newSmtpSender)
+            .build();
+    }
+
+    /** The AWS key with all but its last four characters masked, for display. */
+    public String maskedAwsKey() {
+        if (awsKey == null || awsKey.length() <= 4) {
+            return awsKey;
+        }
+        return "****" + awsKey.substring(awsKey.length() - 4);
+    }
+
+    /**
+     * The effective SMTP password: the freshly provided one when non-blank, otherwise the
+     * previously stored one. Throws when neither is available.
+     */
+    public static String resolveSmtpPassword(String provided, Optional<String> stored) {
+        if (provided != null && !provided.isBlank()) {
+            return provided;
+        }
+        return stored
+            .filter(p -> !p.isBlank())
+            .orElseThrow(() -> new IllegalArgumentException("SMTP password is required"));
+    }
+
     private static void validateAcmeEmail(String acmeEmail) {
         requireNonBlank(acmeEmail, "acmeEmail");
-        if (!EMAIL_PATTERN.matcher(acmeEmail).matches()) {
+        if (!EmailFormat.isValid(acmeEmail)) {
             throw new IllegalArgumentException("acmeEmail is not a valid email format");
         }
     }

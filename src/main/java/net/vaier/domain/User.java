@@ -3,13 +3,11 @@ package net.vaier.domain;
 import lombok.Value;
 
 import java.util.List;
-import java.util.regex.Pattern;
 
 @Value
 public class User {
 
     public static final int MIN_PASSWORD_LENGTH = 8;
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     String name;
     String displayname;
@@ -36,7 +34,7 @@ public class User {
         if (email == null || email.isBlank()) {
             throw new IllegalArgumentException("email must not be blank");
         }
-        if (!EMAIL_PATTERN.matcher(email).matches()) {
+        if (!EmailFormat.isValid(email)) {
             throw new IllegalArgumentException("email is not a valid format");
         }
     }
