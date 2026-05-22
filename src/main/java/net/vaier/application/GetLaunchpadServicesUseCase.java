@@ -34,16 +34,19 @@ public interface GetLaunchpadServicesUseCase {
      *       use case and never appear in this list).</li>
      *   <li>{@code faviconQuery} — pre-built query string the client appends to {@code /favicon}.
      *       Path-based siblings get distinct queries so they don't collide on the favicon cache.</li>
+     *   <li>{@code peerName} — the display name of the machine hosting the service: a VPN peer's
+     *       editable name, the relay peer's name for a LAN service, or "Vaier server". The
+     *       launchpad groups and labels tiles by this; it never re-derives the host from DNS.</li>
      *   <li>{@code image} / {@code version} — the Docker image reference and resolved version of
      *       the container backing this service (issue #210). Both are null when no container
      *       backs the route — e.g. a service published as a bare LAN host:port.</li>
      * </ul>
      * {@code dnsAddress} and {@code pathPrefix} are still here because the client uses them to
-     * derive the peer / subdomain sub-line and the browser-tab target.
+     * derive the subdomain sub-line and the browser-tab target.
      */
     record LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                LaunchpadVisibility visibility, String url, String displayName,
-                               String faviconQuery, String image, String version) {
+                               String faviconQuery, String peerName, String image, String version) {
 
         /**
          * Convenience constructor for a tile with no backing container — a service published as
@@ -51,9 +54,9 @@ public interface GetLaunchpadServicesUseCase {
          */
         public LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                    LaunchpadVisibility visibility, String url, String displayName,
-                                   String faviconQuery) {
+                                   String faviconQuery, String peerName) {
             this(dnsAddress, pathPrefix, hostAddress, visibility, url, displayName, faviconQuery,
-                null, null);
+                peerName, null, null);
         }
     }
 }

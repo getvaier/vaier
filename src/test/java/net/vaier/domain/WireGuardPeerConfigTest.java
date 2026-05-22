@@ -10,7 +10,7 @@ class WireGuardPeerConfigTest {
     void generate_mobileClient_routesAllTrafficAndEmbedsMachineType() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(config).contains("\"peerType\":\"MOBILE_CLIENT\"");
@@ -21,7 +21,7 @@ class WireGuardPeerConfigTest {
     void generate_windowsClient_routesAllTrafficAndEmbedsMachineType() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.WINDOWS_CLIENT, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.WINDOWS_CLIENT, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(config).contains("\"peerType\":\"WINDOWS_CLIENT\"");
@@ -31,7 +31,7 @@ class WireGuardPeerConfigTest {
     void generate_ubuntuServer_routesOnlyVpnTraffic() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).contains("\"peerType\":\"UBUNTU_SERVER\"");
@@ -47,7 +47,7 @@ class WireGuardPeerConfigTest {
         // via its own LAN NIC using ip_forward + iptables NAT (issue #170).
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24", null, null);
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).doesNotContain("AllowedIPs = 10.13.13.0/24, 192.168.1.0/24");
@@ -60,7 +60,7 @@ class WireGuardPeerConfigTest {
     void generate_windowsServer_routesOnlyVpnTraffic() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.4", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.WINDOWS_SERVER, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.WINDOWS_SERVER, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
         assertThat(config).contains("\"peerType\":\"WINDOWS_SERVER\"");
@@ -70,7 +70,7 @@ class WireGuardPeerConfigTest {
     void generate_ubuntuServerWithLanAddress_embedsLanAddressInMetadata() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, "192.168.3.121", "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, "192.168.3.121", "10.13.13.0/24", null, null);
 
         assertThat(config).contains("\"lanAddress\":\"192.168.3.121\"");
         assertThat(config).doesNotContain("\"lanCidr\"");
@@ -80,7 +80,7 @@ class WireGuardPeerConfigTest {
     void generate_mobileClientWithLanAddress_doesNotEmbedLanAddress() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, "192.168.3.121", "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, "192.168.3.121", "10.13.13.0/24", null, null);
 
         assertThat(config).doesNotContain("lanAddress");
     }
@@ -89,7 +89,7 @@ class WireGuardPeerConfigTest {
     void generate_ubuntuServer_usesConfiguredSubnetNotDefault() {
         String config = WireGuardPeerConfig.generate(
                 "privateKey", "10.10.10.3", "serverPubKey", "presharedKey",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.10.10.0/24", null);
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.10.10.0/24", null, null);
 
         assertThat(config).contains("AllowedIPs = 10.10.10.0/24");
         assertThat(config).doesNotContain("10.13.13.0/24");
@@ -99,7 +99,7 @@ class WireGuardPeerConfigTest {
     void generate_clientType_includesDnsLine() {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.2", "serverPk", "psk",
-                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).contains("DNS = 172.20.0.53");
     }
@@ -108,7 +108,7 @@ class WireGuardPeerConfigTest {
     void generate_serverType_omitsDnsLine() {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).doesNotContain("DNS =");
     }
@@ -120,7 +120,7 @@ class WireGuardPeerConfigTest {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
                 "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
-                "Home media server (NUC)");
+                "Home media server (NUC)", null);
 
         assertThat(config).contains("\"description\":\"Home media server (NUC)\"");
     }
@@ -130,7 +130,7 @@ class WireGuardPeerConfigTest {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.2", "serverPk", "psk",
                 "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24",
-                "Work phone");
+                "Work phone", null);
 
         assertThat(config).contains("\"description\":\"Work phone\"");
     }
@@ -139,7 +139,7 @@ class WireGuardPeerConfigTest {
     void generate_nullDescription_omitsDescriptionKey() {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null);
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, null);
 
         assertThat(config).doesNotContain("description");
     }
@@ -148,7 +148,7 @@ class WireGuardPeerConfigTest {
     void generate_blankDescription_omitsDescriptionKey() {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
-                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", "   ");
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", "   ", null);
 
         assertThat(config).doesNotContain("description");
     }
@@ -160,7 +160,7 @@ class WireGuardPeerConfigTest {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
                 "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
-                "NAS \"box\" at C:\\data");
+                "NAS \"box\" at C:\\data", null);
 
         assertThat(config).contains("\\\"box\\\"");
         assertThat(config).contains("C:\\\\data");
@@ -171,10 +171,55 @@ class WireGuardPeerConfigTest {
         String config = WireGuardPeerConfig.generate(
                 "pk", "10.13.13.3", "serverPk", "psk",
                 "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
-                "line one\nline two");
+                "line one\nline two", null);
 
         String vaierLine = config.lines().filter(l -> l.startsWith("# VAIER:")).findFirst().orElseThrow();
         assertThat(vaierLine).contains("line one\\nline two");
         assertThat(vaierLine).doesNotContain("\n");
+    }
+
+    // --- operator-supplied display name (#209) ---
+
+    @Test
+    void generate_withName_embedsNameInMetadata() {
+        String config = WireGuardPeerConfig.generate(
+                "pk", "10.13.13.3", "serverPk", "psk",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "Media Server");
+
+        assertThat(config).contains("\"name\":\"Media Server\"");
+    }
+
+    @Test
+    void generate_nameEmbeddedForClientTypesToo() {
+        String config = WireGuardPeerConfig.generate(
+                "pk", "10.13.13.2", "serverPk", "psk",
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24",
+                null, "Geir's phone");
+
+        assertThat(config).contains("\"name\":\"Geir's phone\"");
+    }
+
+    @Test
+    void generate_nullName_omitsNameKey() {
+        String config = WireGuardPeerConfig.generate(
+                "pk", "10.13.13.3", "serverPk", "psk",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, null);
+
+        assertThat(config).doesNotContain("\"name\"");
+    }
+
+    @Test
+    void generate_nameWithQuotesAndBackslashes_isJsonEscaped() {
+        // The display name is free operator text — JSON-escaped so the single-line "# VAIER:"
+        // comment stays valid JSON and parseable on read-back.
+        String config = WireGuardPeerConfig.generate(
+                "pk", "10.13.13.3", "serverPk", "psk",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "NAS \"box\" at C:\\data");
+
+        String vaierLine = config.lines().filter(l -> l.startsWith("# VAIER:")).findFirst().orElseThrow();
+        assertThat(vaierLine).contains("\\\"box\\\"");
+        assertThat(vaierLine).contains("C:\\\\data");
     }
 }

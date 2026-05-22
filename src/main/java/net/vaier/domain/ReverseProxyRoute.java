@@ -420,6 +420,17 @@ public class ReverseProxyRoute {
         return subdomain + " @ " + server;
     }
 
+    /**
+     * The display name of the machine hosting this route — a VPN peer's editable name, the relay
+     * peer's name for a LAN service, or {@link LanAnchor#VAIER_SERVER_NAME}. The launchpad groups
+     * and labels tiles by this (issue #209): VPN peer names are the operator-set display labels,
+     * the Vaier server name is fixed.
+     */
+    public String hostDisplayName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
+                                  List<PeerConfiguration> peers) {
+        return resolveServerName(vpnClients, peerNameResolver, peers);
+    }
+
     public String directUrl(String callerIp, List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
         if (directUrlDisabled) return null;
         if (callerIp == null || callerIp.isBlank()) return null;
@@ -470,15 +481,23 @@ public class ReverseProxyRoute {
                                      List<PeerConfiguration> peers) {
         if (isLanService) {
             PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
-            if (relay != null && relay.name() != null) return relay.name();
+            if (relay != null) return relay.name();
             return LanAnchor.VAIER_SERVER_NAME;
         }
         // Check VPN peers first — a peer IP is unambiguous, whereas port-only Vaier-server
         // matching can produce false positives when a Vaier-server container happens to use the same port.
         boolean isPeer = vpnClients.stream().anyMatch(p -> p.containsAddress(address));
         if (isPeer) {
-            String peerName = peerNameResolver.resolvePeerNameByIp(address);
-            return peerName.equals(address) ? address : peerName;
+            // Prefer the peer's editable display name from its configuration; fall back to
+            // resolving the id by IP (humanised) when the peers list doesn't carry it.
+            return peers.stream()
+                .filter(p -> address.equals(p.ipAddress()))
+                .map(PeerConfiguration::name)
+                .findFirst()
+                .orElseGet(() -> {
+                    String resolvedId = peerNameResolver.resolvePeerNameByIp(address);
+                    return resolvedId.equals(address) ? address : PeerId.display(resolvedId);
+                });
         }
         return LanAnchor.VAIER_SERVER_NAME;
     }

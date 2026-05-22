@@ -199,6 +199,7 @@ public class PublishingService implements
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, resolveLaunchpadUrl(s, r.directUrl(callerIp, peers, vpnClients)),
                         r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery(),
+                        r.hostDisplayName(vpnClients, forResolvingPeerNames, peers),
                         backing == null ? null : backing.image(),
                         probedVersion != null ? probedVersion
                             : (backing == null ? null : backing.version()));

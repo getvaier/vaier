@@ -168,7 +168,7 @@ Create peers from the Vaier UI. The peer type determines WireGuard defaults and 
 
 Each machine — VPN peer or LAN server — can carry an optional **description**, a free-text note (e.g. "Home media server (NUC, Ubuntu 22.04)") set on the Add Machine form and editable inline on the expanded card. It shows as a muted subtitle under the machine name so its purpose is obvious at a glance.
 
-Peers and LAN servers can be **renamed** in place — expand the card and edit the **Name** field. Renaming a peer just moves its config files; the live tunnel and any published services keep working.
+Peers and LAN servers can be **renamed** in place — expand the card and edit the **Name** field. A peer's **name** is just a display label: editing it leaves the peer's underlying id (its config directory, REST paths, and routing) untouched, so the live tunnel and any published services keep working. The id is the slug Vaier derives from the name you first typed; the name is then yours to change freely.
 
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 

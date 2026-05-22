@@ -47,7 +47,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void createPeer_returns200WithCreatedPeerInfo() throws Exception {
         CreatedPeerUco created = new CreatedPeerUco(
-                "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]\n...", MachineType.UBUNTU_SERVER);
+                "peer1", "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]\n...", MachineType.UBUNTU_SERVER);
         when(createPeerUseCase.createPeer(eq("peer1"), eq(MachineType.UBUNTU_SERVER), any(), any(), any()))
                 .thenReturn(created);
 
@@ -66,7 +66,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void createPeer_defaultsPeerTypeToUbuntuServerWhenNull() throws Exception {
         CreatedPeerUco created = new CreatedPeerUco(
-                "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]", MachineType.UBUNTU_SERVER);
+                "peer1", "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]", MachineType.UBUNTU_SERVER);
         when(createPeerUseCase.createPeer(eq("peer1"), eq(MachineType.UBUNTU_SERVER), any(), any(), any()))
                 .thenReturn(created);
 

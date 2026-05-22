@@ -5,8 +5,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerId;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
-import net.vaier.domain.port.ForRenamingVpnPeers;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,7 +22,7 @@ import java.util.Optional;
 @Component
 @Slf4j
 public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations, ForResolvingPeerNames,
-        ForUpdatingPeerConfigurations, ForRenamingVpnPeers {
+        ForUpdatingPeerConfigurations {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -31,8 +31,17 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private record VaierMetadata(String peerType, String lanCidr, String lanAddress, String description) {
-        VaierMetadata() { this(null, null, null, null); }
+    private record VaierMetadata(String peerType, String lanCidr, String lanAddress, String description,
+                                 String name) {
+        VaierMetadata() { this(null, null, null, null, null); }
+    }
+
+    /**
+     * The display name to report for a peer: the operator-set name from metadata, or — for peers
+     * created before the id/name split, which have none — the humanised form of the id.
+     */
+    private static String effectiveName(String id, VaierMetadata meta) {
+        return (meta.name() != null && !meta.name().isBlank()) ? meta.name() : PeerId.display(id);
     }
 
     @Override
@@ -50,8 +59,9 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             String ipAddress = extractIpAddress(configContent);
             VaierMetadata meta = extractVaierMetadata(configContent);
 
-            return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
-                    parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(), meta.description()));
+            return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
+                    configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
+                    meta.description()));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -87,8 +97,9 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 String configContent = Files.readString(peerConfigPath);
                 VaierMetadata meta = extractVaierMetadata(configContent);
 
-                return Optional.of(new PeerConfiguration(peerName, ipAddress, configContent,
-                        parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(), meta.description()));
+                return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
+                        configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
+                        meta.description()));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -195,27 +206,35 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     }
 
     @Override
-    public void updateLanAddress(String peerName, String lanAddress) {
+    public void updateLanAddress(String peerId, String lanAddress) {
         String normalized = blankToNull(lanAddress);
-        rewriteVaierMetadata(peerName, "lanAddress", normalized,
+        rewriteVaierMetadata(peerId, "lanAddress", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                normalized, existing.description()));
+                normalized, existing.description(), existing.name()));
     }
 
     @Override
-    public void updateLanCidr(String peerName, String lanCidr) {
+    public void updateLanCidr(String peerId, String lanCidr) {
         String normalized = blankToNull(lanCidr);
-        rewriteVaierMetadata(peerName, "lanCidr", normalized,
+        rewriteVaierMetadata(peerId, "lanCidr", normalized,
             existing -> new VaierMetadata(existing.peerType(), normalized,
-                existing.lanAddress(), existing.description()));
+                existing.lanAddress(), existing.description(), existing.name()));
     }
 
     @Override
-    public void updateDescription(String peerName, String description) {
+    public void updateDescription(String peerId, String description) {
         String normalized = blankToNull(description);
-        rewriteVaierMetadata(peerName, "description", normalized,
+        rewriteVaierMetadata(peerId, "description", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), normalized));
+                existing.lanAddress(), normalized, existing.name()));
+    }
+
+    @Override
+    public void updateName(String peerId, String name) {
+        String normalized = blankToNull(name);
+        rewriteVaierMetadata(peerId, "name", normalized,
+            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
+                existing.lanAddress(), existing.description(), normalized));
     }
 
     private static String blankToNull(String value) {
@@ -239,7 +258,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             // rewritten comment is well-formed rather than missing peerType entirely.
             VaierMetadata withType = new VaierMetadata(
                 existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
-                existing.lanCidr(), existing.lanAddress(), existing.description());
+                existing.lanCidr(), existing.lanAddress(), existing.description(), existing.name());
             VaierMetadata updated = mutator.apply(withType);
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
 
@@ -254,31 +273,6 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         } catch (Exception e) {
             throw new RuntimeException(
                 "Failed to update " + fieldName + " for peer " + peerName + ": " + e.getMessage(), e);
-        }
-    }
-
-    @Override
-    public void renamePeer(String currentName, String newName) {
-        Path oldDir = Paths.get(wireguardConfigPath, currentName);
-        Path newDir = Paths.get(wireguardConfigPath, newName);
-        if (!Files.isDirectory(oldDir)) {
-            throw new net.vaier.domain.PeerNotFoundException("Peer not found: " + currentName);
-        }
-        if (Files.exists(newDir)) {
-            throw new IllegalStateException("A peer named " + newName + " already exists");
-        }
-        try {
-            // Move the directory first, then the .conf inside it — the running tunnel keys peers
-            // by public key in wg0.conf, so these per-peer artefacts can move without disruption.
-            Files.move(oldDir, newDir);
-            Path oldConf = newDir.resolve(currentName + ".conf");
-            if (Files.exists(oldConf)) {
-                Files.move(oldConf, newDir.resolve(newName + ".conf"));
-            }
-            log.info("Renamed peer directory {} to {}", currentName, newName);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                "Failed to rename peer " + currentName + " to " + newName + ": " + e.getMessage(), e);
         }
     }
 
