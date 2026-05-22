@@ -42,6 +42,31 @@ class PeerStatsSchedulerTest {
     }
 
     @Test
+    void publishPeerStats_includesServerComputedConnectedFlag() {
+        String recent = String.valueOf(System.currentTimeMillis() / 1000 - 30);
+        when(vpnClients.getClients()).thenReturn(List.of(
+                new VpnClient("pubkey1", "10.0.0.2/32", "1.2.3.4", "51820", recent, "1024", "2048")
+        ));
+        when(peerNameResolver.resolvePeerNameByIp("10.0.0.2")).thenReturn("myserver");
+
+        scheduler.publishPeerStats();
+
+        verify(eventPublisher).publish(eq("vpn-peers"), eq("peers-stats"), contains("\"connected\":true"));
+    }
+
+    @Test
+    void publishPeerStats_staleHandshakePeerReportedDisconnected() {
+        when(vpnClients.getClients()).thenReturn(List.of(
+                new VpnClient("pubkey1", "10.0.0.2/32", "1.2.3.4", "51820", "0", "1024", "2048")
+        ));
+        when(peerNameResolver.resolvePeerNameByIp("10.0.0.2")).thenReturn("myserver");
+
+        scheduler.publishPeerStats();
+
+        verify(eventPublisher).publish(eq("vpn-peers"), eq("peers-stats"), contains("\"connected\":false"));
+    }
+
+    @Test
     void publishPeerStats_whenFetchFails_doesNotThrow() {
         when(vpnClients.getClients()).thenThrow(new RuntimeException("wg unavailable"));
 

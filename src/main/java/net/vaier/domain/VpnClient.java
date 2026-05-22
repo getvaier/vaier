@@ -17,13 +17,18 @@ public record VpnClient(
     private static final Pattern IPV4 = Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
 
     public boolean isConnected() {
-        if (latestHandshake == null) return false;
+        long handshake = latestHandshakeEpoch();
+        long now = System.currentTimeMillis() / 1000;
+        return handshake > 0 && (now - handshake) < HANDSHAKE_STALE_AFTER_SECONDS;
+    }
+
+    /** The last-handshake instant as a Unix epoch second; {@code 0} when absent or unparseable. */
+    public long latestHandshakeEpoch() {
+        if (latestHandshake == null) return 0L;
         try {
-            long handshake = Long.parseLong(latestHandshake);
-            long now = System.currentTimeMillis() / 1000;
-            return handshake > 0 && (now - handshake) < HANDSHAKE_STALE_AFTER_SECONDS;
+            return Long.parseLong(latestHandshake.trim());
         } catch (NumberFormatException e) {
-            return false;
+            return 0L;
         }
     }
 

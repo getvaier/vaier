@@ -966,9 +966,8 @@
         }
 
         function renderPeerCard(peer) {
-            const handshakeTime = parseInt(peer.latestHandshake);
-            const currentTime   = Math.floor(Date.now() / 1000);
-            const isConnected   = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
+            // Connectivity is decided server-side by the domain rule VpnClient.isConnected().
+            const isConnected   = !!peer.connected;
             const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
             const vpnIp      = peer.allowedIps.split('/')[0];
             const id         = cardId(peer.id);
@@ -1807,10 +1806,10 @@
             marker.on('mouseout',  e => e.target.closePopup());
         }
 
+        // Connectivity is computed server-side (VpnClient.isConnected); peer objects from
+        // /vpn/peers and the peers-stats SSE carry the result as `connected`.
         function isPeerConnected(peer) {
-            const h = parseInt(peer.latestHandshake);
-            if (isNaN(h) || h <= 0) return false;
-            return (Math.floor(Date.now() / 1000) - h) < 180;
+            return !!peer.connected;
         }
 
         function statusKeyForPeer(p) {
@@ -1960,13 +1959,10 @@
         _sse.addEventListener('peers-stats', e => {
             try {
                 const stats = JSON.parse(e.data);
-                const now = Math.floor(Date.now() / 1000);
                 let mapNeedsRefresh = false;
                 stats.forEach(s => {
                     const id = s.name.replace(/[^a-zA-Z0-9]/g, '_');
-                    const handshake = parseInt(s.latestHandshake);
-                    const connected = handshake > 0 && (now - handshake) < 180;
-                    const iconCls = connected ? 'icon-up' : 'icon-down';
+                    const iconCls = s.connected ? 'icon-up' : 'icon-down';
 
                     const hdrIcon        = document.getElementById('hdr-icon-'         + id);
                     const rxtx           = document.getElementById('rxtx-'             + id);
@@ -1984,7 +1980,8 @@
                         cached.latestHandshake = s.latestHandshake;
                         cached.transferRx = s.transferRx;
                         cached.transferTx = s.transferTx;
-                        if (wasConnected !== connected) mapNeedsRefresh = true;
+                        cached.connected = s.connected;
+                        if (wasConnected !== s.connected) mapNeedsRefresh = true;
                     }
                 });
                 if (mapNeedsRefresh) refreshPeerMap();

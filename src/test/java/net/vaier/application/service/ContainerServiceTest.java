@@ -273,9 +273,27 @@ class ContainerServiceTest {
     }
 
     @Test
-    void discoverAll_peerWithHandshake240SecondsAgo_isStillQueried() {
+    void discoverAll_peerWithHandshakeStalerThan180s_isSkippedAsDisconnected() {
+        // Connectivity must follow the single domain rule VpnClient.isConnected() — a peer is
+        // connected only while (now - handshake) < 180s. A 240s-stale handshake is disconnected.
         String handshake240sAgo = String.valueOf(System.currentTimeMillis() / 1000 - 240);
         VpnClient peer = new VpnClient("pubkey", "10.13.13.5/32", "1.2.3.4", "51820", handshake240sAgo, "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(peer));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.5")).thenReturn("server1");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))
+            .thenReturn(Optional.of(peerConfig("server1", "10.13.13.5", MachineType.UBUNTU_SERVER)));
+
+        List<PeerContainers> result = service.discoverAll();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).status()).isEqualTo("UNREACHABLE");
+        verify(forGettingServerInfo, never()).getServicesWithExposedPorts(any());
+    }
+
+    @Test
+    void discoverAll_peerWithHandshakeWithin180s_isQueried() {
+        String handshake120sAgo = String.valueOf(System.currentTimeMillis() / 1000 - 120);
+        VpnClient peer = new VpnClient("pubkey", "10.13.13.5/32", "1.2.3.4", "51820", handshake120sAgo, "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(peer));
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.5")).thenReturn("server1");
         when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))

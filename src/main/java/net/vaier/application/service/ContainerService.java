@@ -114,7 +114,7 @@ public class ContainerService implements
                 continue;
             }
 
-            if (!isPeerConnected(client)) {
+            if (!client.isConnected()) {
                 log.debug("Skipping Docker discovery for disconnected peer {} ({})", peerName, vpnIp);
                 results.add(new PeerContainers(peerName, vpnIp, "UNREACHABLE", List.of(), false, WireguardClientImage.EXPECTED));
                 continue;
@@ -220,16 +220,6 @@ public class ContainerService implements
                 .map(DockerService::image)
                 .filter(WireguardClientImage::isWireguardImage)
                 .anyMatch(image -> !WireguardClientImage.matchesExpected(image));
-    }
-
-    private boolean isPeerConnected(VpnClient peer) {
-        try {
-            long handshake = Long.parseLong(peer.latestHandshake());
-            long now = System.currentTimeMillis() / 1000;
-            return handshake > 0 && (now - handshake) < 300;
-        } catch (NumberFormatException e) {
-            return false;
-        }
     }
 
     private ServiceEndpoint resolveEndpoint(DockerService container, PortMapping p) {

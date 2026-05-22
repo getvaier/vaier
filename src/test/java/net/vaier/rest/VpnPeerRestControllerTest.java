@@ -225,6 +225,31 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
+    void listPeers_marksRecentHandshakePeerConnected() {
+        String recent = String.valueOf(System.currentTimeMillis() / 1000 - 30);
+        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", recent, "0", "0");
+        when(vpnClientService.getClients()).thenReturn(List.of(client));
+        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
+        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.connected()).isTrue();
+    }
+
+    @Test
+    void listPeers_marksStaleHandshakePeerDisconnected() {
+        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", "0", "0", "0");
+        when(vpnClientService.getClients()).thenReturn(List.of(client));
+        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
+        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.connected()).isFalse();
+    }
+
+    @Test
     void updateDescription_updatesAndReturnsNoContent() {
         var request = new VpnPeerRestController.UpdateDescriptionRequest("Home media server");
 

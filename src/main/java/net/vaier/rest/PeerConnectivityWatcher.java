@@ -60,16 +60,6 @@ public class PeerConnectivityWatcher {
         MachineType type = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType).orElse(MachineType.UBUNTU_SERVER);
         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
 
-        long handshake = parseHandshake(client.latestHandshake());
-        return new PeerSnapshot(name, type, client.isConnected(), handshake, lanAddress);
-    }
-
-    private long parseHandshake(String raw) {
-        if (raw == null) return 0L;
-        try {
-            return Long.parseLong(raw.trim());
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
+        return new PeerSnapshot(name, type, client.isConnected(), client.latestHandshakeEpoch(), lanAddress);
     }
 }

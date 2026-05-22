@@ -44,6 +44,34 @@ class VpnClientTest {
     }
 
     @Test
+    void latestHandshakeEpoch_parsesNumericHandshake() {
+        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "1700000000", "0", "0");
+
+        assertThat(client.latestHandshakeEpoch()).isEqualTo(1700000000L);
+    }
+
+    @Test
+    void latestHandshakeEpoch_trimsSurroundingWhitespace() {
+        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "  1700000000 ", "0", "0");
+
+        assertThat(client.latestHandshakeEpoch()).isEqualTo(1700000000L);
+    }
+
+    @Test
+    void latestHandshakeEpoch_whenNull_returnsZero() {
+        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", null, "0", "0");
+
+        assertThat(client.latestHandshakeEpoch()).isZero();
+    }
+
+    @Test
+    void latestHandshakeEpoch_whenNotANumber_returnsZero() {
+        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "not-a-number", "0", "0");
+
+        assertThat(client.latestHandshakeEpoch()).isZero();
+    }
+
+    @Test
     void containsAddress_matchesSlash32PeerIp() {
         VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
 

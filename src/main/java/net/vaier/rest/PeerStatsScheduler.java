@@ -27,13 +27,14 @@ public class PeerStatsScheduler {
     public void publishPeerStats() {
         try {
             List<VpnClient> clients = vpnClients.getClients();
-            List<Map<String, String>> stats = clients.stream()
+            List<Map<String, Object>> stats = clients.stream()
                     .map(client -> {
                         String peerIp = client.allowedIps().split("/")[0];
                         String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
-                        return Map.of(
+                        return Map.<String, Object>of(
                                 "name", peerName != null ? peerName : peerIp,
                                 "latestHandshake", client.latestHandshake(),
+                                "connected", client.isConnected(),
                                 "transferRx", client.transferRx(),
                                 "transferTx", client.transferTx(),
                                 "endpointIp", client.endpointIp() != null ? client.endpointIp() : "",

@@ -87,6 +87,7 @@ public class VpnPeerRestController {
                                 client.endpointIp(),
                                 client.endpointPort(),
                                 client.latestHandshake(),
+                                client.isConnected(),
                                 client.transferRx(),
                                 client.transferTx(),
                                 peerType.name(),
@@ -381,8 +382,9 @@ public class VpnPeerRestController {
     }
 
     /**
-     * @param id   the peer's immutable identifier — config directory name, REST path segment.
-     * @param name the operator-facing display label.
+     * @param id        the peer's immutable identifier — config directory name, REST path segment.
+     * @param name      the operator-facing display label.
+     * @param connected server-computed connectivity per the domain rule {@code VpnClient.isConnected()}.
      */
     public record VpnPeerResponse(
             String id,
@@ -392,6 +394,7 @@ public class VpnPeerRestController {
             String endpointIp,
             String endpointPort,
             String latestHandshake,
+            boolean connected,
             String transferRx,
             String transferTx,
             String peerType,
