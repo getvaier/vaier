@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
+import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
@@ -56,7 +57,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             }
 
             String configContent = Files.readString(peerConfigPath);
-            String ipAddress = extractIpAddress(configContent);
+            String ipAddress = WireGuardPeerConfig.readIpAddress(configContent);
             VaierMetadata meta = extractVaierMetadata(configContent);
 
             return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
@@ -169,7 +170,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
             if (Files.exists(confFile)) {
                 String content = Files.readString(confFile);
-                String foundIp = extractIpAddress(content);
+                String foundIp = WireGuardPeerConfig.readIpAddress(content);
                 log.debug("Found IP {} in peer {}", foundIp, dirName);
                 return foundIp.equals(ipAddress);
             } else {
@@ -179,16 +180,6 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             log.warn("Error checking peer dir {}: {}", peerDir, e.getMessage());
         }
         return false;
-    }
-
-    private String extractIpAddress(String configContent) {
-        for (String line : configContent.split("\n")) {
-            if (line.trim().startsWith("Address")) {
-                String address = line.substring(line.indexOf('=') + 1).trim();
-                return address.split("/")[0];
-            }
-        }
-        return "";
     }
 
     private VaierMetadata extractVaierMetadata(String configContent) {

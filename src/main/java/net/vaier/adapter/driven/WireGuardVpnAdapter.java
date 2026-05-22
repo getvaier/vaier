@@ -8,6 +8,7 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
@@ -328,16 +329,6 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         }
     }
 
-    static String extractValue(String configContent, String key) {
-        for (String line : configContent.split("\n")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith(key + " =") || trimmed.startsWith(key + "=")) {
-                return trimmed.substring(trimmed.indexOf('=') + 1).trim();
-            }
-        }
-        return "";
-    }
-
     @Override
     public void setPeerAllowedIps(String peerIpAddress, String allowedIps) {
         log.info("Updating server-side AllowedIPs for peer at {} to: {}", peerIpAddress, allowedIps);
@@ -439,14 +430,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
             }
 
             String configContent = Files.readString(peerConfigPath);
-            String ipAddress = "";
-            for (String line : configContent.split("\n")) {
-                if (line.trim().startsWith("Address")) {
-                    String address = line.substring(line.indexOf('=') + 1).trim();
-                    ipAddress = address.split("/")[0];
-                    break;
-                }
-            }
+            String ipAddress = WireGuardPeerConfig.readIpAddress(configContent);
 
             if (ipAddress.isEmpty()) {
                 log.error("Could not find IP address in peer config");

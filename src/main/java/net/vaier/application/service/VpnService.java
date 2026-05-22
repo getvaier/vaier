@@ -515,9 +515,8 @@ public class VpnService implements
                                 Path confFile = peerDir.resolve(peerDir.getFileName() + ".conf");
                                 if (Files.exists(confFile)) {
                                     String content = Files.readString(confFile);
-                                    String address = extractValue(content, "Address");
-                                    if (!address.isEmpty()) {
-                                        String ip = address.split("/")[0];
+                                    String ip = WireGuardPeerConfig.readIpAddress(content);
+                                    if (!ip.isEmpty()) {
                                         String[] parts = ip.split("\\.");
                                         if (parts.length == 4) {
                                             int lastOctet = Integer.parseInt(parts[3]);
@@ -624,16 +623,6 @@ public class VpnService implements
             log.error("Error restarting WireGuard container: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to restart WireGuard service", e);
         }
-    }
-
-    private String extractValue(String configContent, String key) {
-        for (String line : configContent.split("\n")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith(key + " =") || trimmed.startsWith(key + "=")) {
-                return trimmed.substring(trimmed.indexOf('=') + 1).trim();
-            }
-        }
-        return "";
     }
 
     private String generateScript(String peerName, String vpnIp, String serverUrl, String serverPort,

@@ -62,6 +62,31 @@ public final class WireGuardPeerConfig {
         return sb.toString();
     }
 
+    /**
+     * Reads a single {@code Key = value} directive back out of a WireGuard {@code .conf} file —
+     * the inverse of {@link #generate}. The key must be followed by {@code =} (optional spaces
+     * around it); returns {@code ""} when the directive is absent.
+     */
+    public static String readDirective(String content, String key) {
+        if (content == null || key == null) return "";
+        for (String line : content.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(key + " =") || trimmed.startsWith(key + "=")) {
+                return trimmed.substring(trimmed.indexOf('=') + 1).trim();
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Reads the interface {@code Address} directive and strips its {@code /prefix} mask,
+     * yielding the peer's bare VPN IP. Returns {@code ""} when no {@code Address} line is present.
+     */
+    public static String readIpAddress(String content) {
+        String address = readDirective(content, "Address");
+        return address.isEmpty() ? "" : address.split("/")[0];
+    }
+
     private static String escapeJson(String s) {
         StringBuilder sb = new StringBuilder(s.length() + 8);
         for (int i = 0; i < s.length(); i++) {

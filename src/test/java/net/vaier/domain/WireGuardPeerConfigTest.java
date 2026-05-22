@@ -222,4 +222,55 @@ class WireGuardPeerConfigTest {
         assertThat(vaierLine).contains("\\\"box\\\"");
         assertThat(vaierLine).contains("C:\\\\data");
     }
+
+    // --- readDirective / readIpAddress (#215) — inverse of generate() ---
+
+    @Test
+    void readDirective_findsKeyWithSpacesAroundEquals() {
+        String config = "[Interface]\nPrivateKey = abc123\nAddress = 10.13.13.2/32\n";
+
+        assertThat(WireGuardPeerConfig.readDirective(config, "PrivateKey")).isEqualTo("abc123");
+    }
+
+    @Test
+    void readDirective_findsKeyWithNoSpacesAroundEquals() {
+        String config = "[Interface]\nPrivateKey=abc123\nAddress=10.13.13.2/32\n";
+
+        assertThat(WireGuardPeerConfig.readDirective(config, "PrivateKey")).isEqualTo("abc123");
+    }
+
+    @Test
+    void readDirective_returnsEmptyStringForMissingKey() {
+        String config = "[Interface]\nAddress = 10.13.13.2/32\n";
+
+        assertThat(WireGuardPeerConfig.readDirective(config, "PrivateKey")).isEmpty();
+    }
+
+    @Test
+    void readDirective_doesNotMatchPartialKeyName() {
+        String config = "PresharedKey = xyz789\n";
+
+        assertThat(WireGuardPeerConfig.readDirective(config, "Key")).isEmpty();
+    }
+
+    @Test
+    void readIpAddress_stripsMaskFromAddressDirective() {
+        String config = "[Interface]\nPrivateKey = abc\nAddress = 10.13.13.7/32\n";
+
+        assertThat(WireGuardPeerConfig.readIpAddress(config)).isEqualTo("10.13.13.7");
+    }
+
+    @Test
+    void readIpAddress_readsBareAddressWithoutMask() {
+        String config = "[Interface]\nAddress = 10.13.13.7\n";
+
+        assertThat(WireGuardPeerConfig.readIpAddress(config)).isEqualTo("10.13.13.7");
+    }
+
+    @Test
+    void readIpAddress_returnsEmptyWhenNoAddressLine() {
+        String config = "[Interface]\nPrivateKey = abc\n";
+
+        assertThat(WireGuardPeerConfig.readIpAddress(config)).isEmpty();
+    }
 }
