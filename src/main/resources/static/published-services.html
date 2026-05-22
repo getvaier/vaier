@@ -553,9 +553,26 @@
             return `<span class="status ${cls}"><span class="status-indicator"></span>${state}</span>`;
         }
 
+        // Re-rendering replaces every service card's DOM node. Doing that on every 30s poll,
+        // window-focus refresh, or SSE update used to (a) swallow a click that arrived while
+        // the swap was in flight — so a card needed two clicks to expand — and (b) destroy an
+        // inline edit in progress. We skip the swap when the markup is unchanged, and hold it
+        // back while a field inside the list is focused, flushing once focus leaves.
+        let _lastServicesHtml = null;
+        let _pendingServices = null;
+
+        function isEditingServiceCard() {
+            const active = document.activeElement;
+            const container = document.getElementById('services-container');
+            return !!active && container.contains(active)
+                && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+        }
+
         function displayServices(services) {
             const container = document.getElementById('services-container');
             if (services.length === 0) {
+                _lastServicesHtml = null;
+                _pendingServices = null;
                 container.innerHTML = '<div class="loading">No published services yet</div>';
                 return;
             }
@@ -695,6 +712,11 @@
                 </div>`;
             }).join('');
 
+            if (html === _lastServicesHtml) { _pendingServices = null; return; }
+            if (isEditingServiceCard()) { _pendingServices = services; return; }
+
+            _pendingServices = null;
+            _lastServicesHtml = html;
             container.innerHTML = html;
         }
 
@@ -1246,6 +1268,14 @@
         });
         window.addEventListener('online', refreshAll);
         window.addEventListener('focus', refreshAll);
+
+        // A status update that arrived while the user was editing a field is deferred
+        // (see displayServices); render it once focus leaves the services list.
+        document.getElementById('services-container').addEventListener('focusout', () => {
+            setTimeout(() => {
+                if (_pendingServices && !isEditingServiceCard()) displayServices(_pendingServices);
+            }, 0);
+        });
     </script>
 </body>
 </html>
