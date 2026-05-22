@@ -413,11 +413,32 @@ public class ReverseProxyRoute {
                               List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
                               List<PeerConfiguration> peers) {
         String subdomain = extractSubdomain(baseDomain);
-        String server = resolveServerName(vpnClients, peerNameResolver, peers);
-        if (!LanAnchor.VAIER_SERVER_NAME.equals(server) && subdomain.endsWith("." + server)) {
-            subdomain = subdomain.substring(0, subdomain.length() - server.length() - 1);
+        ServerIdentity server = resolveServer(vpnClients, peerNameResolver, peers);
+        return stripRedundantPeerSuffix(subdomain, server) + " @ " + server.displayName();
+    }
+
+    /**
+     * Drops a trailing {@code .<peer>} label the operator put in the subdomain — the
+     * {@code " @ <server>"} part already names the peer, so {@code nut.colina27} reads as
+     * just {@code nut}. The operator hand-types this suffix, so the match is lenient: the
+     * label is compared to the peer id and display name with case and every non-alphanumeric
+     * character ignored, so {@code colina27} matches both {@code Colina-27} and {@code Colina 27}.
+     */
+    private static String stripRedundantPeerSuffix(String subdomain, ServerIdentity server) {
+        if (server.id() == null) return subdomain; // Vaier server / unresolved — no peer to strip
+        int dot = subdomain.lastIndexOf('.');
+        if (dot < 0) return subdomain;
+        String lastLabel = canonical(subdomain.substring(dot + 1));
+        if (!lastLabel.isEmpty()
+                && (lastLabel.equals(canonical(server.id())) || lastLabel.equals(canonical(server.displayName())))) {
+            return subdomain.substring(0, dot);
         }
-        return subdomain + " @ " + server;
+        return subdomain;
+    }
+
+    /** Lowercased with every non-alphanumeric character removed, for lenient label matching. */
+    private static String canonical(String s) {
+        return s == null ? "" : s.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
     /**
@@ -428,7 +449,7 @@ public class ReverseProxyRoute {
      */
     public String hostDisplayName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
                                   List<PeerConfiguration> peers) {
-        return resolveServerName(vpnClients, peerNameResolver, peers);
+        return resolveServer(vpnClients, peerNameResolver, peers).displayName();
     }
 
     public String directUrl(String callerIp, List<PeerConfiguration> peers, List<VpnClient> vpnClients) {
@@ -477,29 +498,43 @@ public class ReverseProxyRoute {
         return domainName;
     }
 
-    private String resolveServerName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
-                                     List<PeerConfiguration> peers) {
+    /**
+     * The peer hosting this route, as an {@code id} (the immutable slug — null for the Vaier
+     * server) plus the {@code displayName} shown to operators. Resolving both together keeps
+     * {@link #displayName}'s suffix strip (which needs the id) and the labels (which need the
+     * display name) consistent — they would drift if derived from two separate lookups.
+     */
+    private ServerIdentity resolveServer(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
+                                         List<PeerConfiguration> peers) {
         if (isLanService) {
             PeerConfiguration relay = findRelayWhoseLanContains(peers, address);
-            if (relay != null) return relay.name();
-            return LanAnchor.VAIER_SERVER_NAME;
+            return relay != null
+                ? new ServerIdentity(relay.id(), relay.name())
+                : ServerIdentity.VAIER_SERVER;
         }
         // Check VPN peers first — a peer IP is unambiguous, whereas port-only Vaier-server
         // matching can produce false positives when a Vaier-server container happens to use the same port.
         boolean isPeer = vpnClients.stream().anyMatch(p -> p.containsAddress(address));
-        if (isPeer) {
-            // Prefer the peer's editable display name from its configuration; fall back to
-            // resolving the id by IP (humanised) when the peers list doesn't carry it.
-            return peers.stream()
-                .filter(p -> address.equals(p.ipAddress()))
-                .map(PeerConfiguration::name)
-                .findFirst()
-                .orElseGet(() -> {
-                    String resolvedId = peerNameResolver.resolvePeerNameByIp(address);
-                    return resolvedId.equals(address) ? address : PeerId.display(resolvedId);
-                });
+        if (!isPeer) {
+            return ServerIdentity.VAIER_SERVER;
         }
-        return LanAnchor.VAIER_SERVER_NAME;
+        // Prefer the peer's stored id + editable display name; fall back to resolving the id
+        // by IP (humanised) when the peers list doesn't carry it.
+        return peers.stream()
+            .filter(p -> address.equals(p.ipAddress()))
+            .findFirst()
+            .map(p -> new ServerIdentity(p.id(), p.name()))
+            .orElseGet(() -> {
+                String resolvedId = peerNameResolver.resolvePeerNameByIp(address);
+                return resolvedId.equals(address)
+                    ? new ServerIdentity(null, address)
+                    : new ServerIdentity(resolvedId, PeerId.display(resolvedId));
+            });
+    }
+
+    /** A route's host machine: the peer {@code id} (null for the Vaier server) and its display name. */
+    private record ServerIdentity(String id, String displayName) {
+        static final ServerIdentity VAIER_SERVER = new ServerIdentity(null, LanAnchor.VAIER_SERVER_NAME);
     }
 
     @AllArgsConstructor

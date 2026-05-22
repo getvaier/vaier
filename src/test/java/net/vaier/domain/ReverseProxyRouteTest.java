@@ -665,6 +665,37 @@ class ReverseProxyRouteTest {
     }
 
     @Test
+    void displayName_peerService_stripsPeerIdSuffixEvenWhenDisplayNameDiffers() {
+        // Regression from the peer id/name split: the ".<peer>" disambiguation suffix in the
+        // DNS name is the immutable peer id (a slug), never the editable display name. The
+        // strip must match the id — otherwise a renamed peer shows "openhab.apalveien5".
+        ReverseProxyRoute route = route("openhab.apalveien5.example.com", "10.13.13.5", 8080);
+        VpnClient peerClient = connectedPeer("10.13.13.5/32");
+        PeerConfiguration peer = new PeerConfiguration("apalveien5", "Apalveien 5", "10.13.13.5",
+            "", MachineType.UBUNTU_SERVER, null, null, null);
+        ForResolvingPeerNames resolver = ip -> ip;
+
+        String name = route.displayName("example.com", List.of(), List.of(peerClient), resolver, List.of(peer));
+
+        assertThat(name).isEqualTo("openhab @ Apalveien 5");
+    }
+
+    @Test
+    void displayName_peerService_stripsHandTypedSuffixThatDiffersFromIdInPunctuation() {
+        // The operator hand-types the ".<peer>" suffix: here "colina27" while the peer id is
+        // "Colina-27" and the display name "Colina 27". The strip must match leniently.
+        ReverseProxyRoute route = route("nut.colina27.example.com", "10.13.13.3", 3001);
+        VpnClient peerClient = connectedPeer("10.13.13.3/32");
+        PeerConfiguration peer = new PeerConfiguration("Colina-27", "Colina 27", "10.13.13.3",
+            "", MachineType.UBUNTU_SERVER, null, null, null);
+        ForResolvingPeerNames resolver = ip -> ip;
+
+        String name = route.displayName("example.com", List.of(), List.of(peerClient), resolver, List.of(peer));
+
+        assertThat(name).isEqualTo("nut @ Colina 27");
+    }
+
+    @Test
     void displayName_unknownAddress_fallsBackToVaierServer() {
         ReverseProxyRoute route = route("app.example.com", "10.13.13.5", 8080);
         ForResolvingPeerNames resolver = ip -> ip;
