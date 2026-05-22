@@ -39,8 +39,8 @@ class LaunchpadRestControllerTest {
     @Test
     void getServices_returnsLaunchpadServices() {
         var services = List.of(
-            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, null, "app", "host=app.example.com"),
-            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, null, "db", "host=db.example.com")
+            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, null, "app", "host=app.example.com", "media server"),
+            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, null, "db", "host=db.example.com", "database host")
         );
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any(), anyBoolean())).thenReturn(services);
 

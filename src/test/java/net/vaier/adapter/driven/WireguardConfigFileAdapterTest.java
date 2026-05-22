@@ -415,50 +415,62 @@ class WireguardConfigFileAdapterTest {
         assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().description()).isEqualTo("keep me");
     }
 
-    // --- renamePeer (#55) ---
+    // --- updateName: the editable display name (#209) ---
 
     @Test
-    void renamePeer_movesDirectoryAndConfFile() throws IOException {
-        createPeerConf("laptop", "10.13.13.2");
+    void updateName_setsDisplayNameInMetadata() throws IOException {
+        createPeerConf("media-server", "10.13.13.2");
 
-        adapter.renamePeer("laptop", "workstation");
+        adapter.updateName("media-server", "Media Server");
 
-        assertThat(adapter.getPeerConfigByName("laptop")).isEmpty();
-        PeerConfiguration renamed = adapter.getPeerConfigByName("workstation").orElseThrow();
-        assertThat(renamed.name()).isEqualTo("workstation");
-        assertThat(renamed.ipAddress()).isEqualTo("10.13.13.2");
-        assertThat(Files.exists(configDir.resolve("workstation").resolve("workstation.conf"))).isTrue();
-        assertThat(Files.exists(configDir.resolve("laptop"))).isFalse();
+        PeerConfiguration result = adapter.getPeerConfigByName("media-server").orElseThrow();
+        assertThat(result.id()).isEqualTo("media-server");
+        assertThat(result.name()).isEqualTo("Media Server");
     }
 
     @Test
-    void renamePeer_preservesConfigContentAndVaierMetadata() throws IOException {
+    void updateName_storedNameOverridesTheHumanisedIdFallback() throws IOException {
+        // With no stored name a peer falls back to display(id); once set, the stored name wins —
+        // even when it contains a hyphen the operator typed deliberately.
+        createPeerConf("media-server", "10.13.13.2");
+        assertThat(adapter.getPeerConfigByName("media-server").orElseThrow().name())
+            .isEqualTo("media server");
+
+        adapter.updateName("media-server", "Living-room NAS");
+
+        assertThat(adapter.getPeerConfigByName("media-server").orElseThrow().name())
+            .isEqualTo("Living-room NAS");
+    }
+
+    @Test
+    void updateName_blankClearsNameBackToHumanisedIdFallback() throws IOException {
+        createPeerConf("media-server", "10.13.13.2");
+        adapter.updateName("media-server", "Media Server");
+
+        adapter.updateName("media-server", "  ");
+
+        assertThat(adapter.getPeerConfigByName("media-server").orElseThrow().name())
+            .isEqualTo("media server");
+    }
+
+    @Test
+    void updateName_preservesExistingMetadata() throws IOException {
         createPeerConfWithVaierMetadata("spain", "10.13.13.4",
                 "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.1.0/24\",\"description\":\"Spain relay\"}");
 
-        adapter.renamePeer("spain", "spain-relay");
+        adapter.updateName("spain", "Spain Relay");
 
-        PeerConfiguration renamed = adapter.getPeerConfigByName("spain-relay").orElseThrow();
-        assertThat(renamed.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
-        assertThat(renamed.lanCidr()).isEqualTo("192.168.1.0/24");
-        assertThat(renamed.description()).isEqualTo("Spain relay");
+        PeerConfiguration result = adapter.getPeerConfigByName("spain").orElseThrow();
+        assertThat(result.name()).isEqualTo("Spain Relay");
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+        assertThat(result.lanCidr()).isEqualTo("192.168.1.0/24");
+        assertThat(result.description()).isEqualTo("Spain relay");
     }
 
     @Test
-    void renamePeer_throwsWhenPeerDoesNotExist() {
+    void updateName_throwsWhenPeerDoesNotExist() {
         org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
-            () -> adapter.renamePeer("ghost", "phantom"));
-    }
-
-    @Test
-    void renamePeer_throwsWhenTargetNameAlreadyExists() throws IOException {
-        createPeerConf("laptop", "10.13.13.2");
-        createPeerConf("desktop", "10.13.13.3");
-
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
-            () -> adapter.renamePeer("laptop", "desktop"));
-        assertThat(adapter.getPeerConfigByName("laptop")).isPresent();
-        assertThat(adapter.getPeerConfigByName("desktop")).isPresent();
+            () -> adapter.updateName("ghost", "Phantom"));
     }
 
     // --- getAllPeerConfigs ---

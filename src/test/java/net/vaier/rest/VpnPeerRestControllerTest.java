@@ -198,7 +198,7 @@ class VpnPeerRestControllerTest {
     @Test
     void createPeer_passesDescriptionToUseCase() {
         var created = new CreatePeerUseCase.CreatedPeerUco(
-                "nas", "10.13.13.5", "pub", "priv", "[Interface]", MachineType.UBUNTU_SERVER);
+                "nas", "nas", "10.13.13.5", "pub", "priv", "[Interface]", MachineType.UBUNTU_SERVER);
         when(createPeerUseCase.createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server"))
                 .thenReturn(created);
         var request = new VpnPeerRestController.CreatePeerRequest(
@@ -217,7 +217,7 @@ class VpnPeerRestControllerTest {
         when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
         when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(
                 Optional.of(new GetPeerConfigUseCase.PeerConfigResult(
-                        "nas", "10.13.13.2", "", MachineType.UBUNTU_SERVER, null, null, "Home media server")));
+                        "nas", "nas", "10.13.13.2", "", MachineType.UBUNTU_SERVER, null, null, "Home media server")));
 
         var peer = controller.listPeers().getBody().get(0);
 

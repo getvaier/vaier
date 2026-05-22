@@ -7,7 +7,7 @@ public final class WireGuardPeerConfig {
     public static String generate(String privateKey, String ipAddress, String serverPublicKey,
                                   String presharedKey, String serverEndpoint,
                                   MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
-                                  String description) {
+                                  String description, String name) {
         // lanCidr is intentionally NOT appended to the client-side AllowedIPs: doing so makes
         // wg-quick install a route for that CIDR via wg0 on the relay peer, which hijacks the
         // relay's own LAN. lanCidr is still recorded in the # VAIER metadata below so that
@@ -15,7 +15,7 @@ public final class WireGuardPeerConfig {
         // install script (#170) installs ip_forward + iptables MASQUERADE/FORWARD on the relay.
         String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
 
-        String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description);
+        String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description, name);
 
         String dnsLine = peerType.isServerType()
                 ? ""
@@ -37,9 +37,15 @@ public final class WireGuardPeerConfig {
                 serverPublicKey, presharedKey, serverEndpoint, allowedIps);
     }
 
-    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress, String description) {
+    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,
+                                   String description, String name) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
+        // name is the operator's display label for the peer — free text, JSON-escaped, and (like
+        // description) recorded for any peer type. The peer's id stays the config directory name.
+        if (name != null && !name.isBlank()) {
+            sb.append(",\"name\":\"").append(escapeJson(name)).append("\"");
+        }
         boolean serverType = peerType == MachineType.UBUNTU_SERVER;
         if (serverType && lanCidr != null && !lanCidr.isBlank()) {
             sb.append(",\"lanCidr\":\"").append(lanCidr).append("\"");

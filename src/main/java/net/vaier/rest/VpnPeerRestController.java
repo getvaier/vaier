@@ -16,6 +16,7 @@ import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerId;
 import net.vaier.domain.VpnClient;
 
 import java.util.Optional;
@@ -65,7 +66,7 @@ public class VpnPeerRestController {
             List<VpnPeerResponse> response = clients.stream()
                     .map(client -> {
                         String peerIp = client.allowedIps().split("/")[0];
-                        String peerName = peerNameResolver.resolvePeerNameByIp(peerIp);
+                        String id = peerNameResolver.resolvePeerNameByIp(peerIp);
                         var cfg = getPeerConfigUseCase.getPeerConfigByIp(peerIp);
                         MachineType peerType = cfg
                                 .map(GetPeerConfigUseCase.PeerConfigResult::peerType)
@@ -73,11 +74,14 @@ public class VpnPeerRestController {
                         String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
                         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
                         String description = cfg.map(GetPeerConfigUseCase.PeerConfigResult::description).orElse(null);
+                        String name = cfg.map(GetPeerConfigUseCase.PeerConfigResult::name)
+                                .orElseGet(() -> PeerId.display(id));
                         Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
                             ? forGeolocatingIps.locate(client.endpointIp())
                             : Optional.empty();
                         return new VpnPeerResponse(
-                                peerName,
+                                id,
+                                name,
                                 client.publicKey(),
                                 client.allowedIps(),
                                 client.endpointIp(),
@@ -137,6 +141,7 @@ public class VpnPeerRestController {
         );
 
         CreatePeerResponse response = new CreatePeerResponse(
+                createdPeer.id(),
                 createdPeer.name(),
                 createdPeer.ipAddress(),
                 createdPeer.publicKey(),
@@ -269,6 +274,7 @@ public class VpnPeerRestController {
         return getPeerConfigUseCase.getPeerConfig(peerIdentifier)
                 .map(result -> {
                     PeerConfigResponse response = new PeerConfigResponse(
+                            result.id(),
                             result.name(),
                             result.ipAddress(),
                             result.configContent(),
@@ -374,7 +380,12 @@ public class VpnPeerRestController {
                 });
     }
 
+    /**
+     * @param id   the peer's immutable identifier — config directory name, REST path segment.
+     * @param name the operator-facing display label.
+     */
     public record VpnPeerResponse(
+            String id,
             String name,
             String publicKey,
             String allowedIps,
@@ -402,6 +413,7 @@ public class VpnPeerRestController {
     ) {}
 
     public record CreatePeerResponse(
+            String id,
             String name,
             String ipAddress,
             String publicKey,
@@ -426,6 +438,7 @@ public class VpnPeerRestController {
     ) {}
 
     public record PeerConfigResponse(
+            String id,
             String name,
             String ipAddress,
             String configFile,

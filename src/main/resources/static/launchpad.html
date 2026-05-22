@@ -277,10 +277,16 @@
             return dnsAddress.split('.')[0];
         }
 
-        function peerName(dnsAddress, hostAddress) {
+        function peerName(service) {
+            // peerName is the host machine's display name, computed by the domain (a VPN peer's
+            // editable name, the relay peer's name for a LAN service, or "Vaier server").
+            // Fallback to the legacy DNS-label derivation keeps things rendering during a
+            // partial deploy — note that fallback shows the raw slug (e.g. "media-server").
+            if (service.peerName) return service.peerName;
+            const hostAddress = service.hostAddress;
             if (hostAddress && hostAddress.startsWith('172.20.')) return 'Vaier server';
             if (hostAddress && !hostAddress.includes('.')) return 'Vaier server';
-            const parts = dnsAddress.split('.');
+            const parts = service.dnsAddress.split('.');
             return parts.length >= 2 ? parts[1] : 'Vaier server';
         }
 
@@ -299,7 +305,7 @@
             const name   = serviceName(service);
             const color  = avatarColor(name);
             const letter = name.charAt(0).toUpperCase();
-            const peer   = peerName(service.dnsAddress, service.hostAddress);
+            const peer   = peerName(service);
             const subLine = tileSubLine(service, peer);
 
             const tile = document.createElement('a');
@@ -415,7 +421,7 @@
 
                 const byPeer = new Map();
                 for (const s of external) {
-                    const peer = peerName(s.dnsAddress, s.hostAddress);
+                    const peer = peerName(s);
                     if (!byPeer.has(peer)) byPeer.set(peer, []);
                     byPeer.get(peer).push(s);
                 }

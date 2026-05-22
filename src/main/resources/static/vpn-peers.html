@@ -610,6 +610,14 @@
             return peerName.replace(/[^a-zA-Z0-9]/g, '_');
         }
 
+        // A peer has an immutable id (slug — drives DOM keys + REST paths) and a separate
+        // editable display name. This resolves the display name from the id for toasts and
+        // dialogs; the backend owns the id↔name split (issue #209).
+        function peerDisplayName(peerId) {
+            const p = peers.find(x => x.id === peerId);
+            return p ? p.name : peerId;
+        }
+
         async function fetchPeers() {
             try {
                 const response = await fetch('/vpn/peers');
@@ -963,12 +971,12 @@
             const isConnected   = handshakeTime > 0 && (currentTime - handshakeTime) < 180;
             const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
             const vpnIp      = peer.allowedIps.split('/')[0];
-            const id         = cardId(peer.name);
-            const isExpanded = expandedPeers.has(peer.name);
+            const id         = cardId(peer.id);
+            const isExpanded = expandedPeers.has(peer.id);
             const peerType   = peer.peerType || 'UBUNTU_SERVER';
             const isServer   = peerType === 'UBUNTU_SERVER' || peerType === 'WINDOWS_SERVER';
 
-            const services = peerServices[peer.name];
+            const services = peerServices[peer.id];
             const servicesHtml = (() => {
                 if (!isServer) return '';
                 if (!isConnected)
@@ -999,23 +1007,23 @@
             const dockerSlot = isServer ? { kind: 'docker', title: 'Runs Docker', label: 'Docker' } : null;
 
             const composeBtn = isServer
-                ? `<button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.name}')">compose</button>`
+                ? `<button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.id}')">compose</button>`
                 : '';
             const scriptBtn = peerType === 'UBUNTU_SERVER'
-                ? `<button class="btn btn-small btn-secondary" onclick="showVpnPeerSetupScript('${peer.name}')">script</button>`
+                ? `<button class="btn btn-small btn-secondary" onclick="showVpnPeerSetupScript('${peer.id}')">script</button>`
                 : '';
             const qrBtn = peerType === 'MOBILE_CLIENT'
-                ? `<button class="btn btn-small btn-secondary" onclick="showQrModal('${peer.name}')">qr</button>`
+                ? `<button class="btn btn-small btn-secondary" onclick="showQrModal('${peer.id}')">qr</button>`
                 : '';
 
             return `
             <div class="peer-card">
-                <div class="peer-header" onclick="togglePeer('${peer.name.replace(/'/g, "\\'")}')">
+                <div class="peer-header" onclick="togglePeer('${peer.id}')">
                     <div class="peer-header-left">
                         ${machineIconHtml(iconKind, typeTooltip, iconStatusClass(statusClass), 'hdr-icon-' + id)}
                         <div class="peer-name-block">
                             <div class="peer-name-row">
-                                <span class="peer-name">${peer.name}</span>
+                                <span class="peer-name">${escapeHtml(peer.name)}</span>
                                 ${capabilitySlotsHtml([relaySlot, dockerSlot])}
                             </div>
                             ${peer.description ? `<div class="peer-desc" title="${escapeHtml(peer.description)}">${escapeHtml(peer.description)}</div>` : ''}
@@ -1031,10 +1039,10 @@
                                 <input type="text" id="peer-name-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
                                        value="${escapeHtml(peer.name)}"
                                        data-original="${escapeHtml(peer.name)}"
-                                       oninput="onPeerNameInput('${peer.name.replace(/'/g, "\\'")}')">
+                                       oninput="onPeerNameInput('${peer.id}')">
                                 <button class="btn btn-primary" id="peer-name-save-${id}"
                                         style="flex-shrink:0" disabled
-                                        onclick="savePeerName('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                                        onclick="savePeerName('${peer.id}')">Save</button>
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1045,10 +1053,10 @@
                                        value="${escapeHtml(peer.description || '')}"
                                        data-original="${escapeHtml(peer.description || '')}"
                                        placeholder="e.g. Home media server"
-                                       oninput="onDescriptionInput('${peer.name.replace(/'/g, "\\'")}')">
+                                       oninput="onDescriptionInput('${peer.id}')">
                                 <button class="btn btn-primary" id="peer-desc-save-${id}"
                                         style="flex-shrink:0" disabled
-                                        onclick="saveDescription('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                                        onclick="saveDescription('${peer.id}')">Save</button>
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1085,10 +1093,10 @@
                                        value="${peer.lanCidr || ''}"
                                        data-original="${peer.lanCidr || ''}"
                                        placeholder="e.g. 192.168.1.0/24"
-                                       oninput="onLanCidrInput('${peer.name.replace(/'/g, "\\'")}')">
+                                       oninput="onLanCidrInput('${peer.id}')">
                                 <button class="btn btn-primary" id="lan-cidr-save-${id}"
                                         style="flex-shrink:0" disabled
-                                        onclick="saveLanCidr('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                                        onclick="saveLanCidr('${peer.id}')">Save</button>
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1098,22 +1106,22 @@
                                        value="${peer.lanAddress || ''}"
                                        data-original="${peer.lanAddress || ''}"
                                        placeholder="e.g. 192.168.1.50"
-                                       oninput="onLanAddressInput('${peer.name.replace(/'/g, "\\'")}')">
+                                       oninput="onLanAddressInput('${peer.id}')">
                                 <button class="btn btn-primary" id="lan-addr-save-${id}"
                                         style="flex-shrink:0" disabled
-                                        onclick="saveLanAddress('${peer.name.replace(/'/g, "\\'")}')">Save</button>
+                                        onclick="saveLanAddress('${peer.id}')">Save</button>
                             </span>
                         </div>` : ''}
                         ${servicesHtml}
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
-                            <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.name}')">config</button>
+                            <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.id}')">config</button>
                             ${composeBtn}
                             ${scriptBtn}
                             ${qrBtn}
                         </div>
-                        <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.name}')">Delete</button>
+                        <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.id}')">Delete</button>
                     </div>
                 </div>
             </div>`;
@@ -1324,68 +1332,68 @@
             }
         }
 
-        function onLanAddressInput(peerName) {
-            const id = cardId(peerName);
+        function onLanAddressInput(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`lan-addr-${id}`);
             const btn = document.getElementById(`lan-addr-save-${id}`);
             if (!input || !btn) return;
             btn.disabled = input.value.trim() === (input.dataset.original || '');
         }
 
-        async function saveLanAddress(peerName) {
-            const id = cardId(peerName);
+        async function saveLanAddress(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`lan-addr-${id}`);
             const btn = document.getElementById(`lan-addr-save-${id}`);
             const lanAddress = input.value.trim();
             btn.disabled = true;
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}/lan-address`, {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/lan-address`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ lanAddress })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = lanAddress;
-                displaySuccess(`LAN address saved for "${peerName}"`);
+                displaySuccess(`LAN address saved for "${escapeHtml(peerDisplayName(peerId))}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save LAN address: ${error.message}`);
-                onLanAddressInput(peerName);
+                onLanAddressInput(peerId);
             }
         }
 
-        function onDescriptionInput(peerName) {
-            const id = cardId(peerName);
+        function onDescriptionInput(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`peer-desc-${id}`);
             const btn = document.getElementById(`peer-desc-save-${id}`);
             if (!input || !btn) return;
             btn.disabled = input.value.trim() === (input.dataset.original || '');
         }
 
-        async function saveDescription(peerName) {
-            const id = cardId(peerName);
+        async function saveDescription(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`peer-desc-${id}`);
             const btn = document.getElementById(`peer-desc-save-${id}`);
             const description = input.value.trim();
             btn.disabled = true;
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}/description`, {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/description`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ description })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = description;
-                displaySuccess(`Description saved for "${peerName}"`);
+                displaySuccess(`Description saved for "${escapeHtml(peerDisplayName(peerId))}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save description: ${error.message}`);
-                onDescriptionInput(peerName);
+                onDescriptionInput(peerId);
             }
         }
 
-        function onPeerNameInput(peerName) {
-            const id = cardId(peerName);
+        function onPeerNameInput(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`peer-name-${id}`);
             const btn = document.getElementById(`peer-name-save-${id}`);
             if (!input || !btn) return;
@@ -1393,30 +1401,32 @@
             btn.disabled = v === '' || v === (input.dataset.original || '');
         }
 
-        async function savePeerName(peerName) {
-            const id = cardId(peerName);
+        // Renames the peer's editable display name only — the immutable id (config dir,
+        // REST path) never moves. Saving a blank name is rejected by the input guard.
+        async function savePeerName(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`peer-name-${id}`);
             const btn = document.getElementById(`peer-name-save-${id}`);
             const newName = input.value.trim();
             if (!newName) return;
             btn.disabled = true;
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}`, {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ newName })
                 });
                 if (response.status === 409) {
-                    displayError(`A machine named "${newName}" already exists`);
-                    onPeerNameInput(peerName);
+                    displayError(`A machine named "${escapeHtml(newName)}" already exists`);
+                    onPeerNameInput(peerId);
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                displaySuccess(`Renamed "${peerName}"`);
+                displaySuccess(`Renamed to "${escapeHtml(newName)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to rename machine: ${error.message}`);
-                onPeerNameInput(peerName);
+                onPeerNameInput(peerId);
             }
         }
 
@@ -1486,62 +1496,62 @@
             }
         }
 
-        function onLanCidrInput(peerName) {
-            const id = cardId(peerName);
+        function onLanCidrInput(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`lan-cidr-${id}`);
             const btn = document.getElementById(`lan-cidr-save-${id}`);
             if (!input || !btn) return;
             btn.disabled = input.value.trim() === (input.dataset.original || '');
         }
 
-        async function saveLanCidr(peerName) {
-            const id = cardId(peerName);
+        async function saveLanCidr(peerId) {
+            const id = cardId(peerId);
             const input = document.getElementById(`lan-cidr-${id}`);
             const btn = document.getElementById(`lan-cidr-save-${id}`);
             const lanCidr = input.value.trim();
             btn.disabled = true;
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}/lan-cidr`, {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/lan-cidr`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ lanCidr })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = lanCidr;
-                displaySuccess(`LAN CIDR saved for "${peerName}"`);
+                displaySuccess(`LAN CIDR saved for "${escapeHtml(peerDisplayName(peerId))}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save LAN CIDR: ${error.message}`);
-                onLanCidrInput(peerName);
+                onLanCidrInput(peerId);
             }
         }
 
-        function peerDownloadButtons(peerName, peerType) {
+        function peerDownloadButtons(peerId, peerType) {
             const t = peerType || 'UBUNTU_SERVER';
             const btns = [];
             if (t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT') {
-                btns.push(`<button class="btn btn-primary" onclick="downloadConf('${peerName}')">↓ .conf file</button>`);
+                btns.push(`<button class="btn btn-primary" onclick="downloadConf('${peerId}')">↓ .conf file</button>`);
             }
             if (t === 'MOBILE_CLIENT') {
-                btns.push(`<button class="btn btn-primary" onclick="showQrModal('${peerName}')">QR code</button>`);
+                btns.push(`<button class="btn btn-primary" onclick="showQrModal('${peerId}')">QR code</button>`);
             }
             if (t === 'UBUNTU_SERVER' || t === 'WINDOWS_SERVER') {
-                btns.push(`<button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peerName}')">↓ Docker Compose</button>`);
+                btns.push(`<button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peerId}')">↓ Docker Compose</button>`);
             }
             if (t === 'UBUNTU_SERVER') {
-                btns.push(`<button class="btn btn-primary" onclick="showVpnPeerSetupScript('${peerName}')">↓ Setup Script</button>`);
+                btns.push(`<button class="btn btn-primary" onclick="showVpnPeerSetupScript('${peerId}')">↓ Setup Script</button>`);
             }
             return btns.join('');
         }
 
-        function downloadConf(peerName) {
-            window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/config-file`;
+        function downloadConf(peerId) {
+            window.location.href = `/vpn/peers/${encodeURIComponent(peerId)}/config-file`;
         }
 
         function showPeerDetails(peer) {
             document.getElementById('peerDetailsContent').innerHTML = `
                 <div class="peer-details">
-                    <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${peer.name}</span></div>
+                    <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${escapeHtml(peer.name)}</span></div>
                     <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${peer.ipAddress}</span></div>
                     <div class="detail-row"><span class="detail-label">Public Key</span><span class="detail-value">${peer.publicKey}</span></div>
                 </div>
@@ -1553,7 +1563,7 @@
                     <pre id="configPre">${peer.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                    ${peerDownloadButtons(peer.name, peer.peerType)}
+                    ${peerDownloadButtons(peer.id, peer.peerType)}
                 </div>`;
             document.getElementById('peerDetailsModal').classList.add('active');
         }
@@ -1562,13 +1572,13 @@
             document.getElementById('peerDetailsModal').classList.remove('active');
         }
 
-        function downloadDockerComposeForPeer(peerName) {
-            window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/docker-compose`;
+        function downloadDockerComposeForPeer(peerId) {
+            window.location.href = `/vpn/peers/${encodeURIComponent(peerId)}/docker-compose`;
         }
 
-        async function viewPeerConfig(peerName) {
+        async function viewPeerConfig(peerId) {
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerName)}/config`);
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/config`);
                 if (!response.ok) { displayError('Peer configuration not found'); return; }
                 showPeerConfigModal(await response.json());
             } catch (error) {
@@ -1579,7 +1589,7 @@
         function showPeerConfigModal(peerConfig) {
             document.getElementById('peerDetailsContent').innerHTML = `
                 <div class="peer-details">
-                    <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${peerConfig.name}</span></div>
+                    <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${escapeHtml(peerConfig.name)}</span></div>
                     <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${peerConfig.ipAddress}</span></div>
                 </div>
                 <div class="config-preview">
@@ -1590,15 +1600,15 @@
                     <pre id="configPre">${peerConfig.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                    ${peerDownloadButtons(peerConfig.name, peerConfig.peerType)}
+                    ${peerDownloadButtons(peerConfig.id, peerConfig.peerType)}
                 </div>`;
             document.getElementById('peerDetailsModal').classList.add('active');
         }
 
-        function downloadDockerCompose(peerName) { downloadDockerComposeForPeer(peerName); }
+        function downloadDockerCompose(peerId) { downloadDockerComposeForPeer(peerId); }
 
-        function downloadSetupScript(peerName) {
-            window.location.href = `/vpn/peers/${encodeURIComponent(peerName)}/setup-script`;
+        function downloadSetupScript(peerId) {
+            window.location.href = `/vpn/peers/${encodeURIComponent(peerId)}/setup-script`;
         }
 
         // --- Setup-script dialog (shared between VPN peer + LAN docker host) ---
@@ -1641,14 +1651,14 @@
             if (_scriptDialogDownloadUrl) window.location.href = _scriptDialogDownloadUrl;
         }
 
-        function showVpnPeerSetupScript(peerName) {
-            const url = `${window.location.origin}/vpn/peers/${encodeURIComponent(peerName)}/setup-script`;
+        function showVpnPeerSetupScript(peerId) {
+            const url = `${window.location.origin}/vpn/peers/${encodeURIComponent(peerId)}/setup-script`;
             showSetupScriptDialog({
-                title: `Setup script — ${peerName}`,
+                title: `Setup script — ${peerDisplayName(peerId)}`,
                 description: 'Bootstraps WireGuard + Docker on a fresh Ubuntu server. Embeds this peer’s WireGuard private key, '
                     + 'so the URL stays behind Vaier login.',
                 downloadUrl: url,
-                curlCommand: `curl -fsSL '${url}' -o setup-${peerName}.sh && sudo bash setup-${peerName}.sh`,
+                curlCommand: `curl -fsSL '${url}' -o setup-${peerId}.sh && sudo bash setup-${peerId}.sh`,
                 requiresAuth: true,
             });
         }
@@ -1669,9 +1679,9 @@
 
         let peerToDelete = null;
 
-        function confirmDeletePeer(peerName) {
-            peerToDelete = peerName;
-            document.getElementById('deletePeerName').textContent = peerName;
+        function confirmDeletePeer(peerId) {
+            peerToDelete = peerId;
+            document.getElementById('deletePeerName').textContent = peerDisplayName(peerId);
             document.getElementById('deleteConfirmModal').classList.add('active');
         }
 
@@ -1682,28 +1692,28 @@
 
         async function deletePeer() {
             if (!peerToDelete) return;
-            const peerName = peerToDelete;
+            const peerName = peerDisplayName(peerToDelete);
             try {
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerToDelete)}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 hideDeleteConfirmModal();
-                displaySuccess(`Peer "${peerName}" deleted`);
+                displaySuccess(`Peer "${escapeHtml(peerName)}" deleted`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to delete peer: ${error.message}`);
             }
         }
 
-        async function showQrModal(peerName) {
+        async function showQrModal(peerId) {
             const modal = document.getElementById('qrModal');
             const title = document.getElementById('qrModalTitle');
             const body  = document.getElementById('qrModalBody');
 
-            title.textContent = 'QR Code — ' + peerName;
+            title.textContent = 'QR Code — ' + peerDisplayName(peerId);
             body.innerHTML = '<div class="qr-loading">Generating QR code\u2026</div>';
             modal.classList.add('active');
 
-            const url = '/vpn/peers/' + encodeURIComponent(peerName) + '/qr-code';
+            const url = '/vpn/peers/' + encodeURIComponent(peerId) + '/qr-code';
             body.innerHTML =
                 '<div class="qr-canvas-container">' +
                   '<img src="' + url + '" width="256" height="256" alt="WireGuard QR code" onerror="qrImageError()">' +
@@ -1967,7 +1977,8 @@
                     if (lastSeenDetail) { lastSeenDetail.textContent = lastSeenAbsolute(s.latestHandshake); }
 
                     // Sync the in-memory peers array so map markers reflect live connection state.
-                    const cached = peers.find(p => p.name === s.name);
+                    // peers-stats keys entries by the peer's immutable id (resolvePeerNameByIp).
+                    const cached = peers.find(p => p.id === s.name);
                     if (cached) {
                         const wasConnected = isPeerConnected(cached);
                         cached.latestHandshake = s.latestHandshake;
