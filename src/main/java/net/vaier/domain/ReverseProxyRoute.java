@@ -471,6 +471,35 @@ public class ReverseProxyRoute {
     }
 
     /**
+     * The "short" half of the display name — the operator-facing label without the {@code " @ host"}
+     * suffix. Equivalent to the bit before the {@code " @ "} in {@link #displayName}; this method
+     * exists so the API can expose the two halves as separate fields and clients never have to
+     * reverse the composite by splitting on the delimiter.
+     */
+    public String shortName(String baseDomain, List<VpnClient> vpnClients,
+                            ForResolvingPeerNames peerNameResolver, List<PeerConfiguration> peers) {
+        return stripRedundantPeerSuffix(extractSubdomain(baseDomain),
+            resolveServer(vpnClients, peerNameResolver, peers));
+    }
+
+    /**
+     * Where the backing service runs — drives icon choice and grouping in the UI. {@code LAN_SERVICE}
+     * is routed through a relay peer; {@code VAIER_SERVER} runs on this Vaier instance itself;
+     * {@code PEER_SERVER} runs on a VPN peer. Exposed on the published-services API so the browser
+     * doesn't reverse-engineer this from the host display label.
+     */
+    public ServiceLocation serviceLocation(List<VpnClient> vpnClients,
+                                           ForResolvingPeerNames peerNameResolver,
+                                           List<PeerConfiguration> peers) {
+        if (isLanService) return ServiceLocation.LAN_SERVICE;
+        return resolveServer(vpnClients, peerNameResolver, peers).id() == null
+            ? ServiceLocation.VAIER_SERVER
+            : ServiceLocation.PEER_SERVER;
+    }
+
+    public enum ServiceLocation { VAIER_SERVER, PEER_SERVER, LAN_SERVICE }
+
+    /**
      * Drops a trailing {@code .<peer>} label the operator put in the subdomain — the
      * {@code " @ <server>"} part already names the peer, so {@code nut.colina27} reads as
      * just {@code nut}. The operator hand-types this suffix, so the match is lenient: the

@@ -785,6 +785,56 @@ class ReverseProxyRouteTest {
         assertThat(name).isEqualTo("app @ myserver");
     }
 
+    // --- shortName + serviceLocation (#225) ---
+
+    @Test
+    void shortName_returnsTheStrippedSubdomainOnly() {
+        // shortName is the bit before " @ <host>" — the operator-facing label without the host suffix.
+        ReverseProxyRoute route = route("openhab.apalveien5.example.com", "10.13.13.5", 8080);
+        VpnClient peerClient = connectedPeer("10.13.13.5/32");
+        PeerConfiguration peer = new PeerConfiguration("apalveien5", "Apalveien 5", "10.13.13.5",
+            "", MachineType.UBUNTU_SERVER, null, null, null);
+        ForResolvingPeerNames resolver = ip -> ip;
+
+        assertThat(route.shortName("example.com", List.of(peerClient), resolver, List.of(peer)))
+            .isEqualTo("openhab");
+    }
+
+    @Test
+    void shortName_forVaierServerRouteIsJustTheSubdomain() {
+        ReverseProxyRoute route = route("pihole.example.com", "pihole", 8080);
+        ForResolvingPeerNames resolver = ip -> ip;
+
+        assertThat(route.shortName("example.com", List.of(), resolver, List.of())).isEqualTo("pihole");
+    }
+
+    @Test
+    void serviceLocation_vaierServerRoute_isVaierServer() {
+        ReverseProxyRoute route = route("pihole.example.com", "pihole", 8080);
+        ForResolvingPeerNames resolver = ip -> ip;
+
+        assertThat(route.serviceLocation(List.of(), resolver, List.of()))
+            .isEqualTo(ReverseProxyRoute.ServiceLocation.VAIER_SERVER);
+    }
+
+    @Test
+    void serviceLocation_peerHostedRoute_isPeerServer() {
+        ReverseProxyRoute route = route("app.myserver.example.com", "10.13.13.2", 8080);
+        VpnClient peer = connectedPeer("10.13.13.2/32");
+        ForResolvingPeerNames resolver = ip -> "10.13.13.2".equals(ip) ? "myserver" : ip;
+
+        assertThat(route.serviceLocation(List.of(peer), resolver, List.of()))
+            .isEqualTo(ReverseProxyRoute.ServiceLocation.PEER_SERVER);
+    }
+
+    @Test
+    void serviceLocation_lanService_isLanService() {
+        ReverseProxyRoute route = lanRoute("nas.example.com", "192.168.3.50", 5000);
+
+        assertThat(route.serviceLocation(List.of(), ip -> ip, List.of()))
+            .isEqualTo(ReverseProxyRoute.ServiceLocation.LAN_SERVICE);
+    }
+
     // --- directUrl ---
 
     @Test
@@ -928,6 +978,11 @@ class ReverseProxyRouteTest {
 
     private static ReverseProxyRoute route(String domain, String address, int port) {
         return new ReverseProxyRoute("route", domain, address, port, "svc", null);
+    }
+
+    private static ReverseProxyRoute lanRoute(String domain, String address, int port) {
+        return new ReverseProxyRoute("route", domain, address, port, "svc", null,
+            null, null, null, null, false, true, "http");
     }
 
     private static ReverseProxyRoute fullRoute(String domain, String address, int port, boolean directUrlDisabled) {

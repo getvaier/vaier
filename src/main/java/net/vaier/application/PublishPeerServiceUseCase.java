@@ -46,6 +46,18 @@ public interface PublishPeerServiceUseCase {
                 case VAIER_SERVER -> containerName + ":" + port;
             };
         }
+
+        /**
+         * The subdomain the publish modal pre-fills. Vaier-server services get the container name
+         * alone; peer- and LAN-hosted services get {@code containerName.peerName} so multiple peers
+         * publishing the same container don't collide on one DNS label.
+         */
+        @JsonProperty("suggestedSubdomain")
+        public String suggestedSubdomain() {
+            return source == PublishableSource.VAIER_SERVER
+                ? containerName
+                : containerName + "." + peerName;
+        }
     }
 
     record PublishStatus(boolean dnsPropagated, boolean traefikActive) {}

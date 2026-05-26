@@ -469,11 +469,13 @@
         }
 
         function serviceTypeIcon(service) {
-            if (service.isLanService) return 'lan';
-            const nameParts = service.name.split(' @ ');
-            if (nameParts.length === 2 && nameParts[1] === 'Vaier server') return 'vaier';
-            if (nameParts.length === 1) return 'vaier';
-            return 'server';
+            // The server tells us where the route lives — VAIER_SERVER / PEER_SERVER / LAN_SERVICE.
+            // Mapping that onto an icon kind is the only thing the browser does here.
+            switch (service.serviceLocation) {
+                case 'LAN_SERVICE':  return 'lan';
+                case 'VAIER_SERVER': return 'vaier';
+                default:             return 'server';
+            }
         }
 
         function discoverableTypeIcon(s) {
@@ -579,11 +581,10 @@
 
             const html = services.slice().sort((a, b) => a.name.localeCompare(b.name)).map(service => {
                 const dnsOk  = service.dnsState === 'OK';
-                const hostOk = service.state === 'OK';
-                const uniqueName = service.name + (service.pathPrefix || '');
+                const uniqueName = service.dnsAddress + (service.pathPrefix || '');
                 const id         = cardId(uniqueName);
                 const isExpanded = expandedServices.has(uniqueName);
-                const dotClass   = dnsOk && hostOk ? 'status-connected' : 'status-disconnected';
+                const dotClass   = service.healthy ? 'status-connected' : 'status-disconnected';
                 const authSlot   = service.authenticated
                     ? { kind: 'auth',    title: 'Authelia authentication required',         label: 'Auth' }
                     : { kind: 'no-auth', title: 'No authentication — service is publicly reachable', label: 'No auth' };
@@ -591,10 +592,9 @@
                 const displayHost = `${service.dnsAddress}${service.pathPrefix || ''}`;
                 const isSelf = service.dnsAddress.startsWith('vaier.');
 
-                // Parse "subdomain @ server" display name
-                const nameParts = service.name.split(' @ ');
-                const shortName = nameParts[0] + (service.pathPrefix ? service.pathPrefix : '');
-                const peerName  = nameParts.length === 2 ? nameParts[1] : '';
+                // shortName and hostName are computed server-side — no parsing of " @ " here.
+                const shortName = service.shortName + (service.pathPrefix ? service.pathPrefix : '');
+                const peerName  = service.hostName || '';
                 const typeKind  = serviceTypeIcon(service);
                 const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'vaier': 'Service on the Vaier server', 'server': 'Service on a VPN peer' })[typeKind];
 
@@ -754,7 +754,8 @@
                         data-address="${s.address}"
                         data-port="${s.port}"
                         data-container="${s.containerName}"
-                        data-source="${isVaierServer ? 'vaier-server' : s.peerName}"
+                        data-source-label="${sourceLabel}"
+                        data-suggested-subdomain="${s.suggestedSubdomain}"
                         data-redirect="${s.rootRedirectPath || ''}"
                         onclick="showPublishModalFromBtn(this)">
                         + Publish
@@ -808,17 +809,24 @@
         }
 
         function showPublishModalFromBtn(btn) {
-            showPublishModal(btn.dataset.address, parseInt(btn.dataset.port), btn.dataset.container, btn.dataset.source, btn.dataset.redirect || null);
+            showPublishModal(
+                btn.dataset.address,
+                parseInt(btn.dataset.port),
+                btn.dataset.container,
+                btn.dataset.sourceLabel,
+                btn.dataset.suggestedSubdomain,
+                btn.dataset.redirect || null);
         }
 
-        function showPublishModal(address, port, containerName, sourceName, rootRedirectPath) {
+        function showPublishModal(address, port, containerName, sourceLabel, suggestedSubdomain, rootRedirectPath) {
             document.getElementById('publishAddress').value          = address;
             document.getElementById('publishPort').value             = port;
             document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
             document.getElementById('publishPathPrefix').value = '';
-            document.getElementById('publishSubdomain').value        = sourceName === 'vaier-server' ? containerName : `${containerName}.${sourceName}`;
+            // suggestedSubdomain is computed in the domain by PublishableService.suggestedSubdomain().
+            document.getElementById('publishSubdomain').value        = suggestedSubdomain;
             document.getElementById('publishServiceLabel').textContent =
-                `${containerName} on ${sourceName} (${address}:${port})`;
+                `${containerName} on ${sourceLabel} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;
             document.getElementById('publishDirectUrlDisabled').checked = false;
             document.getElementById('publishAdvanced').open = !!rootRedirectPath;

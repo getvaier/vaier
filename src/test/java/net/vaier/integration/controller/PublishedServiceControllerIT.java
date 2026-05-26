@@ -57,7 +57,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(status().isOk());
 
         verify(publishPeerServiceUseCase).publishService(
-                "10.13.13.2", 8080, "app", true, "/dashboard", true);
+                "10.13.13.2", 8080, "app", true, "/dashboard", true, null);
     }
 
     @Test
@@ -75,7 +75,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(publishPeerServiceUseCase).publishService("10.13.13.2", 8080, "app", false, null, false);
+        verify(publishPeerServiceUseCase).publishService("10.13.13.2", 8080, "app", false, null, false, null);
     }
 
     @Test
@@ -83,7 +83,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
         mockMvc.perform(delete("/published-services/app.example.com"))
                .andExpect(status().isOk());
 
-        verify(deletePublishedServiceUseCase).deleteService("app.example.com");
+        verify(deletePublishedServiceUseCase).deleteService("app.example.com", null);
     }
 
     @Test
@@ -95,7 +95,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(toggleServiceAuthUseCase).setAuthentication("app.example.com", true);
+        verify(toggleServiceAuthUseCase).setAuthentication("app.example.com", null, true);
     }
 
     @Test
@@ -107,7 +107,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(toggleServiceDirectUrlDisabledUseCase).setDirectUrlDisabled("app.example.com", true);
+        verify(toggleServiceDirectUrlDisabledUseCase).setDirectUrlDisabled("app.example.com", null, true);
     }
 
     @Test
@@ -119,7 +119,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(toggleServiceLaunchpadVisibilityUseCase).setHiddenFromLaunchpad("internal-api.example.com", true);
+        verify(toggleServiceLaunchpadVisibilityUseCase).setHiddenFromLaunchpad("internal-api.example.com", null, true);
     }
 
     @Test
@@ -196,7 +196,7 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(editServiceRedirectUseCase).setRootRedirectPath("app.example.com", "/dashboard");
+        verify(editServiceRedirectUseCase).setRootRedirectPath("app.example.com", null, "/dashboard");
     }
 
     @Test

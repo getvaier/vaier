@@ -279,13 +279,19 @@ public class PublishingService implements
                                     String serverLanCidr) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
         DnsState dnsState = route.dnsState(allDnsRecords, configResolver.getDnsProvider());
+        Server.State hostState = route.hostState(localServices, vpnClients, peers, serverLanCidr);
+        String baseDomain = configResolver.getDomain();
         return new PublishedServiceUco(
-            route.displayName(configResolver.getDomain(), localServices, vpnClients, forResolvingPeerNames, peers),
+            route.displayName(baseDomain, localServices, vpnClients, forResolvingPeerNames, peers),
+            route.shortName(baseDomain, vpnClients, forResolvingPeerNames, peers),
+            route.hostDisplayName(vpnClients, forResolvingPeerNames, peers),
+            route.serviceLocation(vpnClients, forResolvingPeerNames, peers),
+            dnsState == DnsState.OK && hostState == Server.State.OK,
             route.getDomainName(),
             dnsState,
             route.getAddress(),
             route.getPort(),
-            route.hostState(localServices, vpnClients, peers, serverLanCidr),
+            hostState,
             route.getAuthInfo() != null,
             route.getRootRedirectPath(),
             route.isDirectUrlDisabled(),
