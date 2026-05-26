@@ -17,7 +17,10 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up JDK 21
-      uses: actions/setup-java@v4
+      # Pinned past v4.8.0 (== floating v4) — its codeload archive is unreachable from
+      # the ubuntu-latest runner's network path even though it resolves elsewhere, and
+      # every retry against that exact SHA fails. v4.7.1's archive is intact.
+      uses: actions/setup-java@v4.7.1
       with:
         java-version: '21'
         distribution: 'temurin'
