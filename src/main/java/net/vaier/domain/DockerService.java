@@ -107,5 +107,55 @@ public record DockerService(
             }
             return privatePort + "/" + type;
         }
+
+        /**
+         * Group runs of consecutive {@code (port, type, ip)} tuples into a single range mapping.
+         * Roon-style images expose huge contiguous ranges (e.g. {@code 9100-9339/tcp}); without
+         * this collapse, one container floods the publishable-services list with hundreds of rows.
+         *
+         * <p>The rule belongs to the domain because it shapes {@link PortMapping} values: the
+         * resulting mappings carry {@code lastPrivatePort} so downstream code can render them via
+         * {@link #isRange()}. Mappings are grouped by {@code (type, ip)}, sorted by
+         * {@code privatePort}, and any chain where each entry is exactly one above the previous
+         * is merged. Only meaningful on data where {@code publicPort == privatePort} — i.e.
+         * host-network ExposedPorts; bridge-network mappings already arrive collapsed by Docker.
+         */
+        public static java.util.List<PortMapping> collapseContiguous(java.util.List<PortMapping> input) {
+            if (input == null || input.isEmpty()) return java.util.List.of();
+
+            java.util.Map<String, java.util.List<PortMapping>> grouped = new java.util.LinkedHashMap<>();
+            for (PortMapping pm : input) {
+                String key = pm.type() + "|" + (pm.ip() == null ? "" : pm.ip());
+                grouped.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(pm);
+            }
+
+            java.util.List<PortMapping> result = new java.util.ArrayList<>();
+            for (java.util.List<PortMapping> group : grouped.values()) {
+                group.sort(java.util.Comparator.comparingInt(PortMapping::privatePort));
+                int runStart = group.get(0).privatePort();
+                int runEnd = runStart;
+                String type = group.get(0).type();
+                String ip = group.get(0).ip();
+
+                for (int i = 1; i < group.size(); i++) {
+                    int p = group.get(i).privatePort();
+                    if (p == runEnd + 1) {
+                        runEnd = p;
+                    } else {
+                        result.add(buildRange(runStart, runEnd, type, ip));
+                        runStart = p;
+                        runEnd = p;
+                    }
+                }
+                result.add(buildRange(runStart, runEnd, type, ip));
+            }
+            return result;
+        }
+
+        private static PortMapping buildRange(int first, int last, String type, String ip) {
+            return first == last
+                ? new PortMapping(first, first, type, ip)
+                : new PortMapping(first, last, first, type, ip);
+        }
     }
 }
