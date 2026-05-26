@@ -7,6 +7,7 @@ import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.MachineStatus;
 import net.vaier.domain.Server;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
@@ -49,13 +50,18 @@ public class DockerServiceRestController {
     }
 
     @GetMapping("/vaier-server")
-    public ResponseEntity<List<DockerService>> discoverVaierServerContainers() {
+    public ResponseEntity<VaierServerStatusResponse> discoverVaierServerContainers() {
+        // Status is the domain's: scrape succeeded → OK, scrape errored → DOWN. The browser maps
+        // the enum to a CSS class and never decides what "OK" means.
         try {
-            return ResponseEntity.ok(discoverVaierServerContainersUseCase.discover());
+            return ResponseEntity.ok(new VaierServerStatusResponse(
+                MachineStatus.OK, discoverVaierServerContainersUseCase.discover()));
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
+            return ResponseEntity.ok(new VaierServerStatusResponse(MachineStatus.DOWN, List.of()));
         }
     }
+
+    record VaierServerStatusResponse(MachineStatus status, List<DockerService> containers) {}
 
     @GetMapping("/peers")
     public ResponseEntity<List<PeerContainers>> discoverPeerContainers() {

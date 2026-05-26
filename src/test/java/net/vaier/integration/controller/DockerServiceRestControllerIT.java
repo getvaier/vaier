@@ -91,26 +91,30 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
 
         mockMvc.perform(get("/docker-services/vaier-server"))
                .andExpect(status().isOk())
-               .andExpect(jsonPath("$[0].containerId").value("c1"))
-               .andExpect(jsonPath("$[0].containerName").value("vaier"));
+               .andExpect(jsonPath("$.status").value("OK"))
+               .andExpect(jsonPath("$.containers[0].containerId").value("c1"))
+               .andExpect(jsonPath("$.containers[0].containerName").value("vaier"));
     }
 
     @Test
-    void discoverVaierServerContainers_returnsEmptyListWhenNoContainers() throws Exception {
+    void discoverVaierServerContainers_returnsEmptyContainersWithOkStatus() throws Exception {
         when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of());
 
         mockMvc.perform(get("/docker-services/vaier-server"))
                .andExpect(status().isOk())
-               .andExpect(jsonPath("$").isEmpty());
+               .andExpect(jsonPath("$.status").value("OK"))
+               .andExpect(jsonPath("$.containers").isEmpty());
     }
 
     @Test
-    void discoverVaierServerContainers_returns500WhenDockerUnavailable() throws Exception {
+    void discoverVaierServerContainers_returnsDownStatusWhenDockerUnavailable() throws Exception {
         when(discoverVaierServerContainersUseCase.discover())
                 .thenThrow(new RuntimeException("docker.sock not accessible"));
 
         mockMvc.perform(get("/docker-services/vaier-server"))
-               .andExpect(status().isInternalServerError());
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.status").value("DOWN"))
+               .andExpect(jsonPath("$.containers").isEmpty());
     }
 
     @Test

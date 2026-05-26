@@ -4,12 +4,16 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
+import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
+import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
 import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
+import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
+import net.vaier.domain.MachineStatus;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -20,6 +24,8 @@ import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/lan-servers")
@@ -33,14 +39,25 @@ public class LanServerRestController {
     private final DeleteLanServerUseCase deleteLanServerUseCase;
     private final GetLanServersUseCase getLanServersUseCase;
     private final GetLanServerReachabilityUseCase reachabilityUseCase;
+    private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     private final ResolveLanAnchorUseCase resolveLanAnchorUseCase;
 
     @GetMapping
     public List<LanServerResponse> list() {
+        Map<String, String> scrapeStatusByName = getLanServerScrapeUseCase.getLanServerContainers().stream()
+            .collect(Collectors.toMap(LanServerContainers::name, LanServerContainers::status));
         return getLanServersUseCase.getAll().stream()
-            .map(view -> LanServerResponse.from(view,
-                reachabilityUseCase.getReachability(view.server().lanAddress()).name(),
-                reachabilityUseCase.getLastSeenEpochSec(view.server().lanAddress())))
+            .map(view -> {
+                Reachability reachability = reachabilityUseCase.getReachability(view.server().lanAddress());
+                boolean scrapeOk = "OK".equals(scrapeStatusByName.get(view.server().name()));
+                MachineStatus status = MachineStatus.forLanServer(
+                    reachability != Reachability.UNKNOWN,
+                    reachability == Reachability.OK,
+                    view.server().runsDocker(),
+                    scrapeOk);
+                return LanServerResponse.from(view, reachability.name(), status,
+                    reachabilityUseCase.getLastSeenEpochSec(view.server().lanAddress()));
+            })
             .toList();
     }
 
@@ -146,9 +163,10 @@ public class LanServerRestController {
         String description,
         String relayPeerName,
         String reachability,
+        MachineStatus status,
         Long lastSeen
     ) {
-        static LanServerResponse from(LanServerView view, String reachability, Long lastSeen) {
+        static LanServerResponse from(LanServerView view, String reachability, MachineStatus status, Long lastSeen) {
             return new LanServerResponse(
                 view.server().name(),
                 view.server().lanAddress(),
@@ -157,6 +175,7 @@ public class LanServerRestController {
                 view.server().description(),
                 view.relayPeerName(),
                 reachability,
+                status,
                 lastSeen);
         }
     }

@@ -1,8 +1,10 @@
 package net.vaier.rest;
 
 import net.vaier.application.DeleteLanServerUseCase;
+import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
+import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.RegisterLanServerUseCase;
@@ -41,6 +43,7 @@ class LanServerRestControllerTest {
     @Mock DeleteLanServerUseCase deleteLanServerUseCase;
     @Mock GetLanServersUseCase getLanServersUseCase;
     @Mock GetLanServerReachabilityUseCase reachabilityUseCase;
+    @Mock GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     @Mock ResolveLanAnchorUseCase resolveLanAnchorUseCase;
 
     @InjectMocks
@@ -186,6 +189,7 @@ class LanServerRestControllerTest {
         ));
         when(reachabilityUseCase.getReachability("192.168.3.50")).thenReturn(Reachability.UNKNOWN);
         when(reachabilityUseCase.getReachability("192.168.3.20")).thenReturn(Reachability.OK);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
 
         var response = controller.list();
 
@@ -200,6 +204,56 @@ class LanServerRestControllerTest {
         assertThat(response.get(1).runsDocker()).isFalse();
         assertThat(response.get(1).dockerPort()).isNull();
         assertThat(response.get(1).reachability()).isEqualTo("OK");
+    }
+
+    @Test
+    void list_dockerHostWithFailingScrape_statusIsDegraded() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
+        ));
+        when(reachabilityUseCase.getReachability("192.168.3.50")).thenReturn(Reachability.OK);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of(
+            new LanServerContainers("nas", "192.168.3.50", 2375, "apalveien5", "UNREACHABLE", List.of())));
+
+        var response = controller.list();
+
+        assertThat(response.get(0).status()).isEqualTo(net.vaier.domain.MachineStatus.DEGRADED);
+    }
+
+    @Test
+    void list_dockerHostWithOkScrape_statusIsOk() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
+        ));
+        when(reachabilityUseCase.getReachability("192.168.3.50")).thenReturn(Reachability.OK);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of(
+            new LanServerContainers("nas", "192.168.3.50", 2375, "apalveien5", "OK", List.of())));
+
+        var response = controller.list();
+
+        assertThat(response.get(0).status()).isEqualTo(net.vaier.domain.MachineStatus.OK);
+    }
+
+    @Test
+    void list_unknownReachability_statusIsUnknown() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5")
+        ));
+        when(reachabilityUseCase.getReachability("192.168.3.20")).thenReturn(Reachability.UNKNOWN);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
+
+        assertThat(controller.list().get(0).status()).isEqualTo(net.vaier.domain.MachineStatus.UNKNOWN);
+    }
+
+    @Test
+    void list_unreachableHost_statusIsDown() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
+        ));
+        when(reachabilityUseCase.getReachability("192.168.3.50")).thenReturn(Reachability.DOWN);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
+
+        assertThat(controller.list().get(0).status()).isEqualTo(net.vaier.domain.MachineStatus.DOWN);
     }
 
     // --- rename (#55) ---
@@ -284,6 +338,7 @@ class LanServerRestControllerTest {
         when(reachabilityUseCase.getReachability("192.168.3.20")).thenReturn(Reachability.UNKNOWN);
         when(reachabilityUseCase.getLastSeenEpochSec("192.168.3.50")).thenReturn(1714000000L);
         when(reachabilityUseCase.getLastSeenEpochSec("192.168.3.20")).thenReturn(null);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
 
         var response = controller.list();
 

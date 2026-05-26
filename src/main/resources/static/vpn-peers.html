@@ -589,7 +589,7 @@
         let peers = [];
         let peerServices = {};
         let vaierServerServices = [];
-        let vaierServerServicesStatus = 'UNKNOWN'; // OK | UNREACHABLE | UNKNOWN
+        let vaierServerStatus = 'UNKNOWN'; // domain MachineStatus enum value
         let lanServers = [];
         let lanServerServices = {};
         let lastFetchSuccessful = false;
@@ -648,14 +648,15 @@
             try {
                 const response = await fetch('/docker-services/vaier-server');
                 if (response.ok) {
-                    vaierServerServices = await response.json();
-                    vaierServerServicesStatus = 'OK';
+                    const body = await response.json();
+                    vaierServerServices = body.containers;
+                    vaierServerStatus = body.status;
                 } else {
-                    vaierServerServicesStatus = 'UNREACHABLE';
+                    vaierServerStatus = 'DOWN';
                 }
             } catch (error) {
                 console.error('Failed to load Vaier server services:', error);
-                vaierServerServicesStatus = 'UNREACHABLE';
+                vaierServerStatus = 'DOWN';
             }
             displayPeers(peers);
         }
@@ -826,29 +827,22 @@
             </div>`;
         }
 
+        // Maps the domain's MachineStatus enum to a CSS status class. The combination logic
+        // (reachability + Docker scrape + runsDocker) lives in MachineStatus.forLanServer on
+        // the server; the browser only renders.
+        const MACHINE_STATUS_CLASS = {
+            'OK':       'status-connected',
+            'DEGRADED': 'status-degraded',
+            'DOWN':     'status-disconnected',
+            'UNKNOWN':  'status-neutral',
+        };
+
         function renderLanServerCard(server) {
             const key = 'lan-server:' + server.name;
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
             const services = lanServerServices[server.name];
-            // Status combines the periodic TCP ping (#186) with Docker scrape state for
-            // Docker hosts:
-            //   gray   — not yet probed
-            //   green  — host pingable; if it runs Docker, the scrape is also OK
-            //   yellow — host pingable but Docker scrape failed (Docker host only)
-            //   red    — host not pingable
-            let statusClass;
-            if (server.reachability === 'UNKNOWN' || !server.reachability) {
-                statusClass = 'status-neutral';
-            } else if (server.reachability === 'DOWN') {
-                statusClass = 'status-disconnected';
-            } else if (server.runsDocker) {
-                statusClass = (services && services.status === 'OK')
-                    ? 'status-connected'
-                    : 'status-degraded';
-            } else {
-                statusClass = 'status-connected';
-            }
+            const statusClass = MACHINE_STATUS_CLASS[server.status] || 'status-neutral';
             const dockerSlot = server.runsDocker
                 ? { kind: 'docker', title: 'Docker auto-discovery enabled', label: 'Docker' }
                 : null;
@@ -938,13 +932,9 @@
             const key = '__vaier-server__';
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
-            // Mirror the LAN-server status semantics: green when the Vaier server's Docker
-            // engine responded OK to the most recent /docker-services/vaier-server poll,
-            // red if it errored, neutral until the first poll completes.
-            const statusClass = vaierServerServicesStatus === 'OK'           ? 'status-connected'
-                              : vaierServerServicesStatus === 'UNREACHABLE'  ? 'status-disconnected'
-                              :                                          'status-neutral';
-            const servicesHtml = vaierServerServicesStatus === 'UNREACHABLE'
+            // The Vaier-server endpoint returns a MachineStatus already computed in the domain.
+            const statusClass = MACHINE_STATUS_CLASS[vaierServerStatus] || 'status-neutral';
+            const servicesHtml = vaierServerStatus === 'DOWN'
                 ? `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">Docker engine unreachable</span></div>`
                 : renderServiceList(vaierServerServices);
             return `
@@ -1816,11 +1806,16 @@
             return isPeerConnected(p) ? 'up' : 'down';
         }
 
-        function statusKeyForLanServer(s, services) {
-            if (!s.reachability) return 'unknown';
-            if (s.reachability === 'DOWN') return 'down';
-            if (s.runsDocker && (!services || services.status !== 'OK')) return 'degraded';
-            return 'up';
+        // Maps the domain MachineStatus enum to the map-marker's status key. Same status, same
+        // colour — keeps the map markers in lockstep with the LAN-server card icons.
+        const MAP_MARKER_STATUS_KEY = {
+            'OK':       'up',
+            'DEGRADED': 'degraded',
+            'DOWN':     'down',
+            'UNKNOWN':  'unknown',
+        };
+        function statusKeyForLanServer(s) {
+            return MAP_MARKER_STATUS_KEY[s.status] || 'unknown';
         }
 
         // Build a Leaflet divIcon marker carrying the same SVG used in the machine-list cards.
@@ -1912,7 +1907,7 @@
                     + `<span style="color:#888;font-size:0.85em">Behind ${escapeHtml(s.relayPeerName)}</span><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(s.lanAddress)}</span>`
                     + (s.runsDocker ? `<br><span style="color:#888;font-size:0.78em">Docker on :${s.dockerPort}</span>` : '');
-                const firm = makeIconMarker([lat, lon], 'lan', statusKeyForLanServer(s, lanServerServices[s.name]));
+                const firm = makeIconMarker([lat, lon], 'lan', statusKeyForLanServer(s));
                 bindHoverPopup(firm, popup);
                 _markersClusterGroup.addLayer(firm);
                 allCoords.push([lat, lon]);
