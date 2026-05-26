@@ -8,14 +8,12 @@ import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetServerLocationUseCase.ServerLocation;
-import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.GetVpnPeersUseCase;
+import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.RenamePeerUseCase;
-import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
-import net.vaier.domain.VpnClient;
-import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,8 +33,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class VpnPeerRestControllerTest {
 
-    @Mock GetVpnClientsUseCase vpnClientService;
-    @Mock ResolveVpnPeerNameUseCase peerNameResolver;
+    @Mock GetVpnPeersUseCase getVpnPeersUseCase;
     @Mock GetPeerConfigUseCase getPeerConfigUseCase;
     @Mock CreatePeerUseCase createPeerUseCase;
     @Mock DeletePeerUseCase deletePeerUseCase;
@@ -46,10 +43,17 @@ class VpnPeerRestControllerTest {
     @Mock RenamePeerUseCase renamePeerUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock SseEventPublisher sseEventPublisher;
-    @Mock ForGeolocatingIps forGeolocatingIps;
     @Mock GetServerLocationUseCase getServerLocationUseCase;
 
     @InjectMocks VpnPeerRestController controller;
+
+    private static VpnPeerView view(String id, String name, boolean connected,
+                                    String endpointIp, MachineType type, String description,
+                                    Optional<GeoLocation> geo) {
+        return new VpnPeerView(id, name, "pub", "10.13.13.2/32",
+            endpointIp, "51820", "0", connected, "0", "0",
+            type, null, null, description, geo);
+    }
 
     @Test
     void updateLanAddress_updatesAndReturnsNoContent() {
@@ -196,7 +200,24 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void createPeer_passesDescriptionToUseCase() {
+    void createPeer_passesNullPeerTypeStraightThroughToUseCase() {
+        // The default ("unspecified peerType becomes UBUNTU_SERVER") is a domain rule that lives on
+        // CreatePeerUseCase / VpnService now — the controller must not substitute it.
+        var created = new CreatePeerUseCase.CreatedPeerUco(
+                "nas", "nas", "10.13.13.5", "pub", "priv", "[Interface]", MachineType.UBUNTU_SERVER);
+        when(createPeerUseCase.createPeer("nas", null, null, null, "Home media server"))
+                .thenReturn(created);
+        var request = new VpnPeerRestController.CreatePeerRequest(
+                "nas", null, null, null, "Home media server");
+
+        var response = controller.createPeer(request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(createPeerUseCase).createPeer("nas", null, null, null, "Home media server");
+    }
+
+    @Test
+    void createPeer_passesExplicitPeerTypeThrough() {
         var created = new CreatePeerUseCase.CreatedPeerUco(
                 "nas", "nas", "10.13.13.5", "pub", "priv", "[Interface]", MachineType.UBUNTU_SERVER);
         when(createPeerUseCase.createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server"))
@@ -211,42 +232,57 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void listPeers_includesPeerDescription() {
-        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", "0", "0", "0");
-        when(vpnClientService.getClients()).thenReturn(List.of(client));
-        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(
-                Optional.of(new GetPeerConfigUseCase.PeerConfigResult(
-                        "nas", "nas", "10.13.13.2", "", MachineType.UBUNTU_SERVER, null, null, "Home media server")));
+    void listPeers_mapsUseCaseViewIntoResponseDto() {
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            view("nas", "nas", false, "", MachineType.UBUNTU_SERVER, "Home media server", Optional.empty())
+        ));
 
         var peer = controller.listPeers().getBody().get(0);
 
+        assertThat(peer.id()).isEqualTo("nas");
+        assertThat(peer.name()).isEqualTo("nas");
         assertThat(peer.description()).isEqualTo("Home media server");
+        assertThat(peer.peerType()).isEqualTo("UBUNTU_SERVER");
+        assertThat(peer.latitude()).isNull();
+        assertThat(peer.country()).isNull();
     }
 
     @Test
-    void listPeers_marksRecentHandshakePeerConnected() {
-        String recent = String.valueOf(System.currentTimeMillis() / 1000 - 30);
-        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", recent, "0", "0");
-        when(vpnClientService.getClients()).thenReturn(List.of(client));
-        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+    void listPeers_passesConnectedFlagFromUseCase() {
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            view("nas", "nas", true, "", MachineType.UBUNTU_SERVER, null, Optional.empty())
+        ));
 
-        var peer = controller.listPeers().getBody().get(0);
-
-        assertThat(peer.connected()).isTrue();
+        assertThat(controller.listPeers().getBody().get(0).connected()).isTrue();
     }
 
     @Test
-    void listPeers_marksStaleHandshakePeerDisconnected() {
-        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", "0", "0", "0");
-        when(vpnClientService.getClients()).thenReturn(List.of(client));
-        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("nas");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+    void listPeers_unpacksGeoOptionalIntoFlatFields() {
+        var geo = Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway"));
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            view("alice", "alice", true, "203.0.113.10", MachineType.MOBILE_CLIENT, null, geo)
+        ));
 
         var peer = controller.listPeers().getBody().get(0);
 
-        assertThat(peer.connected()).isFalse();
+        assertThat(peer.latitude()).isEqualTo(59.91);
+        assertThat(peer.longitude()).isEqualTo(10.74);
+        assertThat(peer.city()).isEqualTo("Oslo");
+        assertThat(peer.country()).isEqualTo("Norway");
+    }
+
+    @Test
+    void listPeers_emptyGeoLeavesAllGeoFieldsNull() {
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            view("alice", "alice", true, "203.0.113.10", MachineType.MOBILE_CLIENT, null, Optional.empty())
+        ));
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.latitude()).isNull();
+        assertThat(peer.longitude()).isNull();
+        assertThat(peer.city()).isNull();
+        assertThat(peer.country()).isNull();
     }
 
     @Test
@@ -280,58 +316,6 @@ class VpnPeerRestControllerTest {
         verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void listPeers_includesGeolocationFieldsWhenLookupSucceeds() {
-        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
-        when(vpnClientService.getClients()).thenReturn(List.of(client));
-        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
-        when(forGeolocatingIps.locate("203.0.113.10"))
-            .thenReturn(Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway")));
-
-        var response = controller.listPeers();
-
-        assertThat(response.getStatusCode().value()).isEqualTo(200);
-        var body = response.getBody();
-        assertThat(body).hasSize(1);
-        var peer = body.get(0);
-        assertThat(peer.name()).isEqualTo("alice");
-        assertThat(peer.latitude()).isEqualTo(59.91);
-        assertThat(peer.longitude()).isEqualTo(10.74);
-        assertThat(peer.city()).isEqualTo("Oslo");
-        assertThat(peer.country()).isEqualTo("Norway");
-    }
-
-    @Test
-    void listPeers_geolocationFieldsAreNullWhenLookupFails() {
-        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
-        when(vpnClientService.getClients()).thenReturn(List.of(client));
-        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
-        when(forGeolocatingIps.locate("203.0.113.10")).thenReturn(Optional.empty());
-
-        var peer = controller.listPeers().getBody().get(0);
-
-        assertThat(peer.latitude()).isNull();
-        assertThat(peer.longitude()).isNull();
-        assertThat(peer.city()).isNull();
-        assertThat(peer.country()).isNull();
-    }
-
-    @Test
-    void listPeers_skipsGeolocationLookupWhenEndpointIsBlank() {
-        VpnClient client = new VpnClient("pubkey", "10.13.13.2/32", "", "", "0", "0", "0");
-        when(vpnClientService.getClients()).thenReturn(List.of(client));
-        when(peerNameResolver.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
-
-        var peer = controller.listPeers().getBody().get(0);
-
-        assertThat(peer.latitude()).isNull();
-        assertThat(peer.longitude()).isNull();
-        verify(forGeolocatingIps, never()).locate(org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test

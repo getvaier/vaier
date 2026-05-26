@@ -9,6 +9,8 @@ import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.GetVpnPeersUseCase;
+import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
@@ -56,6 +58,7 @@ public class VpnService implements
     CreatePeerUseCase,
     DeletePeerUseCase,
     GetVpnClientsUseCase,
+    GetVpnPeersUseCase,
     ResolveVpnPeerNameUseCase,
     GetPeerConfigUseCase,
     GeneratePeerSetupScriptUseCase,
@@ -127,6 +130,36 @@ public class VpnService implements
     @Override
     public List<VpnClient> getClients() {
         return forGettingVpnClients.getClients();
+    }
+
+    // --- GetVpnPeersUseCase ---
+
+    @Override
+    public List<VpnPeerView> getVpnPeers() {
+        return forGettingVpnClients.getClients().stream()
+            .map(this::toVpnPeerView)
+            .toList();
+    }
+
+    private VpnPeerView toVpnPeerView(VpnClient client) {
+        String peerIp = client.vpnIp();
+        String id = forResolvingPeerNames.resolvePeerNameByIp(peerIp);
+        Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = getPeerConfigByIp(peerIp);
+        MachineType peerType = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType)
+            .orElse(MachineType.defaultType());
+        String name = cfg.map(GetPeerConfigUseCase.PeerConfigResult::name)
+            .orElseGet(() -> PeerId.display(id));
+        String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
+        String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
+        String description = cfg.map(GetPeerConfigUseCase.PeerConfigResult::description).orElse(null);
+        Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
+            ? forGeolocatingIps.locate(client.endpointIp())
+            : Optional.empty();
+        return new VpnPeerView(
+            id, name, client.publicKey(), client.allowedIps(),
+            client.endpointIp(), client.endpointPort(), client.latestHandshake(),
+            client.isConnected(), client.transferRx(), client.transferTx(),
+            peerType, lanCidr, lanAddress, description, geo);
     }
 
     // --- GetServerLocationUseCase ---
@@ -291,7 +324,7 @@ public class VpnService implements
 
     @Override
     public CreatedPeerUco createPeer(String peerName) {
-        return createPeer(peerName, MachineType.UBUNTU_SERVER, null, null, null);
+        return createPeer(peerName, null, null, null, null);
     }
 
     @Override
@@ -313,6 +346,7 @@ public class VpnService implements
         if (lanCidr != null && !lanCidr.isBlank()) {
             net.vaier.domain.Cidr.validateLanCidr(lanCidr);
         }
+        MachineType resolvedType = peerType != null ? peerType : MachineType.defaultType();
         // The id is the slug of the operator-typed name, deduplicated against existing peers and
         // frozen for the life of the peer (its config directory name). The typed name is kept
         // verbatim as the editable display label.
@@ -321,7 +355,7 @@ public class VpnService implements
                 .collect(Collectors.toSet());
         String id = PeerId.generate(name, existingIds).value();
         log.info("Creating peer '{}' (id {}) on interface {} (peerType: {}, lanCidr: {}, lanAddress: {})",
-                name, id, wireguardInterface, peerType, lanCidr, lanAddress);
+                name, id, wireguardInterface, resolvedType, lanCidr, lanAddress);
 
         try {
             String privateKey = forExecutingInContainer.execute(wireguardContainerName, "wg", "genkey").trim();
@@ -344,7 +378,7 @@ public class VpnService implements
             Files.createDirectories(peerDir);
 
             String clientConfig = WireGuardPeerConfig.generate(
-                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, peerType, lanCidr, lanAddress, vpnSubnet,
+                    privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, resolvedType, lanCidr, lanAddress, vpnSubnet,
                     description, name);
 
             Path peerConfigPath = peerDir.resolve(id + ".conf");
@@ -356,7 +390,7 @@ public class VpnService implements
 
             log.info("Peer created successfully: {} with IP {}", id, ipAddress);
 
-            return new CreatedPeerUco(id, name, ipAddress, publicKey, privateKey, clientConfig, peerType);
+            return new CreatedPeerUco(id, name, ipAddress, publicKey, privateKey, clientConfig, resolvedType);
 
         } catch (IOException | InterruptedException e) {
             log.error("Error creating peer", e);

@@ -950,7 +950,76 @@ class VpnServiceTest {
         verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
     }
 
-    // silence unused field warning — MachineType is referenced in Javadoc of PeerConfigResult ctor via record definition
-    @SuppressWarnings("unused")
-    private static final MachineType REFERENCE = MachineType.UBUNTU_SERVER;
+    // --- getVpnPeers (#220) ---
+
+    @Test
+    void getVpnPeers_returnsEmptyWhenNoClients() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+
+        assertThat(service.getVpnPeers()).isEmpty();
+    }
+
+    @Test
+    void getVpnPeers_assemblesFromClientPlusPeerConfigPlusGeo() {
+        VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice-1");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.of(
+            new PeerConfiguration("alice-1", "Alice", "10.13.13.2", "[Interface]",
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10", "alice's box")));
+        when(forGeolocatingIps.locate("203.0.113.10"))
+            .thenReturn(Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway")));
+
+        var view = service.getVpnPeers().get(0);
+
+        assertThat(view.id()).isEqualTo("alice-1");
+        assertThat(view.name()).isEqualTo("Alice");
+        assertThat(view.publicKey()).isEqualTo("pub");
+        assertThat(view.peerType()).isEqualTo(MachineType.UBUNTU_SERVER);
+        assertThat(view.lanCidr()).isEqualTo("192.168.1.0/24");
+        assertThat(view.lanAddress()).isEqualTo("192.168.1.10");
+        assertThat(view.description()).isEqualTo("alice's box");
+        assertThat(view.geoLocation()).contains(new GeoLocation(59.91, 10.74, "Oslo", "Norway"));
+    }
+
+    @Test
+    void getVpnPeers_fallsBackToDefaultTypeAndDisplayLabelWhenNoPeerConfig() {
+        VpnClient client = new VpnClient("pub", "10.13.13.2/32", "", "", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("orphan-1");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+
+        var view = service.getVpnPeers().get(0);
+
+        assertThat(view.peerType()).isEqualTo(MachineType.defaultType());
+        assertThat(view.name()).isEqualTo(net.vaier.domain.PeerId.display("orphan-1"));
+        assertThat(view.lanCidr()).isNull();
+        assertThat(view.lanAddress()).isNull();
+        assertThat(view.description()).isNull();
+    }
+
+    @Test
+    void getVpnPeers_skipsGeolocationWhenEndpointIsBlank() {
+        VpnClient client = new VpnClient("pub", "10.13.13.2/32", "", "", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice-1");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+
+        var view = service.getVpnPeers().get(0);
+
+        assertThat(view.geoLocation()).isEmpty();
+        verify(forGeolocatingIps, never()).locate(any());
+    }
+
+    @Test
+    void getVpnPeers_emptyGeoOptionalWhenLookupFails() {
+        VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice-1");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
+        when(forGeolocatingIps.locate("203.0.113.10")).thenReturn(Optional.empty());
+
+        assertThat(service.getVpnPeers().get(0).geoLocation()).isEmpty();
+    }
+
 }

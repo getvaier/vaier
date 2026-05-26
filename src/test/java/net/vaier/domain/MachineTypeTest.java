@@ -57,4 +57,11 @@ class MachineTypeTest {
         assertThat(MachineType.MOBILE_CLIENT.defaultAllowedIps(vpnSubnet)).isEqualTo("0.0.0.0/0");
         assertThat(MachineType.WINDOWS_CLIENT.defaultAllowedIps(vpnSubnet)).isEqualTo("0.0.0.0/0");
     }
+
+    // --- defaultType (#220) ---
+
+    @Test
+    void defaultType_isUbuntuServer() {
+        assertThat(MachineType.defaultType()).isEqualTo(MachineType.UBUNTU_SERVER);
+    }
 }

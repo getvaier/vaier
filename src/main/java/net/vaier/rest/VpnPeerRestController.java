@@ -6,20 +6,15 @@ import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
-import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.GetVpnPeersUseCase;
+import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.RenamePeerUseCase;
-import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.domain.GeoLocation;
-import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.MachineType;
-import net.vaier.domain.PeerId;
-import net.vaier.domain.VpnClient;
-
-import java.util.Optional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,8 +34,7 @@ import java.util.List;
 @Slf4j
 public class VpnPeerRestController {
 
-    private final GetVpnClientsUseCase vpnClientService;
-    private final ResolveVpnPeerNameUseCase peerNameResolver;
+    private final GetVpnPeersUseCase getVpnPeersUseCase;
     private final GetPeerConfigUseCase getPeerConfigUseCase;
     private final CreatePeerUseCase createPeerUseCase;
     private final DeletePeerUseCase deletePeerUseCase;
@@ -50,7 +44,6 @@ public class VpnPeerRestController {
     private final RenamePeerUseCase renamePeerUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final SseEventPublisher sseEventPublisher;
-    private final ForGeolocatingIps forGeolocatingIps;
     private final GetServerLocationUseCase getServerLocationUseCase;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -62,44 +55,8 @@ public class VpnPeerRestController {
     public ResponseEntity<List<VpnPeerResponse>> listPeers() {
         log.info("Fetching all VPN peers");
         try {
-            List<VpnClient> clients = vpnClientService.getClients();
-            List<VpnPeerResponse> response = clients.stream()
-                    .map(client -> {
-                        String peerIp = client.vpnIp();
-                        String id = peerNameResolver.resolvePeerNameByIp(peerIp);
-                        var cfg = getPeerConfigUseCase.getPeerConfigByIp(peerIp);
-                        MachineType peerType = cfg
-                                .map(GetPeerConfigUseCase.PeerConfigResult::peerType)
-                                .orElse(MachineType.UBUNTU_SERVER);
-                        String lanCidr = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanCidr).orElse(null);
-                        String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
-                        String description = cfg.map(GetPeerConfigUseCase.PeerConfigResult::description).orElse(null);
-                        String name = cfg.map(GetPeerConfigUseCase.PeerConfigResult::name)
-                                .orElseGet(() -> PeerId.display(id));
-                        Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
-                            ? forGeolocatingIps.locate(client.endpointIp())
-                            : Optional.empty();
-                        return new VpnPeerResponse(
-                                id,
-                                name,
-                                client.publicKey(),
-                                client.allowedIps(),
-                                client.endpointIp(),
-                                client.endpointPort(),
-                                client.latestHandshake(),
-                                client.isConnected(),
-                                client.transferRx(),
-                                client.transferTx(),
-                                peerType.name(),
-                                lanCidr,
-                                lanAddress,
-                                description,
-                                geo.map(GeoLocation::latitude).orElse(null),
-                                geo.map(GeoLocation::longitude).orElse(null),
-                                geo.map(GeoLocation::city).orElse(null),
-                                geo.map(GeoLocation::country).orElse(null)
-                        );
-                    })
+            List<VpnPeerResponse> response = getVpnPeersUseCase.getVpnPeers().stream()
+                    .map(VpnPeerRestController::toResponse)
                     .toList();
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -107,6 +64,18 @@ public class VpnPeerRestController {
             // Return empty list instead of error to prevent constant error messages
             return ResponseEntity.ok(List.of());
         }
+    }
+
+    private static VpnPeerResponse toResponse(VpnPeerView v) {
+        return new VpnPeerResponse(
+            v.id(), v.name(), v.publicKey(), v.allowedIps(),
+            v.endpointIp(), v.endpointPort(), v.latestHandshake(),
+            v.connected(), v.transferRx(), v.transferTx(),
+            v.peerType().name(), v.lanCidr(), v.lanAddress(), v.description(),
+            v.geoLocation().map(GeoLocation::latitude).orElse(null),
+            v.geoLocation().map(GeoLocation::longitude).orElse(null),
+            v.geoLocation().map(GeoLocation::city).orElse(null),
+            v.geoLocation().map(GeoLocation::country).orElse(null));
     }
 
     @GetMapping("/server-location")
@@ -131,11 +100,9 @@ public class VpnPeerRestController {
     public ResponseEntity<CreatePeerResponse> createPeer(@RequestBody CreatePeerRequest request) {
         log.info("Creating new VPN peer: {}", request.name());
 
-        MachineType peerType = request.peerType() != null ? request.peerType() : MachineType.UBUNTU_SERVER;
-
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 request.name(),
-                peerType,
+                request.peerType(),
                 request.lanCidr(),
                 request.lanAddress(),
                 request.description()

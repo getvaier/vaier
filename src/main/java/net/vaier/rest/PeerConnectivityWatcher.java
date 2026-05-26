@@ -57,7 +57,7 @@ public class PeerConnectivityWatcher {
 
         String name = peerNameResolver.resolvePeerNameByIp(peerIp);
         Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = peerConfigs.getPeerConfigByIp(peerIp);
-        MachineType type = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType).orElse(MachineType.UBUNTU_SERVER);
+        MachineType type = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType).orElse(MachineType.defaultType());
         String lanAddress = cfg.map(GetPeerConfigUseCase.PeerConfigResult::lanAddress).orElse(null);
 
         return new PeerSnapshot(name, type, client.isConnected(), client.latestHandshakeEpoch(), lanAddress);
