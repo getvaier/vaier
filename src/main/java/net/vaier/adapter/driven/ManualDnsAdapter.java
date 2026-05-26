@@ -9,6 +9,10 @@ import net.vaier.domain.DnsZone;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 
+// Manual-DNS mode: there is no upstream provider to read, so the "current state" of the zone is
+// just whatever Vaier requires for its own infrastructure. That mandatory set is a domain rule
+// owned by VaierHostnames — the adapter doesn't invent records.
+
 @Slf4j
 public class ManualDnsAdapter implements ForPersistingDnsRecords {
 
@@ -29,13 +33,7 @@ public class ManualDnsAdapter implements ForPersistingDnsRecords {
     public List<DnsRecord> getDnsRecords(DnsZone dnsZone) {
         String domain = configResolver.getDomain();
         if (domain == null || !domain.equals(dnsZone.name())) return List.of();
-        VaierHostnames hostnames = new VaierHostnames(domain);
-        String vaierHost = hostnames.vaierServerFqdn();
-        String authHost = hostnames.autheliaHost();
-        return List.of(
-            new DnsRecord(vaierHost, DnsRecordType.CNAME, 300L, List.of(vaierHost)),
-            new DnsRecord(authHost, DnsRecordType.CNAME, 300L, List.of(vaierHost))
-        );
+        return new VaierHostnames(domain).mandatoryDnsRecords();
     }
 
     @Override
