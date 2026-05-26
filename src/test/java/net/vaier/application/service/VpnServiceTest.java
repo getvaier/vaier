@@ -976,10 +976,38 @@ class VpnServiceTest {
         assertThat(view.name()).isEqualTo("Alice");
         assertThat(view.publicKey()).isEqualTo("pub");
         assertThat(view.peerType()).isEqualTo(MachineType.UBUNTU_SERVER);
+        assertThat(view.tunnelIp()).isEqualTo("10.13.13.2");
+        assertThat(view.isServer()).isTrue();
+        assertThat(view.isClient()).isFalse();
+        assertThat(view.isRelay()).isTrue();
+        assertThat(view.availableArtifacts()).contains(
+            net.vaier.domain.PeerArtifact.WG_CONFIG,
+            net.vaier.domain.PeerArtifact.DOCKER_COMPOSE,
+            net.vaier.domain.PeerArtifact.SETUP_SCRIPT);
         assertThat(view.lanCidr()).isEqualTo("192.168.1.0/24");
         assertThat(view.lanAddress()).isEqualTo("192.168.1.10");
         assertThat(view.description()).isEqualTo("alice's box");
         assertThat(view.geoLocation()).contains(new GeoLocation(59.91, 10.74, "Oslo", "Norway"));
+    }
+
+    @Test
+    void getVpnPeers_mobileClient_isClientNotServer_andOffersQrCode() {
+        VpnClient client = new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.5")).thenReturn("phone");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.5")).thenReturn(Optional.of(
+            new PeerConfiguration("phone", "Phone", "10.13.13.5", "",
+                MachineType.MOBILE_CLIENT, null, null, null)));
+
+        var view = service.getVpnPeers().get(0);
+
+        assertThat(view.isServer()).isFalse();
+        assertThat(view.isClient()).isTrue();
+        assertThat(view.isRelay()).isFalse();
+        assertThat(view.availableArtifacts())
+            .containsExactlyInAnyOrder(
+                net.vaier.domain.PeerArtifact.WG_CONFIG,
+                net.vaier.domain.PeerArtifact.QR_CODE);
     }
 
     @Test

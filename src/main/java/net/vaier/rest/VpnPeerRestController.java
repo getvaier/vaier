@@ -68,10 +68,12 @@ public class VpnPeerRestController {
 
     private static VpnPeerResponse toResponse(VpnPeerView v) {
         return new VpnPeerResponse(
-            v.id(), v.name(), v.publicKey(), v.allowedIps(),
+            v.id(), v.name(), v.publicKey(), v.allowedIps(), v.tunnelIp(),
             v.endpointIp(), v.endpointPort(), v.latestHandshake(),
             v.connected(), v.transferRx(), v.transferTx(),
-            v.peerType().name(), v.lanCidr(), v.lanAddress(), v.description(),
+            v.peerType().name(), v.isServer(), v.isClient(), v.isRelay(),
+            v.availableArtifacts().stream().map(Enum::name).sorted().toList(),
+            v.lanCidr(), v.lanAddress(), v.description(),
             v.geoLocation().map(GeoLocation::latitude).orElse(null),
             v.geoLocation().map(GeoLocation::longitude).orElse(null),
             v.geoLocation().map(GeoLocation::city).orElse(null),
@@ -114,7 +116,9 @@ public class VpnPeerRestController {
                 createdPeer.ipAddress(),
                 createdPeer.publicKey(),
                 createdPeer.clientConfigFile(),
-                createdPeer.peerType().name()
+                createdPeer.peerType().name(),
+                net.vaier.domain.PeerArtifact.forPeerType(createdPeer.peerType()).stream()
+                    .map(Enum::name).sorted().toList()
         );
 
         sseEventPublisher.publish("vpn-peers", "peers-updated", "");
@@ -246,7 +250,9 @@ public class VpnPeerRestController {
                             result.name(),
                             result.ipAddress(),
                             result.configContent(),
-                            result.peerType() != null ? result.peerType().name() : null
+                            result.peerType() != null ? result.peerType().name() : null,
+                            net.vaier.domain.PeerArtifact.forPeerType(result.peerType()).stream()
+                                .map(Enum::name).sorted().toList()
                     );
                     return ResponseEntity.ok(response);
                 })
@@ -349,15 +355,19 @@ public class VpnPeerRestController {
     }
 
     /**
-     * @param id        the peer's immutable identifier — config directory name, REST path segment.
-     * @param name      the operator-facing display label.
-     * @param connected server-computed connectivity per the domain rule {@code VpnClient.isConnected()}.
+     * @param id                 the peer's immutable identifier — config directory name, REST path segment.
+     * @param name               the operator-facing display label.
+     * @param tunnelIp           the WireGuard tunnel IP pre-extracted from {@code allowedIps}.
+     * @param connected          server-computed connectivity per the domain rule {@code VpnClient.isConnected()}.
+     * @param isServer / isClient / isRelay  role flags from the domain — UI doesn't enum-match.
+     * @param availableArtifacts the {@code PeerArtifact} names this peer supports for download.
      */
     public record VpnPeerResponse(
             String id,
             String name,
             String publicKey,
             String allowedIps,
+            String tunnelIp,
             String endpointIp,
             String endpointPort,
             String latestHandshake,
@@ -365,6 +375,10 @@ public class VpnPeerRestController {
             String transferRx,
             String transferTx,
             String peerType,
+            boolean isServer,
+            boolean isClient,
+            boolean isRelay,
+            List<String> availableArtifacts,
             String lanCidr,
             String lanAddress,
             String description,
@@ -388,7 +402,8 @@ public class VpnPeerRestController {
             String ipAddress,
             String publicKey,
             String configFile,
-            String peerType
+            String peerType,
+            List<String> availableArtifacts
     ) {}
 
     public record UpdateLanAddressRequest(
@@ -412,7 +427,8 @@ public class VpnPeerRestController {
             String name,
             String ipAddress,
             String configFile,
-            String peerType
+            String peerType,
+            List<String> availableArtifacts
     ) {}
 
     public record ServerLocationResponse(

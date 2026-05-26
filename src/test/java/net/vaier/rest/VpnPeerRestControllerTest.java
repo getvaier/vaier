@@ -50,9 +50,11 @@ class VpnPeerRestControllerTest {
     private static VpnPeerView view(String id, String name, boolean connected,
                                     String endpointIp, MachineType type, String description,
                                     Optional<GeoLocation> geo) {
-        return new VpnPeerView(id, name, "pub", "10.13.13.2/32",
+        return new VpnPeerView(id, name, "pub", "10.13.13.2/32", "10.13.13.2",
             endpointIp, "51820", "0", connected, "0", "0",
-            type, null, null, description, geo);
+            type, type.isServerType(), type.isVpnPeer() && !type.isServerType(), false,
+            net.vaier.domain.PeerArtifact.forPeerType(type),
+            null, null, description, geo);
     }
 
     @Test

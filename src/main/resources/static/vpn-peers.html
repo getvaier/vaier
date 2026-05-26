@@ -957,13 +957,16 @@
 
         function renderPeerCard(peer) {
             // Connectivity is decided server-side by the domain rule VpnClient.isConnected().
-            const isConnected   = !!peer.connected;
-            const statusClass   = isConnected ? 'status-connected' : 'status-disconnected';
-            const vpnIp      = peer.allowedIps.split('/')[0];
+            const isConnected = !!peer.connected;
+            const statusClass = isConnected ? 'status-connected' : 'status-disconnected';
+            // tunnelIp, isServer, isClient, isRelay and availableArtifacts come from the domain
+            // (GetVpnPeersUseCase / PeerArtifact.forPeerType). The browser only renders.
+            const vpnIp      = peer.tunnelIp;
             const id         = cardId(peer.id);
             const isExpanded = expandedPeers.has(peer.id);
             const peerType   = peer.peerType || 'UBUNTU_SERVER';
-            const isServer   = peerType === 'UBUNTU_SERVER' || peerType === 'WINDOWS_SERVER';
+            const isServer   = peer.isServer;
+            const artifacts  = new Set(peer.availableArtifacts || []);
 
             const services = peerServices[peer.id];
             const servicesHtml = (() => {
@@ -985,7 +988,7 @@
                    </div>`
                 : '';
 
-            const isRelay = isServer && !!(peer.lanCidr && peer.lanCidr.trim());
+            const isRelay  = peer.isRelay;
             const iconKind = peerTypeIconKind(peerType);
             const typeTooltip = ({
                 'mobile': 'Mobile client (VPN)',
@@ -995,13 +998,13 @@
             const relaySlot  = isRelay ? { kind: 'relay',  title: `Relay for LAN ${peer.lanCidr}`, label: 'Relay' } : null;
             const dockerSlot = isServer ? { kind: 'docker', title: 'Runs Docker', label: 'Docker' } : null;
 
-            const composeBtn = isServer
+            const composeBtn = artifacts.has('DOCKER_COMPOSE')
                 ? `<button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.id}')">compose</button>`
                 : '';
-            const scriptBtn = peerType === 'UBUNTU_SERVER'
+            const scriptBtn = artifacts.has('SETUP_SCRIPT')
                 ? `<button class="btn btn-small btn-secondary" onclick="showVpnPeerSetupScript('${peer.id}')">script</button>`
                 : '';
-            const qrBtn = peerType === 'MOBILE_CLIENT'
+            const qrBtn = artifacts.has('QR_CODE')
                 ? `<button class="btn btn-small btn-secondary" onclick="showQrModal('${peer.id}')">qr</button>`
                 : '';
 
@@ -1120,21 +1123,14 @@
             const container = document.getElementById('peers-container');
 
             const byName = (a, b) => a.name.localeCompare(b.name);
-            const isServerType = p => {
-                const t = p.peerType || 'UBUNTU_SERVER';
-                return t === 'UBUNTU_SERVER' || t === 'WINDOWS_SERVER';
-            };
-            const isClientType = p => {
-                const t = p.peerType || 'UBUNTU_SERVER';
-                return t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT';
-            };
 
-            // Unified Servers section: Vaier server (always first) + VPN server peers + LAN servers, sorted by name.
+            // peer.isServer / peer.isClient are computed in the domain from MachineType. The
+            // browser doesn't enumerate enum constants.
             const serverEntries = [
-                ...peers.filter(isServerType).map(p => ({ kind: 'peer', name: p.name, data: p })),
+                ...peers.filter(p => p.isServer).map(p => ({ kind: 'peer', name: p.name, data: p })),
                 ...lanServers.map(s => ({ kind: 'lan', name: s.name, data: s }))
             ].sort(byName);
-            const clients = peers.filter(isClientType).sort(byName);
+            const clients = peers.filter(p => p.isClient).sort(byName);
 
             let html = `<div class="section-header">Servers</div>`;
             html += renderVaierServerCard();
@@ -1515,19 +1511,22 @@
             }
         }
 
-        function peerDownloadButtons(peerId, peerType) {
-            const t = peerType || 'UBUNTU_SERVER';
+        function peerDownloadButtons(peerId, availableArtifacts) {
+            // Which artifacts a peer offers is computed by domain PeerArtifact.forPeerType.
+            // We render one button per entry the server included.
+            const artifacts = new Set(availableArtifacts || []);
             const btns = [];
-            if (t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT') {
+            // .conf is interesting to download on clients (servers run it from compose).
+            if (artifacts.has('WG_CONFIG') && !artifacts.has('DOCKER_COMPOSE')) {
                 btns.push(`<button class="btn btn-primary" onclick="downloadConf('${peerId}')">↓ .conf file</button>`);
             }
-            if (t === 'MOBILE_CLIENT') {
+            if (artifacts.has('QR_CODE')) {
                 btns.push(`<button class="btn btn-primary" onclick="showQrModal('${peerId}')">QR code</button>`);
             }
-            if (t === 'UBUNTU_SERVER' || t === 'WINDOWS_SERVER') {
+            if (artifacts.has('DOCKER_COMPOSE')) {
                 btns.push(`<button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peerId}')">↓ Docker Compose</button>`);
             }
-            if (t === 'UBUNTU_SERVER') {
+            if (artifacts.has('SETUP_SCRIPT')) {
                 btns.push(`<button class="btn btn-primary" onclick="showVpnPeerSetupScript('${peerId}')">↓ Setup Script</button>`);
             }
             return btns.join('');
@@ -1552,7 +1551,7 @@
                     <pre id="configPre">${peer.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                    ${peerDownloadButtons(peer.id, peer.peerType)}
+                    ${peerDownloadButtons(peer.id, peer.availableArtifacts)}
                 </div>`;
             document.getElementById('peerDetailsModal').classList.add('active');
         }
@@ -1589,7 +1588,7 @@
                     <pre id="configPre">${peerConfig.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                    ${peerDownloadButtons(peerConfig.id, peerConfig.peerType)}
+                    ${peerDownloadButtons(peerConfig.id, peerConfig.availableArtifacts)}
                 </div>`;
             document.getElementById('peerDetailsModal').classList.add('active');
         }
@@ -1838,11 +1837,6 @@
             });
         }
 
-        function isClientType(peer) {
-            const t = peer.peerType || 'UBUNTU_SERVER';
-            return t === 'MOBILE_CLIENT' || t === 'WINDOWS_CLIENT';
-        }
-
         function refreshPeerMap() {
             if (!_peerMap || !_markersClusterGroup) return;
             _markersClusterGroup.clearLayers();
@@ -1855,7 +1849,7 @@
                 const iconKind = peerTypeIconKind(p.peerType);
                 const carrierPlace = [p.city, p.country].filter(Boolean).join(', ');
 
-                if (isClientType(p)) {
+                if (p.isClient) {
                     // Weak marker at the carrier IP — "where the device connects from"
                     const carrierPopup = `<strong>${escapeHtml(p.name)}</strong><br>`
                         + `<span style="color:#888;font-size:0.85em">connecting from</span><br>`

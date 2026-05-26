@@ -155,11 +155,16 @@ public class VpnService implements
         Optional<GeoLocation> geo = (client.endpointIp() != null && !client.endpointIp().isBlank())
             ? forGeolocatingIps.locate(client.endpointIp())
             : Optional.empty();
+        boolean isServer = peerType.isServerType();
+        boolean isClient = peerType.isVpnPeer() && !isServer;
+        boolean isRelay = isServer && lanCidr != null && !lanCidr.isBlank();
         return new VpnPeerView(
-            id, name, client.publicKey(), client.allowedIps(),
+            id, name, client.publicKey(), client.allowedIps(), peerIp,
             client.endpointIp(), client.endpointPort(), client.latestHandshake(),
             client.isConnected(), client.transferRx(), client.transferTx(),
-            peerType, lanCidr, lanAddress, description, geo);
+            peerType, isServer, isClient, isRelay,
+            net.vaier.domain.PeerArtifact.forPeerType(peerType),
+            lanCidr, lanAddress, description, geo);
     }
 
     // --- GetServerLocationUseCase ---
