@@ -573,6 +573,16 @@ public class ReverseProxyRoute {
         return LanAnchor.resolve(ip, peers, null).flatMap(LanAnchor::relayPeer).orElse(null);
     }
 
+    /**
+     * The {@code subdomain} part of the route's FQDN — everything before {@code baseDomain}.
+     * For a domain that doesn't fall under {@code baseDomain}, falls back to the whole domain
+     * name. Used by the launchpad sub-line so the browser doesn't split DNS strings to recover
+     * the first label.
+     */
+    public String subdomain(String baseDomain) {
+        return extractSubdomain(baseDomain);
+    }
+
     private String extractSubdomain(String baseDomain) {
         if (baseDomain != null && domainName.endsWith("." + baseDomain)) {
             return domainName.substring(0, domainName.length() - baseDomain.length() - 1);

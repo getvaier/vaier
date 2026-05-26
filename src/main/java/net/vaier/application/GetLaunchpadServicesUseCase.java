@@ -46,7 +46,8 @@ public interface GetLaunchpadServicesUseCase {
      */
     record LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                LaunchpadVisibility visibility, String url, String displayName,
-                               String faviconQuery, String peerName, String image, String version) {
+                               String subdomain, String faviconQuery, String peerName,
+                               String image, String version) {
 
         /**
          * Convenience constructor for a tile with no backing container — a service published as
@@ -54,9 +55,9 @@ public interface GetLaunchpadServicesUseCase {
          */
         public LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                    LaunchpadVisibility visibility, String url, String displayName,
-                                   String faviconQuery, String peerName) {
-            this(dnsAddress, pathPrefix, hostAddress, visibility, url, displayName, faviconQuery,
-                peerName, null, null);
+                                   String subdomain, String faviconQuery, String peerName) {
+            this(dnsAddress, pathPrefix, hostAddress, visibility, url, displayName, subdomain,
+                faviconQuery, peerName, null, null);
         }
     }
 }

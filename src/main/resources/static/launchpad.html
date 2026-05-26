@@ -265,48 +265,22 @@
             return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
         }
 
-        function serviceName(service) {
-            // displayName is computed by the domain (alias > path segment > subdomain).
-            // Fallback to the legacy derivation keeps things rendering during a partial deploy.
-            if (service.displayName) return service.displayName;
-            const base = service.dnsAddress.split('.')[0];
-            return service.pathPrefix ? base + service.pathPrefix : base;
-        }
-
-        function subdomain(dnsAddress) {
-            return dnsAddress.split('.')[0];
-        }
-
-        function peerName(service) {
-            // peerName is the host machine's display name, computed by the domain (a VPN peer's
-            // editable name, the relay peer's name for a LAN service, or "Vaier server").
-            // Fallback to the legacy DNS-label derivation keeps things rendering during a
-            // partial deploy — note that fallback shows the raw slug (e.g. "media-server").
-            if (service.peerName) return service.peerName;
-            const hostAddress = service.hostAddress;
-            if (hostAddress && hostAddress.startsWith('172.20.')) return 'Vaier server';
-            if (hostAddress && !hostAddress.includes('.')) return 'Vaier server';
-            const parts = service.dnsAddress.split('.');
-            return parts.length >= 2 ? parts[1] : 'Vaier server';
-        }
-
-        function tileSubLine(service, peer) {
+        function tileSubLine(service) {
             // Show the subdomain alongside the peer when the tile name has dropped it (path-based
             // routes, or operator-aliased tiles). Keeps the host context visible without making
-            // every tile read "service/path".
-            const sub = subdomain(service.dnsAddress);
-            const name = serviceName(service);
-            if (name === sub) return peer;
-            return `${peer} · ${sub}`;
+            // every tile read "service/path". The subdomain comes from the API; the only
+            // presentation decision is whether to append it.
+            return service.displayName === service.subdomain
+                ? service.peerName
+                : `${service.peerName} · ${service.subdomain}`;
         }
 
         function renderTile(service) {
             const url    = service.url;
-            const name   = serviceName(service);
+            const name   = service.displayName;
             const color  = avatarColor(name);
             const letter = name.charAt(0).toUpperCase();
-            const peer   = peerName(service);
-            const subLine = tileSubLine(service, peer);
+            const subLine = tileSubLine(service);
 
             const tile = document.createElement('a');
             tile.href = url;
@@ -411,26 +385,26 @@
             const container = document.getElementById('grid');
             try {
                 const services = await fetchServices();
-                const external = services.filter(s => !s.dnsAddress.startsWith('vaier.'));
                 container.innerHTML = '';
                 _hasRendered = true;
-                if (external.length === 0) {
+                if (services.length === 0) {
                     container.innerHTML = '<div class="empty">No services published yet.<br>Use <a href="/admin.html">Admin</a> to add services.</div>';
                     return;
                 }
 
+                // Group by server-supplied peerName — the domain owns that label (and excludes the
+                // Vaier service's own infrastructure routes upstream).
                 const byPeer = new Map();
-                for (const s of external) {
-                    const peer = peerName(s);
-                    if (!byPeer.has(peer)) byPeer.set(peer, []);
-                    byPeer.get(peer).push(s);
+                for (const s of services) {
+                    if (!byPeer.has(s.peerName)) byPeer.set(s.peerName, []);
+                    byPeer.get(s.peerName).push(s);
                 }
 
                 const sortedPeers = [...byPeer.keys()].sort((a, b) => a.localeCompare(b));
 
                 for (const peer of sortedPeers) {
                     const peerServices = byPeer.get(peer).sort((a, b) =>
-                        serviceName(a).localeCompare(serviceName(b))
+                        a.displayName.localeCompare(b.displayName)
                     );
 
                     const section = document.createElement('div');

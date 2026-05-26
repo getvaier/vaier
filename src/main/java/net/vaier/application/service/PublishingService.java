@@ -207,7 +207,8 @@ public class PublishingService implements
                         ? probedVersions.get(r.getName()) : null;
                     return new LaunchpadServiceUco(s.dnsAddress(), s.pathPrefix(), s.hostAddress(),
                         visibility, r.launchpadUrl(callerIp, peers, vpnClients, baseDomain),
-                        r.launchpadDisplayName(baseDomain), r.launchpadFaviconQuery(),
+                        r.launchpadDisplayName(baseDomain), r.subdomain(baseDomain),
+                        r.launchpadFaviconQuery(),
                         r.hostDisplayName(vpnClients, forResolvingPeerNames, peers),
                         backing == null ? null : backing.image(),
                         probedVersion != null ? probedVersion
