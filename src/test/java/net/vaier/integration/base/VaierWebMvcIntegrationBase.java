@@ -6,7 +6,6 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
-import net.vaier.rest.FaviconFetcher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -38,7 +37,7 @@ public abstract class VaierWebMvcIntegrationBase {
     protected SseEventPublisher sseEventPublisher;
 
     @MockBean
-    protected FaviconFetcher faviconFetcher;
+    protected GetFaviconUseCase getFaviconUseCase;
 
     // --- User use cases ---
     @MockBean
