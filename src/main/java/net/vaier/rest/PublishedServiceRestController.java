@@ -6,8 +6,6 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.EditServiceLaunchpadAliasUseCase;
 import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.EditServiceVersionEndpointUseCase;
-import net.vaier.application.GetLanServersUseCase;
-import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -46,7 +44,6 @@ public class PublishedServiceRestController {
     private final ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
-    private final GetLanServersUseCase getLanServersUseCase;
     private final SseEventPublisher sseEventPublisher;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -83,24 +80,13 @@ public class PublishedServiceRestController {
 
     @PostMapping("/lan")
     public ResponseEntity<Void> publishLanService(@RequestBody PublishLanRequest request) {
-        LanServerView view = getLanServersUseCase.getAll().stream()
-            .filter(v -> v.server().name().equals(request.machineName()))
-            .findFirst()
-            .orElse(null);
-        if (view == null) {
-            log.warn("LAN publish rejected: unknown machine {}", request.machineName());
-            return ResponseEntity.badRequest().build();
-        }
-        // A Docker-enabled LAN server can still have native (non-container) services that
-        // need manual publish — don't reject based on runsDocker.
-        String host = view.server().lanAddress();
-        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, pathPrefix={}, machine={})",
-            request.protocol(), host, request.port(), request.subdomain(),
+        log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, pathPrefix={})",
+            request.protocol(), request.machineName(), request.port(), request.subdomain(),
             request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
-            request.pathPrefix(), request.machineName());
+            request.pathPrefix());
         try {
             publishLanServiceUseCase.publishLanService(
-                request.subdomain(), host, request.port(), request.protocol(),
+                request.subdomain(), request.machineName(), request.port(), request.protocol(),
                 request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
                 request.pathPrefix());
             return ResponseEntity.ok().build();

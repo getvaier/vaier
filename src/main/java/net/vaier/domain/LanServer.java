@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Collection;
+import java.util.Optional;
 
 public record LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                         String description) {
@@ -17,6 +19,15 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
     /** True when this LAN server is the one named {@code candidate} (exact match). */
     public boolean hasName(String candidate) {
         return name.equals(candidate);
+    }
+
+    /**
+     * Find the LAN server in {@code servers} whose {@link #name()} equals {@code name} (exact,
+     * case-sensitive). Returns empty when no server matches — callers decide how to react
+     * (typically reject the operation that referenced the unknown machine).
+     */
+    public static Optional<LanServer> findByName(String name, Collection<LanServer> servers) {
+        return servers.stream().filter(s -> s.hasName(name)).findFirst();
     }
 
     /**

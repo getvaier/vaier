@@ -2,6 +2,9 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -172,5 +175,36 @@ class LanServerTest {
 
         assertThat(renamed.name()).isEqualTo("storage-box");
         assertThat(renamed.description()).isEqualTo("Synology");
+    }
+
+    // --- findByName (#221) ---
+
+    @Test
+    void findByName_returnsTheMatchingServer() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+        LanServer printer = new LanServer("printer", "192.168.3.20", false, null);
+
+        Optional<LanServer> hit = LanServer.findByName("printer", List.of(nas, printer));
+
+        assertThat(hit).contains(printer);
+    }
+
+    @Test
+    void findByName_unknownName_returnsEmpty() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+
+        assertThat(LanServer.findByName("ghost", List.of(nas))).isEmpty();
+    }
+
+    @Test
+    void findByName_isCaseSensitive() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+
+        assertThat(LanServer.findByName("NAS", List.of(nas))).isEmpty();
+    }
+
+    @Test
+    void findByName_emptyList_returnsEmpty() {
+        assertThat(LanServer.findByName("nas", List.of())).isEmpty();
     }
 }

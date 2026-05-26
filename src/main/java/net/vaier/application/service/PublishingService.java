@@ -31,6 +31,7 @@ import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.DnsZone;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
+import net.vaier.domain.LanServer;
 import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
@@ -41,6 +42,7 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingDnsRecords;
+import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -83,6 +85,7 @@ public class PublishingService implements
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
+    private final ForPersistingLanServers forPersistingLanServers;
     private final ConfigResolver configResolver;
     private final ForPublishingEvents forPublishingEvents;
     private final ForResolvingDns forResolvingDns;
@@ -112,6 +115,7 @@ public class PublishingService implements
                              ForResolvingPeerNames forResolvingPeerNames,
                              ForGettingPeerConfigurations forGettingPeerConfigurations,
                              ForResolvingServerLanCidr forResolvingServerLanCidr,
+                             ForPersistingLanServers forPersistingLanServers,
                              ConfigResolver configResolver,
                              ForPublishingEvents forPublishingEvents,
                              ForResolvingDns forResolvingDns,
@@ -129,6 +133,7 @@ public class PublishingService implements
         this.forResolvingPeerNames = forResolvingPeerNames;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
+        this.forPersistingLanServers = forPersistingLanServers;
         this.configResolver = configResolver;
         this.forPublishingEvents = forPublishingEvents;
         this.forResolvingDns = forResolvingDns;
@@ -307,7 +312,7 @@ public class PublishingService implements
         // peer's LAN or in the Vaier server's own subnet (server LAN CIDR).
         if (hostInsideAnyLanCidr(address)) {
             log.info("Address {} falls inside a relay peer's or the Vaier server's LAN CIDR — publishing as LAN service", address);
-            publishLanService(subdomain, address, port, "http", requiresAuth, directUrlDisabled, rootRedirectPath, normalisedPath);
+            publishLanRoute(subdomain, address, port, "http", requiresAuth, directUrlDisabled, rootRedirectPath, normalisedPath);
             return;
         }
 
@@ -363,9 +368,18 @@ public class PublishingService implements
     // --- PublishLanServiceUseCase ---
 
     @Override
-    public void publishLanService(String subdomain, String host, int port, String protocol,
+    public void publishLanService(String subdomain, String machineName, int port, String protocol,
                                   boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
                                   String pathPrefix) {
+        LanServer machine = LanServer.findByName(machineName, forPersistingLanServers.getAll())
+            .orElseThrow(() -> new IllegalArgumentException("Unknown machine: " + machineName));
+        publishLanRoute(subdomain, machine.lanAddress(), port, protocol,
+            requiresAuth, directUrlDisabled, rootRedirectPath, pathPrefix);
+    }
+
+    private void publishLanRoute(String subdomain, String host, int port, String protocol,
+                                 boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                 String pathPrefix) {
         String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
         ReverseProxyRoute.validatePathPrefix(normalisedPath);
         ReverseProxyRoute.validateForPublication(subdomain + "." + configResolver.getDomain(), host, port);
