@@ -314,7 +314,10 @@ public class ReverseProxyRoute {
         if (hiddenFromLaunchpad) return LaunchpadVisibility.NOT_VISIBLE;
         if (dnsState != DnsState.OK) return LaunchpadVisibility.NOT_VISIBLE;
         if (authInfo != null && !callerAuthenticated) return LaunchpadVisibility.NOT_VISIBLE;
-        if (hostState != Server.State.OK) return LaunchpadVisibility.VISIBLE_INACTIVE;
+        // Only a confirmed-unreachable host dims the tile and suppresses its link — UNKNOWN
+        // means "we don't have a signal yet"; rendering it as inactive would lie to the
+        // operator (and make a healthy service unreachable while the first probe lands).
+        if (hostState == Server.State.UNREACHABLE) return LaunchpadVisibility.VISIBLE_INACTIVE;
         return LaunchpadVisibility.VISIBLE_ACTIVE;
     }
 
@@ -345,24 +348,46 @@ public class ReverseProxyRoute {
 
     public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients,
                            List<PeerConfiguration> peers) {
-        return hostState(localServices, vpnClients, peers, null);
+        return hostState(localServices, vpnClients, peers, null, null);
+    }
+
+    public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients,
+                           List<PeerConfiguration> peers, String serverLanCidr) {
+        return hostState(localServices, vpnClients, peers, serverLanCidr, null);
     }
 
     /**
-     * Same as {@link #hostState(List, List, List)} but also honours the Vaier server's own LAN
-     * CIDR ({@code serverLanCidr}, may be null): a LAN service whose backend falls inside it is
-     * reachable directly from the Vaier server, so its host state follows the Vaier server (always
-     * OK when we're serving the request) rather than a relay peer's tunnel.
+     * Same as {@link #hostState(List, List, List, String)} but also honours per-address
+     * LAN reachability (issue #208) — typically the snapshot of the LAN-reachability probe
+     * cache. Consulted only for {@code isLanService} routes:
+     * <ul>
+     *   <li>{@link Reachability#DOWN} → {@link State#UNREACHABLE} regardless of whether the
+     *       relay peer's tunnel or the Vaier server's own LAN is up; the route can be
+     *       route-reachable while the LAN machine itself is powered off.</li>
+     *   <li>{@link Reachability#OK} → fall through to the existing relay/server-CIDR check.</li>
+     *   <li>{@link Reachability#UNKNOWN} (address absent from the map, or the map itself null)
+     *       → {@link State#UNKNOWN}. Rendering a never-probed host as OK would lie to the
+     *       operator with a green icon on a machine we have no signal from.</li>
+     * </ul>
      */
     public State hostState(List<DockerService> localServices, List<VpnClient> vpnClients,
-                           List<PeerConfiguration> peers, String serverLanCidr) {
+                           List<PeerConfiguration> peers, String serverLanCidr,
+                           Map<String, Reachability> lanReachabilities) {
         if (isLanService) {
             LanAnchor anchor = LanAnchor.resolve(address, peers, serverLanCidr).orElse(null);
             if (anchor == null) return State.UNREACHABLE;
-            if (anchor.isVaierServer()) return State.OK;
-            return anchor.relayPeer()
+            Reachability reach = lanReachabilities == null
+                ? Reachability.UNKNOWN
+                : lanReachabilities.getOrDefault(address, Reachability.UNKNOWN);
+            if (reach == Reachability.DOWN) return State.UNREACHABLE;
+            // Routability through Vaier still wins over reachability — a known-up LAN host with
+            // a dead relay tunnel is unreachable to operators outside the LAN, and reporting
+            // UNKNOWN there would hide a real outage.
+            boolean routable = anchor.isVaierServer() || anchor.relayPeer()
                 .map(relay -> vpnClients.stream().anyMatch(p -> p.containsAddress(relay.ipAddress()) && p.isConnected()))
-                .orElse(false) ? State.OK : State.UNREACHABLE;
+                .orElse(false);
+            if (!routable) return State.UNREACHABLE;
+            return reach == Reachability.OK ? State.OK : State.UNKNOWN;
         }
         return hostState(localServices, vpnClients);
     }

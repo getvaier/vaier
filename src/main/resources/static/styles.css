@@ -334,8 +334,15 @@ body {
     flex-shrink: 0;
 }
 
-.status-ok .status-indicator  { background: var(--green); }
-.status-error .status-indicator { background: var(--red); }
+.status-unknown {
+    background: rgba(154, 154, 154, 0.08);
+    color: var(--text-dim);
+    border: 1px solid rgba(154, 154, 154, 0.25);
+}
+
+.status-ok .status-indicator      { background: var(--green); }
+.status-error .status-indicator   { background: var(--red); }
+.status-unknown .status-indicator { background: var(--text-dim); }
 
 /* Badges */
 .badge {

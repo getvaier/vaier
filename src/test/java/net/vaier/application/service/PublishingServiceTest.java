@@ -17,6 +17,7 @@ import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.Server.State;
+import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
@@ -108,6 +109,9 @@ class PublishingServiceTest {
 
     @Mock
     ForPersistingLanServers forPersistingLanServers;
+
+    @Mock
+    ForCheckingLanReachability forCheckingLanReachability;
 
     @InjectMocks
     PublishingService service;
@@ -221,7 +225,7 @@ class PublishingServiceTest {
     }
 
     @Test
-    void getPublishedServices_lanServiceInsideServerLanCidr_hostStateOk() {
+    void getPublishedServices_lanServiceInsideServerLanCidr_reachabilityOk_hostStateOk() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             ReverseProxyRoute.lanRoute("box-router", "box.example.com", "172.31.5.20", 8080, "http", "box-svc")
         ));
@@ -229,11 +233,89 @@ class PublishingServiceTest {
         setupEmptyVpnClients();
         setupEmptyVaierServerServices();
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+        when(forCheckingLanReachability.snapshot())
+            .thenReturn(java.util.Map.of("172.31.5.20", Reachability.OK));
 
         PublishedServiceUco result = service.getPublishedServices().get(0);
 
         assertThat(result.state()).isEqualTo(State.OK);
         assertThat(result.isLanService()).isTrue();
+    }
+
+    @Test
+    void getPublishedServices_lanService_lanHostDown_hostStateUnreachable() {
+        // Issue #208: a LAN service whose host is reachability-DOWN must report UNREACHABLE
+        // even when the relay tunnel is up, so both the launchpad and the services UI can
+        // surface the host as offline.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            ReverseProxyRoute.lanRoute("nas-router", "nas.example.com", "192.168.3.50", 5000, "http", "nas-svc")
+        ));
+        setupNoDnsRecords();
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        when(forGettingVpnClients.getClients()).thenReturn(
+            List.of(new VpnClient("pubkey", "10.13.13.5/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
+        );
+        setupEmptyVaierServerServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new ForGettingPeerConfigurations.PeerConfiguration("apalveien5", "10.13.13.5", "",
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+        when(forCheckingLanReachability.snapshot())
+            .thenReturn(java.util.Map.of("192.168.3.50", Reachability.DOWN));
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.state()).isEqualTo(State.UNREACHABLE);
+        assertThat(result.isLanService()).isTrue();
+    }
+
+    @Test
+    void getPublishedServices_lanService_lanHostOk_hostStateOk() {
+        // An OK reachability lets the existing relay-only check decide; here the relay tunnel
+        // is up, so the service is reported OK.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            ReverseProxyRoute.lanRoute("nas-router", "nas.example.com", "192.168.3.50", 5000, "http", "nas-svc")
+        ));
+        setupNoDnsRecords();
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        when(forGettingVpnClients.getClients()).thenReturn(
+            List.of(new VpnClient("pubkey", "10.13.13.5/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
+        );
+        setupEmptyVaierServerServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new ForGettingPeerConfigurations.PeerConfiguration("apalveien5", "10.13.13.5", "",
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+        when(forCheckingLanReachability.snapshot())
+            .thenReturn(java.util.Map.of("192.168.3.50", Reachability.OK));
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.state()).isEqualTo(State.OK);
+    }
+
+    @Test
+    void getPublishedServices_lanService_lanHostNotProbed_hostStateUnknown() {
+        // Issue #208: a never-probed LAN host must surface as UNKNOWN, not OK — otherwise the
+        // services-card icon shows green on a machine we have no signal from.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            ReverseProxyRoute.lanRoute("nas-router", "nas.example.com", "192.168.3.50", 5000, "http", "nas-svc")
+        ));
+        setupNoDnsRecords();
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        when(forGettingVpnClients.getClients()).thenReturn(
+            List.of(new VpnClient("pubkey", "10.13.13.5/32", "1.2.3.4", "51820", recentHandshake, "0", "0"))
+        );
+        setupEmptyVaierServerServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new ForGettingPeerConfigurations.PeerConfiguration("apalveien5", "10.13.13.5", "",
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5")
+        ));
+        when(forCheckingLanReachability.snapshot()).thenReturn(java.util.Map.of());
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.state()).isEqualTo(State.UNKNOWN);
     }
 
     @Test

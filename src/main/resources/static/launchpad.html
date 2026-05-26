@@ -45,11 +45,26 @@
         }
 
         .tile.down {
-            opacity: 0.4;
+            opacity: 0.55;
+            cursor: not-allowed;
         }
 
         .tile.down:hover {
-            opacity: 0.7;
+            opacity: 0.85;
+        }
+
+        /* Offline dot rides on the top-right of an inactive tile so it's obvious at a glance
+           that the hosting machine is unreachable — opacity alone reads as "muted" against the
+           dark theme and the operator can miss it. (Issue #208.) */
+        .tile-status-dot {
+            position: absolute;
+            top: 0.4rem;
+            right: 0.4rem;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: var(--red);
+            box-shadow: 0 0 0 1px var(--bg-card);
         }
 
         .tile-icon {
@@ -282,11 +297,17 @@
             const letter = name.charAt(0).toUpperCase();
             const subLine = tileSubLine(service);
 
+            // An inactive tile is rendered without an href so a click can't follow the link
+            // to a service whose host is known unreachable (issue #208). The anchor element
+            // still receives hover/cursor styling and the offline-dot indicator below.
+            const isActive = service.visibility === 'VISIBLE_ACTIVE';
             const tile = document.createElement('a');
-            tile.href = url;
-            tile.target = service.dnsAddress + (service.pathPrefix || '');
-            tile.rel = '';
-            tile.className = service.visibility === 'VISIBLE_ACTIVE' ? 'tile' : 'tile down';
+            if (isActive) {
+                tile.href = url;
+                tile.target = service.dnsAddress + (service.pathPrefix || '');
+                tile.rel = '';
+            }
+            tile.className = isActive ? 'tile' : 'tile down';
 
             const iconDiv = document.createElement('div');
             iconDiv.className = 'tile-icon';
@@ -322,6 +343,19 @@
 
             tile.appendChild(iconDiv);
             tile.appendChild(infoDiv);
+
+            // Inactive tile → render an offline indicator (issue #208). Visibility is set by
+            // the domain (ReverseProxyRoute.launchpadVisibility): VISIBLE_INACTIVE is reached
+            // only for hosts confirmed unreachable — a VPN peer with no recent handshake, a
+            // LAN service whose reachability probe came back DOWN, or a LAN service whose
+            // relay-peer tunnel is down. UNKNOWN host state (no probe data yet) maps to
+            // VISIBLE_ACTIVE and gets no dot — we don't know the host is down.
+            if (!isActive) {
+                const dot = document.createElement('span');
+                dot.className = 'tile-status-dot';
+                dot.title = 'Host offline — the machine hosting this service is unreachable';
+                tile.appendChild(dot);
+            }
 
             // image comes from a backing container (issue #210); version comes from that
             // container or from a configured version endpoint — a service running natively on

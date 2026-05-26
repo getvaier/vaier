@@ -8,6 +8,7 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.LaunchpadVisibility;
+import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
@@ -73,6 +74,9 @@ class GetLaunchpadServicesTest {
     @Mock
     ForProbingServiceVersion forProbingServiceVersion;
 
+    @Mock
+    ForCheckingLanReachability forCheckingLanReachability;
+
     @InjectMocks
     PublishingService service;
 
@@ -85,6 +89,7 @@ class GetLaunchpadServicesTest {
             .thenAnswer(inv -> inv.getArgument(0));
         lenient().when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         lenient().when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
+        lenient().when(forCheckingLanReachability.snapshot()).thenReturn(java.util.Map.of());
     }
 
     @Test

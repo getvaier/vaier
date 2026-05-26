@@ -1,9 +1,11 @@
 package net.vaier.application.service;
 
-import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
+import net.vaier.adapter.driven.InMemoryLanReachabilityCache;
+import net.vaier.domain.Reachability;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerSnapshot;
@@ -38,6 +40,7 @@ class LanServerReachabilityServiceTest {
     @Mock ForPingingHost forPingingHost;
     @Mock ForPublishingEvents forPublishingEvents;
     @Mock NotifyAdminsOfPeerTransitionUseCase notifier;
+    @Mock PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
 
     LanServerReachabilityService service;
 
@@ -47,7 +50,12 @@ class LanServerReachabilityServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPingingHost, forPublishingEvents, notifier);
+        // The reachability cache is a tiny stateful adapter (concurrent maps + lookups); using
+        // the real implementation keeps the test exercising the orchestrator's actual debounce
+        // and event-emission paths instead of stubbing them away.
+        InMemoryLanReachabilityCache cache = new InMemoryLanReachabilityCache();
+        service = new LanServerReachabilityService(getLanServersUseCase, forProbingTcp, forPingingHost,
+            forPublishingEvents, notifier, cache, cache, publishedServicesCacheInvalidator);
         lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of());
         lenient().when(forProbingTcp.probe(anyString(), anyInt(), anyInt()))
             .thenReturn(ProbeResult.UNREACHABLE);
@@ -142,6 +150,34 @@ class LanServerReachabilityServiceTest {
         refreshN(CONFIRM);
 
         verify(forPublishingEvents).publish(eq("vpn-peers"), eq("lan-servers-updated"), anyString());
+    }
+
+    @Test
+    void refreshAll_reachabilityChange_invalidatesPublishedServicesCacheAndPublishesServiceUpdated() {
+        // Issue #208: a LAN host transitioning UP↔DOWN flips ReverseProxyRoute.hostState for
+        // every published service backed by it, so the published-services cache must be
+        // invalidated and the launchpad / services pages woken up. Without this, a cached
+        // PublishedServiceUco lingers with state=OK after the printer goes offline.
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+
+        refreshN(CONFIRM);
+
+        verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
+        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), anyString());
+    }
+
+    @Test
+    void refreshAll_unchangedReachability_doesNotInvalidatePublishedServicesCache() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            view("printer", "192.168.3.20", false, null)
+        ));
+
+        refreshN(CONFIRM);     // confirms DOWN → 1 invalidation
+        service.refreshAll();  // still DOWN, already confirmed → no second invalidation
+
+        verify(publishedServicesCacheInvalidator, times(1)).invalidatePublishedServicesCache();
     }
 
     @Test

@@ -33,9 +33,11 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.LaunchpadVisibility;
+import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
@@ -96,6 +98,7 @@ public class PublishingService implements
     private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     private final GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
     private final ForProbingServiceVersion forProbingServiceVersion;
+    private final ForCheckingLanReachability forCheckingLanReachability;
 
     private volatile List<PublishedServiceUco> cache = null;
 
@@ -125,7 +128,8 @@ public class PublishingService implements
                              DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase,
                              GetLanServerScrapeUseCase getLanServerScrapeUseCase,
                              GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase,
-                             ForProbingServiceVersion forProbingServiceVersion) {
+                             ForProbingServiceVersion forProbingServiceVersion,
+                             ForCheckingLanReachability forCheckingLanReachability) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
@@ -144,6 +148,7 @@ public class PublishingService implements
         this.getLanServerScrapeUseCase = getLanServerScrapeUseCase;
         this.getVaierServerDockerServicesUseCase = getVaierServerDockerServicesUseCase;
         this.forProbingServiceVersion = forProbingServiceVersion;
+        this.forCheckingLanReachability = forCheckingLanReachability;
     }
 
     @Override
@@ -164,10 +169,11 @@ public class PublishingService implements
         List<VpnClient> vpnClients = forGettingVpnClients.getClients();
         List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer());
         String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
+        Map<String, Reachability> lanReachabilities = forCheckingLanReachability.snapshot();
 
         cache = routes.stream()
             .filter(r -> !isInfrastructureRouter(r))
-            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices, serverLanCidr))
+            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices, serverLanCidr, lanReachabilities))
             .toList();
         return cache;
     }
@@ -277,10 +283,10 @@ public class PublishingService implements
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices,
-                                    String serverLanCidr) {
+                                    String serverLanCidr, Map<String, Reachability> lanReachabilities) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
         DnsState dnsState = route.dnsState(allDnsRecords, configResolver.getDnsProvider());
-        Server.State hostState = route.hostState(localServices, vpnClients, peers, serverLanCidr);
+        Server.State hostState = route.hostState(localServices, vpnClients, peers, serverLanCidr, lanReachabilities);
         String baseDomain = configResolver.getDomain();
         return new PublishedServiceUco(
             route.displayName(baseDomain, localServices, vpnClients, forResolvingPeerNames, peers),

@@ -517,29 +517,33 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void hostState_lanServiceWithRelay_relayConnected_returnsOk() {
+    void hostState_lanServiceWithRelay_relayConnected_reachabilityOk_returnsOk() {
         ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
         PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
             MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
         VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
 
-        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null)).isEqualTo(State.OK);
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null,
+            Map.of("192.168.3.50", Reachability.OK))).isEqualTo(State.OK);
     }
 
     @Test
     void hostState_lanServiceWithRelay_relayDisconnected_returnsUnreachable() {
+        // Even when we have no LAN-reachability signal, a dead relay tunnel means the service
+        // is unreachable to anyone going through Vaier — UNREACHABLE wins over UNKNOWN.
         ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
         PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
             MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
 
-        assertThat(route.hostState(List.of(), List.of(), List.of(relay), null)).isEqualTo(State.UNREACHABLE);
+        assertThat(route.hostState(List.of(), List.of(), List.of(relay), null, null)).isEqualTo(State.UNREACHABLE);
     }
 
     @Test
-    void hostState_lanServiceInsideServerLanCidr_returnsOk() {
+    void hostState_lanServiceInsideServerLanCidr_reachabilityOk_returnsOk() {
         ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "box.example.com", "172.31.5.20", 8080, "http", "svc");
 
-        assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16")).isEqualTo(State.OK);
+        assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16",
+            Map.of("172.31.5.20", Reachability.OK))).isEqualTo(State.OK);
     }
 
     @Test
@@ -547,6 +551,102 @@ class ReverseProxyRouteTest {
         ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "box.example.com", "10.99.99.99", 8080, "http", "svc");
 
         assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16")).isEqualTo(State.UNREACHABLE);
+    }
+
+    // --- hostState with LAN-host reachability (issue #208) ---
+
+    @Test
+    void hostState_lanService_relayConnected_lanHostDown_returnsUnreachable() {
+        // Issue #208: even with the relay tunnel up, a LAN service whose host machine is known
+        // unreachable (reachability probe returned DOWN) must report UNREACHABLE so the
+        // launchpad and services UIs can show the host as offline.
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
+
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null,
+            Map.of("192.168.3.50", Reachability.DOWN))).isEqualTo(State.UNREACHABLE);
+    }
+
+    @Test
+    void hostState_lanService_relayConnected_lanHostOk_returnsOk() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
+
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null,
+            Map.of("192.168.3.50", Reachability.OK))).isEqualTo(State.OK);
+    }
+
+    @Test
+    void hostState_lanService_lanHostUnknown_returnsUnknown() {
+        // A never-probed LAN host (or one whose probe hasn't landed yet) must NOT collapse to
+        // OK — that would render the icon green when we don't actually have a signal. Return
+        // UNKNOWN so the UI can show grey. Issue #208.
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
+
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null, Map.of()))
+            .isEqualTo(State.UNKNOWN);
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null,
+            Map.of("192.168.3.50", Reachability.UNKNOWN))).isEqualTo(State.UNKNOWN);
+    }
+
+    @Test
+    void hostState_lanService_insideServerLanCidr_lanHostDown_returnsUnreachable() {
+        // A LAN host inside the Vaier server's own subnet is route-reachable from the server,
+        // but the machine itself can still be powered off — the reachability probe is the
+        // authoritative signal.
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "box.example.com", "172.31.5.20", 8080, "http", "svc");
+
+        assertThat(route.hostState(List.of(), List.of(), List.of(), "172.31.0.0/16",
+            Map.of("172.31.5.20", Reachability.DOWN))).isEqualTo(State.UNREACHABLE);
+    }
+
+    @Test
+    void hostState_lanService_nullReachabilities_returnsUnknown() {
+        // No data at all means we have no signal — treat as UNKNOWN, same as an empty map.
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
+            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
+        VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
+
+        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null, null))
+            .isEqualTo(State.UNKNOWN);
+    }
+
+    @Test
+    void hostState_peerRoute_reachabilityMapIgnored() {
+        // The LAN reachability signal applies only to LAN services — passing the map on a peer
+        // route must not change the outcome.
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.2", 8080);
+        VpnClient connected = connectedPeer("10.13.13.2/32");
+
+        assertThat(route.hostState(List.of(), List.of(connected), List.of(), null,
+            Map.of("10.13.13.2", Reachability.DOWN))).isEqualTo(State.OK);
+    }
+
+    // --- launchpadVisibility with UNKNOWN host state (issue #208) ---
+
+    @Test
+    void launchpadVisibility_hostStateUnknown_returnsVisibleActive() {
+        // We don't know the host is down, so don't dim or pin a red dot on the tile.
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.2", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.UNKNOWN))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+    }
+
+    @Test
+    void launchpadVisibility_hostStateUnreachable_returnsVisibleInactive() {
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.2", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.UNREACHABLE))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
     }
 
     // --- backingContainer (issue #210) ---

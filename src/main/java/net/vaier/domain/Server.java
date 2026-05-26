@@ -35,8 +35,15 @@ public class Server {
         return "http://" + address + ":9000/api/endpoints";
     }
 
+    /**
+     * Host reachability outcome for a published service. {@link #OK} = host is reachable and the
+     * service is up; {@link #UNREACHABLE} = host is confirmed offline (handshake stale, relay
+     * tunnel down, or LAN reachability probe came back DOWN); {@link #UNKNOWN} = we don't yet
+     * have a signal — typically the LAN-reachability probe hasn't landed in the cache. UNKNOWN
+     * must not be conflated with OK (a green icon on a host we haven't probed is misleading).
+     */
     public enum State {
-        OK, UNREACHABLE
+        OK, UNREACHABLE, UNKNOWN
     }
 
     /**

@@ -3,7 +3,7 @@ package net.vaier.rest;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
 import net.vaier.application.GetLanServerReachabilityUseCase;
-import net.vaier.application.GetLanServerReachabilityUseCase.Reachability;
+import net.vaier.domain.Reachability;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.GetLanServersUseCase.LanServerView;

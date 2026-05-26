@@ -4,16 +4,19 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.Reachability;
+import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForPingingHost;
 import net.vaier.domain.port.ForProbingTcp;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForRecordingLanReachability;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,17 +40,23 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private static final int REQUIRED_CONSECUTIVE_PROBES = 3;
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-servers-updated";
+    // A LAN host transitioning UP↔DOWN flips the host-state of every published service backed by
+    // that host (issue #208), so the published-services cache must be invalidated and the
+    // launchpad / services pages woken up — they subscribe to `service-updated` on this topic.
+    private static final String PUBLISHED_SERVICES_SSE_TOPIC = "published-services";
+    private static final String PUBLISHED_SERVICES_SSE_EVENT = "service-updated";
 
     private final GetLanServersUseCase getLanServersUseCase;
     private final ForProbingTcp forProbingTcp;
     private final ForPingingHost forPingingHost;
     private final ForPublishingEvents forPublishingEvents;
     private final NotifyAdminsOfPeerTransitionUseCase notifier;
-    // All four maps are keyed by the LAN server's lanAddress, not its name. A host's
-    // reachability is a property of its address — keying by address keeps the probe history
-    // intact across a rename (the name changes, the address does not).
-    private final Map<String, Reachability> cache = new ConcurrentHashMap<>();
-    private final Map<String, Long> lastSeenEpochSec = new ConcurrentHashMap<>();
+    private final ForCheckingLanReachability cache;
+    private final ForRecordingLanReachability recorder;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
+    // Debounce state is application-layer orchestration, not infrastructure cache: a candidate
+    // result must hold for REQUIRED_CONSECUTIVE_PROBES consecutive cycles before the cache adapter
+    // sees it. Keyed by lanAddress for the same rename-survives reason as the cache.
     private final Map<String, Reachability> pendingState = new ConcurrentHashMap<>();
     private final Map<String, Integer> pendingCount = new ConcurrentHashMap<>();
 
@@ -55,27 +64,33 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
                                         ForProbingTcp forProbingTcp,
                                         ForPingingHost forPingingHost,
                                         ForPublishingEvents forPublishingEvents,
-                                        NotifyAdminsOfPeerTransitionUseCase notifier) {
+                                        NotifyAdminsOfPeerTransitionUseCase notifier,
+                                        ForCheckingLanReachability cache,
+                                        ForRecordingLanReachability recorder,
+                                        PublishedServicesCacheInvalidator publishedServicesCacheInvalidator) {
         this.getLanServersUseCase = getLanServersUseCase;
         this.forProbingTcp = forProbingTcp;
         this.forPingingHost = forPingingHost;
         this.forPublishingEvents = forPublishingEvents;
         this.notifier = notifier;
+        this.cache = cache;
+        this.recorder = recorder;
+        this.publishedServicesCacheInvalidator = publishedServicesCacheInvalidator;
     }
 
     @Override
     public Reachability getReachability(String lanAddress) {
-        return cache.getOrDefault(lanAddress, Reachability.UNKNOWN);
+        return cache.getReachability(lanAddress);
     }
 
     @Override
     public Long getLastSeenEpochSec(String lanAddress) {
-        return lastSeenEpochSec.get(lanAddress);
+        return cache.getLastSeenEpochSec(lanAddress);
     }
 
     @Override
     public synchronized void refreshAll() {
-        Map<String, Reachability> previous = new HashMap<>(cache);
+        Map<String, Reachability> previous = cache.snapshot();
         Set<String> seen = new HashSet<>();
         // Pingability is independent of Docker scrape state — probe every registered LAN
         // server. The UI combines this binary "is the host on the network" signal with the
@@ -89,7 +104,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
             // Only stamp lastSeen on a successful raw probe — independent of debounce, since
             // a one-off TCP success still proves the host was alive at that moment.
             if (r == Reachability.OK) {
-                lastSeenEpochSec.put(key, System.currentTimeMillis() / 1000);
+                recorder.recordLastSeen(key, System.currentTimeMillis() / 1000);
             }
             // Debounce: only commit to the published cache (and therefore to the email path)
             // once the same probe result has held for REQUIRED_CONSECUTIVE_PROBES cycles.
@@ -98,22 +113,26 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
             if (count >= REQUIRED_CONSECUTIVE_PROBES) {
                 pendingState.remove(key);
                 pendingCount.remove(key);
-                Reachability prev = cache.put(key, r);
+                Reachability prev = recorder.record(key, r);
                 maybeNotifyTransition(server, prev, r);
             } else {
                 pendingState.put(key, r);
                 pendingCount.put(key, count);
             }
         }
-        cache.keySet().retainAll(seen);
-        lastSeenEpochSec.keySet().retainAll(seen);
+        recorder.retainOnly(seen);
         pendingState.keySet().retainAll(seen);
         pendingCount.keySet().retainAll(seen);
 
-        if (!previous.equals(cache)) {
+        if (!previous.equals(cache.snapshot())) {
             // Wake up the Machines page so the icon colour reflects the latest confirmed
             // probe without needing a manual refresh.
             forPublishingEvents.publish(SSE_TOPIC, SSE_EVENT, "");
+            // A LAN host's reachability also feeds ReverseProxyRoute.hostState via the
+            // ForCheckingLanReachability port — drop the published-services cache so the next
+            // launchpad / services fetch recomputes state, and wake those pages too (issue #208).
+            publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
+            forPublishingEvents.publish(PUBLISHED_SERVICES_SSE_TOPIC, PUBLISHED_SERVICES_SSE_EVENT, "");
         }
     }
 
@@ -123,7 +142,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         // storm on restart. Same rule the VPN PeerConnectivityTracker applies.
         if (previous == null || previous == current) return;
         boolean connected = current == Reachability.OK;
-        Long lastSeen = lastSeenEpochSec.get(server.lanAddress());
+        Long lastSeen = cache.getLastSeenEpochSec(server.lanAddress());
         PeerSnapshot snapshot = new PeerSnapshot(
                 server.name(),
                 MachineType.LAN_SERVER,
