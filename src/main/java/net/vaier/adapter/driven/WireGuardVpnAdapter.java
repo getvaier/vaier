@@ -1,5 +1,6 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.domain.AllowedIps;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireGuardPeerConfig;
 import net.vaier.domain.port.ForDeletingVpnPeers;
@@ -16,10 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -173,7 +171,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
             }
 
             String oldAllowedIps = peerInfo.allowedIps();
-            RouteDelta routeDelta = computeRouteDelta(oldAllowedIps, allowedIps);
+            AllowedIps.RouteDelta routeDelta = AllowedIps.routeDelta(oldAllowedIps, allowedIps);
 
             // Argv-style — no shell, so user-supplied lanCidr cannot break out of `allowed-ips`.
             // Closes #195.
@@ -194,7 +192,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         }
     }
 
-    private void reconcileKernelRoutes(RouteDelta routeDelta) throws IOException, InterruptedException {
+    private void reconcileKernelRoutes(AllowedIps.RouteDelta routeDelta) throws IOException, InterruptedException {
         for (String cidr : routeDelta.toAdd()) {
             log.info("Installing kernel route: {} dev {}", cidr, wireguardInterface);
             forExecutingInContainer.execute(wireguardContainerName, "ip", "route", "replace", cidr, "dev", wireguardInterface);
@@ -207,49 +205,6 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
             // user-supplied cidr cannot inject. Closes #195.
             forExecutingInContainer.execute(wireguardContainerName, "ip", "route", "del", cidr, "dev", wireguardInterface);
         }
-    }
-
-    record RouteDelta(List<String> toAdd, List<String> toRemove) {}
-
-    /**
-     * Compute which CIDRs need {@code ip route replace} (add) or {@code ip route del} (remove)
-     * inside the wireguard container, given the previous and new {@code AllowedIPs} for one peer.
-     *
-     * <p>{@code /32} host routes are skipped — they're managed by {@code wg-quick up} and we must
-     * not touch them here. Non-/32 CIDRs in the new set are always emitted as adds (idempotent
-     * via {@code ip route replace}) so drift from earlier {@code wg set} calls is healed.
-     */
-    static RouteDelta computeRouteDelta(String oldAllowedIps, String newAllowedIps) {
-        List<String> oldCidrs = parseCidrList(oldAllowedIps);
-        List<String> newCidrs = parseCidrList(newAllowedIps);
-        Set<String> newSet = new HashSet<>(newCidrs);
-
-        List<String> toAdd = newCidrs.stream()
-                .filter(cidr -> !cidr.endsWith("/32"))
-                .distinct()
-                .toList();
-
-        List<String> toRemove = oldCidrs.stream()
-                .filter(cidr -> !cidr.endsWith("/32"))
-                .filter(cidr -> !newSet.contains(cidr))
-                .distinct()
-                .toList();
-
-        return new RouteDelta(toAdd, toRemove);
-    }
-
-    private static List<String> parseCidrList(String allowedIps) {
-        if (allowedIps == null || allowedIps.isBlank()) {
-            return List.of();
-        }
-        Set<String> seen = new LinkedHashSet<>();
-        for (String cidr : allowedIps.split(",")) {
-            String trimmed = cidr.trim();
-            if (!trimmed.isEmpty()) {
-                seen.add(trimmed);
-            }
-        }
-        return new ArrayList<>(seen);
     }
 
     @Override
