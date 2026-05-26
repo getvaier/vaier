@@ -668,27 +668,20 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
-     * Extract authentication info from middleware names when fetching from API.
-     * Checks if any middleware name suggests authentication (contains auth-related keywords).
+     * Extract authentication info from middleware names when fetching from API. The "is this an
+     * auth middleware" predicate lives on {@link ReverseProxyRoute.AuthInfo#isAuthMiddlewareName}
+     * — the adapter only walks the list and pulls the provider label off the matching entry.
      */
     private ReverseProxyRoute.AuthInfo extractAuthInfoFromMiddlewareNames(List<String> middlewareNames) {
-        if (middlewareNames == null || middlewareNames.isEmpty()) {
-            return null;
-        }
+        if (middlewareNames == null || middlewareNames.isEmpty()) return null;
 
-        // Check for common auth middleware patterns
         for (String middlewareName : middlewareNames) {
-            String lowerName = middlewareName.toLowerCase();
-            if (lowerName.contains("auth") || lowerName.contains("authelia") ||
-                lowerName.contains("oauth") || lowerName.contains("sso")) {
-                // Extract provider name from middleware name if possible
-                String provider = middlewareName.contains("@")
-                    ? middlewareName.substring(0, middlewareName.indexOf("@"))
-                    : "middleware";
-                return new ReverseProxyRoute.AuthInfo("forwardAuth", provider, null);
-            }
+            if (!ReverseProxyRoute.AuthInfo.isAuthMiddlewareName(middlewareName)) continue;
+            String provider = middlewareName.contains("@")
+                ? middlewareName.substring(0, middlewareName.indexOf("@"))
+                : "middleware";
+            return new ReverseProxyRoute.AuthInfo("forwardAuth", provider, null);
         }
-
         return null;
     }
 
@@ -993,33 +986,19 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * Example: "code.apalveien5.eilertsen.family" -> "code-apalveien5-router"
      */
     private String generateRouterName(String dnsName) {
-        return generateRouterName(dnsName, null);
+        return ReverseProxyRoute.routerName(dnsName, null);
     }
 
     private String generateServiceName(String dnsName) {
-        return generateServiceName(dnsName, null);
+        return ReverseProxyRoute.serviceName(dnsName, null);
     }
 
-    /**
-     * Router name including a path-derived slug so multiple path-based routes on one host don't
-     * collide. {@code pathPrefix=null} produces the same name as the host-only form, preserving
-     * compatibility with pre-pathPrefix YAML files.
-     */
     private String generateRouterName(String dnsName, String pathPrefix) {
-        String slug = pathSlug(pathPrefix);
-        return dnsName.replace(".", "-") + (slug.isEmpty() ? "" : "-" + slug) + "-router";
+        return ReverseProxyRoute.routerName(dnsName, pathPrefix);
     }
 
     private String generateServiceName(String dnsName, String pathPrefix) {
-        String slug = pathSlug(pathPrefix);
-        return dnsName.replace(".", "-") + (slug.isEmpty() ? "" : "-" + slug) + "-service";
-    }
-
-    /** "/auth" → "auth", "/builder/ui" → "builder-ui", null/"" → "". */
-    private String pathSlug(String pathPrefix) {
-        if (pathPrefix == null || pathPrefix.isBlank()) return "";
-        String trimmed = pathPrefix.startsWith("/") ? pathPrefix.substring(1) : pathPrefix;
-        return trimmed.replace('/', '-');
+        return ReverseProxyRoute.serviceName(dnsName, pathPrefix);
     }
 
     /**
@@ -1184,9 +1163,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     private String deriveDnsNameFromRouter(String routerName) {
-        if (routerName == null) return null;
-        if (!routerName.endsWith("-router")) return null;
-        return routerName.substring(0, routerName.length() - "-router".length()).replace("-", ".");
+        return ReverseProxyRoute.dnsNameFromRouterName(routerName);
     }
 
     /**

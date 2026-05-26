@@ -974,6 +974,67 @@ class ReverseProxyRouteTest {
         assertThat(name).isEqualTo("nut @ apalveien5");
     }
 
+    // --- routerName / serviceName / dnsNameFromRouterName (#229) ---
+
+    @Test
+    void routerName_hostOnly_dotsAreDashed_withRouterSuffix() {
+        assertThat(ReverseProxyRoute.routerName("app.example.com", null))
+            .isEqualTo("app-example-com-router");
+    }
+
+    @Test
+    void routerName_pathBased_includesSluggedPath() {
+        assertThat(ReverseProxyRoute.routerName("svc.example.com", "/grafana"))
+            .isEqualTo("svc-example-com-grafana-router");
+    }
+
+    @Test
+    void routerName_multiSegmentPath_slashesBecomeDashes() {
+        assertThat(ReverseProxyRoute.routerName("svc.example.com", "/builder/ui"))
+            .isEqualTo("svc-example-com-builder-ui-router");
+    }
+
+    @Test
+    void routerName_blankPath_isSameAsHostOnly() {
+        assertThat(ReverseProxyRoute.routerName("svc.example.com", ""))
+            .isEqualTo(ReverseProxyRoute.routerName("svc.example.com", null));
+    }
+
+    @Test
+    void serviceName_mirrorsRouterNameWithServiceSuffix() {
+        assertThat(ReverseProxyRoute.serviceName("svc.example.com", "/grafana"))
+            .isEqualTo("svc-example-com-grafana-service");
+    }
+
+    @Test
+    void dnsNameFromRouterName_invertsRouterName_replacingDashesWithDots() {
+        assertThat(ReverseProxyRoute.dnsNameFromRouterName("app-example-com-router"))
+            .isEqualTo("app.example.com");
+    }
+
+    @Test
+    void dnsNameFromRouterName_nullOrNonRouter_returnsNull() {
+        assertThat(ReverseProxyRoute.dnsNameFromRouterName(null)).isNull();
+        assertThat(ReverseProxyRoute.dnsNameFromRouterName("app-example-com-service")).isNull();
+    }
+
+    // --- AuthInfo.isAuthMiddlewareName (#229) ---
+
+    @Test
+    void isAuthMiddlewareName_recognisesCommonAuthKeywords() {
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName("authelia@docker")).isTrue();
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName("forward-auth")).isTrue();
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName("oauth-proxy")).isTrue();
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName("SSO")).isTrue();
+    }
+
+    @Test
+    void isAuthMiddlewareName_rejectsUnrelatedMiddleware() {
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName("strip-prefix")).isFalse();
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName("compress")).isFalse();
+        assertThat(ReverseProxyRoute.AuthInfo.isAuthMiddlewareName(null)).isFalse();
+    }
+
     // --- helpers ---
 
     private static ReverseProxyRoute route(String domain, String address, int port) {

@@ -500,6 +500,42 @@ public class ReverseProxyRoute {
     public enum ServiceLocation { VAIER_SERVER, PEER_SERVER, LAN_SERVICE }
 
     /**
+     * The Traefik router key for a route on {@code (dnsName, pathPrefix)} — dots become dashes,
+     * the path is slugged, and a {@code -router} suffix lands the key in Traefik's router map.
+     * Adapters use this both when writing YAML and when looking up an existing route by name.
+     * Lives in the domain so the identity rule has a single owner (mirrored by {@link #serviceName}
+     * and inverted by {@link #dnsNameFromRouterName}).
+     */
+    public static String routerName(String dnsName, String pathPrefix) {
+        String slug = pathSlug(pathPrefix);
+        return dnsName.replace(".", "-") + (slug.isEmpty() ? "" : "-" + slug) + "-router";
+    }
+
+    /** The Traefik service key for the same route — same shape, {@code -service} suffix. */
+    public static String serviceName(String dnsName, String pathPrefix) {
+        String slug = pathSlug(pathPrefix);
+        return dnsName.replace(".", "-") + (slug.isEmpty() ? "" : "-" + slug) + "-service";
+    }
+
+    /**
+     * Recover the host part of a route's DNS name from a router key, e.g.
+     * {@code app-example-com-router → app.example.com}. Path slug is not reversed (dashes are
+     * ambiguous once joined). Null / non-router input returns null.
+     */
+    public static String dnsNameFromRouterName(String routerName) {
+        if (routerName == null) return null;
+        if (!routerName.endsWith("-router")) return null;
+        return routerName.substring(0, routerName.length() - "-router".length()).replace("-", ".");
+    }
+
+    /** {@code "/auth" → "auth"}, {@code "/builder/ui" → "builder-ui"}, null/blank → {@code ""}. */
+    private static String pathSlug(String pathPrefix) {
+        if (pathPrefix == null || pathPrefix.isBlank()) return "";
+        String trimmed = pathPrefix.startsWith("/") ? pathPrefix.substring(1) : pathPrefix;
+        return trimmed.replace('/', '-');
+    }
+
+    /**
      * Drops a trailing {@code .<peer>} label the operator put in the subdomain — the
      * {@code " @ <server>"} part already names the peer, so {@code nut.colina27} reads as
      * just {@code nut}. The operator hand-types this suffix, so the match is lenient: the
@@ -636,6 +672,23 @@ public class ReverseProxyRoute {
         private final String type;
         private final String username;
         private final String realm;
+
+        /**
+         * Whether the Traefik middleware named {@code middlewareName} is an authentication
+         * middleware — case-insensitive substring match against the canonical keywords
+         * ({@code auth}, {@code authelia}, {@code oauth}, {@code sso}). Used by adapters reading
+         * back a route from the Traefik API where only middleware names (not their type) are
+         * exposed. The heuristic is good-enough rather than exhaustive; it's a domain decision so
+         * it isn't re-invented per adapter.
+         */
+        public static boolean isAuthMiddlewareName(String middlewareName) {
+            if (middlewareName == null) return false;
+            String lower = middlewareName.toLowerCase();
+            return lower.contains("auth")
+                || lower.contains("authelia")
+                || lower.contains("oauth")
+                || lower.contains("sso");
+        }
     }
 
     @AllArgsConstructor
