@@ -310,7 +310,13 @@
         <div id="discoverable-section">
             <div class="section-header">
                 <span class="section-title">Discovered services</span>
-                <div style="display:flex;gap:0.75rem;align-items:center">
+                <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
+                    <input id="discoveredFilter" type="search" class="form-input" style="width:180px;padding:0.25rem 0.5rem;font-size:0.78rem"
+                           placeholder="Filter…" title="Filter by container name, host, or address" oninput="onDiscoveredFilterInput()">
+                    <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.75rem;color:var(--text-muted);cursor:pointer;user-select:none" title="Group discovered services under a heading per host">
+                        <input id="discoveredGroupChk" type="checkbox" style="accent-color:var(--accent);cursor:pointer" onchange="onDiscoveredGroupToggle()">
+                        Group by host
+                    </label>
                     <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.75rem;color:var(--text-muted);cursor:pointer;user-select:none" title="Toggle visibility of ignored services">
                         <input id="showIgnoredChk" type="checkbox" style="accent-color:var(--accent);cursor:pointer" onchange="toggleShowIgnored()">
                         Show ignored
@@ -899,62 +905,113 @@
             renderServicesContainer(html);
         }
 
-        let showIgnored = false;
+        // Discovered-list controls (#244). State persists in localStorage so a reload doesn't
+        // reset the operator's filter / grouping / show-ignored preference.
+        const LS_DISCOVERED_FILTER  = 'vaier.discovered.filter';
+        const LS_DISCOVERED_GROUP   = 'vaier.discovered.groupByHost';
+        const LS_DISCOVERED_IGNORED = 'vaier.discovered.showIgnored';
+
+        let showIgnored          = localStorage.getItem(LS_DISCOVERED_IGNORED) === '1';
+        let discoveredFilter     = localStorage.getItem(LS_DISCOVERED_FILTER) || '';
+        let discoveredGroupByHost = localStorage.getItem(LS_DISCOVERED_GROUP) === '1';
         let lastPublishableServices = [];
 
         function toggleShowIgnored() {
             showIgnored = document.getElementById('showIgnoredChk').checked;
+            localStorage.setItem(LS_DISCOVERED_IGNORED, showIgnored ? '1' : '0');
             displayPublishable(lastPublishableServices);
         }
 
-        function displayPublishable(services) {
-            lastPublishableServices = services;
-            const container = document.getElementById('publishable-container');
-            const section = document.getElementById('discoverable-section');
-            const visible = (showIgnored ? services : services.filter(s => !s.ignored))
-                .slice()
-                .sort((a, b) => a.containerName.localeCompare(b.containerName));
-            if (visible.length === 0) {
-                container.innerHTML = '<div class="loading">No discovered services</div>';
-                return;
-            }
+        function onDiscoveredFilterInput() {
+            discoveredFilter = document.getElementById('discoveredFilter').value;
+            localStorage.setItem(LS_DISCOVERED_FILTER, discoveredFilter);
+            displayPublishable(lastPublishableServices);
+        }
 
-            const html = visible.map(s => {
-                const isVaierServer = s.source === 'VAIER_SERVER';
-                const sourceLabel = isVaierServer ? 'Vaier server' : s.peerName;
-                const key = s.ignoreKey;
-                const dimStyle = s.ignored ? 'opacity:0.55' : '';
-                const typeKind = discoverableTypeIcon(s);
-                const typeTip  = ({ 'lan': 'Discovered on a LAN Docker host', 'vaier': 'Discovered on the Vaier server', 'server': 'Discovered on a VPN peer' })[typeKind];
-                const actionButtons = s.ignored
-                    ? `<button class="btn btn-success btn-small" title="Show this service again in the list" onclick="unignoreService('${key}')">Unignore</button>`
-                    : `<button class="btn btn-primary btn-small"
-                        title="Publish ${s.containerName} as a reverse-proxy route"
-                        data-address="${s.address}"
-                        data-port="${s.port}"
-                        data-container="${s.containerName}"
-                        data-source-label="${sourceLabel}"
-                        data-suggested-subdomain="${s.suggestedSubdomain}"
-                        data-redirect="${s.rootRedirectPath || ''}"
-                        onclick="showPublishModalFromBtn(this)">
-                        + Publish
-                    </button>
-                    <button class="btn btn-warning btn-small" title="Hide this service from the list" onclick="ignoreService('${key}')">Ignore</button>`;
-                return `
+        function onDiscoveredGroupToggle() {
+            discoveredGroupByHost = document.getElementById('discoveredGroupChk').checked;
+            localStorage.setItem(LS_DISCOVERED_GROUP, discoveredGroupByHost ? '1' : '0');
+            displayPublishable(lastPublishableServices);
+        }
+
+        function discoveredSourceLabel(s) {
+            return s.source === 'VAIER_SERVER' ? 'Vaier server' : s.peerName;
+        }
+
+        function discoveredMatchesFilter(s, needle) {
+            if (!needle) return true;
+            const haystack = (s.containerName + ' ' + discoveredSourceLabel(s) + ' ' + s.address).toLowerCase();
+            return haystack.includes(needle);
+        }
+
+        function renderDiscoveredCard(s) {
+            const sourceLabel = discoveredSourceLabel(s);
+            const key = s.ignoreKey;
+            const dimStyle = s.ignored ? 'opacity:0.55' : '';
+            const typeKind = discoverableTypeIcon(s);
+            const typeTip  = ({ 'lan': 'Discovered on a LAN Docker host', 'vaier': 'Discovered on the Vaier server', 'server': 'Discovered on a VPN peer' })[typeKind];
+            const actionButtons = s.ignored
+                ? `<button class="btn btn-success btn-small" title="Show this service again in the list" onclick="unignoreService('${key}')">Unignore</button>`
+                : `<button class="btn btn-primary btn-small"
+                    title="Publish ${s.containerName} as a reverse-proxy route"
+                    data-address="${s.address}"
+                    data-port="${s.port}"
+                    data-container="${s.containerName}"
+                    data-source-label="${sourceLabel}"
+                    data-suggested-subdomain="${s.suggestedSubdomain}"
+                    data-redirect="${s.rootRedirectPath || ''}"
+                    onclick="showPublishModalFromBtn(this)">
+                    + Publish
+                </button>
+                <button class="btn btn-warning btn-small" title="Hide this service from the list" onclick="ignoreService('${key}')">Ignore</button>`;
+            // The "@ source" sub-label is dropped when grouping by host, because the section
+            // heading already names the source — matches how the published-services list reads.
+            const subLabel = discoveredGroupByHost ? '' : `<span class="service-peer">@ ${sourceLabel}</span>`;
+            return `
                 <div class="discoverable-card">
                     <div class="service-header-left" style="${dimStyle}">
                         ${machineIconHtml(typeKind, typeTip)}
                         <span class="service-name">${s.containerName}</span>
-                        <span class="service-peer">@ ${sourceLabel}</span>
+                        ${subLabel}
                         <span class="discoverable-meta" style="margin-left:auto">${s.address}:${s.port}</span>
                     </div>
                     <div style="display:flex;gap:0.4rem;align-items:center">
                         ${actionButtons}
                     </div>
                 </div>`;
-            }).join('');
+        }
 
-            container.innerHTML = html;
+        function displayPublishable(services) {
+            lastPublishableServices = services;
+            const container = document.getElementById('publishable-container');
+            const needle = discoveredFilter.trim().toLowerCase();
+            const visible = (showIgnored ? services : services.filter(s => !s.ignored))
+                .filter(s => discoveredMatchesFilter(s, needle))
+                .slice()
+                .sort((a, b) => a.containerName.localeCompare(b.containerName));
+            if (visible.length === 0) {
+                container.innerHTML = needle
+                    ? `<div class="loading">No discovered services match "${discoveredFilter}"</div>`
+                    : '<div class="loading">No discovered services</div>';
+                return;
+            }
+
+            if (!discoveredGroupByHost) {
+                container.innerHTML = visible.map(renderDiscoveredCard).join('');
+                return;
+            }
+
+            const groups = new Map();
+            for (const s of visible) {
+                const key = discoveredSourceLabel(s);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(s);
+            }
+            const sortedSources = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+            container.innerHTML = sortedSources.map(source => {
+                const cards = groups.get(source).map(renderDiscoveredCard).join('');
+                return `<div class="peer-section"><div class="peer-heading">${source}</div>${cards}</div>`;
+            }).join('');
         }
 
         async function ignoreService(key) {
@@ -1401,6 +1458,11 @@
         window.onclick = e => {
             if (e.target.classList.contains('modal')) e.target.classList.remove('active');
         };
+
+        // Reflect persisted Discovered-list controls into the DOM before first fetch (#244).
+        document.getElementById('discoveredFilter').value     = discoveredFilter;
+        document.getElementById('discoveredGroupChk').checked = discoveredGroupByHost;
+        document.getElementById('showIgnoredChk').checked     = showIgnored;
 
         fetchServices();
         fetchPublishable();
