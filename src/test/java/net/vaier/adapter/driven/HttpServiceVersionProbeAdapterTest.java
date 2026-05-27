@@ -38,6 +38,30 @@ class HttpServiceVersionProbeAdapterTest {
             .isEmpty();
     }
 
+    /** A typical SPA build-info endpoint — a flat JSON object with string properties. */
+    private static final String JSON_BUILD_INFO =
+        "{  \"version\": \"dev-main-23ed23e\",  \"commit\": \"23ed23e\",  " +
+        "\"buildTime\": \"2026-05-27T06:48:29.366Z\"}";
+
+    @Test
+    void extractProperty_readsJsonStringProperty() {
+        assertThat(HttpServiceVersionProbeAdapter.extractProperty(JSON_BUILD_INFO, "version"))
+            .contains("dev-main-23ed23e");
+    }
+
+    @Test
+    void extractProperty_readsJsonStringPropertyWithNoSpaceAfterColon() {
+        String compact = "{\"version\":\"1.2.3\"}";
+        assertThat(HttpServiceVersionProbeAdapter.extractProperty(compact, "version"))
+            .contains("1.2.3");
+    }
+
+    @Test
+    void extractProperty_jsonAbsent_returnsEmpty() {
+        assertThat(HttpServiceVersionProbeAdapter.extractProperty(JSON_BUILD_INFO, "nonexistent"))
+            .isEmpty();
+    }
+
     @Test
     void extractProperty_emptyForNullBody() {
         assertThat(HttpServiceVersionProbeAdapter.extractProperty(null, "display")).isEmpty();

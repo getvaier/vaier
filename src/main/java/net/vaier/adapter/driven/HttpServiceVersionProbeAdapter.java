@@ -62,15 +62,22 @@ public class HttpServiceVersionProbeAdapter implements ForProbingServiceVersion 
     }
 
     /**
-     * Pull the value out of a {@code property="value"} pair — the label form used by Prometheus
-     * text exposition (and any response that labels values the same way). First non-empty match
-     * wins; the property name is matched literally.
+     * Pull the value out of a {@code property="value"} pair (Prometheus text exposition) or a
+     * JSON {@code "property": "value"} pair. First non-empty match wins; the property name is
+     * matched literally. Prometheus is tried first because its label form is more constrained
+     * and so cheaper to reject when the body is JSON.
      */
     static Optional<String> extractProperty(String body, String property) {
         if (body == null || property == null) return Optional.empty();
-        Matcher m = Pattern.compile(Pattern.quote(property) + "=\"([^\"]*)\"").matcher(body);
-        if (m.find()) {
-            String value = m.group(1).trim();
+        String quoted = Pattern.quote(property);
+        Matcher prometheus = Pattern.compile(quoted + "=\"([^\"]*)\"").matcher(body);
+        if (prometheus.find()) {
+            String value = prometheus.group(1).trim();
+            if (!value.isEmpty()) return Optional.of(value);
+        }
+        Matcher json = Pattern.compile("\"" + quoted + "\"\\s*:\\s*\"([^\"]*)\"").matcher(body);
+        if (json.find()) {
+            String value = json.group(1).trim();
             if (!value.isEmpty()) return Optional.of(value);
         }
         return Optional.empty();

@@ -842,6 +842,14 @@ class ReverseProxyRouteTest {
     }
 
     @Test
+    void versionProbeUrl_isPathPrefixIndependent() {
+        // The version endpoint is the operator's full backend path; pathPrefix is a Traefik
+        // matcher and stays out of the probe URL. The operator types the path they want.
+        ReverseProxyRoute route = pathVersionRoute("/builder", "/builder/version", "version");
+        assertThat(route.versionProbeUrl()).isEqualTo("http://192.168.3.50:9000/builder/version");
+    }
+
+    @Test
     void probeVersion_delegatesToProberWithBuiltUrlAndProperty() {
         ReverseProxyRoute route = versionRoute("sys/metrics?name[]=system_info", "display");
         ForProbingServiceVersion prober = (url, property) ->
@@ -864,6 +872,11 @@ class ReverseProxyRouteTest {
     private static ReverseProxyRoute versionRoute(String endpoint, String property) {
         return new ReverseProxyRoute("r", "app.example.com", "192.168.3.50", 9000, "svc", null,
             null, null, null, null, false, true, "http", null, false, null, endpoint, property);
+    }
+
+    private static ReverseProxyRoute pathVersionRoute(String pathPrefix, String endpoint, String property) {
+        return new ReverseProxyRoute("r", "app.example.com", "192.168.3.50", 9000, "svc", null,
+            null, null, null, null, false, true, "http", pathPrefix, false, null, endpoint, property);
     }
 
     // --- displayName ---
