@@ -73,9 +73,12 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void normalisePathPrefix_stripsTrailingSlash() {
-        assertThat(ReverseProxyRoute.normalisePathPrefix("/auth/")).isEqualTo("/auth");
-        assertThat(ReverseProxyRoute.normalisePathPrefix("/builder/ui/")).isEqualTo("/builder/ui");
+    void normalisePathPrefix_preservesOperatorTrailingSlash() {
+        // The operator's trailing slash is part of their intent — backend SPAs sometimes serve
+        // different content for /path vs /path/, so we keep the slash they typed instead of
+        // silently dropping it (issue: bmp.native.corporater.dev/builder/ui).
+        assertThat(ReverseProxyRoute.normalisePathPrefix("/auth/")).isEqualTo("/auth/");
+        assertThat(ReverseProxyRoute.normalisePathPrefix("/builder/ui/")).isEqualTo("/builder/ui/");
     }
 
     @Test
@@ -98,7 +101,8 @@ class ReverseProxyRouteTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/auth", "/builder/ui", "/CorpoWebserver", "/a-b_c.d", "/x/y/z"})
+    @ValueSource(strings = {"/auth", "/builder/ui", "/CorpoWebserver", "/a-b_c.d", "/x/y/z",
+                            "/auth/", "/builder/ui/"})
     void validatePathPrefix_acceptsGoodShapes(String good) {
         assertThatCode(() -> ReverseProxyRoute.validatePathPrefix(good)).doesNotThrowAnyException();
     }
@@ -437,6 +441,59 @@ class ReverseProxyRouteTest {
 
         assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
             .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Finternal.example.com%2F");
+    }
+
+    @Test
+    void launchpadUrl_pathPrefixWithTrailingSlash_isEmittedVerbatim() {
+        // Operator typed `/builder/ui/` — we don't strip the slash, and we don't auto-add one
+        // either; the launchpad URL uses the pathPrefix as the landing path as-is.
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/builder/ui/");
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://bmp.example.com/builder/ui/");
+    }
+
+    @Test
+    void launchpadUrl_pathPrefixWithoutTrailingSlash_isEmittedVerbatim() {
+        // Operator typed `/builder/ui` (no slash) — emitted as-is. If the backend needs a slash,
+        // the operator can express that via a redirect.
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/builder/ui");
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://bmp.example.com/builder/ui");
+    }
+
+    @Test
+    void launchpadUrl_redirectWinsOverPathPrefix() {
+        // pathPrefix is the Traefik matcher; when a redirect is registered, the redirect is the
+        // operator's intended landing path and supersedes the pathPrefix in the launchpad URL.
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            null, null, null, null, "/builder/ui/", false, false, null, "/builder/ui");
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://bmp.example.com/builder/ui/");
+    }
+
+    @Test
+    void launchpadUrl_authProtectedRouteWithRedirect_encodesRedirectAsRdTarget() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null,
+            "/builder/ui/", false, false, null, "/builder/ui");
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fbmp.example.com%2Fbuilder%2Fui%2F");
+    }
+
+    @Test
+    void launchpadUrl_authProtectedRouteWithPathPrefix_encodesPathPrefixAsRdTarget() {
+        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null,
+            null, false, false, null, "/builder/ui/");
+
+        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fbmp.example.com%2Fbuilder%2Fui%2F");
     }
 
     @Test
@@ -1059,6 +1116,33 @@ class ReverseProxyRouteTest {
 
         assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
             .isEqualTo("http://192.168.1.10:3001/devices/ups");
+    }
+
+    @Test
+    void directUrl_pathPrefixOnly_usesPathPrefixVerbatim() {
+        // No redirect set, pathPrefix has no trailing slash — the direct URL must not invent one.
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "r", "bmp.example.com", "10.13.13.2", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/builder/ui");
+        PeerConfiguration peer = new PeerConfiguration("s", "10.13.13.2", "",
+            MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10");
+        VpnClient peerClient = connectedPeerWithEndpoint("10.13.13.2/32", "203.0.113.5");
+
+        assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
+            .isEqualTo("http://192.168.1.10:8080/builder/ui");
+    }
+
+    @Test
+    void directUrl_pathPrefixWithTrailingSlash_preservedInDirectUrl() {
+        ReverseProxyRoute route = new ReverseProxyRoute(
+            "r", "bmp.example.com", "10.13.13.2", 8080, "svc",
+            null, null, null, null, null, false, false, null, "/builder/ui/");
+        PeerConfiguration peer = new PeerConfiguration("s", "10.13.13.2", "",
+            MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10");
+        VpnClient peerClient = connectedPeerWithEndpoint("10.13.13.2/32", "203.0.113.5");
+
+        assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
+            .isEqualTo("http://192.168.1.10:8080/builder/ui/");
     }
 
     @Test

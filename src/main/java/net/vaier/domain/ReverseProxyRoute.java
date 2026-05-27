@@ -23,7 +23,7 @@ public class ReverseProxyRoute {
     public static final int MIN_PORT = 1;
     public static final int MAX_PORT = 65535;
 
-    private static final Pattern PATH_PREFIX_PATTERN = Pattern.compile("^/[A-Za-z0-9._\\-]+(/[A-Za-z0-9._\\-]+)*$");
+    private static final Pattern PATH_PREFIX_PATTERN = Pattern.compile("^/[A-Za-z0-9._\\-]+(/[A-Za-z0-9._\\-]+)*/?$");
 
     private final String name;
     private final String domainName;
@@ -137,16 +137,16 @@ public class ReverseProxyRoute {
 
     /**
      * Normalises operator-supplied path prefixes. Null, blank, and "/" all collapse to null (= no
-     * PathPrefix, i.e. the route catches everything on its host). A trailing slash is stripped so
-     * the Traefik matcher behaves predictably — {@code PathPrefix("/auth")} matches both
-     * {@code /auth} and {@code /auth/...}, whereas {@code PathPrefix("/auth/")} would miss bare
-     * {@code /auth}.
+     * PathPrefix, i.e. the route catches everything on its host). An operator-typed trailing
+     * slash is preserved — backend SPAs sometimes serve different content for {@code /path} vs
+     * {@code /path/}, so the slash is part of the operator's intent. If the operator wants both
+     * {@code /auth} and {@code /auth/} to match, they type {@code /auth} (no slash) — Traefik's
+     * {@code PathPrefix("/auth")} then catches both shapes.
      */
     public static String normalisePathPrefix(String raw) {
         if (raw == null) return null;
         String trimmed = raw.trim();
         if (trimmed.isEmpty() || trimmed.equals("/")) return null;
-        if (trimmed.length() > 1 && trimmed.endsWith("/")) trimmed = trimmed.substring(0, trimmed.length() - 1);
         return trimmed;
     }
 
@@ -260,7 +260,12 @@ public class ReverseProxyRoute {
      */
     public String launchpadDisplayName(String baseDomain) {
         if (launchpadAlias != null && !launchpadAlias.isBlank()) return launchpadAlias.trim();
-        if (pathPrefix != null) return pathPrefix.substring(pathPrefix.lastIndexOf('/') + 1);
+        if (pathPrefix != null) {
+            String trimmed = pathPrefix.endsWith("/") && pathPrefix.length() > 1
+                ? pathPrefix.substring(0, pathPrefix.length() - 1)
+                : pathPrefix;
+            return trimmed.substring(trimmed.lastIndexOf('/') + 1);
+        }
         return domainName.split("\\.")[0];
     }
 
@@ -288,14 +293,26 @@ public class ReverseProxyRoute {
                                List<VpnClient> vpnClients, String baseDomain) {
         String direct = directUrl(callerIp, peers, vpnClients);
         if (direct != null) return direct;
-        // Path-based services land at https://host/pathPrefix (no trailing slash) — some apps
-        // serve different content for /path vs /path/, so let the target redirect itself.
+        String landingPath = landingPath();
         if (authInfo == null) {
-            return "https://" + domainName + (pathPrefix == null ? "" : pathPrefix);
+            return "https://" + domainName + landingPath;
         }
-        String target = "https://" + domainName + (pathPrefix == null ? "/" : pathPrefix);
+        // Authelia needs an absolute target with at least a path; bare "https://host" round-trips
+        // through the login flow and lands the browser on the host root without a slash.
+        String target = "https://" + domainName + (landingPath.isEmpty() ? "/" : landingPath);
         String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
         return "https://" + new VaierHostnames(baseDomain).autheliaHost() + "/?rd=" + encoded;
+    }
+
+    /**
+     * The path segment a launchpad-emitted URL lands on. {@code rootRedirectPath} is the
+     * operator's stated landing path and wins when set; otherwise the {@code pathPrefix} is used
+     * verbatim (no trailing slash invented — the operator expresses that by typing it). Empty
+     * when neither is set: the route catches the whole host and lands on the root.
+     */
+    private String landingPath() {
+        if (rootRedirectPath != null && !rootRedirectPath.isBlank()) return rootRedirectPath;
+        return pathPrefix == null ? "" : pathPrefix;
     }
 
     public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
@@ -553,10 +570,15 @@ public class ReverseProxyRoute {
         return routerName.substring(0, routerName.length() - "-router".length()).replace("-", ".");
     }
 
-    /** {@code "/auth" → "auth"}, {@code "/builder/ui" → "builder-ui"}, null/blank → {@code ""}. */
+    /**
+     * {@code "/auth" → "auth"}, {@code "/builder/ui" → "builder-ui"}, null/blank → {@code ""}.
+     * An operator-typed trailing slash is dropped here — the routerName/serviceName identifier
+     * is purely structural, the slash never appears in YAML keys.
+     */
     private static String pathSlug(String pathPrefix) {
         if (pathPrefix == null || pathPrefix.isBlank()) return "";
         String trimmed = pathPrefix.startsWith("/") ? pathPrefix.substring(1) : pathPrefix;
+        if (trimmed.endsWith("/")) trimmed = trimmed.substring(0, trimmed.length() - 1);
         return trimmed.replace('/', '-');
     }
 
@@ -616,11 +638,10 @@ public class ReverseProxyRoute {
 
         // Path-based routes pass the prefix through to the backend (no StripPrefix middleware
         // on the Traefik side), so the direct LAN bypass URL must include it too — otherwise
-        // bare http://backend:port/ hits a different path than the routed one.
-        String pathPart = (pathPrefix == null) ? "" : pathPrefix;
-        String redirectSuffix = (rootRedirectPath == null || rootRedirectPath.isBlank()) ? "" : rootRedirectPath;
-        // When both are set, redirect takes precedence as the user's intended landing path.
-        String suffix = redirectSuffix.isEmpty() ? (pathPart.isEmpty() ? "" : pathPart + "/") : redirectSuffix;
+        // bare http://backend:port/ hits a different path than the routed one. landingPath()
+        // owns the redirect-wins / pathPrefix-verbatim rule so launchpad and direct URLs land
+        // on the same place.
+        String suffix = landingPath();
         if (isLanService) {
             String scheme = (protocol == null || protocol.isBlank()) ? "http" : protocol;
             return scheme + "://" + address + ":" + port + suffix;
