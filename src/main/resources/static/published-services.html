@@ -184,6 +184,13 @@
         .service-advanced[open] > summary::before { transform: rotate(90deg); }
         .service-advanced[open] > .service-details { margin-top: 0.5rem; }
 
+        /* Brief green-border flash on a text input after an auto-save (#238). Lets the
+           operator know the change was committed without the explicit Save button. */
+        .form-input.save-ok {
+            border-color: var(--green) !important;
+            transition: border-color 0.2s;
+        }
+
         /* Discoverable action buttons */
         .btn { transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s; }
 
@@ -744,15 +751,13 @@
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label" title="Optional label shown on the launchpad tile. Leave blank to use the default (path-segment for path-based routes, subdomain otherwise).">Display name</span>
-                                <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                    <input type="text" id="alias-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                <span class="detail-value">
+                                    <input type="text" id="alias-${id}" class="form-input" style="width:100%;max-width:240px"
                                            value="${service.launchpadAlias || ''}"
                                            data-original="${service.launchpadAlias || ''}"
                                            placeholder="(default)"
-                                           oninput="onAliasInput('${service.dnsAddress}', '${id}')">
-                                    <button class="btn btn-primary" id="alias-save-${id}"
-                                            style="flex-shrink:0" disabled
-                                            onclick="saveAlias('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
+                                           onkeydown="if (event.key === 'Enter') this.blur();"
+                                           onblur="saveAlias('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">
                                 </span>
                             </div>
                         </div>
@@ -762,15 +767,13 @@
                             <div class="service-details">
                             <div class="detail-row">
                                 <span class="detail-label">Redirect</span>
-                                <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                    <input type="text" id="redirect-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                <span class="detail-value">
+                                    <input type="text" id="redirect-${id}" class="form-input" style="width:100%;max-width:240px"
                                            value="${service.rootRedirectPath || ''}"
                                            data-original="${service.rootRedirectPath || ''}"
                                            placeholder="e.g. /dashboard"
-                                           oninput="onRedirectInput('${service.dnsAddress}', '${id}')">
-                                    <button class="btn btn-primary" id="redirect-save-${id}"
-                                            style="flex-shrink:0" disabled
-                                            onclick="saveRedirect('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
+                                           onkeydown="if (event.key === 'Enter') this.blur();"
+                                           onblur="saveRedirect('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">
                                 </span>
                             </div>
                             <div class="detail-row">
@@ -780,15 +783,14 @@
                                            value="${service.versionEndpoint || ''}"
                                            data-original="${service.versionEndpoint || ''}"
                                            placeholder="/sys/metrics"
-                                           oninput="onVersionEndpointInput('${id}')">
+                                           onkeydown="if (event.key === 'Enter') this.blur();"
+                                           onblur="saveVersionEndpoint('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">
                                     <input type="text" id="verProperty-${id}" class="form-input" style="flex:1;min-width:0;max-width:100px"
                                            value="${service.versionProperty || ''}"
                                            data-original="${service.versionProperty || ''}"
                                            placeholder="property"
-                                           oninput="onVersionEndpointInput('${id}')">
-                                    <button class="btn btn-primary" id="verEndpoint-save-${id}"
-                                            style="flex-shrink:0" disabled
-                                            onclick="saveVersionEndpoint('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
+                                           onkeydown="if (event.key === 'Enter') this.blur();"
+                                           onblur="saveVersionEndpoint('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">
                                 </span>
                             </div>
                             <div class="detail-row">
@@ -819,6 +821,45 @@
                         </div>
                     </div>
                 </div>`;
+        }
+
+        // Replace the services-container HTML, but preserve any in-progress typing — and the
+        // focused field's caret position — so an SSE-driven re-render or a 30s poll can't wipe
+        // an unsaved edit out from under the operator's fingers (#239 follow-up). The existing
+        // in-flight + focus guards still defer the swap when possible; this is the last-resort
+        // belt-and-suspenders for the moments those checks miss.
+        function renderServicesContainer(html) {
+            const container = document.getElementById('services-container');
+            const dirty = new Map();
+            container.querySelectorAll('input[data-original]').forEach(input => {
+                if (input.id && input.value !== input.dataset.original) dirty.set(input.id, input.value);
+            });
+            const active = document.activeElement;
+            let restoreFocus = null;
+            if (active && active.id && container.contains(active)
+                && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                restoreFocus = {
+                    id: active.id,
+                    selectionStart: active.selectionStart,
+                    selectionEnd: active.selectionEnd,
+                };
+            }
+            container.innerHTML = html;
+            dirty.forEach((value, id) => {
+                const input = document.getElementById(id);
+                if (input) input.value = value;
+            });
+            if (restoreFocus) {
+                const input = document.getElementById(restoreFocus.id);
+                if (input) {
+                    input.focus();
+                    try {
+                        if (typeof restoreFocus.selectionStart === 'number') {
+                            input.setSelectionRange(restoreFocus.selectionStart, restoreFocus.selectionEnd);
+                        }
+                    } catch (_) { /* selection API doesn't apply to this input type — ignore */ }
+                }
+            }
         }
 
         function displayServices(services) {
@@ -855,7 +896,7 @@
 
             _pendingServices = null;
             _lastServicesHtml = html;
-            container.innerHTML = html;
+            renderServicesContainer(html);
         }
 
         let showIgnored = false;
@@ -1237,25 +1278,19 @@
             });
         }
 
-        function onRedirectInput(dnsAddress, id) {
-            const input = document.getElementById(`redirect-${id}`);
-            const btn = document.getElementById(`redirect-save-${id}`);
-            if (!input || !btn) return;
-            btn.disabled = input.value.trim() === (input.dataset.original || '');
-        }
-
-        function onAliasInput(dnsAddress, id) {
-            const input = document.getElementById(`alias-${id}`);
-            const btn = document.getElementById(`alias-save-${id}`);
-            if (!input || !btn) return;
-            btn.disabled = input.value.trim() === (input.dataset.original || '');
+        // Brief green-border flash after a successful auto-save (#238). The transient class
+         // gets cleared on a timer; if the card re-renders in the meantime, the new DOM node
+         // simply has no class and the absence reads as "no recent save" — which is correct.
+        function flashSaveOk(input) {
+            input.classList.add('save-ok');
+            setTimeout(() => input.classList.remove('save-ok'), 900);
         }
 
         async function saveAlias(dnsAddress, pathPrefix, id) {
             const input = document.getElementById(`alias-${id}`);
-            const btn = document.getElementById(`alias-save-${id}`);
+            if (!input) return;
             const alias = input.value.trim();
-            btn.disabled = true;
+            if (alias === (input.dataset.original || '')) return;
             await withInFlightEdit(dnsAddress, pathPrefix, 'launchpad-alias', async () => {
                 try {
                     const response = await fetch(withPathQuery(
@@ -1266,30 +1301,21 @@
                     });
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     input.dataset.original = alias;
+                    flashSaveOk(input);
                     await fetchServices();
                 } catch (error) {
-                    btn.disabled = false;
                     alert(`Failed to update display name: ${error.message}`);
                 }
             });
         }
 
-        function onVersionEndpointInput(id) {
-            const ep = document.getElementById(`verEndpoint-${id}`);
-            const prop = document.getElementById(`verProperty-${id}`);
-            const btn = document.getElementById(`verEndpoint-save-${id}`);
-            if (!ep || !prop || !btn) return;
-            btn.disabled = ep.value.trim() === (ep.dataset.original || '')
-                && prop.value.trim() === (prop.dataset.original || '');
-        }
-
         async function saveVersionEndpoint(dnsAddress, pathPrefix, id) {
             const ep = document.getElementById(`verEndpoint-${id}`);
             const prop = document.getElementById(`verProperty-${id}`);
-            const btn = document.getElementById(`verEndpoint-save-${id}`);
+            if (!ep || !prop) return;
             const endpoint = ep.value.trim();
             const property = prop.value.trim();
-            btn.disabled = true;
+            if (endpoint === (ep.dataset.original || '') && property === (prop.dataset.original || '')) return;
             await withInFlightEdit(dnsAddress, pathPrefix, 'version-endpoint', async () => {
                 try {
                     const response = await fetch(withPathQuery(
@@ -1301,9 +1327,10 @@
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     ep.dataset.original = endpoint;
                     prop.dataset.original = property;
+                    flashSaveOk(ep);
+                    flashSaveOk(prop);
                     await fetchServices();
                 } catch (error) {
-                    btn.disabled = false;
                     alert(`Failed to update version endpoint: ${error.message}`);
                 }
             });
@@ -1311,9 +1338,10 @@
 
         async function saveRedirect(dnsAddress, pathPrefix, id) {
             const input = document.getElementById(`redirect-${id}`);
-            const btn = document.getElementById(`redirect-save-${id}`);
-            const path = input.value.trim() || null;
-            btn.disabled = true;
+            if (!input) return;
+            const raw = input.value.trim();
+            if (raw === (input.dataset.original || '')) return;
+            const path = raw || null;
             await withInFlightEdit(dnsAddress, pathPrefix, 'redirect', async () => {
                 try {
                     const response = await fetch(withPathQuery(
@@ -1324,10 +1352,10 @@
                     });
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     input.dataset.original = path || '';
+                    flashSaveOk(input);
                     await fetchServices();
                 } catch (error) {
                     alert(`Failed to update redirect: ${error.message}`);
-                    onRedirectInput(dnsAddress, id);
                 }
             });
         }
