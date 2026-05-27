@@ -191,6 +191,11 @@
             transition: border-color 0.2s;
         }
 
+        /* Publish modal modes (#240) — the single modal shows only one set of optional fields.
+           Container mode hides the LAN-only rows; LAN mode hides the discovered-source caption. */
+        #publishModal[data-mode="container"] .publish-only-lan { display: none; }
+        #publishModal[data-mode="lan"]       .publish-only-container { display: none; }
+
         /* Discoverable action buttons */
         .btn { transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s; }
 
@@ -349,73 +354,28 @@
     </div>
 
     <!-- Publish LAN Modal -->
-    <div id="publishLanModal" class="modal">
+    <!-- Publish modal — one form, two modes (#240). Container mode publishes a discovered
+         container; LAN mode publishes a non-Docker host through its relay peer. Differences
+         are confined to the .publish-only-lan blocks (machine picker, port, protocol) and the
+         .publish-only-container block (the source/host caption). -->
+    <div id="publishModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header">Publish LAN Service</div>
-            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.6rem">
+            <div class="modal-header" id="publishModalHeader">Publish Service</div>
+            <p id="publishLanIntro" class="publish-only-lan" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.6rem">
                 Pick a registered LAN server (a non-Docker machine on a relay peer's LAN — NAS UI, IPMI, printer, etc.) and expose one of its services through the relay.
             </p>
-            <div id="publishLanForm">
-                <div class="form-group">
+            <div id="publishForm">
+                <input type="hidden" id="publishAddress">
+                <input type="hidden" id="publishPort">
+                <div class="form-group publish-only-container" style="margin-bottom:0.5rem;">
+                    <span style="color:var(--text-muted);font-size:0.8rem;" id="publishServiceLabel"></span>
+                </div>
+                <div class="form-group publish-only-lan">
                     <label class="form-label" for="publishLanMachine">Machine</label>
                     <select id="publishLanMachine" class="form-input" onchange="onPublishLanMachineChange()">
                         <option value="">— select a LAN server —</option>
                     </select>
                     <span id="publishLanRelayHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
-                </div>
-                <div style="display:flex;gap:0.5rem;align-items:flex-end;">
-                    <div class="form-group" style="flex:1;margin-bottom:1rem;">
-                        <label class="form-label" for="publishLanSubdomain">Subdomain</label>
-                        <input type="text" id="publishLanSubdomain" class="form-input" placeholder="e.g. nas">
-                    </div>
-                    <div class="form-group" style="flex:1;margin-bottom:1rem;">
-                        <label class="form-label" for="publishLanPathPrefix" title="Optional. Scope this route to a path prefix so multiple services can share one subdomain.">Path prefix <span style="color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
-                        <input type="text" id="publishLanPathPrefix" class="form-input" placeholder="e.g. /auth">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="publishLanPort">Target port</label>
-                    <input type="number" id="publishLanPort" class="form-input" min="1" max="65535" placeholder="e.g. 5000">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="publishLanProtocol">Protocol</label>
-                    <select id="publishLanProtocol" class="form-input">
-                        <option value="http">http</option>
-                        <option value="https">https</option>
-                    </select>
-                </div>
-                <div class="form-checkbox">
-                    <input type="checkbox" id="publishLanRequiresAuth">
-                    <label for="publishLanRequiresAuth">Require Authelia authentication</label>
-                </div>
-                <div class="form-checkbox">
-                    <input type="checkbox" id="publishLanDirectUrlEnabled" checked>
-                    <label for="publishLanDirectUrlEnabled" title="When checked, the launchpad links to the direct LAN URL for on-LAN callers. Uncheck for apps whose public origin differs from http://lan:port.">Link directly to LAN URL</label>
-                </div>
-                <details id="publishLanAdvanced" style="margin-top:0.75rem;">
-                    <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
-                    <div class="form-group" style="margin-top:0.6rem;">
-                        <label class="form-label" for="publishLanRootRedirectPath" title="If set, visiting the service root (/) will redirect to this path">Root path redirect</label>
-                        <input type="text" id="publishLanRootRedirectPath" class="form-input" placeholder="e.g. /builder/ui/">
-                    </div>
-                </details>
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" id="publishLanCancelBtn" onclick="hidePublishLanModal()">Cancel</button>
-                    <button class="btn btn-primary"   id="publishLanSubmitBtn" onclick="submitPublishLan()">Publish</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Publish Modal -->
-    <div id="publishModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">Publish Service</div>
-            <div id="publishForm">
-                <input type="hidden" id="publishAddress">
-                <input type="hidden" id="publishPort">
-                <div class="form-group" style="margin-bottom:0.5rem;">
-                    <span style="color:var(--text-muted);font-size:0.8rem;" id="publishServiceLabel"></span>
                 </div>
                 <div style="display:flex;gap:0.5rem;align-items:flex-end;">
                     <div class="form-group" style="flex:1;margin-bottom:1rem;">
@@ -426,6 +386,17 @@
                         <label class="form-label" for="publishPathPrefix" title="Optional. Scope this route to a path prefix so multiple services can share one subdomain.">Path prefix <span style="color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
                         <input type="text" id="publishPathPrefix" class="form-input" placeholder="e.g. /auth">
                     </div>
+                </div>
+                <div class="form-group publish-only-lan">
+                    <label class="form-label" for="publishLanPort">Target port</label>
+                    <input type="number" id="publishLanPort" class="form-input" min="1" max="65535" placeholder="e.g. 5000">
+                </div>
+                <div class="form-group publish-only-lan">
+                    <label class="form-label" for="publishLanProtocol">Protocol</label>
+                    <select id="publishLanProtocol" class="form-input">
+                        <option value="http">http</option>
+                        <option value="https">https</option>
+                    </select>
                 </div>
                 <div class="form-checkbox">
                     <input type="checkbox" id="publishRequiresAuth">
@@ -1044,6 +1015,21 @@
             }
         }
 
+        // Shared modal state — the data-mode attribute on #publishModal also drives the CSS
+        // that shows/hides container-only vs LAN-only sections (#240).
+        function publishMode() {
+            return document.getElementById('publishModal').dataset.mode;
+        }
+
+        function resetPublishFormCommon() {
+            document.getElementById('publishSubdomain').value     = '';
+            document.getElementById('publishPathPrefix').value    = '';
+            document.getElementById('publishRequiresAuth').checked = false;
+            document.getElementById('publishDirectUrlEnabled').checked = true;
+            document.getElementById('publishRootRedirectPath').value = '';
+            document.getElementById('publishAdvanced').open = false;
+        }
+
         function showPublishModalFromBtn(btn) {
             showPublishModal(
                 btn.dataset.address,
@@ -1055,18 +1041,34 @@
         }
 
         function showPublishModal(address, port, containerName, sourceLabel, suggestedSubdomain, rootRedirectPath) {
+            const modal = document.getElementById('publishModal');
+            modal.dataset.mode = 'container';
+            document.getElementById('publishModalHeader').textContent = 'Publish Service';
+            resetPublishFormCommon();
             document.getElementById('publishAddress').value          = address;
             document.getElementById('publishPort').value             = port;
             document.getElementById('publishRootRedirectPath').value = rootRedirectPath || '';
-            document.getElementById('publishPathPrefix').value = '';
             // suggestedSubdomain is computed in the domain by PublishableService.suggestedSubdomain().
             document.getElementById('publishSubdomain').value        = suggestedSubdomain;
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceLabel} (${address}:${port})`;
-            document.getElementById('publishRequiresAuth').checked = false;
-            document.getElementById('publishDirectUrlEnabled').checked = true;
             document.getElementById('publishAdvanced').open = !!rootRedirectPath;
-            document.getElementById('publishModal').classList.add('active');
+            modal.classList.add('active');
+            document.getElementById('publishSubdomain').focus();
+        }
+
+        async function showPublishLanModal() {
+            const modal = document.getElementById('publishModal');
+            modal.dataset.mode = 'lan';
+            document.getElementById('publishModalHeader').textContent = 'Publish LAN Service';
+            resetPublishFormCommon();
+            document.getElementById('publishAddress').value = '';
+            document.getElementById('publishPort').value    = '';  // hidden field stays empty in LAN mode
+            document.getElementById('publishLanPort').value = '';
+            document.getElementById('publishLanProtocol').value = 'http';
+            document.getElementById('publishLanRelayHint').textContent = '';
+            modal.classList.add('active');
+            await loadLanServersForPublish();
             document.getElementById('publishSubdomain').focus();
         }
 
@@ -1179,79 +1181,36 @@
             }
         }
 
-        async function showPublishLanModal() {
-            document.getElementById('publishLanSubdomain').value = '';
-            document.getElementById('publishLanPort').value = '';
-            document.getElementById('publishLanProtocol').value = 'http';
-            document.getElementById('publishLanRequiresAuth').checked = false;
-            document.getElementById('publishLanDirectUrlEnabled').checked = true;
-            document.getElementById('publishLanRootRedirectPath').value = '';
-            document.getElementById('publishLanPathPrefix').value = '';
-            document.getElementById('publishLanAdvanced').open = false;
-            document.getElementById('publishLanRelayHint').textContent = '';
-            document.getElementById('publishLanModal').classList.add('active');
-            await loadLanServersForPublish();
-            document.getElementById('publishLanSubdomain').focus();
-        }
-
-        function hidePublishLanModal() {
-            document.getElementById('publishLanModal').classList.remove('active');
-        }
-
-        async function submitPublishLan() {
-            const subdomain   = document.getElementById('publishLanSubdomain').value.trim();
-            const machineName = document.getElementById('publishLanMachine').value;
-            const port        = parseInt(document.getElementById('publishLanPort').value);
-            const protocol    = document.getElementById('publishLanProtocol').value;
-            const requireAuth        = document.getElementById('publishLanRequiresAuth').checked;
-            const directUrlDisabled  = !document.getElementById('publishLanDirectUrlEnabled').checked;
-            const rootRedirectPath   = document.getElementById('publishLanRootRedirectPath').value.trim() || null;
-            const pathPrefix         = document.getElementById('publishLanPathPrefix').value.trim() || null;
-
-            if (!machineName) { alert('Please select a LAN server'); return; }
-            if (!subdomain)   { alert('Please enter a subdomain'); return; }
-            if (!port || port < 1 || port > 65535) { alert('Please enter a valid port (1-65535)'); return; }
-
-            const submitBtn = document.getElementById('publishLanSubmitBtn');
-            const cancelBtn = document.getElementById('publishLanCancelBtn');
-            submitBtn.disabled = true;
-            cancelBtn.disabled = true;
-            submitBtn.textContent = 'Publishing…';
-
-            try {
-                const response = await fetch('/published-services/lan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ subdomain, machineName, port, protocol, requireAuth, directUrlDisabled, rootRedirectPath, pathPrefix })
-                });
-                if (response.status === 400) {
-                    alert(`Could not publish — make sure ${machineName}'s lanAddress is inside a relay peer's lanCidr.`);
-                    return;
-                }
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-                hidePublishLanModal();
-                addProcessingCard(subdomain, requireAuth, false);
-            } catch (error) {
-                alert(`Failed to publish LAN service: ${error.message}`);
-            } finally {
-                submitBtn.disabled = false;
-                cancelBtn.disabled = false;
-                submitBtn.textContent = 'Publish';
-            }
-        }
-
-
         async function submitPublish() {
-            const address          = document.getElementById('publishAddress').value;
-            const port             = parseInt(document.getElementById('publishPort').value);
-            const rootRedirectPath = document.getElementById('publishRootRedirectPath').value || null;
-            const pathPrefix       = document.getElementById('publishPathPrefix').value.trim() || null;
+            const mode = publishMode();
             const subdomain          = document.getElementById('publishSubdomain').value.trim();
+            const pathPrefix         = document.getElementById('publishPathPrefix').value.trim() || null;
             const requiresAuth       = document.getElementById('publishRequiresAuth').checked;
             const directUrlDisabled  = !document.getElementById('publishDirectUrlEnabled').checked;
+            const rootRedirectPath   = document.getElementById('publishRootRedirectPath').value.trim() || null;
 
             if (!subdomain) { alert('Please enter a subdomain'); return; }
+
+            // Per-mode validation + payload — the only thing that diverges between the two
+            // publish flows is which endpoint we hit and which extra fields it expects.
+            let endpoint, body, errorPrefix;
+            if (mode === 'lan') {
+                const machineName = document.getElementById('publishLanMachine').value;
+                const port        = parseInt(document.getElementById('publishLanPort').value);
+                const protocol    = document.getElementById('publishLanProtocol').value;
+                if (!machineName) { alert('Please select a LAN server'); return; }
+                if (!port || port < 1 || port > 65535) { alert('Please enter a valid port (1-65535)'); return; }
+                endpoint = '/published-services/lan';
+                // LAN API field name is `requireAuth` (singular), not `requiresAuth`. Quirk preserved.
+                body = { subdomain, machineName, port, protocol, requireAuth: requiresAuth, directUrlDisabled, rootRedirectPath, pathPrefix };
+                errorPrefix = 'Failed to publish LAN service';
+            } else {
+                const address = document.getElementById('publishAddress').value;
+                const port    = parseInt(document.getElementById('publishPort').value);
+                endpoint = '/published-services/publish';
+                body = { address, port, subdomain, requiresAuth, rootRedirectPath, directUrlDisabled, pathPrefix };
+                errorPrefix = 'Failed to publish service';
+            }
 
             const submitBtn = document.getElementById('publishSubmitBtn');
             const cancelBtn = document.getElementById('publishCancelBtn');
@@ -1260,19 +1219,22 @@
             submitBtn.textContent = 'Publishing…';
 
             try {
-                const response = await fetch('/published-services/publish', {
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ address, port, subdomain, requiresAuth, rootRedirectPath, directUrlDisabled, pathPrefix })
+                    body: JSON.stringify(body)
                 });
+                if (mode === 'lan' && response.status === 400) {
+                    alert(`Could not publish — make sure ${body.machineName}'s lanAddress is inside a relay peer's lanCidr.`);
+                    return;
+                }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 hidePublishModal();
                 addProcessingCard(subdomain, requiresAuth, false);
-                fetchPublishable();
-
+                if (mode === 'container') fetchPublishable();
             } catch (error) {
-                alert(`Failed to publish service: ${error.message}`);
+                alert(`${errorPrefix}: ${error.message}`);
             } finally {
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
