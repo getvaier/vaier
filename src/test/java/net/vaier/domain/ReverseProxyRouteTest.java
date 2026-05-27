@@ -1171,6 +1171,37 @@ class ReverseProxyRouteTest {
         assertThat(name).isEqualTo("nut @ apalveien5");
     }
 
+    // --- lanServerName (#234 follow-up) ---
+    // For LAN-routed services, the published-services page shows the LAN host's display name in
+    // the card sub-line — the relay peer is already named by the section heading. This is the
+    // single piece of LAN-server identity the route surfaces; the relay still owns the routing.
+
+    @Test
+    void lanServerName_lanServiceWithMatchingHost_returnsItsDisplayName() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "nas-router", "nas.example.com", "192.168.3.50", 5000, "http", "nas-svc");
+        LanServer nas = new LanServer("nas", "192.168.3.50", false, null);
+
+        assertThat(route.lanServerName(List.of(nas))).contains("nas");
+    }
+
+    @Test
+    void lanServerName_lanServiceWithUnknownAddress_isEmpty() {
+        ReverseProxyRoute route = ReverseProxyRoute.lanRoute(
+            "nas-router", "nas.example.com", "192.168.3.50", 5000, "http", "nas-svc");
+
+        assertThat(route.lanServerName(List.of())).isEmpty();
+    }
+
+    @Test
+    void lanServerName_peerHostedRoute_isEmpty() {
+        // Non-LAN routes don't carry a LAN-host concept; the heading already names the peer.
+        ReverseProxyRoute route = route("app.example.com", "10.13.13.2", 8080);
+        LanServer unrelated = new LanServer("nas", "192.168.3.50", false, null);
+
+        assertThat(route.lanServerName(List.of(unrelated))).isEmpty();
+    }
+
     // --- routerName / serviceName / dnsNameFromRouterName (#229) ---
 
     @Test

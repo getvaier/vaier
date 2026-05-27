@@ -14,6 +14,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 @Getter
@@ -615,6 +616,21 @@ public class ReverseProxyRoute {
     public String hostDisplayName(List<VpnClient> vpnClients, ForResolvingPeerNames peerNameResolver,
                                   List<PeerConfiguration> peers) {
         return resolveServer(vpnClients, peerNameResolver, peers).displayName();
+    }
+
+    /**
+     * The display name of the LAN server this route targets, when the route {@link #isLanService}.
+     * The card sub-line on the Services page surfaces it ({@code @ NAS}, {@code @ Pool controller})
+     * so the operator sees the actual host even though the section heading names the relay peer
+     * the traffic flows through. Empty for non-LAN routes (the heading already names the host) and
+     * when no registered LAN server matches the route's address.
+     */
+    public Optional<String> lanServerName(List<LanServer> lanServers) {
+        if (!isLanService) return Optional.empty();
+        return lanServers.stream()
+            .filter(s -> address.equals(s.lanAddress()))
+            .findFirst()
+            .map(LanServer::name);
     }
 
     public String directUrl(String callerIp, List<PeerConfiguration> peers, List<VpnClient> vpnClients) {

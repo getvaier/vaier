@@ -14,6 +14,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingDnsRecords;
+import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
@@ -77,6 +78,9 @@ class GetLaunchpadServicesTest {
     @Mock
     ForCheckingLanReachability forCheckingLanReachability;
 
+    @Mock
+    ForPersistingLanServers forPersistingLanServers;
+
     @InjectMocks
     PublishingService service;
 
@@ -90,6 +94,7 @@ class GetLaunchpadServicesTest {
         lenient().when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
         lenient().when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
         lenient().when(forCheckingLanReachability.snapshot()).thenReturn(java.util.Map.of());
+        lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
     }
 
     @Test

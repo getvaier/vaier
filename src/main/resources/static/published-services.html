@@ -181,6 +181,22 @@
             margin-bottom: 0.5rem;
         }
 
+        /* Peer grouping — mirrors launchpad.html so "what's on each host" reads the same on
+           both pages. The first section sheds its top margin so the page doesn't start with a
+           gap above the first peer heading. */
+        .peer-section { margin-bottom: 1.5rem; }
+        .peer-section:last-child { margin-bottom: 0; }
+        .peer-heading {
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 0.4rem;
+            margin-top: 1rem;
+        }
+        .peer-section:first-child .peer-heading { margin-top: 0; }
+
         .discoverable-meta {
             font-size: 0.78rem;
             color: var(--text-muted);
@@ -562,9 +578,36 @@
         // window-focus refresh, or SSE update used to (a) swallow a click that arrived while
         // the swap was in flight — so a card needed two clicks to expand — and (b) destroy an
         // inline edit in progress. We skip the swap when the markup is unchanged, and hold it
-        // back while a field inside the list is focused, flushing once focus leaves.
+        // back while a field inside the list is focused (or while a PATCH is in flight),
+        // flushing once focus leaves / the PATCH resolves.
         let _lastServicesHtml = null;
         let _pendingServices = null;
+        // A PATCH triggered from a card (checkbox toggle, alias save, etc.) immediately fires a
+        // server-side `service-updated` SSE event. The handler turns around and calls
+        // fetchServices, which used to re-render with the pre-PATCH snapshot — the checkbox
+        // visibly snapped back for a frame. While any PATCH is outstanding we defer renders,
+        // then flush once the set drains. Keyed by `${dnsAddress}|${pathPrefix}|${field}` so two
+        // concurrent edits on different fields of the same row still both hold the render off.
+        const _inFlightEdits = new Set();
+
+        function inFlightKey(dnsAddress, pathPrefix, field) {
+            return `${dnsAddress}|${pathPrefix || ''}|${field}`;
+        }
+
+        async function withInFlightEdit(dnsAddress, pathPrefix, field, op) {
+            const key = inFlightKey(dnsAddress, pathPrefix, field);
+            _inFlightEdits.add(key);
+            try {
+                return await op();
+            } finally {
+                _inFlightEdits.delete(key);
+                if (_inFlightEdits.size === 0 && _pendingServices && !isEditingServiceCard()) {
+                    const pending = _pendingServices;
+                    _pendingServices = null;
+                    displayServices(pending);
+                }
+            }
+        }
 
         function isEditingServiceCard() {
             const active = document.activeElement;
@@ -573,48 +616,47 @@
                 && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
         }
 
-        function displayServices(services) {
-            const container = document.getElementById('services-container');
-            if (services.length === 0) {
-                _lastServicesHtml = null;
-                _pendingServices = null;
-                container.innerHTML = '<div class="loading">No published services yet</div>';
-                return;
-            }
+        function renderServiceCard(service) {
+            const dnsOk  = service.dnsState === 'OK';
+            const uniqueName = service.dnsAddress + (service.pathPrefix || '');
+            const id         = cardId(uniqueName);
+            const isExpanded = expandedServices.has(uniqueName);
+            // Tri-state: state UNKNOWN renders the machine-type icon grey, so a service
+            // whose host hasn't been probed yet doesn't show a misleading green.
+            const dotClass = service.state === 'OK' ? 'status-connected'
+                : (service.state === 'UNKNOWN' ? 'status-unknown' : 'status-disconnected');
+            const authSlot   = service.authenticated
+                ? { kind: 'auth',    title: 'Authelia authentication required',         label: 'Auth' }
+                : { kind: 'no-auth', title: 'No authentication — service is publicly reachable', label: 'No auth' };
+            const serviceUrl = `https://${service.dnsAddress}${service.pathPrefix || ''}`;
+            const displayHost = `${service.dnsAddress}${service.pathPrefix || ''}`;
+            const isSelf = service.dnsAddress.startsWith('vaier.');
 
-            const html = services.slice().sort((a, b) => a.name.localeCompare(b.name)).map(service => {
-                const dnsOk  = service.dnsState === 'OK';
-                const uniqueName = service.dnsAddress + (service.pathPrefix || '');
-                const id         = cardId(uniqueName);
-                const isExpanded = expandedServices.has(uniqueName);
-                // Tri-state: state UNKNOWN renders the machine-type icon grey, so a service
-                // whose host hasn't been probed yet doesn't show a misleading green.
-                const dotClass = service.state === 'OK' ? 'status-connected'
-                    : (service.state === 'UNKNOWN' ? 'status-unknown' : 'status-disconnected');
-                const authSlot   = service.authenticated
-                    ? { kind: 'auth',    title: 'Authelia authentication required',         label: 'Auth' }
-                    : { kind: 'no-auth', title: 'No authentication — service is publicly reachable', label: 'No auth' };
-                const serviceUrl = `https://${service.dnsAddress}${service.pathPrefix || ''}`;
-                const displayHost = `${service.dnsAddress}${service.pathPrefix || ''}`;
-                const isSelf = service.dnsAddress.startsWith('vaier.');
+            // The bold heading is the operator-facing Display Name when set, else the
+            // computed shortName. The peer/host is already named by the section heading
+            // (we group cards by hostName), so the sub-line only carries (a) the LAN host's
+            // display name for LAN services — the relay is in the heading but operators
+            // think of "DSM @ NAS", not "DSM @ relay-peer" — and (b) the pathPrefix when set,
+            // so a path-based route doesn't conflate name and path (#235).
+            const heading = service.launchpadAlias || service.shortName;
+            const subParts = [];
+            if (service.lanServerName) subParts.push(`@ ${service.lanServerName}`);
+            if (service.pathPrefix)    subParts.push(service.pathPrefix);
+            const subLine = subParts.join(' · ');
+            const typeKind  = serviceTypeIcon(service);
+            const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'vaier': 'Service on the Vaier server', 'server': 'Service on a VPN peer' })[typeKind];
 
-                // shortName and hostName are computed server-side — no parsing of " @ " here.
-                const shortName = service.shortName + (service.pathPrefix ? service.pathPrefix : '');
-                const peerName  = service.hostName || '';
-                const typeKind  = serviceTypeIcon(service);
-                const typeTip   = ({ 'lan': 'LAN service (routed through a relay peer)', 'vaier': 'Service on the Vaier server', 'server': 'Service on a VPN peer' })[typeKind];
+            const urlValue = dnsOk && !isSelf
+                ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}${service.pathPrefix || ''}">${displayHost}</a>`
+                : `<span style="color:var(--text-dim);font-family:var(--mono)">${displayHost}</span>`;
 
-                const urlValue = dnsOk && !isSelf
-                    ? `<a class="service-link" href="${serviceUrl}" target="${service.dnsAddress}${service.pathPrefix || ''}">${displayHost}</a>`
-                    : `<span style="color:var(--text-dim);font-family:var(--mono)">${displayHost}</span>`;
-
-                return `
+            return `
                 <div class="service-card">
                     <div class="service-header" onclick="toggleService('${uniqueName.replace(/'/g, "\\'")}')">
                         <div class="service-header-left">
                             ${machineIconHtml(typeKind, typeTip, iconStatusClass(dotClass))}
-                            <span class="service-name">${shortName}</span>
-                            ${peerName ? `<span class="service-peer">@ ${peerName}</span>` : ''}
+                            <span class="service-name">${heading}</span>
+                            ${subLine ? `<span class="service-peer">${subLine}</span>` : ''}
                             ${capabilitySlotsHtml([authSlot])}
                         </div>
                         <span class="service-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
@@ -716,10 +758,39 @@
                         </div>
                     </div>
                 </div>`;
+        }
+
+        function displayServices(services) {
+            const container = document.getElementById('services-container');
+            if (services.length === 0) {
+                _lastServicesHtml = null;
+                _pendingServices = null;
+                container.innerHTML = '<div class="loading">No published services yet</div>';
+                return;
+            }
+
+            // Group by hostName so the page reads "what's on each host", mirroring the launchpad
+            // (#234). Services on the Vaier server itself have an empty hostName — they go under
+            // "Vaier". LAN services have hostName set to their relay peer (the domain decides
+            // that), so they group with the rest of that peer's services.
+            const groups = new Map();
+            for (const s of services) {
+                const key = s.hostName || 'Vaier';
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(s);
+            }
+            const sortedPeers = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+
+            const html = sortedPeers.map(peer => {
+                const cards = groups.get(peer)
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(renderServiceCard)
+                    .join('');
+                return `<div class="peer-section"><div class="peer-heading">${peer}</div>${cards}</div>`;
             }).join('');
 
             if (html === _lastServicesHtml) { _pendingServices = null; return; }
-            if (isEditingServiceCard()) { _pendingServices = services; return; }
+            if (isEditingServiceCard() || _inFlightEdits.size > 0) { _pendingServices = services; return; }
 
             _pendingServices = null;
             _lastServicesHtml = html;
@@ -1055,48 +1126,54 @@
         }
 
         async function setDirectUrlDisabled(dnsAddress, pathPrefix, disabled) {
-            try {
-                const response = await fetch(withPathQuery(
-                    `/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, pathPrefix), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ directUrlDisabled: disabled })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                await fetchServices();
-            } catch (error) {
-                alert(`Failed to update direct LAN URL setting: ${error.message}`);
-            }
+            await withInFlightEdit(dnsAddress, pathPrefix, 'direct-url-disabled', async () => {
+                try {
+                    const response = await fetch(withPathQuery(
+                        `/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, pathPrefix), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ directUrlDisabled: disabled })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await fetchServices();
+                } catch (error) {
+                    alert(`Failed to update direct LAN URL setting: ${error.message}`);
+                }
+            });
         }
 
         async function setHiddenFromLaunchpad(dnsAddress, pathPrefix, hidden) {
-            try {
-                const response = await fetch(withPathQuery(
-                    `/published-services/${encodeURIComponent(dnsAddress)}/hidden-from-launchpad`, pathPrefix), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ hiddenFromLaunchpad: hidden })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                await fetchServices();
-            } catch (error) {
-                alert(`Failed to update launchpad visibility: ${error.message}`);
-            }
+            await withInFlightEdit(dnsAddress, pathPrefix, 'hidden-from-launchpad', async () => {
+                try {
+                    const response = await fetch(withPathQuery(
+                        `/published-services/${encodeURIComponent(dnsAddress)}/hidden-from-launchpad`, pathPrefix), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ hiddenFromLaunchpad: hidden })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await fetchServices();
+                } catch (error) {
+                    alert(`Failed to update launchpad visibility: ${error.message}`);
+                }
+            });
         }
 
         async function setRequiresAuth(dnsAddress, pathPrefix, requiresAuth) {
-            try {
-                const response = await fetch(withPathQuery(
-                    `/published-services/${encodeURIComponent(dnsAddress)}/auth`, pathPrefix), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ requiresAuth })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                await fetchServices();
-            } catch (error) {
-                alert(`Failed to update authentication: ${error.message}`);
-            }
+            await withInFlightEdit(dnsAddress, pathPrefix, 'auth', async () => {
+                try {
+                    const response = await fetch(withPathQuery(
+                        `/published-services/${encodeURIComponent(dnsAddress)}/auth`, pathPrefix), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ requiresAuth })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await fetchServices();
+                } catch (error) {
+                    alert(`Failed to update authentication: ${error.message}`);
+                }
+            });
         }
 
         function onRedirectInput(dnsAddress, id) {
@@ -1118,20 +1195,22 @@
             const btn = document.getElementById(`alias-save-${id}`);
             const alias = input.value.trim();
             btn.disabled = true;
-            try {
-                const response = await fetch(withPathQuery(
-                    `/published-services/${encodeURIComponent(dnsAddress)}/launchpad-alias`, pathPrefix), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ launchpadAlias: alias })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                input.dataset.original = alias;
-                await fetchServices();
-            } catch (error) {
-                btn.disabled = false;
-                alert(`Failed to update display name: ${error.message}`);
-            }
+            await withInFlightEdit(dnsAddress, pathPrefix, 'launchpad-alias', async () => {
+                try {
+                    const response = await fetch(withPathQuery(
+                        `/published-services/${encodeURIComponent(dnsAddress)}/launchpad-alias`, pathPrefix), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ launchpadAlias: alias })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    input.dataset.original = alias;
+                    await fetchServices();
+                } catch (error) {
+                    btn.disabled = false;
+                    alert(`Failed to update display name: ${error.message}`);
+                }
+            });
         }
 
         function onVersionEndpointInput(id) {
@@ -1150,21 +1229,23 @@
             const endpoint = ep.value.trim();
             const property = prop.value.trim();
             btn.disabled = true;
-            try {
-                const response = await fetch(withPathQuery(
-                    `/published-services/${encodeURIComponent(dnsAddress)}/version-endpoint`, pathPrefix), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ versionEndpoint: endpoint, versionProperty: property })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                ep.dataset.original = endpoint;
-                prop.dataset.original = property;
-                await fetchServices();
-            } catch (error) {
-                btn.disabled = false;
-                alert(`Failed to update version endpoint: ${error.message}`);
-            }
+            await withInFlightEdit(dnsAddress, pathPrefix, 'version-endpoint', async () => {
+                try {
+                    const response = await fetch(withPathQuery(
+                        `/published-services/${encodeURIComponent(dnsAddress)}/version-endpoint`, pathPrefix), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ versionEndpoint: endpoint, versionProperty: property })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    ep.dataset.original = endpoint;
+                    prop.dataset.original = property;
+                    await fetchServices();
+                } catch (error) {
+                    btn.disabled = false;
+                    alert(`Failed to update version endpoint: ${error.message}`);
+                }
+            });
         }
 
         async function saveRedirect(dnsAddress, pathPrefix, id) {
@@ -1172,20 +1253,22 @@
             const btn = document.getElementById(`redirect-save-${id}`);
             const path = input.value.trim() || null;
             btn.disabled = true;
-            try {
-                const response = await fetch(withPathQuery(
-                    `/published-services/${encodeURIComponent(dnsAddress)}/redirect`, pathPrefix), {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rootRedirectPath: path })
-                });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                input.dataset.original = path || '';
-                await fetchServices();
-            } catch (error) {
-                alert(`Failed to update redirect: ${error.message}`);
-                onRedirectInput(dnsAddress, id);
-            }
+            await withInFlightEdit(dnsAddress, pathPrefix, 'redirect', async () => {
+                try {
+                    const response = await fetch(withPathQuery(
+                        `/published-services/${encodeURIComponent(dnsAddress)}/redirect`, pathPrefix), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rootRedirectPath: path })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    input.dataset.original = path || '';
+                    await fetchServices();
+                } catch (error) {
+                    alert(`Failed to update redirect: ${error.message}`);
+                    onRedirectInput(dnsAddress, id);
+                }
+            });
         }
 
         function showDeleteModal(dnsAddress, pathPrefix) {
@@ -1284,10 +1367,16 @@
         window.addEventListener('focus', refreshAll);
 
         // A status update that arrived while the user was editing a field is deferred
-        // (see displayServices); render it once focus leaves the services list.
+        // (see displayServices); render it once focus leaves the services list and no PATCH
+        // is in flight. The in-flight branch is also flushed inside withInFlightEdit so a
+        // focus-less checkbox toggle reconciles too.
         document.getElementById('services-container').addEventListener('focusout', () => {
             setTimeout(() => {
-                if (_pendingServices && !isEditingServiceCard()) displayServices(_pendingServices);
+                if (_pendingServices && !isEditingServiceCard() && _inFlightEdits.size === 0) {
+                    const pending = _pendingServices;
+                    _pendingServices = null;
+                    displayServices(pending);
+                }
             }, 0);
         });
     </script>

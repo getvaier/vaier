@@ -285,6 +285,7 @@ public class PublishingService implements
                                     List<VpnClient> vpnClients, List<DockerService> localServices,
                                     String serverLanCidr, Map<String, Reachability> lanReachabilities) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        var lanServers = forPersistingLanServers.getAll();
         DnsState dnsState = route.dnsState(allDnsRecords, configResolver.getDnsProvider());
         Server.State hostState = route.hostState(localServices, vpnClients, peers, serverLanCidr, lanReachabilities);
         String baseDomain = configResolver.getDomain();
@@ -292,6 +293,7 @@ public class PublishingService implements
             route.displayName(baseDomain, localServices, vpnClients, forResolvingPeerNames, peers),
             route.shortName(baseDomain, vpnClients, forResolvingPeerNames, peers),
             route.hostDisplayName(vpnClients, forResolvingPeerNames, peers),
+            route.lanServerName(lanServers).orElse(null),
             route.serviceLocation(vpnClients, forResolvingPeerNames, peers),
             dnsState == DnsState.OK && hostState == Server.State.OK,
             route.getDomainName(),
