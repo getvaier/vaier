@@ -150,6 +150,40 @@
             margin-top: 0.75rem;
         }
 
+        /* Advanced disclosure — collapses the rare-touch settings behind a summary line so
+           the common case (status + auth toggle) reads at a glance (#236). Open state is
+           remembered in advancedExpanded; auto-opens on first render when any field inside
+           is non-default. */
+        .service-advanced {
+            margin-top: 0.75rem;
+            padding-top: 0.6rem;
+            border-top: 1px dashed var(--border);
+        }
+        .service-advanced > summary {
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.15rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .service-advanced > summary::-webkit-details-marker { display: none; }
+        .service-advanced > summary::before {
+            content: '▶';
+            display: inline-block;
+            font-size: 0.55rem;
+            color: var(--text-dim);
+            transition: transform 0.15s;
+        }
+        .service-advanced[open] > summary::before { transform: rotate(90deg); }
+        .service-advanced[open] > .service-details { margin-top: 0.5rem; }
+
         /* Discoverable action buttons */
         .btn { transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s; }
 
@@ -405,6 +439,29 @@
 
     <script>
         const expandedServices = new Set();
+        // Tracks explicit operator toggles of the Advanced disclosure on each card (#236).
+        // Keyed by uniqueName; absence means "use the auto-open rule" (open iff any rare-touch
+        // field is non-default). A present entry overrides the rule — once the operator
+        // collapses the section it stays collapsed across re-renders.
+        const advancedExpanded = new Map();
+
+        function hasAdvancedNonDefault(service) {
+            return !!service.rootRedirectPath
+                || !!service.versionEndpoint
+                || !!service.versionProperty
+                || !!service.directUrlDisabled
+                || !!service.hiddenFromLaunchpad;
+        }
+
+        function shouldAdvancedBeOpen(service, uniqueName) {
+            return advancedExpanded.has(uniqueName)
+                ? advancedExpanded.get(uniqueName)
+                : hasAdvancedNonDefault(service);
+        }
+
+        function onAdvancedToggle(uniqueName, isOpen) {
+            advancedExpanded.set(uniqueName, isOpen);
+        }
 
         function cardId(name) {
             return name.replace(/[^a-zA-Z0-9]/g, '_');
@@ -686,19 +743,6 @@
                                 </span>
                             </div>
                             <div class="detail-row">
-                                <span class="detail-label">Redirect</span>
-                                <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                    <input type="text" id="redirect-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
-                                           value="${service.rootRedirectPath || ''}"
-                                           data-original="${service.rootRedirectPath || ''}"
-                                           placeholder="e.g. /dashboard"
-                                           oninput="onRedirectInput('${service.dnsAddress}', '${id}')">
-                                    <button class="btn btn-primary" id="redirect-save-${id}"
-                                            style="flex-shrink:0" disabled
-                                            onclick="saveRedirect('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
-                                </span>
-                            </div>
-                            <div class="detail-row">
                                 <span class="detail-label" title="Optional label shown on the launchpad tile. Leave blank to use the default (path-segment for path-based routes, subdomain otherwise).">Display name</span>
                                 <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
                                     <input type="text" id="alias-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
@@ -709,6 +753,24 @@
                                     <button class="btn btn-primary" id="alias-save-${id}"
                                             style="flex-shrink:0" disabled
                                             onclick="saveAlias('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
+                                </span>
+                            </div>
+                        </div>
+                        <details class="service-advanced" ${shouldAdvancedBeOpen(service, uniqueName) ? 'open' : ''}
+                                 ontoggle="onAdvancedToggle('${uniqueName.replace(/'/g, "\\'")}', this.open)">
+                            <summary>Advanced</summary>
+                            <div class="service-details">
+                            <div class="detail-row">
+                                <span class="detail-label">Redirect</span>
+                                <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+                                    <input type="text" id="redirect-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                                           value="${service.rootRedirectPath || ''}"
+                                           data-original="${service.rootRedirectPath || ''}"
+                                           placeholder="e.g. /dashboard"
+                                           oninput="onRedirectInput('${service.dnsAddress}', '${id}')">
+                                    <button class="btn btn-primary" id="redirect-save-${id}"
+                                            style="flex-shrink:0" disabled
+                                            onclick="saveRedirect('${service.dnsAddress}', '${service.pathPrefix || ''}', '${id}')">Save</button>
                                 </span>
                             </div>
                             <div class="detail-row">
@@ -749,7 +811,8 @@
                                         onchange="setHiddenFromLaunchpad('${service.dnsAddress}', '${service.pathPrefix || ''}', !this.checked)">
                                 </span>
                             </div>
-                        </div>
+                            </div>
+                        </details>
                         <div class="service-actions-row">
                             <div class="service-actions-left"></div>
                             <button class="btn btn-small btn-danger" onclick="showDeleteModal('${service.dnsAddress}', '${service.pathPrefix || ''}')">Delete</button>
