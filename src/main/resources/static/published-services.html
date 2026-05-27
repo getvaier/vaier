@@ -342,8 +342,8 @@
                     <label for="publishLanRequiresAuth">Require Authelia authentication</label>
                 </div>
                 <div class="form-checkbox">
-                    <input type="checkbox" id="publishLanDirectUrlDisabled">
-                    <label for="publishLanDirectUrlDisabled" title="When checked, the launchpad never links to the direct LAN URL.">Disable direct LAN URL</label>
+                    <input type="checkbox" id="publishLanDirectUrlEnabled" checked>
+                    <label for="publishLanDirectUrlEnabled" title="When checked, the launchpad links to the direct LAN URL for on-LAN callers. Uncheck for apps whose public origin differs from http://lan:port.">Link directly to LAN URL</label>
                 </div>
                 <details id="publishLanAdvanced" style="margin-top:0.75rem;">
                     <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
@@ -385,8 +385,8 @@
                     <label for="publishRequiresAuth">Require Authelia authentication</label>
                 </div>
                 <div class="form-checkbox">
-                    <input type="checkbox" id="publishDirectUrlDisabled">
-                    <label for="publishDirectUrlDisabled" title="When checked, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Disable direct LAN URL</label>
+                    <input type="checkbox" id="publishDirectUrlEnabled" checked>
+                    <label for="publishDirectUrlEnabled" title="When checked, the launchpad links to the direct LAN URL when the caller shares the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Link directly to LAN URL</label>
                 </div>
                 <details id="publishAdvanced" style="margin-top:0.75rem;">
                     <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
@@ -673,7 +673,7 @@
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Host</span>
-                                <span class="detail-value">${service.hostAddress}:${service.hostPort} ${getStatusHtml(service.state, service.state === 'OK')}</span>
+                                <span class="detail-value">${service.hostAddress}:${service.hostPort}</span>
                             </div>
                             <div class="detail-row">
                                 <span class="detail-label">Auth</span>
@@ -730,25 +730,23 @@
                                 </span>
                             </div>
                             <div class="detail-row">
-                                <span class="detail-label" title="When checked, the launchpad never links to the direct LAN URL for this service, even when the caller shares the peer's NAT. Useful for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
+                                <span class="detail-label" title="When checked, the launchpad uses the direct LAN URL for callers sharing the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
                                 <span class="detail-value">
-                                    <input type="checkbox" id="dulDisabled-${id}"
-                                        ${service.directUrlDisabled ? 'checked' : ''}
+                                    <input type="checkbox" id="dulEnabled-${id}"
+                                        ${service.directUrlDisabled ? '' : 'checked'}
                                         style="accent-color:var(--accent);cursor:pointer"
-                                        title="When checked, the launchpad never links to the direct LAN URL."
-                                        onchange="setDirectUrlDisabled('${service.dnsAddress}', '${service.pathPrefix || ''}', this.checked)">
-                                    <span style="margin-left:0.4rem;color:var(--text-muted);font-size:0.75rem">Disable</span>
+                                        title="When checked, the launchpad links to the direct LAN URL when applicable."
+                                        onchange="setDirectUrlDisabled('${service.dnsAddress}', '${service.pathPrefix || ''}', !this.checked)">
                                 </span>
                             </div>
                             <div class="detail-row">
-                                <span class="detail-label" title="When checked, this service is hidden from the launchpad. Useful for internal APIs that exist to back another service and don't need their own tile.">Launchpad</span>
+                                <span class="detail-label" title="When checked, the launchpad renders a tile for this service. Uncheck for internal APIs that back another service and don't need their own tile.">Launchpad</span>
                                 <span class="detail-value">
-                                    <input type="checkbox" id="hideFromLaunchpad-${id}"
-                                        ${service.hiddenFromLaunchpad ? 'checked' : ''}
+                                    <input type="checkbox" id="showOnLaunchpad-${id}"
+                                        ${service.hiddenFromLaunchpad ? '' : 'checked'}
                                         style="accent-color:var(--accent);cursor:pointer"
-                                        title="When checked, this service is hidden from the launchpad."
-                                        onchange="setHiddenFromLaunchpad('${service.dnsAddress}', '${service.pathPrefix || ''}', this.checked)">
-                                    <span style="margin-left:0.4rem;color:var(--text-muted);font-size:0.75rem">Hide</span>
+                                        title="When checked, the launchpad shows a tile for this service."
+                                        onchange="setHiddenFromLaunchpad('${service.dnsAddress}', '${service.pathPrefix || ''}', !this.checked)">
                                 </span>
                             </div>
                         </div>
@@ -905,7 +903,7 @@
             document.getElementById('publishServiceLabel').textContent =
                 `${containerName} on ${sourceLabel} (${address}:${port})`;
             document.getElementById('publishRequiresAuth').checked = false;
-            document.getElementById('publishDirectUrlDisabled').checked = false;
+            document.getElementById('publishDirectUrlEnabled').checked = true;
             document.getElementById('publishAdvanced').open = !!rootRedirectPath;
             document.getElementById('publishModal').classList.add('active');
             document.getElementById('publishSubdomain').focus();
@@ -1025,7 +1023,7 @@
             document.getElementById('publishLanPort').value = '';
             document.getElementById('publishLanProtocol').value = 'http';
             document.getElementById('publishLanRequiresAuth').checked = false;
-            document.getElementById('publishLanDirectUrlDisabled').checked = false;
+            document.getElementById('publishLanDirectUrlEnabled').checked = true;
             document.getElementById('publishLanRootRedirectPath').value = '';
             document.getElementById('publishLanPathPrefix').value = '';
             document.getElementById('publishLanAdvanced').open = false;
@@ -1045,7 +1043,7 @@
             const port        = parseInt(document.getElementById('publishLanPort').value);
             const protocol    = document.getElementById('publishLanProtocol').value;
             const requireAuth        = document.getElementById('publishLanRequiresAuth').checked;
-            const directUrlDisabled  = document.getElementById('publishLanDirectUrlDisabled').checked;
+            const directUrlDisabled  = !document.getElementById('publishLanDirectUrlEnabled').checked;
             const rootRedirectPath   = document.getElementById('publishLanRootRedirectPath').value.trim() || null;
             const pathPrefix         = document.getElementById('publishLanPathPrefix').value.trim() || null;
 
@@ -1090,7 +1088,7 @@
             const pathPrefix       = document.getElementById('publishPathPrefix').value.trim() || null;
             const subdomain          = document.getElementById('publishSubdomain').value.trim();
             const requiresAuth       = document.getElementById('publishRequiresAuth').checked;
-            const directUrlDisabled  = document.getElementById('publishDirectUrlDisabled').checked;
+            const directUrlDisabled  = !document.getElementById('publishDirectUrlEnabled').checked;
 
             if (!subdomain) { alert('Please enter a subdomain'); return; }
 
