@@ -141,22 +141,7 @@ public abstract class VaierWebMvcIntegrationBase {
     protected DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @MockBean
-    protected ToggleServiceAuthUseCase toggleServiceAuthUseCase;
-
-    @MockBean
-    protected EditServiceRedirectUseCase editServiceRedirectUseCase;
-
-    @MockBean
-    protected EditServiceLaunchpadAliasUseCase editServiceLaunchpadAliasUseCase;
-
-    @MockBean
-    protected EditServiceVersionEndpointUseCase editServiceVersionEndpointUseCase;
-
-    @MockBean
-    protected ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
-
-    @MockBean
-    protected ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
+    protected UpdatePublishedServiceUseCase updatePublishedServiceUseCase;
 
     @MockBean
     protected ResolveLanAnchorUseCase resolveLanAnchorUseCase;

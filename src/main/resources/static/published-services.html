@@ -1246,16 +1246,20 @@
             return pathPrefix ? `${url}?pathPrefix=${encodeURIComponent(pathPrefix)}` : url;
         }
 
+        async function patchService(dnsAddress, pathPrefix, patch) {
+            const response = await fetch(withPathQuery(
+                `/published-services/${encodeURIComponent(dnsAddress)}`, pathPrefix), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch)
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        }
+
         async function setDirectUrlDisabled(dnsAddress, pathPrefix, disabled) {
             await withInFlightEdit(dnsAddress, pathPrefix, 'direct-url-disabled', async () => {
                 try {
-                    const response = await fetch(withPathQuery(
-                        `/published-services/${encodeURIComponent(dnsAddress)}/direct-url-disabled`, pathPrefix), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ directUrlDisabled: disabled })
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await patchService(dnsAddress, pathPrefix, { directUrlDisabled: disabled });
                     await fetchServices();
                 } catch (error) {
                     alert(`Failed to update direct LAN URL setting: ${error.message}`);
@@ -1266,13 +1270,7 @@
         async function setHiddenFromLaunchpad(dnsAddress, pathPrefix, hidden) {
             await withInFlightEdit(dnsAddress, pathPrefix, 'hidden-from-launchpad', async () => {
                 try {
-                    const response = await fetch(withPathQuery(
-                        `/published-services/${encodeURIComponent(dnsAddress)}/hidden-from-launchpad`, pathPrefix), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ hiddenFromLaunchpad: hidden })
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await patchService(dnsAddress, pathPrefix, { hiddenFromLaunchpad: hidden });
                     await fetchServices();
                 } catch (error) {
                     alert(`Failed to update launchpad visibility: ${error.message}`);
@@ -1283,13 +1281,7 @@
         async function setRequiresAuth(dnsAddress, pathPrefix, requiresAuth) {
             await withInFlightEdit(dnsAddress, pathPrefix, 'auth', async () => {
                 try {
-                    const response = await fetch(withPathQuery(
-                        `/published-services/${encodeURIComponent(dnsAddress)}/auth`, pathPrefix), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ requiresAuth })
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await patchService(dnsAddress, pathPrefix, { requiresAuth });
                     await fetchServices();
                 } catch (error) {
                     alert(`Failed to update authentication: ${error.message}`);
@@ -1312,13 +1304,7 @@
             if (alias === (input.dataset.original || '')) return;
             await withInFlightEdit(dnsAddress, pathPrefix, 'launchpad-alias', async () => {
                 try {
-                    const response = await fetch(withPathQuery(
-                        `/published-services/${encodeURIComponent(dnsAddress)}/launchpad-alias`, pathPrefix), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ launchpadAlias: alias })
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await patchService(dnsAddress, pathPrefix, { launchpadAlias: alias });
                     input.dataset.original = alias;
                     flashSaveOk(input);
                     await fetchServices();
@@ -1337,13 +1323,7 @@
             if (endpoint === (ep.dataset.original || '') && property === (prop.dataset.original || '')) return;
             await withInFlightEdit(dnsAddress, pathPrefix, 'version-endpoint', async () => {
                 try {
-                    const response = await fetch(withPathQuery(
-                        `/published-services/${encodeURIComponent(dnsAddress)}/version-endpoint`, pathPrefix), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ versionEndpoint: endpoint, versionProperty: property })
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    await patchService(dnsAddress, pathPrefix, { versionEndpoint: endpoint, versionProperty: property });
                     ep.dataset.original = endpoint;
                     prop.dataset.original = property;
                     flashSaveOk(ep);
@@ -1360,17 +1340,11 @@
             if (!input) return;
             const raw = input.value.trim();
             if (raw === (input.dataset.original || '')) return;
-            const path = raw || null;
+            const path = raw || '';
             await withInFlightEdit(dnsAddress, pathPrefix, 'redirect', async () => {
                 try {
-                    const response = await fetch(withPathQuery(
-                        `/published-services/${encodeURIComponent(dnsAddress)}/redirect`, pathPrefix), {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rootRedirectPath: path })
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    input.dataset.original = path || '';
+                    await patchService(dnsAddress, pathPrefix, { rootRedirectPath: path });
+                    input.dataset.original = path;
                     flashSaveOk(input);
                     await fetchServices();
                 } catch (error) {

@@ -2,6 +2,7 @@ package net.vaier.integration.controller;
 
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
+import net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch;
 import net.vaier.domain.DnsState;
 import net.vaier.domain.Server.State;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
@@ -87,44 +88,21 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void setAuth_togglesAuthentication() throws Exception {
-        mockMvc.perform(patch("/published-services/app.example.com/auth")
+    void update_singleBooleanField_appliesOnlyThatField() throws Exception {
+        mockMvc.perform(patch("/published-services/app.example.com")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
                            {"requiresAuth":true}
                            """))
                .andExpect(status().isOk());
 
-        verify(toggleServiceAuthUseCase).setAuthentication("app.example.com", null, true);
+        verify(updatePublishedServiceUseCase).updateService("app.example.com", null,
+            new PublishedServicePatch(true, null, null, null, null, null, null));
     }
 
     @Test
-    void setDirectUrlDisabled_togglesFlag() throws Exception {
-        mockMvc.perform(patch("/published-services/app.example.com/direct-url-disabled")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"directUrlDisabled":true}
-                           """))
-               .andExpect(status().isOk());
-
-        verify(toggleServiceDirectUrlDisabledUseCase).setDirectUrlDisabled("app.example.com", null, true);
-    }
-
-    @Test
-    void setHiddenFromLaunchpad_togglesFlag() throws Exception {
-        mockMvc.perform(patch("/published-services/internal-api.example.com/hidden-from-launchpad")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"hiddenFromLaunchpad":true}
-                           """))
-               .andExpect(status().isOk());
-
-        verify(toggleServiceLaunchpadVisibilityUseCase).setHiddenFromLaunchpad("internal-api.example.com", null, true);
-    }
-
-    @Test
-    void setHiddenFromLaunchpad_pathBasedRoute_includesPathPrefix() throws Exception {
-        mockMvc.perform(patch("/published-services/svc.example.com/hidden-from-launchpad")
+    void update_pathBasedRoute_passesPathPrefix() throws Exception {
+        mockMvc.perform(patch("/published-services/svc.example.com")
                        .param("pathPrefix", "/grafana")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
@@ -132,71 +110,57 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk());
 
-        verify(toggleServiceLaunchpadVisibilityUseCase).setHiddenFromLaunchpad("svc.example.com", "/grafana", true);
+        verify(updatePublishedServiceUseCase).updateService("svc.example.com", "/grafana",
+            new PublishedServicePatch(null, null, true, null, null, null, null));
     }
 
     @Test
-    void setLaunchpadAlias_setsAlias() throws Exception {
-        mockMvc.perform(patch("/published-services/svc.example.com/launchpad-alias")
-                       .param("pathPrefix", "/grafana")
+    void update_multipleFields_passesAllSetValues() throws Exception {
+        mockMvc.perform(patch("/published-services/app.example.com")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
-                           {"launchpadAlias":"Grafana Prod"}
+                           {
+                             "requiresAuth": true,
+                             "directUrlDisabled": false,
+                             "hiddenFromLaunchpad": true,
+                             "rootRedirectPath": "/dashboard",
+                             "launchpadAlias": "Grafana Prod",
+                             "versionEndpoint": "/status",
+                             "versionProperty": "build"
+                           }
                            """))
                .andExpect(status().isOk());
 
-        verify(editServiceLaunchpadAliasUseCase).setLaunchpadAlias("svc.example.com", "/grafana", "Grafana Prod");
+        verify(updatePublishedServiceUseCase).updateService("app.example.com", null,
+            new PublishedServicePatch(true, false, true, "/dashboard", "Grafana Prod", "/status", "build"));
     }
 
     @Test
-    void setLaunchpadAlias_blankClearsAlias() throws Exception {
-        mockMvc.perform(patch("/published-services/app.example.com/launchpad-alias")
+    void update_emptyStringClearsStringField() throws Exception {
+        mockMvc.perform(patch("/published-services/app.example.com")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
                            {"launchpadAlias":""}
                            """))
                .andExpect(status().isOk());
 
-        verify(editServiceLaunchpadAliasUseCase).setLaunchpadAlias("app.example.com", null, "");
+        verify(updatePublishedServiceUseCase).updateService("app.example.com", null,
+            new PublishedServicePatch(null, null, null, null, "", null, null));
     }
 
     @Test
-    void setVersionEndpoint_setsEndpointAndProperty() throws Exception {
-        mockMvc.perform(patch("/published-services/app.example.com/version-endpoint")
+    void update_absentFieldsArriveAsNull() throws Exception {
+        mockMvc.perform(patch("/published-services/svc.example.com")
+                       .param("pathPrefix", "/grafana")
                        .contentType(MediaType.APPLICATION_JSON)
                        .content("""
                            {"versionEndpoint":"/sys/metrics?name[]=system_info","versionProperty":"display"}
                            """))
                .andExpect(status().isOk());
 
-        verify(editServiceVersionEndpointUseCase).setVersionEndpoint(
-            "app.example.com", null, "/sys/metrics?name[]=system_info", "display");
-    }
-
-    @Test
-    void setVersionEndpoint_pathBasedRoute_passesPathPrefix() throws Exception {
-        mockMvc.perform(patch("/published-services/svc.example.com/version-endpoint")
-                       .param("pathPrefix", "/grafana")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"versionEndpoint":"/status","versionProperty":"build"}
-                           """))
-               .andExpect(status().isOk());
-
-        verify(editServiceVersionEndpointUseCase).setVersionEndpoint(
-            "svc.example.com", "/grafana", "/status", "build");
-    }
-
-    @Test
-    void setRedirect_updatesRootRedirectPath() throws Exception {
-        mockMvc.perform(patch("/published-services/app.example.com/redirect")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"rootRedirectPath":"/dashboard"}
-                           """))
-               .andExpect(status().isOk());
-
-        verify(editServiceRedirectUseCase).setRootRedirectPath("app.example.com", null, "/dashboard");
+        verify(updatePublishedServiceUseCase).updateService("svc.example.com", "/grafana",
+            new PublishedServicePatch(null, null, null, null, null,
+                "/sys/metrics?name[]=system_info", "display"));
     }
 
     @Test

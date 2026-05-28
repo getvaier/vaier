@@ -1331,177 +1331,127 @@ class PublishingServiceTest {
         assertThat(result.getFirst().ignored()).isFalse();
     }
 
-    // --- setAuthentication ---
+    // --- updateService ---
 
     @Test
-    void setAuthentication_true_delegatesToPort() {
-        service.setAuthentication("app.example.com", true);
+    void updateService_requiresAuth_delegatesToPort() {
+        service.updateService("app.example.com", null,
+            patch(true, null, null, null, null, null, null));
 
         verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", null, true);
+        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), any(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
     }
 
     @Test
-    void setAuthentication_false_delegatesToPort() {
-        service.setAuthentication("app.example.com", false);
-
-        verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", null, false);
-    }
-
-    @Test
-    void setAuthentication_rejectsVaierService() {
-        assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("vaier.example.com", true));
-
-        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
-    }
-
-    @Test
-    void setAuthentication_rejectsAuthService() {
-        assertThrows(IllegalArgumentException.class, () -> service.setAuthentication("login.example.com", false));
-
-        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
-    }
-
-    @Test
-    void setAuthentication_invalidatesPublishedServicesCache() {
-        // PublishingService is its own cache invalidator — verify observable behaviour.
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
-            route("other.example.com", "10.0.0.2", 9090)
-        ));
-        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
-        when(forGettingVpnClients.getClients()).thenReturn(List.of());
-        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
-
-        service.getPublishedServices(); // prime cache
-        service.setAuthentication("app.example.com", true);
-        service.getPublishedServices(); // should refetch
-
-        verify(forPersistingDnsRecords, times(2)).getDnsZones();
-    }
-
-    // --- setDirectUrlDisabled ---
-
-    @Test
-    void setDirectUrlDisabled_true_delegatesToPort() {
-        service.setDirectUrlDisabled("app.example.com", true);
-
-        verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, true);
-    }
-
-    @Test
-    void setDirectUrlDisabled_false_delegatesToPort() {
-        service.setDirectUrlDisabled("app.example.com", false);
+    void updateService_directUrlDisabled_delegatesToPort() {
+        service.updateService("app.example.com", null,
+            patch(null, false, null, null, null, null, null));
 
         verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, false);
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
     }
 
     @Test
-    void setDirectUrlDisabled_rejectsVaierService() {
-        assertThrows(IllegalArgumentException.class, () -> service.setDirectUrlDisabled("vaier.example.com", true));
+    void updateService_hiddenFromLaunchpad_delegatesToPort() {
+        service.updateService("svc.example.com", "/grafana",
+            patch(null, null, true, null, null, null, null));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), any(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes).setRouteHiddenFromLaunchpad("svc.example.com", "/grafana", true);
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
     }
 
     @Test
-    void setDirectUrlDisabled_invalidatesPublishedServicesCache() {
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
-            route("other.example.com", "10.0.0.2", 9090)
-        ));
-        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
-        when(forGettingVpnClients.getClients()).thenReturn(List.of());
-        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
-
-        service.getPublishedServices(); // prime cache
-        service.setDirectUrlDisabled("app.example.com", true);
-        service.getPublishedServices(); // should refetch
-
-        verify(forPersistingDnsRecords, times(2)).getDnsZones();
-    }
-
-    // --- setRootRedirectPath ---
-
-    @Test
-    void setRootRedirectPath_delegatesToPort() {
-        service.setRootRedirectPath("app.example.com", "/dashboard/");
+    void updateService_rootRedirectPath_delegatesToPort() {
+        service.updateService("app.example.com", null,
+            patch(null, null, null, "/dashboard/", null, null, null));
 
         verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, "/dashboard/");
     }
 
     @Test
-    void setRootRedirectPath_nullPath_removesRedirect() {
-        service.setRootRedirectPath("app.example.com", null);
+    void updateService_blankRootRedirectPath_clearsByPassingNull() {
+        service.updateService("app.example.com", null,
+            patch(null, null, null, "", null, null, null));
 
         verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, null);
     }
 
     @Test
-    void setRootRedirectPath_invalidatesCache() {
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
-            route("other.example.com", "10.0.0.2", 9090)
-        ));
-        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of());
-        when(forGettingVpnClients.getClients()).thenReturn(List.of());
-        when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
+    void updateService_launchpadAlias_trimsAndDelegates() {
+        service.updateService("svc.example.com", "/grafana",
+            patch(null, null, null, null, "  Grafana Prod ", null, null));
 
-        service.getPublishedServices(); // prime cache
-        service.setRootRedirectPath("app.example.com", "/dashboard/");
-        service.getPublishedServices(); // should refetch
-
-        verify(forPersistingDnsRecords, times(2)).getDnsZones();
+        verify(forPersistingReverseProxyRoutes).setRouteLaunchpadAlias("svc.example.com", "/grafana", "Grafana Prod");
     }
 
     @Test
-    void setRootRedirectPath_rejectsVaierService() {
-        assertThrows(IllegalArgumentException.class,
-            () -> service.setRootRedirectPath("vaier.example.com", "/admin/"));
+    void updateService_blankLaunchpadAlias_clearsByPassingNull() {
+        service.updateService("app.example.com", null,
+            patch(null, null, null, null, "", null, null));
 
-        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
+        verify(forPersistingReverseProxyRoutes).setRouteLaunchpadAlias("app.example.com", null, null);
     }
 
     @Test
-    void setRootRedirectPath_rejectsAuthService() {
-        assertThrows(IllegalArgumentException.class,
-            () -> service.setRootRedirectPath("login.example.com", "/admin/"));
-
-        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
-    }
-
-    // --- setVersionEndpoint ---
-
-    @Test
-    void setVersionEndpoint_delegatesToPort() {
-        service.setVersionEndpoint("app.example.com", "/sys/metrics?name[]=system_info", "display");
+    void updateService_versionEndpointAndProperty_delegatesToPort() {
+        service.updateService("app.example.com", null,
+            patch(null, null, null, null, null, "/sys/metrics?name[]=system_info", "display"));
 
         verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint(
             "app.example.com", null, "/sys/metrics?name[]=system_info", "display");
     }
 
     @Test
-    void setVersionEndpoint_pathBasedRoute_passesPathPrefix() {
-        service.setVersionEndpoint("svc.example.com", "/grafana", "/sys/metrics", "display");
+    void updateService_blankVersionEndpoint_clearsBothByPassingNull() {
+        service.updateService("app.example.com", null,
+            patch(null, null, null, null, null, "   ", ""));
 
         verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint(
-            "svc.example.com", "/grafana", "/sys/metrics", "display");
+            "app.example.com", null, null, null);
     }
 
     @Test
-    void setVersionEndpoint_blankEndpoint_clearsByPassingNull() {
-        service.setVersionEndpoint("app.example.com", "   ", "display");
+    void updateService_multipleFields_appliesAllSetValues() {
+        service.updateService("app.example.com", null,
+            patch(true, true, false, "/dashboard/", "Alias", "/status", "build"));
 
-        verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint(
-            "app.example.com", null, null, "display");
+        verify(forPersistingReverseProxyRoutes).setRouteAuthentication("app.example.com", null, true);
+        verify(forPersistingReverseProxyRoutes).setRouteDirectUrlDisabled("app.example.com", null, true);
+        verify(forPersistingReverseProxyRoutes).setRouteHiddenFromLaunchpad("app.example.com", null, false);
+        verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, "/dashboard/");
+        verify(forPersistingReverseProxyRoutes).setRouteLaunchpadAlias("app.example.com", null, "Alias");
+        verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint("app.example.com", null, "/status", "build");
     }
 
     @Test
-    void setVersionEndpoint_rejectsVaierService() {
-        assertThrows(IllegalArgumentException.class,
-            () -> service.setVersionEndpoint("vaier.example.com", "/sys/metrics", "display"));
+    void updateService_emptyPatch_writesNothing() {
+        service.updateService("app.example.com", null,
+            patch(null, null, null, null, null, null, null));
 
-        verify(forPersistingReverseProxyRoutes, never())
-            .setRouteVersionEndpoint(anyString(), any(), any(), any());
+        verifyNoRouteWrites();
     }
 
     @Test
-    void setVersionEndpoint_invalidatesCache() {
+    void updateService_rejectsVaierService() {
+        assertThrows(IllegalArgumentException.class, () ->
+            service.updateService("vaier.example.com", null,
+                patch(true, null, null, null, null, null, null)));
+
+        verifyNoRouteWrites();
+    }
+
+    @Test
+    void updateService_rejectsAuthService() {
+        assertThrows(IllegalArgumentException.class, () ->
+            service.updateService("login.example.com", null,
+                patch(null, null, null, "/admin/", null, null, null)));
+
+        verifyNoRouteWrites();
+    }
+
+    @Test
+    void updateService_invalidatesPublishedServicesCache() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("other.example.com", "10.0.0.2", 9090)
         ));
@@ -1510,10 +1460,28 @@ class PublishingServiceTest {
         when(forGettingServerInfo.getServicesWithExposedPorts(any())).thenReturn(List.of());
 
         service.getPublishedServices(); // prime cache
-        service.setVersionEndpoint("app.example.com", "/sys/metrics", "display");
+        service.updateService("app.example.com", null,
+            patch(true, null, null, null, null, null, null));
         service.getPublishedServices(); // should refetch
 
         verify(forPersistingDnsRecords, times(2)).getDnsZones();
+    }
+
+    private static net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch patch(
+        Boolean requiresAuth, Boolean directUrlDisabled, Boolean hiddenFromLaunchpad,
+        String rootRedirectPath, String launchpadAlias, String versionEndpoint, String versionProperty) {
+        return new net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch(
+            requiresAuth, directUrlDisabled, hiddenFromLaunchpad,
+            rootRedirectPath, launchpadAlias, versionEndpoint, versionProperty);
+    }
+
+    private void verifyNoRouteWrites() {
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteDirectUrlDisabled(anyString(), any(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteHiddenFromLaunchpad(anyString(), any(), anyBoolean());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteRootRedirectPath(anyString(), any(), any());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteLaunchpadAlias(anyString(), any(), any());
+        verify(forPersistingReverseProxyRoutes, never()).setRouteVersionEndpoint(anyString(), any(), any(), any());
     }
 
     // --- PublishableService.ignoreKey() ---

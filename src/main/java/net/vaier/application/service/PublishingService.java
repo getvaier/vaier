@@ -5,9 +5,6 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
-import net.vaier.application.EditServiceLaunchpadAliasUseCase;
-import net.vaier.application.EditServiceRedirectUseCase;
-import net.vaier.application.EditServiceVersionEndpointUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
@@ -19,10 +16,8 @@ import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
 import net.vaier.application.RefreshLaunchpadVersionsUseCase;
-import net.vaier.application.ToggleServiceAuthUseCase;
-import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
-import net.vaier.application.ToggleServiceLaunchpadVisibilityUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
+import net.vaier.application.UpdatePublishedServiceUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
@@ -70,12 +65,7 @@ public class PublishingService implements
     PublishLanServiceUseCase,
     DeletePublishedServiceUseCase,
     GetPublishableServicesUseCase,
-    ToggleServiceAuthUseCase,
-    ToggleServiceDirectUrlDisabledUseCase,
-    ToggleServiceLaunchpadVisibilityUseCase,
-    EditServiceRedirectUseCase,
-    EditServiceLaunchpadAliasUseCase,
-    EditServiceVersionEndpointUseCase,
+    UpdatePublishedServiceUseCase,
     IgnorePublishableServiceUseCase,
     UnignorePublishableServiceUseCase,
     RefreshLaunchpadVersionsUseCase {
@@ -714,87 +704,46 @@ public class PublishingService implements
             .toList();
     }
 
-    // --- ToggleServiceAuthUseCase ---
+    // --- UpdatePublishedServiceUseCase ---
 
     @Override
-    public void setAuthentication(String dnsName, String pathPrefix, boolean requiresAuth) {
+    public void updateService(String dnsName, String pathPrefix, PublishedServicePatch patch) {
         String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
         ReverseProxyRoute.validatePathPrefix(normalisedPath);
-        requireNonMandatory(dnsName, "Cannot change auth for built-in service: ");
-        log.info("Setting auth={} for {} ({})", requiresAuth, dnsName, normalisedPath);
-        forPersistingReverseProxyRoutes.setRouteAuthentication(dnsName, normalisedPath, requiresAuth);
-        invalidatePublishedServicesCache();
-    }
-
-    // --- ToggleServiceDirectUrlDisabledUseCase ---
-
-    @Override
-    public void setDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled) {
-        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
-        ReverseProxyRoute.validatePathPrefix(normalisedPath);
-        requireNonMandatory(dnsName, "Cannot change direct URL setting for built-in service: ");
-        log.info("Setting directUrlDisabled={} for {} ({})", directUrlDisabled, dnsName, normalisedPath);
-        forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(dnsName, normalisedPath, directUrlDisabled);
-        invalidatePublishedServicesCache();
-    }
-
-    // --- ToggleServiceLaunchpadVisibilityUseCase ---
-
-    @Override
-    public void setHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad) {
-        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
-        ReverseProxyRoute.validatePathPrefix(normalisedPath);
-        requireNonMandatory(dnsName, "Cannot change launchpad visibility for built-in service: ");
-        log.info("Setting hiddenFromLaunchpad={} for {} ({})", hiddenFromLaunchpad, dnsName, normalisedPath);
-        forPersistingReverseProxyRoutes.setRouteHiddenFromLaunchpad(dnsName, normalisedPath, hiddenFromLaunchpad);
-        invalidatePublishedServicesCache();
-    }
-
-    // --- EditServiceLaunchpadAliasUseCase ---
-
-    @Override
-    public void setLaunchpadAlias(String dnsName, String pathPrefix, String launchpadAlias) {
-        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
-        ReverseProxyRoute.validatePathPrefix(normalisedPath);
-        requireNonMandatory(dnsName, "Cannot set launchpad alias for built-in service: ");
-        String alias = (launchpadAlias == null || launchpadAlias.isBlank()) ? null : launchpadAlias.trim();
-        log.info("Setting launchpadAlias={} for {} ({})", alias, dnsName, normalisedPath);
-        forPersistingReverseProxyRoutes.setRouteLaunchpadAlias(dnsName, normalisedPath, alias);
-        invalidatePublishedServicesCache();
-    }
-
-    // --- EditServiceVersionEndpointUseCase ---
-
-    @Override
-    public void setVersionEndpoint(String dnsName, String pathPrefix, String versionEndpoint,
-                                   String versionProperty) {
-        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
-        ReverseProxyRoute.validatePathPrefix(normalisedPath);
-        requireNonMandatory(dnsName, "Cannot set version endpoint for built-in service: ");
-        String endpoint = (versionEndpoint == null || versionEndpoint.isBlank()) ? null : versionEndpoint.trim();
-        String property = (versionProperty == null || versionProperty.isBlank()) ? null : versionProperty.trim();
-        log.info("Setting versionEndpoint={} versionProperty={} for {} ({})",
-            endpoint, property, dnsName, normalisedPath);
-        forPersistingReverseProxyRoutes.setRouteVersionEndpoint(dnsName, normalisedPath, endpoint, property);
-        invalidatePublishedServicesCache();
-    }
-
-    // --- EditServiceRedirectUseCase ---
-
-    @Override
-    public void setRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath) {
-        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
-        ReverseProxyRoute.validatePathPrefix(normalisedPath);
-        requireNonMandatory(dnsName, "Cannot edit built-in service: ");
-        log.info("Setting root redirect path for {} ({}) to {}", dnsName, normalisedPath, rootRedirectPath);
-        forPersistingReverseProxyRoutes.setRouteRootRedirectPath(dnsName, normalisedPath, rootRedirectPath);
-        invalidatePublishedServicesCache();
-    }
-
-    private void requireNonMandatory(String dnsName, String errorPrefix) {
         if (PublishingConstants.isMandatory(dnsName, configResolver.getDomain())) {
-            throw new IllegalArgumentException(errorPrefix + dnsName);
+            throw new IllegalArgumentException("Cannot edit built-in service: " + dnsName);
         }
+        log.info("Updating {} ({}): {}", dnsName, normalisedPath, patch);
+
+        if (patch.requiresAuth() != null) {
+            forPersistingReverseProxyRoutes.setRouteAuthentication(dnsName, normalisedPath, patch.requiresAuth());
+        }
+        if (patch.directUrlDisabled() != null) {
+            forPersistingReverseProxyRoutes.setRouteDirectUrlDisabled(dnsName, normalisedPath, patch.directUrlDisabled());
+        }
+        if (patch.hiddenFromLaunchpad() != null) {
+            forPersistingReverseProxyRoutes.setRouteHiddenFromLaunchpad(dnsName, normalisedPath, patch.hiddenFromLaunchpad());
+        }
+        if (patch.rootRedirectPath() != null) {
+            forPersistingReverseProxyRoutes.setRouteRootRedirectPath(
+                dnsName, normalisedPath, blankToNull(patch.rootRedirectPath()));
+        }
+        if (patch.launchpadAlias() != null) {
+            String alias = patch.launchpadAlias().isBlank() ? null : patch.launchpadAlias().trim();
+            forPersistingReverseProxyRoutes.setRouteLaunchpadAlias(dnsName, normalisedPath, alias);
+        }
+        // versionEndpoint and versionProperty are paired: the persistence port accepts both at once,
+        // so we call it when at least one is set, falling back to "blank means clear" for either side.
+        if (patch.versionEndpoint() != null || patch.versionProperty() != null) {
+            String endpoint = blankToNull(patch.versionEndpoint());
+            String property = blankToNull(patch.versionProperty());
+            forPersistingReverseProxyRoutes.setRouteVersionEndpoint(dnsName, normalisedPath, endpoint, property);
+        }
+        invalidatePublishedServicesCache();
+    }
+
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     // --- IgnorePublishableServiceUseCase ---

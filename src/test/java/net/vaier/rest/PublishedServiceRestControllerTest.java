@@ -2,15 +2,13 @@ package net.vaier.rest;
 
 import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.application.DeletePublishedServiceUseCase;
-import net.vaier.application.EditServiceRedirectUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
-import net.vaier.application.ToggleServiceAuthUseCase;
-import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
+import net.vaier.application.UpdatePublishedServiceUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -31,9 +29,7 @@ class PublishedServiceRestControllerTest {
     @Mock PublishLanServiceUseCase publishLanServiceUseCase;
     @Mock GetPublishableServicesUseCase getPublishableServicesUseCase;
     @Mock DeletePublishedServiceUseCase deletePublishedServiceUseCase;
-    @Mock ToggleServiceAuthUseCase toggleServiceAuthUseCase;
-    @Mock EditServiceRedirectUseCase editServiceRedirectUseCase;
-    @Mock ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
+    @Mock UpdatePublishedServiceUseCase updatePublishedServiceUseCase;
     @Mock IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     @Mock UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     @Mock SseEventPublisher sseEventPublisher;

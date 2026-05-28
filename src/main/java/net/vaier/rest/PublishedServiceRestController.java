@@ -3,9 +3,6 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
-import net.vaier.application.EditServiceLaunchpadAliasUseCase;
-import net.vaier.application.EditServiceRedirectUseCase;
-import net.vaier.application.EditServiceVersionEndpointUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -13,10 +10,9 @@ import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
-import net.vaier.application.ToggleServiceAuthUseCase;
-import net.vaier.application.ToggleServiceDirectUrlDisabledUseCase;
-import net.vaier.application.ToggleServiceLaunchpadVisibilityUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
+import net.vaier.application.UpdatePublishedServiceUseCase;
+import net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch;
 import net.vaier.adapter.driven.SseEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -36,12 +32,7 @@ public class PublishedServiceRestController {
     private final PublishLanServiceUseCase publishLanServiceUseCase;
     private final GetPublishableServicesUseCase getPublishableServicesUseCase;
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
-    private final ToggleServiceAuthUseCase toggleServiceAuthUseCase;
-    private final EditServiceRedirectUseCase editServiceRedirectUseCase;
-    private final EditServiceLaunchpadAliasUseCase editServiceLaunchpadAliasUseCase;
-    private final EditServiceVersionEndpointUseCase editServiceVersionEndpointUseCase;
-    private final ToggleServiceDirectUrlDisabledUseCase toggleServiceDirectUrlDisabledUseCase;
-    private final ToggleServiceLaunchpadVisibilityUseCase toggleServiceLaunchpadVisibilityUseCase;
+    private final UpdatePublishedServiceUseCase updatePublishedServiceUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     private final SseEventPublisher sseEventPublisher;
@@ -96,64 +87,12 @@ public class PublishedServiceRestController {
         }
     }
 
-    @PatchMapping("/{dnsName:.+}/auth")
-    public ResponseEntity<Void> setAuth(@PathVariable String dnsName,
-                                        @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
-                                        @RequestBody AuthRequest request) {
-        log.info("Setting auth={} for {} (pathPrefix: {})", request.requiresAuth(), dnsName, pathPrefix);
-        toggleServiceAuthUseCase.setAuthentication(dnsName, pathPrefix, request.requiresAuth());
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
-        return ResponseEntity.ok().build();
-    }
-
-    @PatchMapping("/{dnsName:.+}/redirect")
-    public ResponseEntity<Void> setRedirect(@PathVariable String dnsName,
-                                            @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
-                                            @RequestBody RedirectRequest request) {
-        log.info("Setting rootRedirectPath={} for {} (pathPrefix: {})", request.rootRedirectPath(), dnsName, pathPrefix);
-        editServiceRedirectUseCase.setRootRedirectPath(dnsName, pathPrefix, request.rootRedirectPath());
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
-        return ResponseEntity.ok().build();
-    }
-
-    @PatchMapping("/{dnsName:.+}/direct-url-disabled")
-    public ResponseEntity<Void> setDirectUrlDisabled(@PathVariable String dnsName,
-                                                     @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
-                                                     @RequestBody DirectUrlDisabledRequest request) {
-        log.info("Setting directUrlDisabled={} for {} (pathPrefix: {})", request.directUrlDisabled(), dnsName, pathPrefix);
-        toggleServiceDirectUrlDisabledUseCase.setDirectUrlDisabled(dnsName, pathPrefix, request.directUrlDisabled());
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
-        return ResponseEntity.ok().build();
-    }
-
-    @PatchMapping("/{dnsName:.+}/hidden-from-launchpad")
-    public ResponseEntity<Void> setHiddenFromLaunchpad(@PathVariable String dnsName,
-                                                      @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
-                                                      @RequestBody HiddenFromLaunchpadRequest request) {
-        log.info("Setting hiddenFromLaunchpad={} for {} (pathPrefix: {})", request.hiddenFromLaunchpad(), dnsName, pathPrefix);
-        toggleServiceLaunchpadVisibilityUseCase.setHiddenFromLaunchpad(dnsName, pathPrefix, request.hiddenFromLaunchpad());
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
-        return ResponseEntity.ok().build();
-    }
-
-    @PatchMapping("/{dnsName:.+}/launchpad-alias")
-    public ResponseEntity<Void> setLaunchpadAlias(@PathVariable String dnsName,
-                                                  @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
-                                                  @RequestBody LaunchpadAliasRequest request) {
-        log.info("Setting launchpadAlias={} for {} (pathPrefix: {})", request.launchpadAlias(), dnsName, pathPrefix);
-        editServiceLaunchpadAliasUseCase.setLaunchpadAlias(dnsName, pathPrefix, request.launchpadAlias());
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
-        return ResponseEntity.ok().build();
-    }
-
-    @PatchMapping("/{dnsName:.+}/version-endpoint")
-    public ResponseEntity<Void> setVersionEndpoint(@PathVariable String dnsName,
-                                                   @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
-                                                   @RequestBody VersionEndpointRequest request) {
-        log.info("Setting versionEndpoint={} versionProperty={} for {} (pathPrefix: {})",
-            request.versionEndpoint(), request.versionProperty(), dnsName, pathPrefix);
-        editServiceVersionEndpointUseCase.setVersionEndpoint(
-            dnsName, pathPrefix, request.versionEndpoint(), request.versionProperty());
+    @PatchMapping("/{dnsName:.+}")
+    public ResponseEntity<Void> updateService(@PathVariable String dnsName,
+                                              @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
+                                              @RequestBody PublishedServicePatch patch) {
+        log.info("Updating service {} (pathPrefix={}): {}", dnsName, pathPrefix, patch);
+        updatePublishedServiceUseCase.updateService(dnsName, pathPrefix, patch);
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
@@ -200,11 +139,5 @@ public class PublishedServiceRestController {
     record PublishLanRequest(String subdomain, String machineName, int port, String protocol, boolean requireAuth,
                              boolean directUrlDisabled, String rootRedirectPath, String pathPrefix) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
-    record AuthRequest(boolean requiresAuth) {}
-    record RedirectRequest(String rootRedirectPath) {}
-    record DirectUrlDisabledRequest(boolean directUrlDisabled) {}
-    record HiddenFromLaunchpadRequest(boolean hiddenFromLaunchpad) {}
-    record LaunchpadAliasRequest(String launchpadAlias) {}
-    record VersionEndpointRequest(String versionEndpoint, String versionProperty) {}
     record IgnoreRequest(String key) {}
 }
