@@ -11,7 +11,9 @@ import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.MachineType;
@@ -43,8 +45,19 @@ public class VpnPeerRestController {
     private final UpdateLanCidrUseCase updateLanCidrUseCase;
     private final RenamePeerUseCase renamePeerUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
+    private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     private final SseEventPublisher sseEventPublisher;
     private final GetServerLocationUseCase getServerLocationUseCase;
+    private final ConfigResolver configResolver;
+
+    /**
+     * One-shot 410 response body (#202). Returned from any of the five secret-bearing endpoints
+     * after the peer's config has already been retrieved once. The fields are machine-readable so
+     * the UI can render a useful error: the only way to recover a fresh config is delete +
+     * recreate of the peer (which rotates the WireGuard keypair as a side effect).
+     */
+    private static final java.util.Map<String, String> ALREADY_VIEWED_BODY =
+        java.util.Map.of("reason", "already-viewed", "action", "delete-and-recreate");
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
@@ -110,6 +123,26 @@ public class VpnPeerRestController {
                 request.description()
         );
 
+        // Inline every artefact so the create-success modal renders config + QR + download buttons
+        // in one response, without follow-up GETs. The five GET endpoints are gated by a one-shot
+        // marker (#202); the marker is set on first GET, NOT on create. The UI uses only the
+        // inline payload so it never burns the budget; a raw curl GET can still recover any one
+        // artefact once (then 410 forever).
+        java.util.Set<net.vaier.domain.PeerArtifact> artefacts =
+            net.vaier.domain.PeerArtifact.forPeerType(createdPeer.peerType());
+
+        String qrCodePngBase64 = artefacts.contains(net.vaier.domain.PeerArtifact.QR_CODE)
+            ? tryEncodeQrCodeBase64(createdPeer.clientConfigFile(), createdPeer.name())
+            : null;
+        String dockerCompose = artefacts.contains(net.vaier.domain.PeerArtifact.DOCKER_COMPOSE)
+            ? generateDockerComposeUseCase.generateWireguardClientDockerCompose(
+                createdPeer.id(), defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT)
+            : null;
+        String setupScript = artefacts.contains(net.vaier.domain.PeerArtifact.SETUP_SCRIPT)
+            ? generatePeerSetupScriptUseCase.generateSetupScript(
+                createdPeer.id(), defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT).orElse(null)
+            : null;
+
         CreatePeerResponse response = new CreatePeerResponse(
                 createdPeer.id(),
                 createdPeer.name(),
@@ -117,8 +150,10 @@ public class VpnPeerRestController {
                 createdPeer.publicKey(),
                 createdPeer.clientConfigFile(),
                 createdPeer.peerType().name(),
-                net.vaier.domain.PeerArtifact.forPeerType(createdPeer.peerType()).stream()
-                    .map(Enum::name).sorted().toList()
+                artefacts.stream().map(Enum::name).sorted().toList(),
+                qrCodePngBase64,
+                dockerCompose,
+                setupScript
         );
 
         sseEventPublisher.publish("vpn-peers", "peers-updated", "");
@@ -240,31 +275,37 @@ public class VpnPeerRestController {
     }
 
     @GetMapping("/{peerIdentifier}/config")
-    public ResponseEntity<PeerConfigResponse> getPeerConfig(@PathVariable String peerIdentifier) {
+    public ResponseEntity<?> getPeerConfig(@PathVariable String peerIdentifier) {
         log.info("Fetching config for peer: {}", peerIdentifier);
 
-        return getPeerConfigUseCase.getPeerConfig(peerIdentifier)
-                .map(result -> {
-                    PeerConfigResponse response = new PeerConfigResponse(
-                            result.id(),
-                            result.name(),
-                            result.ipAddress(),
-                            result.configContent(),
-                            result.peerType() != null ? result.peerType().name() : null,
-                            net.vaier.domain.PeerArtifact.forPeerType(result.peerType()).stream()
-                                .map(Enum::name).sorted().toList()
-                    );
-                    return ResponseEntity.ok(response);
-                })
-                .orElseGet(() -> {
-                    log.warn("Peer config not found for identifier: {}", peerIdentifier);
-                    return ResponseEntity.notFound().build();
-                });
+        // /config accepts a name OR an IP. The marker is keyed by peer id (= dir name), so
+        // we resolve via getPeerConfigUseCase first to map IP→id, then atomically mark.
+        var config = getPeerConfigUseCase.getPeerConfig(peerIdentifier);
+        if (config.isEmpty()) {
+            log.warn("Peer config not found for identifier: {}", peerIdentifier);
+            return ResponseEntity.notFound().build();
+        }
+        if (!forTrackingPeerConfigRetrieval.markViewedIfNotAlready(config.get().id())) {
+            return alreadyViewedResponse();
+        }
+        var result = config.get();
+        PeerConfigResponse response = new PeerConfigResponse(
+                result.id(),
+                result.name(),
+                result.ipAddress(),
+                result.configContent(),
+                result.peerType() != null ? result.peerType().name() : null,
+                net.vaier.domain.PeerArtifact.forPeerType(result.peerType()).stream()
+                    .map(Enum::name).sorted().toList()
+        );
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{peerName}/config-file")
-    public ResponseEntity<Resource> downloadConfigFile(@PathVariable String peerName) {
+    public ResponseEntity<?> downloadConfigFile(@PathVariable String peerName) {
         log.info("Downloading config file for peer: {}", peerName);
+        ResponseEntity<?> gate = checkOneShotGate(peerName);
+        if (gate != null) return gate;
         return getPeerConfigUseCase.getPeerConfig(peerName)
                 .map(result -> {
                     byte[] content = result.configContent().getBytes();
@@ -274,35 +315,23 @@ public class VpnPeerRestController {
                                     "attachment; filename=" + peerName + ".conf")
                             .contentType(MediaType.parseMediaType("text/plain"))
                             .contentLength(content.length)
-                            .<Resource>body(resource);
+                            .<Object>body(resource);
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/{peerName}/qr-code")
-    public ResponseEntity<byte[]> getPeerQrCode(@PathVariable String peerName) {
+    public ResponseEntity<?> getPeerQrCode(@PathVariable String peerName) {
         log.info("Generating QR code for peer: {}", peerName);
+        ResponseEntity<?> gate = checkOneShotGate(peerName);
+        if (gate != null) return gate;
         var config = getPeerConfigUseCase.getPeerConfig(peerName);
         if (config.isEmpty()) return ResponseEntity.notFound().build();
         try {
-            com.google.zxing.qrcode.QRCodeWriter writer = new com.google.zxing.qrcode.QRCodeWriter();
-            com.google.zxing.common.BitMatrix matrix = writer.encode(
-                    config.get().configContent(),
-                    com.google.zxing.BarcodeFormat.QR_CODE,
-                    256, 256,
-                    java.util.Map.of(
-                            com.google.zxing.EncodeHintType.ERROR_CORRECTION,
-                            com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M,
-                            com.google.zxing.EncodeHintType.MARGIN, 2
-                    )
-            );
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            javax.imageio.ImageIO.write(
-                    com.google.zxing.client.j2se.MatrixToImageWriter.toBufferedImage(matrix),
-                    "PNG", out);
+            byte[] png = encodeQrCodePng(config.get().configContent());
             return ResponseEntity.ok()
                     .contentType(MediaType.IMAGE_PNG)
-                    .body(out.toByteArray());
+                    .body(png);
         } catch (Exception e) {
             log.error("Failed to generate QR code for peer {}: {}", peerName, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
@@ -310,12 +339,14 @@ public class VpnPeerRestController {
     }
 
     @GetMapping("/{peerName}/docker-compose")
-    public ResponseEntity<Resource> downloadDockerCompose(
+    public ResponseEntity<?> downloadDockerCompose(
             @PathVariable String peerName,
             @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
             @RequestParam(required = false, defaultValue = ServiceNames.DEFAULT_WG_PORT) String serverPort
     ) {
         log.info("Generating docker-compose for peer: {}", peerName);
+        ResponseEntity<?> gate = checkOneShotGate(peerName);
+        if (gate != null) return gate;
 
         String dockerCompose = generateDockerComposeUseCase.generateWireguardClientDockerCompose(
                 peerName, serverUrl, serverPort);
@@ -331,12 +362,14 @@ public class VpnPeerRestController {
     }
 
     @GetMapping("/{peerName}/setup-script")
-    public ResponseEntity<Resource> downloadSetupScript(
+    public ResponseEntity<?> downloadSetupScript(
             @PathVariable String peerName,
             @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
             @RequestParam(required = false, defaultValue = ServiceNames.DEFAULT_WG_PORT) String serverPort
     ) {
         log.info("Generating setup script for peer: {}", peerName);
+        ResponseEntity<?> gate = checkOneShotGate(peerName);
+        if (gate != null) return gate;
 
         return generatePeerSetupScriptUseCase.generateSetupScript(peerName, serverUrl, serverPort)
                 .map(script -> {
@@ -346,12 +379,77 @@ public class VpnPeerRestController {
                             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=setup-" + peerName + ".sh")
                             .contentType(MediaType.parseMediaType("application/x-sh"))
                             .contentLength(content.length)
-                            .<Resource>body(resource);
+                            .<Object>body(resource);
                 })
                 .orElseGet(() -> {
                     log.warn("Peer not found for setup script: {}", peerName);
                     return ResponseEntity.notFound().build();
                 });
+    }
+
+    /**
+     * One-shot gate (#202). Atomically marks the peer as viewed; returns a 404 if the peer
+     * directory doesn't exist, or a 410 if the marker was already set. Returns null on first
+     * successful view — the caller proceeds to serve the artefact.
+     */
+    private ResponseEntity<?> checkOneShotGate(String peerName) {
+        try {
+            if (!forTrackingPeerConfigRetrieval.markViewedIfNotAlready(peerName)) {
+                return alreadyViewedResponse();
+            }
+            return null;
+        } catch (IllegalStateException e) {
+            log.warn("Peer not found for one-shot gate: {}", peerName);
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    private static ResponseEntity<?> alreadyViewedResponse() {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.GONE)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(ALREADY_VIEWED_BODY);
+    }
+
+    /**
+     * Best-effort QR PNG → base64. Returns null and logs on failure so the create response is
+     * still usable (config text is still inline; the operator can copy/paste).
+     */
+    private String tryEncodeQrCodeBase64(String content, String peerName) {
+        try {
+            return java.util.Base64.getEncoder().encodeToString(encodeQrCodePng(content));
+        } catch (Exception e) {
+            log.error("Failed to generate QR code for peer {}: {}", peerName, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Server URL used to seed the inline docker-compose / setup-script in the create response.
+     * The GET endpoints accept this as a query param; the create flow has no such param, so we
+     * fall back to {@code VAIER_DOMAIN}-derived {@code vaier.<domain>} (the canonical WireGuard
+     * endpoint for the stack).
+     */
+    private String defaultServerUrl() {
+        return new net.vaier.domain.VaierHostnames(configResolver.getDomain()).vaierServerFqdn();
+    }
+
+    private static byte[] encodeQrCodePng(String content) throws Exception {
+        com.google.zxing.qrcode.QRCodeWriter writer = new com.google.zxing.qrcode.QRCodeWriter();
+        com.google.zxing.common.BitMatrix matrix = writer.encode(
+                content,
+                com.google.zxing.BarcodeFormat.QR_CODE,
+                256, 256,
+                java.util.Map.of(
+                        com.google.zxing.EncodeHintType.ERROR_CORRECTION,
+                        com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M,
+                        com.google.zxing.EncodeHintType.MARGIN, 2
+                )
+        );
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(
+                com.google.zxing.client.j2se.MatrixToImageWriter.toBufferedImage(matrix),
+                "PNG", out);
+        return out.toByteArray();
     }
 
     /**
@@ -403,7 +501,10 @@ public class VpnPeerRestController {
             String publicKey,
             String configFile,
             String peerType,
-            List<String> availableArtifacts
+            List<String> availableArtifacts,
+            String qrCodePngBase64,
+            String dockerCompose,
+            String setupScript
     ) {}
 
     public record UpdateLanAddressRequest(

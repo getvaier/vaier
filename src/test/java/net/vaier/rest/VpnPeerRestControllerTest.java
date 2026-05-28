@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.config.ConfigResolver;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
@@ -14,6 +15,7 @@ import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,8 +44,10 @@ class VpnPeerRestControllerTest {
     @Mock UpdateLanCidrUseCase updateLanCidrUseCase;
     @Mock RenamePeerUseCase renamePeerUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
+    @Mock ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     @Mock SseEventPublisher sseEventPublisher;
     @Mock GetServerLocationUseCase getServerLocationUseCase;
+    @Mock ConfigResolver configResolver;
 
     @InjectMocks VpnPeerRestController controller;
 

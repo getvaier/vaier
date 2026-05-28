@@ -362,6 +362,42 @@
             font-style: italic;
         }
 
+        /* Busy spinner shown during slow create/regenerate (#202). */
+        .busy-spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid var(--bg-input);
+            border-top-color: var(--accent, #6aa6ff);
+            border-radius: 50%;
+            animation: busy-spin 0.9s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        @keyframes busy-spin { to { transform: rotate(360deg); } }
+        .busy-body {
+            text-align: center;
+            padding: 1.5rem 1rem 1rem;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+        .busy-sub {
+            margin-top: 0.4rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        /* Show-once warning banner inside the create-success modal (#202). */
+        .show-once-warning {
+            background: rgba(255, 170, 0, 0.08);
+            border: 1px solid rgba(255, 170, 0, 0.35);
+            color: var(--text);
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        .show-once-warning strong { color: var(--orange, #ffaa00); }
+
         .config-preview-header {
             display: flex;
             justify-content: space-between;
@@ -552,6 +588,34 @@
         </div>
     </div>
 
+    <!-- Regenerate Confirm Modal (#202) -->
+    <div id="regenerateConfirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Regenerate Configuration</div>
+            <p style="font-size:0.85rem;color:var(--text-muted)">
+                Rotate the WireGuard keypair for <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="regeneratePeerName"></code>?
+            </p>
+            <p style="font-size:0.78rem;color:var(--orange,#ffaa00);margin-top:0.5rem;">
+                The existing config will stop working immediately. The new config is delivered exactly once — save it before closing the modal.
+            </p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideRegenerateConfirmModal()">Cancel</button>
+                <button class="btn btn-primary"  onclick="regeneratePeer()">Regenerate</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Busy indicator shown during slow create/regenerate (#202). -->
+    <div id="busyModal" class="modal">
+        <div class="modal-content" style="max-width:380px">
+            <div class="busy-body">
+                <div class="busy-spinner"></div>
+                <div id="busyMessage">Working…</div>
+                <div class="busy-sub">This can take a few seconds — generating keypair, writing config, and reloading WireGuard.</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Setup-script Dialog (VPN peer + LAN docker host) -->
     <div id="scriptDialogModal" class="modal">
         <div class="modal-content" style="max-width:680px;width:95%">
@@ -572,18 +636,6 @@
         </div>
     </div>
 
-    <!-- QR Code Modal -->
-    <div id="qrModal" class="modal">
-        <div class="modal-content" style="max-width:380px;width:95%">
-            <div class="modal-header" id="qrModalTitle">QR Code</div>
-            <div id="qrModalBody">
-                <div class="qr-loading">Loading config…</div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="hideQrModal()">Close</button>
-            </div>
-        </div>
-    </div>
 
     <script>
         let peers = [];
@@ -998,15 +1050,11 @@
             const relaySlot  = isRelay ? { kind: 'relay',  title: `Relay for LAN ${peer.lanCidr}`, label: 'Relay' } : null;
             const dockerSlot = isServer ? { kind: 'docker', title: 'Runs Docker', label: 'Docker' } : null;
 
-            const composeBtn = artifacts.has('DOCKER_COMPOSE')
-                ? `<button class="btn btn-small btn-secondary" onclick="downloadDockerCompose('${peer.id}')">compose</button>`
-                : '';
-            const scriptBtn = artifacts.has('SETUP_SCRIPT')
-                ? `<button class="btn btn-small btn-secondary" onclick="showVpnPeerSetupScript('${peer.id}')">script</button>`
-                : '';
-            const qrBtn = artifacts.has('QR_CODE')
-                ? `<button class="btn btn-small btn-secondary" onclick="showQrModal('${peer.id}')">qr</button>`
-                : '';
+            // #202: WireGuard configs are one-shot — the secrets are delivered exactly once,
+            // at create time, inside the create-success modal. The row no longer surfaces
+            // config/compose/script/qr buttons that would hit (now-gated) GET endpoints; to
+            // recover a fresh config the operator regenerates the peer (delete + recreate with
+            // the same name/IP/lanCidr/lanAddress/description).
 
             return `
             <div class="peer-card">
@@ -1108,10 +1156,8 @@
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
-                            <button class="btn btn-small btn-secondary" onclick="viewPeerConfig('${peer.id}')">config</button>
-                            ${composeBtn}
-                            ${scriptBtn}
-                            ${qrBtn}
+                            <button class="btn btn-small btn-secondary" onclick="confirmRegeneratePeer('${peer.id}')"
+                                    title="Rotate the WireGuard keypair and re-deliver the config — old config stops working immediately">Regenerate</button>
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.id}')">Delete</button>
                     </div>
@@ -1257,6 +1303,17 @@
             }
         }
 
+        // Busy indicator (#202) — create + regenerate hit WireGuard / keygen / config writes and
+        // can take a few seconds on slow hosts. Without immediate feedback the user assumes
+        // the page is dead.
+        function showBusy(message) {
+            document.getElementById('busyMessage').textContent = message;
+            document.getElementById('busyModal').classList.add('active');
+        }
+        function hideBusy() {
+            document.getElementById('busyModal').classList.remove('active');
+        }
+
         async function createPeer() {
             const name = document.getElementById('peerName').value.trim();
             const type = document.getElementById('peerType').value;
@@ -1280,6 +1337,8 @@
                     if (runsDocker && (!dockerPort || dockerPort < 1 || dockerPort > 65535)) {
                         displayError('Please enter a valid Docker port (1-65535)'); return;
                     }
+                    hideCreatePeerModal();
+                    showBusy(`Adding "${name}"…`);
                     const response = await fetch('/lan-servers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1290,12 +1349,13 @@
                         return;
                     }
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    hideCreatePeerModal();
                     displaySuccess(`LAN server "${name}" added`);
                     fetchLanServers();
                 } else {
                     const lanCidr     = document.getElementById('lanCidr').value.trim() || null;
                     const lanAddress  = document.getElementById('lanAddress').value.trim() || null;
+                    hideCreatePeerModal();
+                    showBusy(`Adding "${name}"…`);
                     const response = await fetch('/vpn/peers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1303,7 +1363,6 @@
                     });
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const createdPeer = await response.json();
-                    hideCreatePeerModal();
                     displaySuccess(`"${createdPeer.name}" added`);
                     showPeerDetails(createdPeer);
                     fetchPeers();
@@ -1311,6 +1370,7 @@
             } catch (error) {
                 displayError(`Failed to add machine: ${error.message}`);
             } finally {
+                hideBusy();
                 submitBtn.disabled = false;
                 cancelBtn.disabled = false;
                 submitBtn.textContent = 'Add Machine';
@@ -1511,38 +1571,83 @@
             }
         }
 
-        function peerDownloadButtons(peerId, availableArtifacts) {
-            // Which artifacts a peer offers is computed by domain PeerArtifact.forPeerType.
-            // We render one button per entry the server included.
-            const artifacts = new Set(availableArtifacts || []);
+        /**
+         * Builds a download button that serves inline payload (#202) instead of hitting the
+         * (now-gated) GET endpoints. The blob is created on click — not pre-allocated — so
+         * unused buttons don't churn the GC.
+         */
+        function inlineDownloadButton(label, filename, mimeType, content) {
+            if (!content) return '';
+            const cssEscapedFilename = filename.replace(/'/g, "\\'");
+            return `<button class="btn btn-primary" onclick="downloadInline('${cssEscapedFilename}', '${mimeType}', this)" data-content-ref="${filename}">${label}</button>`;
+        }
+
+        // Map of filename → content for the most recent show-once render. Cleared when the
+        // modal closes so the secret doesn't linger in memory.
+        let _showOncePayloads = {};
+
+        function downloadInline(filename, mimeType, btn) {
+            const content = _showOncePayloads[filename];
+            if (!content) return;
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            // Revoke after the browser has had a chance to start the download.
+            setTimeout(() => URL.revokeObjectURL(url), 1500);
+        }
+
+        function showOnceDownloadButtons(peer) {
+            const peerName = peer.name;
             const btns = [];
-            // .conf is interesting to download on clients (servers run it from compose).
-            if (artifacts.has('WG_CONFIG') && !artifacts.has('DOCKER_COMPOSE')) {
-                btns.push(`<button class="btn btn-primary" onclick="downloadConf('${peerId}')">↓ .conf file</button>`);
+            _showOncePayloads = {};
+
+            const confName = `${peerName}.conf`;
+            _showOncePayloads[confName] = peer.configFile;
+            btns.push(inlineDownloadButton('↓ .conf file', confName, 'text/plain', peer.configFile));
+
+            if (peer.dockerCompose) {
+                _showOncePayloads['docker-compose.yml'] = peer.dockerCompose;
+                btns.push(inlineDownloadButton('↓ docker-compose.yml', 'docker-compose.yml',
+                    'application/x-yaml', peer.dockerCompose));
             }
-            if (artifacts.has('QR_CODE')) {
-                btns.push(`<button class="btn btn-primary" onclick="showQrModal('${peerId}')">QR code</button>`);
-            }
-            if (artifacts.has('DOCKER_COMPOSE')) {
-                btns.push(`<button class="btn btn-primary" onclick="downloadDockerComposeForPeer('${peerId}')">↓ Docker Compose</button>`);
-            }
-            if (artifacts.has('SETUP_SCRIPT')) {
-                btns.push(`<button class="btn btn-primary" onclick="showVpnPeerSetupScript('${peerId}')">↓ Setup Script</button>`);
+            if (peer.setupScript) {
+                const scriptName = `setup-${peerName}.sh`;
+                _showOncePayloads[scriptName] = peer.setupScript;
+                btns.push(inlineDownloadButton(`↓ ${scriptName}`, scriptName,
+                    'application/x-sh', peer.setupScript));
             }
             return btns.join('');
         }
 
-        function downloadConf(peerId) {
-            window.location.href = `/vpn/peers/${encodeURIComponent(peerId)}/config-file`;
-        }
-
+/**
+         * Show-once success modal (#202). Renders the WireGuard config text, an inline QR
+         * (data: URL from the create response's base64 PNG), and download buttons that build
+         * blobs from the inline payload. The five GET endpoints are gated server-side, so the
+         * UI never re-fetches: the operator must save these artefacts now or regenerate the
+         * peer to get a fresh keypair.
+         */
         function showPeerDetails(peer) {
+            const qrBlock = peer.qrCodePngBase64
+                ? `<div class="qr-canvas-container"><img src="data:image/png;base64,${peer.qrCodePngBase64}" width="256" height="256" alt="WireGuard QR code"></div>
+                   <p class="qr-hint">Scan with WireGuard mobile app</p>`
+                : '';
             document.getElementById('peerDetailsContent').innerHTML = `
+                <div class="show-once-warning">
+                    <strong>Save these now — they will not be retrievable again.</strong>
+                    The WireGuard config is delivered exactly once. To get a fresh config later,
+                    use <em>Regenerate</em> on the peer's row (which rotates the keypair).
+                </div>
                 <div class="peer-details">
                     <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${escapeHtml(peer.name)}</span></div>
                     <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${peer.ipAddress}</span></div>
                     <div class="detail-row"><span class="detail-label">Public Key</span><span class="detail-value">${peer.publicKey}</span></div>
                 </div>
+                ${qrBlock}
                 <div class="config-preview">
                     <div class="config-preview-header">
                         <strong>Client Configuration</strong>
@@ -1551,52 +1656,15 @@
                     <pre id="configPre">${peer.configFile}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                    ${peerDownloadButtons(peer.id, peer.availableArtifacts)}
+                    ${showOnceDownloadButtons(peer)}
                 </div>`;
             document.getElementById('peerDetailsModal').classList.add('active');
         }
 
         function hidePeerDetailsModal() {
             document.getElementById('peerDetailsModal').classList.remove('active');
-        }
-
-        function downloadDockerComposeForPeer(peerId) {
-            window.location.href = `/vpn/peers/${encodeURIComponent(peerId)}/docker-compose`;
-        }
-
-        async function viewPeerConfig(peerId) {
-            try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/config`);
-                if (!response.ok) { displayError('Peer configuration not found'); return; }
-                showPeerConfigModal(await response.json());
-            } catch (error) {
-                displayError(`Failed to load peer configuration: ${error.message}`);
-            }
-        }
-
-        function showPeerConfigModal(peerConfig) {
-            document.getElementById('peerDetailsContent').innerHTML = `
-                <div class="peer-details">
-                    <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${escapeHtml(peerConfig.name)}</span></div>
-                    <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value">${peerConfig.ipAddress}</span></div>
-                </div>
-                <div class="config-preview">
-                    <div class="config-preview-header">
-                        <strong>Client Configuration</strong>
-                        <button class="btn-copy" id="copyBtn" onclick="copyConfig()">copy</button>
-                    </div>
-                    <pre id="configPre">${peerConfig.configFile}</pre>
-                </div>
-                <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
-                    ${peerDownloadButtons(peerConfig.id, peerConfig.availableArtifacts)}
-                </div>`;
-            document.getElementById('peerDetailsModal').classList.add('active');
-        }
-
-        function downloadDockerCompose(peerId) { downloadDockerComposeForPeer(peerId); }
-
-        function downloadSetupScript(peerId) {
-            window.location.href = `/vpn/peers/${encodeURIComponent(peerId)}/setup-script`;
+            // Drop the secret-bearing payloads from memory once the modal closes.
+            _showOncePayloads = {};
         }
 
         // --- Setup-script dialog (shared between VPN peer + LAN docker host) ---
@@ -1637,18 +1705,6 @@
 
         function scriptDialogDownload() {
             if (_scriptDialogDownloadUrl) window.location.href = _scriptDialogDownloadUrl;
-        }
-
-        function showVpnPeerSetupScript(peerId) {
-            const url = `${window.location.origin}/vpn/peers/${encodeURIComponent(peerId)}/setup-script`;
-            showSetupScriptDialog({
-                title: `Setup script — ${peerDisplayName(peerId)}`,
-                description: 'Bootstraps WireGuard + Docker on a fresh Ubuntu server. Embeds this peer’s WireGuard private key, '
-                    + 'so the URL stays behind Vaier login.',
-                downloadUrl: url,
-                curlCommand: `curl -fsSL '${url}' -o setup-${peerId}.sh && sudo bash setup-${peerId}.sh`,
-                requiresAuth: true,
-            });
         }
 
         function showLanDockerSetupScript(port) {
@@ -1692,31 +1748,59 @@
             }
         }
 
-        async function showQrModal(peerId) {
-            const modal = document.getElementById('qrModal');
-            const title = document.getElementById('qrModalTitle');
-            const body  = document.getElementById('qrModalBody');
+        // #202: regenerate = delete + recreate with the same name/peerType/lanCidr/lanAddress/
+        // description. The WireGuard keypair rotates as a side effect (the recreate generates
+        // a fresh one), the show-once marker is cleared (its parent dir is gone), and the
+        // create response is the single delivery of the new secret.
+        let peerToRegenerate = null;
 
-            title.textContent = 'QR Code — ' + peerDisplayName(peerId);
-            body.innerHTML = '<div class="qr-loading">Generating QR code\u2026</div>';
-            modal.classList.add('active');
-
-            const url = '/vpn/peers/' + encodeURIComponent(peerId) + '/qr-code';
-            body.innerHTML =
-                '<div class="qr-canvas-container">' +
-                  '<img src="' + url + '" width="256" height="256" alt="WireGuard QR code" onerror="qrImageError()">' +
-                '</div>' +
-                '<p class="qr-hint">Scan with WireGuard mobile app</p>';
+        function confirmRegeneratePeer(peerId) {
+            peerToRegenerate = peerId;
+            document.getElementById('regeneratePeerName').textContent = peerDisplayName(peerId);
+            document.getElementById('regenerateConfirmModal').classList.add('active');
         }
 
-        function qrImageError() {
-            document.getElementById('qrModalBody').innerHTML =
-                '<div class="qr-loading" style="color:var(--red)">Failed to generate QR code</div>';
+        function hideRegenerateConfirmModal() {
+            document.getElementById('regenerateConfirmModal').classList.remove('active');
+            peerToRegenerate = null;
         }
 
-        function hideQrModal() {
-            document.getElementById('qrModal').classList.remove('active');
-            document.getElementById('qrModalBody').innerHTML = '';
+        async function regeneratePeer() {
+            if (!peerToRegenerate) return;
+            const peerId = peerToRegenerate;
+            // Snapshot the inputs we want to preserve before the row vanishes.
+            const before = peers.find(x => x.id === peerId);
+            if (!before) {
+                displayError('Could not find the peer to regenerate.');
+                return;
+            }
+            const recreatePayload = {
+                name: before.name,
+                peerType: before.peerType,
+                lanCidr: before.lanCidr || null,
+                lanAddress: before.lanAddress || null,
+                description: before.description || null
+            };
+            hideRegenerateConfirmModal();
+            showBusy(`Regenerating "${before.name}"…`);
+            try {
+                const del = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}`, { method: 'DELETE' });
+                if (!del.ok) throw new Error(`delete HTTP ${del.status}`);
+                const create = await fetch('/vpn/peers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(recreatePayload)
+                });
+                if (!create.ok) throw new Error(`create HTTP ${create.status}`);
+                const newPeer = await create.json();
+                displaySuccess(`"${escapeHtml(newPeer.name)}" regenerated — save the new config now`);
+                showPeerDetails(newPeer);
+                fetchPeers();
+            } catch (error) {
+                displayError(`Failed to regenerate peer: ${error.message}`);
+            } finally {
+                hideBusy();
+            }
         }
 
         async function copyConfig() {
@@ -1736,7 +1820,7 @@
 
         window.onclick = e => {
             if (e.target.classList.contains('modal')) {
-                if (e.target.id === 'qrModal') hideQrModal();
+                if (e.target.id === 'peerDetailsModal') hidePeerDetailsModal();
                 else e.target.classList.remove('active');
             }
         };

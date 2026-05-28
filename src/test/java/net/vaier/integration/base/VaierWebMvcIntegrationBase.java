@@ -5,6 +5,7 @@ import net.vaier.application.*;
 import net.vaier.config.ConfigResolver;
 import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.domain.port.ForGeolocatingIps;
+import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -123,6 +124,9 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
+
+    @MockBean
+    protected ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
 
     @MockBean
     protected ForGeolocatingIps forGeolocatingIps;
