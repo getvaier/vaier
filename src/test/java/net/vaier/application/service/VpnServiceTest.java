@@ -21,6 +21,7 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForSyncingLanRoutes;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
@@ -62,6 +63,7 @@ class VpnServiceTest {
     @Mock ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     @Mock ForSyncingLanRoutes forSyncingLanRoutes;
     @Mock ForExecutingInContainer forExecutingInContainer;
+    @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     @InjectMocks VpnService service;
 

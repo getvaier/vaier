@@ -8,12 +8,30 @@ public final class WireGuardPeerConfig {
                                   String presharedKey, String serverEndpoint,
                                   MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
                                   String description, String name) {
+        return generate(privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint,
+            peerType, lanCidr, lanAddress, vpnSubnet, description, name, null);
+    }
+
+    public static String generate(String privateKey, String ipAddress, String serverPublicKey,
+                                  String presharedKey, String serverEndpoint,
+                                  MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
+                                  String description, String name, String serverLanCidr) {
         // lanCidr is intentionally NOT appended to the client-side AllowedIPs: doing so makes
         // wg-quick install a route for that CIDR via wg0 on the relay peer, which hijacks the
         // relay's own LAN. lanCidr is still recorded in the # VAIER metadata below so that
         // VpnService.addPeerToServer adds it to the server-side wg0.conf [Peer] entry, and the
         // install script (#170) installs ip_forward + iptables MASQUERADE/FORWARD on the relay.
+        //
+        // serverLanCidr — the subnet the Vaier server itself sits on — IS appended for server-type
+        // peers (#204): unlike the relay's own lanCidr, this is the server's subnet, so installing
+        // a route for it via wg0 lets the server peer reach back into the server's LAN without
+        // hijacking the peer's own local connectivity. Mobile/Windows clients already cover this
+        // via their default 0.0.0.0/0 AllowedIPs, so the value is only applied when the peer is a
+        // server type.
         String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
+        if (peerType.isServerType() && serverLanCidr != null && !serverLanCidr.isBlank()) {
+            allowedIps = allowedIps + "," + serverLanCidr.trim();
+        }
 
         String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description, name);
 

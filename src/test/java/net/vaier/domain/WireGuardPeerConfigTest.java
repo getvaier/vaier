@@ -56,6 +56,83 @@ class WireGuardPeerConfigTest {
         assertThat(config).contains("\"lanCidr\":\"192.168.1.0/24\"");
     }
 
+    // --- serverLanCidr in client-side AllowedIPs for server peers (#204) ---
+    // The server LAN CIDR is the subnet the Vaier server itself sits on. Appending it to a
+    // server peer's client-side AllowedIPs lets the peer *initiate* connections into the server's
+    // LAN through the tunnel (full-tunnel mobile/Windows clients already can since their
+    // AllowedIPs is 0.0.0.0/0). Safe: it's the server's subnet, not the peer's own LAN, so it
+    // doesn't hijack the peer's local connectivity the way a relay's own lanCidr would.
+
+    @Test
+    void generate_ubuntuServerWithServerLanCidr_appendsToClientAllowedIps() {
+        String config = WireGuardPeerConfig.generate(
+                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, null, "172.31.0.0/16");
+
+        assertThat(config).contains("AllowedIPs = 10.13.13.0/24,172.31.0.0/16");
+    }
+
+    @Test
+    void generate_windowsServerWithServerLanCidr_appendsToClientAllowedIps() {
+        String config = WireGuardPeerConfig.generate(
+                "privateKey", "10.13.13.4", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", MachineType.WINDOWS_SERVER, null, null, "10.13.13.0/24",
+                null, null, "172.31.0.0/16");
+
+        assertThat(config).contains("AllowedIPs = 10.13.13.0/24,172.31.0.0/16");
+    }
+
+    @Test
+    void generate_mobileClientWithServerLanCidr_doesNotChangeAllowedIps() {
+        // Mobile/Windows clients already route everything (0.0.0.0/0) — appending the server LAN
+        // CIDR would be redundant and could confuse wg-quick's route installation.
+        String config = WireGuardPeerConfig.generate(
+                "privateKey", "10.13.13.2", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24",
+                null, null, "172.31.0.0/16");
+
+        assertThat(config).contains("AllowedIPs = 0.0.0.0/0");
+        assertThat(config).doesNotContain("172.31.0.0/16");
+    }
+
+    @Test
+    void generate_ubuntuServerWithNullServerLanCidr_unchanged() {
+        // Explicit null serverLanCidr behaves the same as the existing no-server-LAN overload.
+        String config = WireGuardPeerConfig.generate(
+                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, null, null);
+
+        assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
+        assertThat(config).doesNotContain(",");
+    }
+
+    @Test
+    void generate_ubuntuServerWithBlankServerLanCidr_unchanged() {
+        String config = WireGuardPeerConfig.generate(
+                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, null, "  ");
+
+        assertThat(config).contains("AllowedIPs = 10.13.13.0/24");
+        assertThat(config).doesNotContain(",");
+    }
+
+    @Test
+    void generate_ubuntuServerWithBothLanCidrAndServerLanCidr_onlyServerLanCidrInAllowedIps() {
+        // Relay lanCidr stays out of client-side AllowedIPs (regression from earlier change);
+        // server LAN CIDR appends. Both still recorded — lanCidr in VAIER metadata.
+        String config = WireGuardPeerConfig.generate(
+                "privateKey", "10.13.13.3", "serverPubKey", "presharedKey",
+                "vpn.example.com:51820", MachineType.UBUNTU_SERVER, "192.168.1.0/24", null,
+                "10.13.13.0/24", null, null, "172.31.0.0/16");
+
+        assertThat(config).contains("AllowedIPs = 10.13.13.0/24,172.31.0.0/16");
+        assertThat(config).doesNotContain("192.168.1.0/24,172.31.0.0/16");
+        assertThat(config).contains("\"lanCidr\":\"192.168.1.0/24\"");
+    }
+
     @Test
     void generate_windowsServer_routesOnlyVpnTraffic() {
         String config = WireGuardPeerConfig.generate(

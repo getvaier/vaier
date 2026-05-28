@@ -459,6 +459,11 @@ services:
       VAIER_DOMAIN: ${VAIER_DOMAIN:-}
       VAIER_PUBLIC_HOST: ${VAIER_PUBLIC_HOST:-}
       VAIER_PUBLIC_IP: ${VAIER_PUBLIC_IP:-}
+      # Override the auto-detected LAN/VPC subnet (EC2 IMDS detects only the server's own /20).
+      # Set to the whole VPC CIDR (e.g. 172.31.0.0/16) to register machines in any subnet/AZ.
+      # Also threaded into server peers' client-side AllowedIPs so they can initiate connections
+      # back into the server's LAN through the tunnel (#204).
+      VAIER_SERVER_LAN_CIDR: ${VAIER_SERVER_LAN_CIDR:-}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config

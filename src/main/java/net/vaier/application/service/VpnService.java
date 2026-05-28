@@ -36,6 +36,7 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
+import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForSyncingLanRoutes;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
@@ -94,6 +95,7 @@ public class VpnService implements
     private final ForUpdatingServerAllowedIps forUpdatingServerAllowedIps;
     private final ForSyncingLanRoutes forSyncingLanRoutes;
     private final ForExecutingInContainer forExecutingInContainer;
+    private final ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -108,7 +110,8 @@ public class VpnService implements
                       ForUpdatingPeerConfigurations forUpdatingPeerConfigurations,
                       ForUpdatingServerAllowedIps forUpdatingServerAllowedIps,
                       ForSyncingLanRoutes forSyncingLanRoutes,
-                      ForExecutingInContainer forExecutingInContainer) {
+                      ForExecutingInContainer forExecutingInContainer,
+                      ForResolvingServerLanCidr forResolvingServerLanCidr) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -123,6 +126,7 @@ public class VpnService implements
         this.forUpdatingServerAllowedIps = forUpdatingServerAllowedIps;
         this.forSyncingLanRoutes = forSyncingLanRoutes;
         this.forExecutingInContainer = forExecutingInContainer;
+        this.forResolvingServerLanCidr = forResolvingServerLanCidr;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -382,9 +386,10 @@ public class VpnService implements
             Path peerDir = Paths.get(wireguardConfigPath, id);
             Files.createDirectories(peerDir);
 
+            String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
             String clientConfig = WireGuardPeerConfig.generate(
                     privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint, resolvedType, lanCidr, lanAddress, vpnSubnet,
-                    description, name);
+                    description, name, serverLanCidr);
 
             Path peerConfigPath = peerDir.resolve(id + ".conf");
             Files.writeString(peerConfigPath, clientConfig);
