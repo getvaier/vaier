@@ -160,10 +160,16 @@ public class PublishingService implements
         List<DockerService> localServices = forGettingServerInfo.getServicesWithExposedPorts(Server.vaierServer());
         String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
         Map<String, Reachability> lanReachabilities = forCheckingLanReachability.snapshot();
+        // Same enrichment as the launchpad: a route backed by a discoverable container surfaces
+        // the container's image + version, and a configured versionEndpoint (probed periodically)
+        // overrides the container's version (#245).
+        ContainerImageSnapshot images = currentContainerImages();
+        Map<String, String> probedVersions = launchpadVersions;
 
         cache = routes.stream()
             .filter(r -> !isInfrastructureRouter(r))
-            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices, serverLanCidr, lanReachabilities))
+            .map(r -> toUco(r, allDnsRecords, vpnClients, localServices, serverLanCidr, lanReachabilities,
+                images, probedVersions))
             .toList();
         return cache;
     }
@@ -273,12 +279,16 @@ public class PublishingService implements
 
     private PublishedServiceUco toUco(ReverseProxyRoute route, List<DnsRecord> allDnsRecords,
                                     List<VpnClient> vpnClients, List<DockerService> localServices,
-                                    String serverLanCidr, Map<String, Reachability> lanReachabilities) {
+                                    String serverLanCidr, Map<String, Reachability> lanReachabilities,
+                                    ContainerImageSnapshot images, Map<String, String> probedVersions) {
         var peers = forGettingPeerConfigurations.getAllPeerConfigs();
         var lanServers = forPersistingLanServers.getAll();
         DnsState dnsState = route.dnsState(allDnsRecords, configResolver.getDnsProvider());
         Server.State hostState = route.hostState(localServices, vpnClients, peers, serverLanCidr, lanReachabilities);
         String baseDomain = configResolver.getDomain();
+        DockerService backing = route.backingContainer(images.vaierServerContainers(),
+            images.peerContainersByVpnIp(), images.lanServerContainersByAddress()).orElse(null);
+        String probedVersion = route.hasVersionEndpoint() ? probedVersions.get(route.getName()) : null;
         return new PublishedServiceUco(
             route.displayName(baseDomain, localServices, vpnClients, forResolvingPeerNames, peers),
             route.shortName(baseDomain, vpnClients, forResolvingPeerNames, peers),
@@ -299,7 +309,9 @@ public class PublishingService implements
             route.isHiddenFromLaunchpad(),
             route.getLaunchpadAlias(),
             route.getVersionEndpoint(),
-            route.getVersionProperty()
+            route.getVersionProperty(),
+            backing == null ? null : backing.image(),
+            probedVersion != null ? probedVersion : (backing == null ? null : backing.version())
         );
     }
 

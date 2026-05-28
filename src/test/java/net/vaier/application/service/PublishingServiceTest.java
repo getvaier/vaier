@@ -209,6 +209,65 @@ class PublishingServiceTest {
         assertThat(result.state()).isEqualTo(State.OK);
     }
 
+    // --- image + version on the service card (#245) ---
+    // Same enrichment as the launchpad: the route's backing container surfaces its image and
+    // version; a configured version endpoint overrides the container's version (a service
+    // running natively on a LAN host reports its own version over HTTP). LAN services published
+    // as a bare host:port (no Docker container) have null image and version.
+
+    @Test
+    void getPublishedServices_routeBackedByVaierServerContainer_surfacesImageAndVersion() {
+        setupOneRoute("app.example.com", "my-container", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+        when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of(
+            new DockerService("id", "my-container", "grafana/grafana:11.3.0", "11.3.0",
+                List.of(new PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running")
+        ));
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.image()).isEqualTo("grafana/grafana:11.3.0");
+        assertThat(result.version()).isEqualTo("11.3.0");
+    }
+
+    @Test
+    void getPublishedServices_routeWithNoBackingContainer_imageAndVersionNull() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.image()).isNull();
+        assertThat(result.version()).isNull();
+    }
+
+    @Test
+    void getPublishedServices_routeWithVersionEndpoint_usesProbedVersionOverContainerVersion() {
+        ReverseProxyRoute route = new ReverseProxyRoute("route", "app.example.com", "my-container", 8080,
+            "svc", null, null, null, null, null, false, false, null, null, false, null,
+            "/api/health", "version");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+        when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of(
+            new DockerService("id", "my-container", "grafana/grafana:11.3.0", "11.3.0",
+                List.of(new PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running")
+        ));
+        // launchpadVersions is populated by the periodic refresh; seed it directly.
+        ReflectionTestUtils.setField(service, "launchpadVersions",
+            java.util.Map.of("route", "2.0.0-probed"));
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.image()).isEqualTo("grafana/grafana:11.3.0");
+        assertThat(result.version()).isEqualTo("2.0.0-probed");
+    }
+
     @Test
     void getPublishedServices_stoppedLocalService_hostStateUnreachable() {
         setupOneRoute("app.example.com", "my-container", 8080);

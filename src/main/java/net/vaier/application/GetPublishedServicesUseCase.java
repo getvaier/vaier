@@ -25,6 +25,14 @@ public interface GetPublishedServicesUseCase {
      * @param healthy          true when both DNS and Traefik backend health are OK; computed in
      *                         the domain so the browser doesn't recombine {@code dnsState} and
      *                         {@code state}.
+     * @param image            the Docker image reference of the container backing this route
+     *                         (e.g. {@code grafana/grafana:11.3.0}), or null when no container
+     *                         backs the route — e.g. a service published as a bare LAN host:port.
+     *                         Resolved the same way the launchpad does (issue #245).
+     * @param version          the running version of the backing container, or the probed value
+     *                         from a configured {@code versionEndpoint} when set (the endpoint
+     *                         takes precedence over the container's image tag). Null when nothing
+     *                         backs the route and no endpoint is configured.
      */
     record PublishedServiceUco(
         String name,
@@ -46,14 +54,16 @@ public interface GetPublishedServicesUseCase {
         boolean hiddenFromLaunchpad,
         String launchpadAlias,
         String versionEndpoint,
-        String versionProperty
+        String versionProperty,
+        String image,
+        String version
     ){
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled) {
             this(name, name, "", null, ServiceLocation.VAIER_SERVER, dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, false, null, false, null, null, null);
+                rootRedirectPath, directUrlDisabled, false, null, false, null, null, null, null, null);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -62,7 +72,7 @@ public interface GetPublishedServicesUseCase {
                 isLanService ? ServiceLocation.LAN_SERVICE : ServiceLocation.VAIER_SERVER,
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, null, false, null, null, null);
+                rootRedirectPath, directUrlDisabled, isLanService, null, false, null, null, null, null, null);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -72,7 +82,7 @@ public interface GetPublishedServicesUseCase {
                 isLanService ? ServiceLocation.LAN_SERVICE : ServiceLocation.VAIER_SERVER,
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false, null, null, null);
+                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false, null, null, null, null, null);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -83,7 +93,7 @@ public interface GetPublishedServicesUseCase {
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
-                null, null, null);
+                null, null, null, null, null);
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -94,7 +104,7 @@ public interface GetPublishedServicesUseCase {
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
-                launchpadAlias, null, null);
+                launchpadAlias, null, null, null, null);
         }
     }
 }

@@ -233,6 +233,31 @@ function isEditingServiceCard() {
         && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
 }
 
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+}
+
+// Render the Version row only when the route has a backing image or a probed version (#245).
+// image comes from a backing container (Vaier server / VPN peer / LAN server scrape); version
+// comes from that container or from a configured versionEndpoint — a service running natively
+// on a LAN host can report a version with no image. Bare LAN host:port routes have neither.
+function versionRowHtml(service) {
+    if (!service.image && !service.version) return '';
+    // The row label is already "Version", so the value drops the "version" prefix. Image and
+    // version share the monospace font so the version doesn't look like prose pinned to a code
+    // chip — when both are present we render them inline separated by a middle dot.
+    const parts = [];
+    if (service.image) parts.push(`<span style="color:var(--text)">${escapeHtml(service.image)}</span>`);
+    if (service.version) parts.push(`<span style="color:var(--text-muted)">${escapeHtml(service.version)}</span>`);
+    return `
+        <div class="detail-row">
+            <span class="detail-label">Version</span>
+            <span class="detail-value" style="font-family:var(--mono);display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">${parts.join('<span style="color:var(--text-dim)">·</span>')}</span>
+        </div>`;
+}
+
 function renderServiceCard(service) {
     const dnsOk  = service.dnsState === 'OK';
     const uniqueName = service.dnsAddress + (service.pathPrefix || '');
@@ -292,6 +317,7 @@ function renderServiceCard(service) {
                         <span class="detail-label">Host</span>
                         <span class="detail-value">${service.hostAddress}:${service.hostPort}</span>
                     </div>
+                    ${versionRowHtml(service)}
                     <div class="detail-row">
                         <span class="detail-label">Auth</span>
                         <span class="detail-value">
