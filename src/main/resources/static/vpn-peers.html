@@ -398,6 +398,34 @@
         }
         .show-once-warning strong { color: var(--orange, #ffaa00); }
 
+        /* Getting Started panel inside the create-success modal (#51). Surfaces the recommended
+           next step (mobile=QR, Ubuntu=setup script, Windows=.conf) so the operator doesn't have
+           to guess which of three or four download buttons is the right one for their peer type. */
+        .getting-started {
+            background: rgba(60, 130, 246, 0.06);
+            border: 1px solid rgba(60, 130, 246, 0.32);
+            border-radius: 4px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            line-height: 1.45;
+        }
+        .getting-started-title {
+            color: var(--accent, #6aa6ff);
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+            font-size: 0.78rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .getting-started code {
+            background: var(--bg-input);
+            padding: 0.1rem 0.4rem;
+            border-radius: 2px;
+            font-family: var(--mono);
+            color: var(--text);
+        }
+
         .config-preview-header {
             display: flex;
             justify-content: space-between;
@@ -989,6 +1017,27 @@
             const servicesHtml = vaierServerStatus === 'DOWN'
                 ? `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">Docker engine unreachable</span></div>`
                 : renderServiceList(vaierServerServices);
+            // The server's LAN/VPC CIDR comes from VAIER_SERVER_LAN_CIDR or EC2 IMDS (#204). Show
+            // it as a read-only row so the operator can see the subnet the server is publishing
+            // and registering LAN servers in. Omitted when unresolved (no env, no IMDS).
+            const lanCidrHtml = _serverLocation && _serverLocation.lanCidr
+                ? `<div class="detail-row">
+                       <span class="detail-label">LAN CIDR</span>
+                       <span class="detail-value" style="font-family:var(--mono)" title="The IPv4 CIDR the Vaier server itself sits on. Used to route, register, and publish LAN machines on this subnet. Override via the VAIER_SERVER_LAN_CIDR env var.">${escapeHtml(_serverLocation.lanCidr)}</span>
+                   </div>`
+                : '';
+            const placeHtml = _serverLocation && (_serverLocation.city || _serverLocation.country)
+                ? `<div class="detail-row">
+                       <span class="detail-label">Location</span>
+                       <span class="detail-value">${escapeHtml([_serverLocation.city, _serverLocation.country].filter(Boolean).join(', '))}</span>
+                   </div>`
+                : '';
+            const hostHtml = _serverLocation && _serverLocation.publicHost
+                ? `<div class="detail-row">
+                       <span class="detail-label">Public host</span>
+                       <span class="detail-value" style="font-family:var(--mono)">${escapeHtml(_serverLocation.publicHost)}</span>
+                   </div>`
+                : '';
             return `
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key}')">
@@ -1001,6 +1050,9 @@
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
+                        ${hostHtml}
+                        ${lanCidrHtml}
+                        ${placeHtml}
                         ${servicesHtml}
                     </div>
                 </div>
@@ -1576,10 +1628,11 @@
          * (now-gated) GET endpoints. The blob is created on click — not pre-allocated — so
          * unused buttons don't churn the GC.
          */
-        function inlineDownloadButton(label, filename, mimeType, content) {
+        function inlineDownloadButton(label, filename, mimeType, content, primary) {
             if (!content) return '';
             const cssEscapedFilename = filename.replace(/'/g, "\\'");
-            return `<button class="btn btn-primary" onclick="downloadInline('${cssEscapedFilename}', '${mimeType}', this)" data-content-ref="${filename}">${label}</button>`;
+            const cls = primary ? 'btn btn-primary' : 'btn btn-secondary';
+            return `<button class="${cls}" onclick="downloadInline('${cssEscapedFilename}', '${mimeType}', this)" data-content-ref="${filename}">${label}</button>`;
         }
 
         // Map of filename → content for the most recent show-once render. Cleared when the
@@ -1601,27 +1654,77 @@
             setTimeout(() => URL.revokeObjectURL(url), 1500);
         }
 
+        // Which artifact is the 80/20 next step for this peer type (#51). The matching download
+        // button gets primary styling; the others stay secondary so the operator's eye lands on
+        // the right one without the alternatives being hidden.
+        function recommendedArtifactFor(peerType) {
+            switch (peerType) {
+                case 'MOBILE_CLIENT':  return 'qr-code';
+                case 'UBUNTU_SERVER':  return 'setup-script';
+                case 'WINDOWS_SERVER': // intentional fall-through — same .conf import path as Windows client
+                case 'WINDOWS_CLIENT': return 'wg-config';
+                default:               return 'wg-config';
+            }
+        }
+
         function showOnceDownloadButtons(peer) {
             const peerName = peer.name;
             const btns = [];
             _showOncePayloads = {};
+            const recommended = recommendedArtifactFor(peer.peerType);
 
             const confName = `${peerName}.conf`;
             _showOncePayloads[confName] = peer.configFile;
-            btns.push(inlineDownloadButton('↓ .conf file', confName, 'text/plain', peer.configFile));
+            btns.push(inlineDownloadButton('↓ .conf file', confName, 'text/plain', peer.configFile,
+                recommended === 'wg-config'));
 
             if (peer.dockerCompose) {
                 _showOncePayloads['docker-compose.yml'] = peer.dockerCompose;
                 btns.push(inlineDownloadButton('↓ docker-compose.yml', 'docker-compose.yml',
-                    'application/x-yaml', peer.dockerCompose));
+                    'application/x-yaml', peer.dockerCompose, recommended === 'docker-compose'));
             }
             if (peer.setupScript) {
                 const scriptName = `setup-${peerName}.sh`;
                 _showOncePayloads[scriptName] = peer.setupScript;
                 btns.push(inlineDownloadButton(`↓ ${scriptName}`, scriptName,
-                    'application/x-sh', peer.setupScript));
+                    'application/x-sh', peer.setupScript, recommended === 'setup-script'));
             }
             return btns.join('');
+        }
+
+        // Per-type guidance shown at the top of the create-success modal (#51). Keep it short:
+        // one sentence on what to do, with a concrete next step the operator can act on right now.
+        function gettingStartedHtml(peer) {
+            const peerName = escapeHtml(peer.name);
+            switch (peer.peerType) {
+                case 'MOBILE_CLIENT':
+                    return `
+                        <div class="getting-started">
+                            <div class="getting-started-title">Next step</div>
+                            Open the WireGuard mobile app, tap <strong>+</strong> → <strong>Scan from QR code</strong>,
+                            and scan the code above. Then toggle the tunnel on.
+                        </div>`;
+                case 'UBUNTU_SERVER':
+                    return `
+                        <div class="getting-started">
+                            <div class="getting-started-title">Next step</div>
+                            Download <code>setup-${peerName}.sh</code> below, copy it to your Ubuntu host,
+                            and run <code>bash setup-${peerName}.sh</code>. The script installs Docker,
+                            writes the WireGuard config, and starts the tunnel.
+                        </div>`;
+                case 'WINDOWS_SERVER':
+                case 'WINDOWS_CLIENT':
+                    return `
+                        <div class="getting-started">
+                            <div class="getting-started-title">Next step</div>
+                            Download <code>${peerName}.conf</code> below, open the
+                            <strong>WireGuard for Windows</strong> client, click
+                            <strong>Import tunnel(s) from file</strong>, and pick the downloaded file.
+                            Activate the tunnel from the same window.
+                        </div>`;
+                default:
+                    return '';
+            }
         }
 
 /**
@@ -1637,6 +1740,7 @@
                    <p class="qr-hint">Scan with WireGuard mobile app</p>`
                 : '';
             document.getElementById('peerDetailsContent').innerHTML = `
+                ${gettingStartedHtml(peer)}
                 <div class="show-once-warning">
                     <strong>Save these now — they will not be retrievable again.</strong>
                     The WireGuard config is delivered exactly once. To get a fresh config later,
@@ -1945,8 +2049,9 @@
                     _markersClusterGroup.addLayer(weak);
                     allCoords.push([p.latitude, p.longitude]);
 
-                    // Firm marker at the server — "where the device's internet traffic surfaces"
-                    if (_serverLocation) {
+                    // Firm marker at the server — "where the device's internet traffic surfaces".
+                    // Skip when lat/lon aren't available (geoip MMDB not yet populated).
+                    if (_serverLocation && _serverLocation.latitude != null && _serverLocation.longitude != null) {
                         const surfacePlace = [_serverLocation.city, _serverLocation.country].filter(Boolean).join(', ');
                         const surfacePopup = `<strong>${escapeHtml(p.name)}</strong><br>`
                             + `<span style="color:#888;font-size:0.85em">internet via Vaier</span>`
@@ -1991,7 +2096,7 @@
                 allCoords.push([lat, lon]);
             });
 
-            if (_serverLocation) {
+            if (_serverLocation && _serverLocation.latitude != null && _serverLocation.longitude != null) {
                 const place = [_serverLocation.city, _serverLocation.country].filter(Boolean).join(', ');
                 const popup = `<strong>Vaier server</strong><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(_serverLocation.publicHost)}</span>`
@@ -2009,12 +2114,16 @@
         }
 
         async function fetchServerLocation() {
-            if (!_peerMap) return;
+            // Always fetch — the response carries both the Map tab's lat/lon and the Vaier-server
+            // machine card's LAN CIDR (#204). Either group can be absent (null lat/lon when the
+            // geoip MMDB isn't in place; null lanCidr when neither env nor IMDS yields one).
             try {
                 const res = await fetch('/vpn/peers/server-location');
                 if (!res.ok) return;
                 _serverLocation = await res.json();
-                refreshPeerMap();
+                if (_peerMap) refreshPeerMap();
+                // Re-render the Machines list so the Vaier server card picks up the LAN CIDR.
+                if (peers && peers.length) displayPeers(peers);
             } catch (e) {
                 console.error('Failed to load server location:', e);
             }

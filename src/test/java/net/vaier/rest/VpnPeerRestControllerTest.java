@@ -327,7 +327,7 @@ class VpnPeerRestControllerTest {
     @Test
     void getServerLocation_returnsLocationWhenResolved() {
         when(getServerLocationUseCase.getServerLocation())
-            .thenReturn(Optional.of(new ServerLocation("vaier.example.com", 59.91, 10.74, "Oslo", "Norway")));
+            .thenReturn(Optional.of(new ServerLocation("vaier.example.com", 59.91, 10.74, "Oslo", "Norway", "172.31.0.0/16")));
 
         var response = controller.getServerLocation();
 
@@ -338,6 +338,7 @@ class VpnPeerRestControllerTest {
         assertThat(body.longitude()).isEqualTo(10.74);
         assertThat(body.city()).isEqualTo("Oslo");
         assertThat(body.country()).isEqualTo("Norway");
+        assertThat(body.lanCidr()).isEqualTo("172.31.0.0/16");
     }
 
     @Test

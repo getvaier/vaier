@@ -102,7 +102,8 @@ public class VpnPeerRestController {
                     loc.latitude(),
                     loc.longitude(),
                     loc.city(),
-                    loc.country()
+                    loc.country(),
+                    loc.lanCidr()
                 )))
                 .orElseGet(() -> ResponseEntity.notFound().build());
         } catch (Exception e) {
@@ -534,10 +535,11 @@ public class VpnPeerRestController {
 
     public record ServerLocationResponse(
             String publicHost,
-            double latitude,
-            double longitude,
+            Double latitude,
+            Double longitude,
             String city,
-            String country
+            String country,
+            String lanCidr
     ) {}
 
 }

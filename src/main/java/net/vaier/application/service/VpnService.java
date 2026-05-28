@@ -177,11 +177,18 @@ public class VpnService implements
     public Optional<ServerLocation> getServerLocation() {
         // The domain owns the four-tier fallback + A-vs-CNAME branching; the service supplies the
         // public-host port and a DNS resolver, then runs the geolocation lookup on the result.
-        return ServerLocationResolver
+        // The LAN CIDR is independent — populated even when geolocation fails, so the Vaier-server
+        // machine card can render it before the geoip DB is in place.
+        String lanCidr = forResolvingServerLanCidr.resolve().orElse(null);
+        Optional<ServerLocation> located = ServerLocationResolver
             .resolve(forResolvingPublicHost, this::resolveHostnameToIp, configResolver.getDomain())
             .flatMap(host -> forGeolocatingIps.locate(host.publicIp())
                 .map(geo -> new ServerLocation(host.displayLabel(),
-                    geo.latitude(), geo.longitude(), geo.city(), geo.country())));
+                    geo.latitude(), geo.longitude(), geo.city(), geo.country(), lanCidr)));
+        if (located.isPresent()) return located;
+        // No geolocation, but lanCidr alone is useful to surface. Drop empty-everything to empty.
+        if (lanCidr == null) return Optional.empty();
+        return Optional.of(new ServerLocation(null, null, null, null, null, lanCidr));
     }
 
     private String resolveHostnameToIp(String hostname) {

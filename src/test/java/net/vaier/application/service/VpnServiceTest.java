@@ -728,6 +728,48 @@ class VpnServiceTest {
     }
 
     @Test
+    void getServerLocation_populatesLanCidrFromResolverWhenGeoSucceeds() {
+        // The LAN CIDR rides along on the same response as geolocation so the dashboard fetches
+        // both server-only facts in one call (#204 surface on the Vaier-server machine card).
+        when(forResolvingPublicHost.resolve())
+            .thenReturn(Optional.of(new PublicHost("203.0.113.10", DnsRecordType.A)));
+        when(forGeolocatingIps.locate("203.0.113.10"))
+            .thenReturn(Optional.of(new GeoLocation(59.91, 10.74, "Oslo", "Norway")));
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        Optional<ServerLocation> result = service.getServerLocation();
+
+        assertThat(result).isPresent();
+        assertThat(result.get().lanCidr()).isEqualTo("172.31.0.0/16");
+    }
+
+    @Test
+    void getServerLocation_returnsLanCidrEvenWhenGeolocationUnavailable() {
+        // Geoip-init may not have populated the MMDB yet, or the public host can't be resolved.
+        // The LAN CIDR is independent and useful on its own — surface it without blocking on geo.
+        when(forResolvingPublicHost.resolve()).thenReturn(Optional.empty());
+        when(configResolver.getDomain()).thenReturn(null);
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
+
+        Optional<ServerLocation> result = service.getServerLocation();
+
+        assertThat(result).isPresent();
+        assertThat(result.get().publicHost()).isNull();
+        assertThat(result.get().latitude()).isNull();
+        assertThat(result.get().longitude()).isNull();
+        assertThat(result.get().lanCidr()).isEqualTo("172.31.0.0/16");
+    }
+
+    @Test
+    void getServerLocation_returnsEmptyWhenNoGeoAndNoLanCidr() {
+        when(forResolvingPublicHost.resolve()).thenReturn(Optional.empty());
+        when(configResolver.getDomain()).thenReturn(null);
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
+
+        assertThat(service.getServerLocation()).isEmpty();
+    }
+
+    @Test
     void getServerLocation_returnsEmptyWhenCnameDoesNotResolveAndNoDomain() {
         when(forResolvingPublicHost.resolve())
             .thenReturn(Optional.of(new PublicHost("does-not-resolve.invalid", DnsRecordType.CNAME)));
