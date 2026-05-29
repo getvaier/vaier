@@ -1,12 +1,12 @@
-name: Static Analysis (release)
+name: Static Analysis (on-demand)
 
 # SpotBugs (+ find-sec-bugs + fb-contrib) is intentionally NOT part of the
-# every-push / PR build (build-deploy.yml). It runs only when cutting a release
-# — on a v* tag push — or on demand via the Actions tab. The baseline noise
-# filter lives in spotbugs-exclude.xml; the build fails on any new finding.
+# every-push / PR build. The RELEASE hard gate lives in build-deploy.yml (a
+# tag-only step that blocks publishing if it fails). This workflow is the
+# on-demand companion: run it from the Actions tab to check static analysis
+# before tagging a release. The baseline noise filter lives in
+# spotbugs-exclude.xml; it fails on any new finding.
 on:
-  push:
-    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:

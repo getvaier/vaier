@@ -79,8 +79,8 @@ Application services must never import from an unrelated use case interface just
 ## CI/CD
 
 GitHub Actions:
-- `.github/workflows/build-deploy.yml`: build → test → Docker image → push to Docker Hub on main branch.
-- `.github/workflows/static-analysis.yml`: SpotBugs (+ find-sec-bugs + fb-contrib) — runs **only** on release (`v*` tag push) or on-demand, not on every push/PR. Fails on any finding not suppressed in `spotbugs-exclude.xml`.
+- `.github/workflows/build-deploy.yml`: build → test → Docker image → push to Docker Hub on main branch. On a `v*` tag push it is also the release pipeline, and includes a **hard SpotBugs gate** (tag-only step) that must pass before the release image is built or published.
+- `.github/workflows/static-analysis.yml`: on-demand SpotBugs (+ find-sec-bugs + fb-contrib) via `workflow_dispatch` — the companion to the release gate, for checking analysis before tagging. Static analysis never runs on ordinary push/PR builds. Findings are filtered by `spotbugs-exclude.xml`.
 
 ## Docker Stack
 

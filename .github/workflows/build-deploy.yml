@@ -29,6 +29,14 @@ jobs:
     - name: Run tests
       run: mvn test
 
+    # Hard release gate: SpotBugs must pass before any release artifact is built
+    # or published. Runs ONLY on a v* tag push, so ordinary main/PR builds skip it.
+    # A failure here aborts the job, so the image-push and release-creation steps
+    # below never run. Findings are filtered by spotbugs-exclude.xml.
+    - name: SpotBugs static analysis (release gate)
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      run: mvn -B com.github.spotbugs:spotbugs-maven-plugin:check
+
     - name: Build Docker image
       run: |
         VAIER_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)
