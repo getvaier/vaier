@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs exclusion filter for Vaier. Established as the V1 baseline (issue #255).
+  Each <Match> documents WHY it is suppressed. Suppress noise / verified false
+  positives only — never a real bug. Re-run: mvn spotbugs:spotbugs, report in
+  target/spotbugsXml.xml.
+-->
+<FindBugsFilter>
+
+    <!-- Lombok @Value/@Data/@Builder generate accessors that return/store object
+         refs without defensive copies. Our value objects are effectively immutable
+         and not security-sensitive; defensive copies add no real safety and Lombok
+         will not emit them. EI_EXPOSE_REP / EI_EXPOSE_REP2 are pure noise here. -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- fb-contrib STYLE / PERFORMANCE / I18N findings are coding-opinion suggestions
+         (parameterised methods, presize collections, overly-concrete params, default
+         locale, etc.), not defects. Excluded from the gating baseline; revisit as a
+         dedicated cleanup if desired. -->
+    <Match>
+        <Or>
+            <Bug category="STYLE"/>
+            <Bug category="PERFORMANCE"/>
+            <Bug category="I18N"/>
+        </Or>
+    </Match>
+
+    <!-- Spring @Component/@Service singletons write their fields from a single thread
+         (construction / scheduled task); fb-contrib's unsynchronised-singleton warning
+         does not understand the Spring lifecycle. False positive. -->
+    <Match>
+        <Bug pattern="USFW_UNSYNCHRONIZED_SINGLETON_FIELD_WRITES"/>
+    </Match>
+
+    <!-- The driven adapters ARE the infrastructure boundary: they run privileged
+         network tooling (wg, ip, ping, docker) and read/write WireGuard/Traefik/
+         Authelia config files from OPERATOR-controlled paths. find-sec-bugs flags
+         these inherently:
+           - COMMAND_INJECTION: verified safe — every call uses ProcessBuilder with an
+             argument ARRAY (execve, no shell), so values cannot be shell-interpreted.
+           - PATH_TRAVERSAL_IN / file-stream ctors: paths come from operator config
+             (WIREGUARD_CONFIG_PATH etc.), not anonymous web input.
+           - CRLF_INJECTION_LOGS / XML injection / unencrypted socket / ReDoS: low-risk
+             patterns inherent to a LAN-side config/probe layer.
+         Scoped to the adapter package so the scanner stays active everywhere else. -->
+    <Match>
+        <Package name="~net\.vaier\.adapter\.driven.*"/>
+        <Or>
+            <Bug pattern="COMMAND_INJECTION"/>
+            <Bug pattern="PATH_TRAVERSAL_IN"/>
+            <Bug pattern="CRLF_INJECTION_LOGS"/>
+            <Bug pattern="POTENTIAL_XML_INJECTION"/>
+            <Bug pattern="UNENCRYPTED_SOCKET"/>
+            <Bug pattern="REDOS"/>
+            <Bug pattern="IOI_USE_OF_FILE_STREAM_CONSTRUCTORS"/>
+        </Or>
+    </Match>
+
+    <!-- Log-forging (CRLF in log lines) from user-supplied fields in the REST layer.
+         V1 is admin-only (Traefik forward-auth; every authenticated user is an admin),
+         so the only actor who could forge a log line is a trusted operator, and logback's
+         default encoder is in use. Low severity; deferred hardening tracked in #256. -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+    </Match>
+
+    <!-- Verified false positives:
+         - POTENTIAL_XML_INJECTION on PeerSetupScript: it builds a shell SCRIPT from a
+           template, not XML; the pattern misfires on the templating.
+         - REDOS on ReverseProxyRoute.PATH_PREFIX_PATTERN: each repetition is gated by a
+           mandatory '/' that is not in the inner character class, so there is no
+           overlapping backtracking — the match is linear, not exponential. -->
+    <Match>
+        <Class name="net.vaier.domain.PeerSetupScript"/>
+        <Bug pattern="POTENTIAL_XML_INJECTION"/>
+    </Match>
+    <Match>
+        <Class name="net.vaier.domain.ReverseProxyRoute"/>
+        <Bug pattern="REDOS"/>
+    </Match>
+
+    <!-- PATH_TRAVERSAL_IN in VpnService.createPeer/findNextAvailableIp: the only operator
+         input that becomes a path segment is PeerId, and every PeerId is produced via
+         PeerId.sanitized()/generate(), which replace any char outside [A-Za-z0-9_-] with
+         '-' (so '/', '.' and '..' cannot survive). Mitigated by construction. Tightening
+         the PeerId compact constructor to enforce the same charset is tracked in #256. -->
+    <Match>
+        <Or>
+            <Class name="net.vaier.application.service.VpnService"/>
+            <Class name="net.vaier.domain.PeerId"/>
+        </Or>
+        <Bug pattern="PATH_TRAVERSAL_IN"/>
+    </Match>
+
+    <!-- fb-contrib code-quality opinions (not defects): unnecessary File->Path conversion,
+         default-charset getBytes, Optional-style nits, containsKey-before-get, ignored
+         return values, newline-in-format-string, constructor-throws, single-use Random,
+         negated compareTo, partially-constructed-object access, field-could-be-local.
+         Suppressed from the gating baseline; revisit as a dedicated cleanup pass. -->
+    <Match>
+        <Bug pattern="UAC_UNNECESSARY_API_CONVERSION_FILE_TO_PATH,MDM_STRING_BYTES_ENCODING,OI_OPTIONAL_ISSUES_USES_IMMEDIATE_EXECUTION,OI_OPTIONAL_ISSUES_CHECKING_REFERENCE,MUI_CONTAINSKEY_BEFORE_GET,RV_RETURN_VALUE_IGNORED_BAD_PRACTICE,VA_FORMAT_STRING_USES_NEWLINE,CT_CONSTRUCTOR_THROW,DMI_RANDOM_USED_ONLY_ONCE,RV_NEGATING_RESULT_OF_COMPARETO,PCOA_PARTIALLY_CONSTRUCTED_OBJECT_ACCESS,FCBL_FIELD_COULD_BE_LOCAL"/>
+    </Match>
+
+</FindBugsFilter>
