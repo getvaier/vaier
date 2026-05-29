@@ -228,6 +228,20 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 existing.lanAddress(), existing.description(), normalized));
     }
 
+    @Override
+    public void rewriteConfig(String peerId, String newContent) {
+        Path peerConfigPath = Paths.get(wireguardConfigPath, peerId, peerId + ".conf");
+        if (!Files.exists(peerConfigPath)) {
+            throw new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerId);
+        }
+        try {
+            Files.writeString(peerConfigPath, newContent);
+            log.info("Rewrote config for peer {}", peerId);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to rewrite config for peer " + peerId + ": " + e.getMessage(), e);
+        }
+    }
+
     private static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.trim();
     }

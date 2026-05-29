@@ -95,4 +95,27 @@ class FilePeerConfigRetrievalTrackerTest {
         // Sibling of the .conf file — the existing delete flow already removes the peer dir.
         assertThat(marker.getParent()).isEqualTo(peerDir);
     }
+
+    // --- resetViewed (#247): a Reissue re-opens the one-shot budget ---
+
+    @Test
+    void resetViewed_deletesMarkerAndReEnablesAFreshView() throws IOException {
+        Files.createDirectories(configDir.resolve("laptop"));
+        tracker.markViewedIfNotAlready("laptop");
+        assertThat(tracker.isAlreadyViewed("laptop")).isTrue();
+
+        tracker.resetViewed("laptop");
+
+        assertThat(tracker.isAlreadyViewed("laptop")).isFalse();
+        assertThat(tracker.markViewedIfNotAlready("laptop")).isTrue();
+    }
+
+    @Test
+    void resetViewed_isANoOpWhenNotYetViewed() throws IOException {
+        Files.createDirectories(configDir.resolve("laptop"));
+
+        tracker.resetViewed("laptop");
+
+        assertThat(tracker.isAlreadyViewed("laptop")).isFalse();
+    }
 }

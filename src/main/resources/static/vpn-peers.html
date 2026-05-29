@@ -139,6 +139,8 @@
         .machine-icon.icon-down      { color: var(--red); }
         .machine-icon.icon-degraded  { color: var(--yellow); }
         .machine-icon.icon-unknown   { color: var(--text-dim); }
+        /* Out-of-date peer config (#247): a plain yellow warning glyph by the machine name. */
+        .config-stale-warn { color: var(--yellow); cursor: help; font-size: 0.95rem; line-height: 1; }
 
         .machine-icon-cap {
             display: inline-flex;
@@ -1116,6 +1118,7 @@
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${escapeHtml(peer.name)}</span>
+                                ${peer.configOutOfDate ? `<span class="config-stale-warn" title="Config out of date — it predates a change in how Vaier generates configs. Reissue it (keys preserved) and reinstall it on the peer.">⚠</span>` : ''}
                                 ${capabilitySlotsHtml([relaySlot, dockerSlot])}
                             </div>
                             ${peer.description ? `<div class="peer-desc" title="${escapeHtml(peer.description)}">${escapeHtml(peer.description)}</div>` : ''}
@@ -1208,6 +1211,8 @@
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
+                            <button class="btn btn-small ${peer.configOutOfDate ? 'btn-primary' : 'btn-secondary'}" onclick="reissuePeerConfig('${peer.id}')"
+                                    title="Re-render this peer's config from current logic, keeping its keypair. The live tunnel is untouched — reinstall the new config on the peer to apply it.">Reissue config</button>
                             <button class="btn btn-small btn-secondary" onclick="confirmRegeneratePeer('${peer.id}')"
                                     title="Rotate the WireGuard keypair and re-deliver the config — old config stops working immediately">Regenerate</button>
                         </div>
@@ -1902,6 +1907,27 @@
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to regenerate peer: ${error.message}`);
+            } finally {
+                hideBusy();
+            }
+        }
+
+        // #247: reissue = re-render the config from current logic, preserving the keypair (no
+        // delete/recreate, no server-side change, live tunnel untouched). The response is one
+        // delivery of the freshly rendered config — the operator reinstalls it on the peer.
+        async function reissuePeerConfig(peerId) {
+            const before = peers.find(x => x.id === peerId);
+            const label = before ? before.name : peerDisplayName(peerId);
+            showBusy(`Reissuing "${label}"…`);
+            try {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/reissue`, { method: 'POST' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const reissued = await response.json();
+                displaySuccess(`"${escapeHtml(reissued.name)}" reissued — reinstall the new config on the peer`);
+                showPeerDetails(reissued);
+                fetchPeers();
+            } catch (error) {
+                displayError(`Failed to reissue config: ${error.message}`);
             } finally {
                 hideBusy();
             }

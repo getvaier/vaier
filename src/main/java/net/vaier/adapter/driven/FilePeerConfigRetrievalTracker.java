@@ -55,4 +55,16 @@ public class FilePeerConfigRetrievalTracker implements ForTrackingPeerConfigRetr
     public boolean isAlreadyViewed(String peerName) {
         return Files.exists(Paths.get(wireguardConfigPath, peerName, peerName + ".conf.viewed"));
     }
+
+    @Override
+    public void resetViewed(String peerName) {
+        Path marker = Paths.get(wireguardConfigPath, peerName, peerName + ".conf.viewed");
+        try {
+            if (Files.deleteIfExists(marker)) {
+                log.info("Reset peer config viewed marker: {}", peerName);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to reset retrieval marker for " + peerName, e);
+        }
+    }
 }

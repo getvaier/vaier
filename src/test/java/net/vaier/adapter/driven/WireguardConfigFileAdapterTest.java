@@ -515,6 +515,29 @@ class WireguardConfigFileAdapterTest {
         assertThat(adapter.getAllPeerConfigs()).isEmpty();
     }
 
+    // --- rewriteConfig (#247) ---
+
+    @Test
+    void rewriteConfig_overwritesTheEntireConfFile() throws IOException {
+        createPeerConf("apalveien5", "10.13.13.6");
+        String newContent = "# VAIER: {\"peerType\":\"UBUNTU_SERVER\"}\n[Interface]\n"
+                + "Address=10.13.13.6/32\nPrivateKey=testkey\n[Peer]\n"
+                + "AllowedIPs = 10.13.13.0/24,172.31.16.0/20\n";
+
+        adapter.rewriteConfig("apalveien5", newContent);
+
+        assertThat(Files.readString(configDir.resolve("apalveien5").resolve("apalveien5.conf")))
+                .isEqualTo(newContent);
+    }
+
+    @Test
+    void rewriteConfig_throwsWhenPeerDoesNotExist() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> adapter.rewriteConfig("ghost", "x"))
+            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class)
+            .hasMessageContaining("ghost");
+    }
+
     // helpers
 
     private void createPeerConf(String peerName, String ip) throws IOException {

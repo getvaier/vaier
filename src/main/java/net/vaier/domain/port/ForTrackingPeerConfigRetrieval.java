@@ -26,4 +26,11 @@ public interface ForTrackingPeerConfigRetrieval {
 
     /** True iff the marker is already set for {@code peerName}. Read-only — does not mark. */
     boolean isAlreadyViewed(String peerName);
+
+    /**
+     * Clears the viewed marker for {@code peerName}, re-opening the one-shot retrieval budget so
+     * the config can be delivered once more. Used by a {@code Reissue} (which deliberately
+     * re-exposes the preserved secret). A no-op when no marker is set.
+     */
+    void resetViewed(String peerName);
 }

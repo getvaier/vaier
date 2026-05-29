@@ -36,6 +36,9 @@ public interface GetVpnPeersUseCase {
      *                            only renders buttons for what's in the set.
      * @param geoLocation         present only when the peer has a non-blank endpoint and the
      *                            lookup succeeded; empty otherwise.
+     * @param configOutOfDate     true when the peer's on-disk config differs from what current
+     *                            generation logic would render (keys preserved) — i.e. a
+     *                            {@code Reissue} would change it. The UI surfaces this as a badge.
      */
     record VpnPeerView(
         String id,
@@ -57,6 +60,7 @@ public interface GetVpnPeersUseCase {
         String lanCidr,
         String lanAddress,
         String description,
-        Optional<GeoLocation> geoLocation
+        Optional<GeoLocation> geoLocation,
+        boolean configOutOfDate
     ) {}
 }

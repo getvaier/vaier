@@ -14,4 +14,11 @@ public interface ForUpdatingPeerConfigurations {
      * the peer falls back to its id's humanised form for display.
      */
     void updateName(String peerId, String name);
+
+    /**
+     * Replaces the peer's entire {@code .conf} with {@code newContent}. Used by a {@code Reissue}
+     * to persist a freshly rendered config; the existing {@code update*} methods only patch a
+     * single {@code # VAIER:} field. Throws {@code PeerNotFoundException} if the peer is unknown.
+     */
+    void rewriteConfig(String peerId, String newContent);
 }

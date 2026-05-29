@@ -174,9 +174,14 @@ After creating a peer, download its config and connect. Vaier shows the peer's h
 
 ### Show-once peer config
 
-The WireGuard config for a peer is delivered **exactly once**, at create time: the create-success modal shows the config text, an inline QR code, and download buttons for `.conf` / `docker-compose.yml` / setup script as appropriate. Save what you need before closing the modal — the five secret-bearing endpoints (`/config`, `/config-file`, `/qr-code`, `/docker-compose`, `/setup-script`) return `410 Gone` once the budget is burned, and the only way to recover a fresh config is **Regenerate** on the peer's row, which deletes and recreates the peer with the same name (rotating the WireGuard keypair as a side effect).
+The WireGuard config for a peer is delivered **exactly once**, at create time: the create-success modal shows the config text, an inline QR code, and download buttons for `.conf` / `docker-compose.yml` / setup script as appropriate. Save what you need before closing the modal — the five secret-bearing endpoints (`/config`, `/config-file`, `/qr-code`, `/docker-compose`, `/setup-script`) return `410 Gone` once the budget is burned.
 
-Why: WireGuard has no session concept, no server-side revocation, and the same config works on any number of devices. A leaked screenshot or `.conf` would otherwise be a permanent backdoor.
+To get a fresh config for an existing peer, the peer's row offers two actions:
+
+- **Reissue config** — re-renders the config from the *current* generation logic while **keeping the peer's keypair**, then re-opens the one-shot delivery. Use this when Vaier's config format has changed since the peer was created (the peer's row shows a **Config out of date** badge). The live tunnel keeps working; reinstall the reissued config on the peer machine to apply it.
+- **Regenerate** — deletes and recreates the peer with the same name, **rotating the keypair** as a side effect. Use this if the key may be compromised; the old config stops working immediately.
+
+Why show-once: WireGuard has no session concept, no server-side revocation, and the same config works on any number of devices. A leaked screenshot or `.conf` would otherwise be a permanent backdoor.
 
 ---
 

@@ -11,6 +11,7 @@ import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
+import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.domain.GeoLocation;
@@ -27,6 +28,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doThrow;
@@ -43,6 +46,7 @@ class VpnPeerRestControllerTest {
     @Mock GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     @Mock UpdateLanCidrUseCase updateLanCidrUseCase;
     @Mock RenamePeerUseCase renamePeerUseCase;
+    @Mock ReissuePeerConfigUseCase reissuePeerConfigUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     @Mock SseEventPublisher sseEventPublisher;
@@ -58,7 +62,7 @@ class VpnPeerRestControllerTest {
             endpointIp, "51820", "0", connected, "0", "0",
             type, type.isServerType(), type.isVpnPeer() && !type.isServerType(), false,
             net.vaier.domain.PeerArtifact.forPeerType(type),
-            null, null, description, geo);
+            null, null, description, geo, false);
     }
 
     @Test
@@ -235,6 +239,57 @@ class VpnPeerRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         verify(createPeerUseCase).createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server");
+    }
+
+    // --- reissue (#247) ---
+
+    @Test
+    void reissuePeer_returnsFreshConfigAndArtefactsAndPublishesUpdate() {
+        var reissued = new ReissuePeerConfigUseCase.ReissuedPeerUco(
+            "apalveien5", "apalveien5", "10.13.13.6", "pub",
+            "# VAIER: {\"peerType\":\"UBUNTU_SERVER\"}\n[Interface]\nPrivateKey = k\n"
+                + "Address = 10.13.13.6/32\n[Peer]\nAllowedIPs = 10.13.13.0/24,172.31.16.0/20\n",
+            MachineType.UBUNTU_SERVER);
+        when(reissuePeerConfigUseCase.reissuePeerConfig("apalveien5")).thenReturn(reissued);
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(generateDockerComposeUseCase.generateWireguardClientDockerCompose(eq("apalveien5"), any(), any()))
+            .thenReturn("compose-yaml");
+        when(generatePeerSetupScriptUseCase.generateSetupScript(eq("apalveien5"), any(), any()))
+            .thenReturn(Optional.of("setup-sh"));
+
+        var response = controller.reissuePeer("apalveien5");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        var body = (VpnPeerRestController.CreatePeerResponse) response.getBody();
+        assertThat(body.configFile()).contains("172.31.16.0/20");
+        assertThat(body.dockerCompose()).isEqualTo("compose-yaml");
+        assertThat(body.setupScript()).isEqualTo("setup-sh");
+        assertThat(body.availableArtifacts()).contains("WG_CONFIG", "DOCKER_COMPOSE", "SETUP_SCRIPT");
+        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void reissuePeer_unknownPeer_returns404AndPublishesNothing() {
+        when(reissuePeerConfigUseCase.reissuePeerConfig("ghost"))
+            .thenThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"));
+
+        var response = controller.reissuePeer("ghost");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        verify(sseEventPublisher, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void listPeers_exposesConfigOutOfDateFlag() {
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            new VpnPeerView("nas", "nas", "pub", "10.13.13.6/32", "10.13.13.6",
+                "", "51820", "0", false, "0", "0",
+                MachineType.UBUNTU_SERVER, true, false, false,
+                net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
+                null, null, null, Optional.empty(), true)
+        ));
+
+        assertThat(controller.listPeers().getBody().get(0).configOutOfDate()).isTrue();
     }
 
     @Test

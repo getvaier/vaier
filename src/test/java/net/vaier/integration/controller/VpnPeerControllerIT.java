@@ -234,6 +234,36 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
+    void reissuePeer_returns200WithFreshConfigAndReopensTheOneShotGate() throws Exception {
+        var reissued = new net.vaier.application.ReissuePeerConfigUseCase.ReissuedPeerUco(
+                "peer1", "peer1", "10.13.13.6", "pubkey",
+                "# VAIER: {\"peerType\":\"UBUNTU_SERVER\"}\n[Interface]\nPrivateKey = abc\n"
+                    + "Address = 10.13.13.6/32\n[Peer]\nAllowedIPs = 10.13.13.0/24,172.31.16.0/20\n",
+                MachineType.UBUNTU_SERVER);
+        when(reissuePeerConfigUseCase.reissuePeerConfig("peer1")).thenReturn(reissued);
+        // After reissue the gate is reset; the use case owns that. A subsequent GET is allowed once.
+        when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("peer1")).thenReturn(true);
+        when(getPeerConfigUseCase.getPeerConfig("peer1")).thenReturn(Optional.of(new PeerConfigResult(
+                "peer1", "10.13.13.6", reissued.clientConfigFile(), MachineType.UBUNTU_SERVER)));
+
+        mockMvc.perform(post("/vpn/peers/peer1/reissue"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.configFile").value(containsString("172.31.16.0/20")));
+
+        mockMvc.perform(get("/vpn/peers/peer1/config"))
+               .andExpect(status().isOk());
+    }
+
+    @Test
+    void reissuePeer_returns404WhenPeerNotFound() throws Exception {
+        when(reissuePeerConfigUseCase.reissuePeerConfig("ghost"))
+                .thenThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"));
+
+        mockMvc.perform(post("/vpn/peers/ghost/reissue"))
+               .andExpect(status().isNotFound());
+    }
+
+    @Test
     void createPeer_responseIncludesInlineQrPng() throws Exception {
         CreatedPeerUco created = new CreatedPeerUco(
                 "peer1", "peer1", "10.13.13.2", "pubkey", "privkey",

@@ -11,6 +11,7 @@ import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
+import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
@@ -38,6 +39,7 @@ import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForSyncingLanRoutes;
+import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForUpdatingServerAllowedIps;
 import org.springframework.beans.factory.annotation.Value;
@@ -67,6 +69,7 @@ public class VpnService implements
     GetServerLocationUseCase,
     UpdateLanCidrUseCase,
     RenamePeerUseCase,
+    ReissuePeerConfigUseCase,
     SyncLanRoutesUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
@@ -96,6 +99,7 @@ public class VpnService implements
     private final ForSyncingLanRoutes forSyncingLanRoutes;
     private final ForExecutingInContainer forExecutingInContainer;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
+    private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -111,7 +115,8 @@ public class VpnService implements
                       ForUpdatingServerAllowedIps forUpdatingServerAllowedIps,
                       ForSyncingLanRoutes forSyncingLanRoutes,
                       ForExecutingInContainer forExecutingInContainer,
-                      ForResolvingServerLanCidr forResolvingServerLanCidr) {
+                      ForResolvingServerLanCidr forResolvingServerLanCidr,
+                      ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -127,6 +132,7 @@ public class VpnService implements
         this.forSyncingLanRoutes = forSyncingLanRoutes;
         this.forExecutingInContainer = forExecutingInContainer;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
+        this.forTrackingPeerConfigRetrieval = forTrackingPeerConfigRetrieval;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -140,12 +146,34 @@ public class VpnService implements
 
     @Override
     public List<VpnPeerView> getVpnPeers() {
+        // Resolve the live server render inputs once per refresh (not per peer) so the
+        // out-of-date check is a pure string compare against each peer's on-disk config.
+        ServerRenderContext serverContext = resolveServerRenderContext();
         return forGettingVpnClients.getClients().stream()
-            .map(this::toVpnPeerView)
+            .map(client -> toVpnPeerView(client, serverContext))
             .toList();
     }
 
-    private VpnPeerView toVpnPeerView(VpnClient client) {
+    /**
+     * The current server-side inputs to {@link WireGuardPeerConfig#reissue}. Null when they can't
+     * be read (e.g. the wg interface is down) — drift is then reported as false rather than
+     * false-flagging every peer.
+     */
+    private record ServerRenderContext(String serverPublicKey, String serverEndpoint, String serverLanCidr) {}
+
+    private ServerRenderContext resolveServerRenderContext() {
+        try {
+            return new ServerRenderContext(
+                getServerPublicKey(wireguardInterface),
+                extractServerEndpoint(),
+                forResolvingServerLanCidr.resolve().orElse(null));
+        } catch (Exception e) {
+            log.debug("Could not resolve server render context for out-of-date check: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private VpnPeerView toVpnPeerView(VpnClient client, ServerRenderContext serverContext) {
         String peerIp = client.vpnIp();
         String id = forResolvingPeerNames.resolvePeerNameByIp(peerIp);
         Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = getPeerConfigByIp(peerIp);
@@ -162,13 +190,27 @@ public class VpnService implements
         boolean isServer = peerType.isServerType();
         boolean isClient = peerType.isVpnPeer() && !isServer;
         boolean isRelay = isServer && lanCidr != null && !lanCidr.isBlank();
+        boolean configOutOfDate = cfg.isPresent() && serverContext != null
+            && WireGuardPeerConfig.isOutOfDate(
+                cfg.get().configContent(), peerType, lanCidr, lanAddress, description,
+                storedName(cfg.get().configContent(), name), serverContext.serverPublicKey(),
+                serverContext.serverEndpoint(), vpnSubnet, serverContext.serverLanCidr());
         return new VpnPeerView(
             id, name, client.publicKey(), client.allowedIps(), peerIp,
             client.endpointIp(), client.endpointPort(), client.latestHandshake(),
             client.isConnected(), client.transferRx(), client.transferTx(),
             peerType, isServer, isClient, isRelay,
             net.vaier.domain.PeerArtifact.forPeerType(peerType),
-            lanCidr, lanAddress, description, geo);
+            lanCidr, lanAddress, description, geo, configOutOfDate);
+    }
+
+    /**
+     * The name to feed back into a re-render: the raw stored name, or null when the config carries
+     * none. {@code effectiveName} substitutes the humanised id when there's no stored name, so
+     * passing it through would embed a name the on-disk config lacks and falsely report drift.
+     */
+    private static String storedName(String configContent, String effectiveName) {
+        return configContent.contains("\"name\"") ? effectiveName : null;
     }
 
     // --- GetServerLocationUseCase ---
@@ -412,6 +454,44 @@ public class VpnService implements
         } catch (IOException | InterruptedException e) {
             log.error("Error creating peer", e);
             throw new RuntimeException("Failed to create peer: " + e.getMessage(), e);
+        }
+    }
+
+    // --- ReissuePeerConfigUseCase ---
+
+    @Override
+    public ReissuedPeerUco reissuePeerConfig(String peerId) {
+        log.info("Reissuing config for peer: {}", peerId);
+        ForGettingPeerConfigurations.PeerConfiguration peer = peerConfigProvider.getPeerConfigByName(peerId)
+            .orElseThrow(() -> new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerId));
+        try {
+            String serverPublicKey = getServerPublicKey(wireguardInterface);
+            String serverEndpoint = extractServerEndpoint();
+            String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
+
+            // Re-render from current logic, preserving the keypair/PSK/tunnel IP baked into the
+            // on-disk config. Pass the raw stored name (null when absent) so the metadata round-trips.
+            String newContent = WireGuardPeerConfig.reissue(
+                peer.configContent(), peer.peerType(), peer.lanCidr(), peer.lanAddress(),
+                peer.description(), storedName(peer.configContent(), peer.name()),
+                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr);
+
+            forUpdatingPeerConfigurations.rewriteConfig(peer.id(), newContent);
+            // Deliberate operator-initiated re-exposure: re-open the one-shot retrieval budget.
+            forTrackingPeerConfigRetrieval.resetViewed(peer.id());
+
+            // The peer's public key is derived from its preserved private key — no server-side
+            // mutation, so the live tunnel and the wg0.conf [Peer] entry are untouched.
+            String privateKey = WireGuardPeerConfig.readDirective(newContent, "PrivateKey");
+            String publicKey = forExecutingInContainer
+                .executeWithInput(wireguardContainerName, privateKey, "wg", "pubkey").trim();
+
+            log.info("Reissued config for peer {} (serverLanCidr: {})", peer.id(), serverLanCidr);
+            return new ReissuedPeerUco(peer.id(), peer.name(), peer.ipAddress(), publicKey,
+                newContent, peer.peerType());
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new RuntimeException("Failed to reissue config for peer " + peerId + ": " + e.getMessage(), e);
         }
     }
 

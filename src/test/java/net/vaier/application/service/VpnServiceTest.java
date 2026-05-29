@@ -64,6 +64,7 @@ class VpnServiceTest {
     @Mock ForSyncingLanRoutes forSyncingLanRoutes;
     @Mock ForExecutingInContainer forExecutingInContainer;
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
+    @Mock net.vaier.domain.port.ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
 
     @InjectMocks VpnService service;
 
@@ -1092,6 +1093,86 @@ class VpnServiceTest {
         when(forGeolocatingIps.locate("203.0.113.10")).thenReturn(Optional.empty());
 
         assertThat(service.getVpnPeers().get(0).geoLocation()).isEmpty();
+    }
+
+    // --- reissuePeerConfig (#247) ---
+
+    @Test
+    void reissuePeerConfig_reRendersWithCurrentServerLanCidr_rewritesAndResetsGate() throws Exception {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        ReflectionTestUtils.setField(service, "wireguardContainerName", "wireguard");
+        ReflectionTestUtils.setField(service, "wireguardInterface", "wg0");
+
+        // A server peer created before server-LAN routing: its client AllowedIPs lacks the CIDR.
+        String existing = net.vaier.domain.WireGuardPeerConfig.generate(
+            "PRIVKEY", "10.13.13.6", "SERVER_PUB", "PSK", "vaier.example.com:51820",
+            MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, "apalveien5", null);
+        when(peerConfigProvider.getPeerConfigByName("apalveien5")).thenReturn(Optional.of(
+            new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", existing,
+                MachineType.UBUNTU_SERVER, null, null, null)));
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
+        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
+            .thenReturn("SERVER_PUB\n");
+        when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
+            .thenReturn("PEER_PUB\n");
+
+        var result = service.reissuePeerConfig("apalveien5");
+
+        ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
+        verify(forUpdatingPeerConfigurations).rewriteConfig(eq("apalveien5"), content.capture());
+        assertThat(content.getValue())
+            .contains("AllowedIPs = 10.13.13.0/24,172.31.16.0/20")
+            .contains("PrivateKey = PRIVKEY");
+        verify(forTrackingPeerConfigRetrieval).resetViewed("apalveien5");
+        assertThat(result.clientConfigFile()).contains("172.31.16.0/20");
+        assertThat(result.publicKey()).isEqualTo("PEER_PUB");
+        assertThat(result.ipAddress()).isEqualTo("10.13.13.6");
+    }
+
+    @Test
+    void reissuePeerConfig_throwsWhenPeerUnknown() {
+        when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.reissuePeerConfig("ghost"))
+            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+        verify(forUpdatingPeerConfigurations, never()).rewriteConfig(any(), any());
+    }
+
+    @Test
+    void getVpnPeers_flagsConfigOutOfDateWhenRenderedConfigDiverges() throws Exception {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        ReflectionTestUtils.setField(service, "wireguardContainerName", "wireguard");
+        ReflectionTestUtils.setField(service, "wireguardInterface", "wg0");
+
+        String existing = net.vaier.domain.WireGuardPeerConfig.generate(
+            "PRIVKEY", "10.13.13.6", "SERVER_PUB", "PSK", "vaier.eilertsen.family:51820",
+            MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, "apalveien5", null);
+        VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.6")).thenReturn("apalveien5");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(
+            new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", existing,
+                MachineType.UBUNTU_SERVER, null, null, null)));
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
+        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
+            .thenReturn("SERVER_PUB\n");
+
+        assertThat(service.getVpnPeers().get(0).configOutOfDate()).isTrue();
+    }
+
+    @Test
+    void getVpnPeers_configNotOutOfDateWhenServerStateUnavailable() {
+        // No server pubkey stubbed → drift can't be computed; must not false-flag.
+        VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.6")).thenReturn("apalveien5");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(
+            new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", "[Interface]",
+                MachineType.UBUNTU_SERVER, null, null, null)));
+
+        assertThat(service.getVpnPeers().get(0).configOutOfDate()).isFalse();
     }
 
 }

@@ -364,4 +364,84 @@ class WireGuardPeerConfigTest {
         assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", "192.168.1.0/24"))
             .isEqualTo("10.13.13.5/32,192.168.1.0/24");
     }
+
+    // --- reissue: re-render from current logic, preserving keys (#247) ---
+
+    @Test
+    void reissue_preservesPrivateKeyPresharedKeyAndAddressFromExistingConfig() {
+        // A server peer created before the server-LAN-CIDR change: its client AllowedIPs is just
+        // the VPN subnet. Reissue must keep the exact keypair, PSK and tunnel IP.
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV_KEY_ABC", "10.13.13.6", "SERVER_PUB", "PSK_XYZ",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", null);
+
+        String reissued = WireGuardPeerConfig.reissue(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20");
+
+        assertThat(WireGuardPeerConfig.readDirective(reissued, "PrivateKey")).isEqualTo("PRIV_KEY_ABC");
+        assertThat(WireGuardPeerConfig.readDirective(reissued, "PresharedKey")).isEqualTo("PSK_XYZ");
+        assertThat(WireGuardPeerConfig.readIpAddress(reissued)).isEqualTo("10.13.13.6");
+    }
+
+    @Test
+    void reissue_serverPeer_appendsCurrentServerLanCidrToClientAllowedIps() {
+        // The #247 scenario: an existing server peer whose AllowedIPs predates server LAN routing.
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", null);
+        assertThat(existing).contains("AllowedIPs = 10.13.13.0/24");
+
+        String reissued = WireGuardPeerConfig.reissue(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20");
+
+        assertThat(reissued).contains("AllowedIPs = 10.13.13.0/24,172.31.16.0/20");
+    }
+
+    @Test
+    void reissue_clientPeer_keepsFullTunnelAllowedIps() {
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.2", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.MOBILE_CLIENT, null, null, "10.13.13.0/24",
+                null, "phone", null);
+
+        String reissued = WireGuardPeerConfig.reissue(
+                existing, MachineType.MOBILE_CLIENT, null, null, null, "phone",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20");
+
+        assertThat(reissued).contains("AllowedIPs = 0.0.0.0/0");
+        assertThat(reissued).doesNotContain("172.31.16.0/20");
+    }
+
+    // --- isOutOfDate: on-disk differs from current rendered config (#247) ---
+
+    @Test
+    void isOutOfDate_trueWhenExistingLacksCurrentServerLanCidr() {
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", null);
+
+        assertThat(WireGuardPeerConfig.isOutOfDate(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20"))
+            .isTrue();
+    }
+
+    @Test
+    void isOutOfDate_falseWhenRenderedConfigMatchesExisting() {
+        // Already carries the server LAN CIDR — re-rendering with the same inputs is a no-op.
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", "172.31.16.0/20");
+
+        assertThat(WireGuardPeerConfig.isOutOfDate(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20"))
+            .isFalse();
+    }
 }

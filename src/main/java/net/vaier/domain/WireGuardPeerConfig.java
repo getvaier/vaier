@@ -55,6 +55,42 @@ public final class WireGuardPeerConfig {
                 serverPublicKey, presharedKey, serverEndpoint, allowedIps);
     }
 
+    /**
+     * Re-renders a peer's installable config from the <em>current</em> generation logic while
+     * preserving the secrets and tunnel IP baked into {@code existingContent} — its
+     * {@code PrivateKey}, {@code PresharedKey} and {@code Address}. The identity fields
+     * (peerType/lanCidr/lanAddress/description/name) are supplied by the caller from the peer's
+     * parsed metadata, and the server fields (public key, endpoint, VPN subnet, server LAN CIDR)
+     * are the live ones — so a peer whose config predates a generation change (e.g. the server
+     * LAN CIDR now appended to a server peer's client-side AllowedIPs, #204/#247) comes back
+     * current without rotating its keypair. See {@code Reissue} in UBIQUITOUS_LANGUAGE.md.
+     */
+    public static String reissue(String existingContent, MachineType peerType, String lanCidr,
+                                 String lanAddress, String description, String name,
+                                 String serverPublicKey, String serverEndpoint, String vpnSubnet,
+                                 String serverLanCidr) {
+        return generate(
+                readDirective(existingContent, "PrivateKey"),
+                readIpAddress(existingContent),
+                serverPublicKey,
+                readDirective(existingContent, "PresharedKey"),
+                serverEndpoint,
+                peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr);
+    }
+
+    /**
+     * Whether {@code existingContent} differs from the config current logic would render for the
+     * same peer (its {@code Rendered config}). True means the on-disk config is {@code out of date}
+     * and a {@code Reissue} would change it. Same arguments as {@link #reissue}.
+     */
+    public static boolean isOutOfDate(String existingContent, MachineType peerType, String lanCidr,
+                                      String lanAddress, String description, String name,
+                                      String serverPublicKey, String serverEndpoint, String vpnSubnet,
+                                      String serverLanCidr) {
+        return !existingContent.equals(reissue(existingContent, peerType, lanCidr, lanAddress,
+                description, name, serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr));
+    }
+
     public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,
                                    String description, String name) {
         StringBuilder sb = new StringBuilder();

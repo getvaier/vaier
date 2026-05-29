@@ -8,6 +8,7 @@ import net.vaier.application.GetPeerConfigUseCase;
 import net.vaier.application.GetServerLocationUseCase;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
+import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.adapter.driven.SseEventPublisher;
@@ -44,6 +45,7 @@ public class VpnPeerRestController {
     private final GeneratePeerSetupScriptUseCase generatePeerSetupScriptUseCase;
     private final UpdateLanCidrUseCase updateLanCidrUseCase;
     private final RenamePeerUseCase renamePeerUseCase;
+    private final ReissuePeerConfigUseCase reissuePeerConfigUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     private final SseEventPublisher sseEventPublisher;
@@ -90,7 +92,8 @@ public class VpnPeerRestController {
             v.geoLocation().map(GeoLocation::latitude).orElse(null),
             v.geoLocation().map(GeoLocation::longitude).orElse(null),
             v.geoLocation().map(GeoLocation::city).orElse(null),
-            v.geoLocation().map(GeoLocation::country).orElse(null));
+            v.geoLocation().map(GeoLocation::country).orElse(null),
+            v.configOutOfDate());
     }
 
     @GetMapping("/server-location")
@@ -129,36 +132,68 @@ public class VpnPeerRestController {
         // marker (#202); the marker is set on first GET, NOT on create. The UI uses only the
         // inline payload so it never burns the budget; a raw curl GET can still recover any one
         // artefact once (then 410 forever).
-        java.util.Set<net.vaier.domain.PeerArtifact> artefacts =
-            net.vaier.domain.PeerArtifact.forPeerType(createdPeer.peerType());
-
-        String qrCodePngBase64 = artefacts.contains(net.vaier.domain.PeerArtifact.QR_CODE)
-            ? tryEncodeQrCodeBase64(createdPeer.clientConfigFile(), createdPeer.name())
-            : null;
-        String dockerCompose = artefacts.contains(net.vaier.domain.PeerArtifact.DOCKER_COMPOSE)
-            ? generateDockerComposeUseCase.generateWireguardClientDockerCompose(
-                createdPeer.id(), defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT)
-            : null;
-        String setupScript = artefacts.contains(net.vaier.domain.PeerArtifact.SETUP_SCRIPT)
-            ? generatePeerSetupScriptUseCase.generateSetupScript(
-                createdPeer.id(), defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT).orElse(null)
-            : null;
-
-        CreatePeerResponse response = new CreatePeerResponse(
-                createdPeer.id(),
-                createdPeer.name(),
-                createdPeer.ipAddress(),
-                createdPeer.publicKey(),
-                createdPeer.clientConfigFile(),
-                createdPeer.peerType().name(),
-                artefacts.stream().map(Enum::name).sorted().toList(),
-                qrCodePngBase64,
-                dockerCompose,
-                setupScript
-        );
+        CreatePeerResponse response = buildConfigDeliveryResponse(
+                createdPeer.id(), createdPeer.name(), createdPeer.ipAddress(),
+                createdPeer.publicKey(), createdPeer.clientConfigFile(), createdPeer.peerType());
 
         sseEventPublisher.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Reissues a peer's config (#247): re-renders it from current generation logic with the
+     * keypair preserved, persists it, re-opens the one-shot retrieval budget, and returns the
+     * fresh config + artefacts inline — the same shape as create, so the UI reuses the
+     * create-success modal. 404 when the peer is unknown.
+     */
+    @PostMapping("/{peerId}/reissue")
+    public ResponseEntity<?> reissuePeer(@PathVariable String peerId) {
+        log.info("Reissuing config for peer: {}", peerId);
+        try {
+            ReissuePeerConfigUseCase.ReissuedPeerUco reissued =
+                reissuePeerConfigUseCase.reissuePeerConfig(peerId);
+
+            CreatePeerResponse response = buildConfigDeliveryResponse(
+                    reissued.id(), reissued.name(), reissued.ipAddress(),
+                    reissued.publicKey(), reissued.clientConfigFile(), reissued.peerType());
+
+            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            return ResponseEntity.ok(response);
+        } catch (net.vaier.domain.PeerNotFoundException e) {
+            log.warn("Peer not found for reissue: {}", peerId);
+            return ResponseEntity.notFound().build();
+        } catch (Exception e) {
+            log.error("Failed to reissue config for peer {}: {}", peerId, e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    /**
+     * Builds the inline config-delivery payload (config text + QR + docker-compose + setup script)
+     * shared by create and reissue. The five GET endpoints stay gated by the one-shot marker (#202);
+     * the UI consumes only this inline payload so it never burns the budget.
+     */
+    private CreatePeerResponse buildConfigDeliveryResponse(String id, String name, String ipAddress,
+            String publicKey, String configFile, MachineType peerType) {
+        java.util.Set<net.vaier.domain.PeerArtifact> artefacts =
+            net.vaier.domain.PeerArtifact.forPeerType(peerType);
+
+        String qrCodePngBase64 = artefacts.contains(net.vaier.domain.PeerArtifact.QR_CODE)
+            ? tryEncodeQrCodeBase64(configFile, name)
+            : null;
+        String dockerCompose = artefacts.contains(net.vaier.domain.PeerArtifact.DOCKER_COMPOSE)
+            ? generateDockerComposeUseCase.generateWireguardClientDockerCompose(
+                id, defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT)
+            : null;
+        String setupScript = artefacts.contains(net.vaier.domain.PeerArtifact.SETUP_SCRIPT)
+            ? generatePeerSetupScriptUseCase.generateSetupScript(
+                id, defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT).orElse(null)
+            : null;
+
+        return new CreatePeerResponse(
+                id, name, ipAddress, publicKey, configFile, peerType.name(),
+                artefacts.stream().map(Enum::name).sorted().toList(),
+                qrCodePngBase64, dockerCompose, setupScript);
     }
 
     @PatchMapping("/{peerName}")
@@ -484,7 +519,8 @@ public class VpnPeerRestController {
             Double latitude,
             Double longitude,
             String city,
-            String country
+            String country,
+            boolean configOutOfDate
     ) {}
 
     public record CreatePeerRequest(

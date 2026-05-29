@@ -123,6 +123,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected RenamePeerUseCase renamePeerUseCase;
 
     @MockBean
+    protected ReissuePeerConfigUseCase reissuePeerConfigUseCase;
+
+    @MockBean
     protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
 
     @MockBean
