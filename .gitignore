@@ -49,3 +49,7 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code — keep checked-in agents/skills, ignore local/ephemeral state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
