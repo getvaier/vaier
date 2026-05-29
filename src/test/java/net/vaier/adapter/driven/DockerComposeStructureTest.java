@@ -38,6 +38,30 @@ class DockerComposeStructureTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void wireguardMasquerade_usesInterfaceNameAgnosticRuleForVpnEgress() throws Exception {
+        // The linuxserver/wireguard wg0.conf PostUp masquerades only on `-o eth+`. On a
+        // Vaier server whose primary NIC is not named eth* (e.g. AWS EC2's ens5, or when
+        // wireguard runs with host networking) that rule is a silent no-op, so traffic
+        // from a LAN behind a server peer that egresses a non-WG interface keeps its
+        // original source and the destination has no return route — it drops. #248.
+        //
+        // The wireguard-masquerade sidecar must therefore install a name-agnostic rule
+        // that masquerades anything leaving a non-wg0 interface (`! -o wg0`), regardless
+        // of the kernel's name for that interface.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> masquerade = (Map<String, Object>) services.get("wireguard-masquerade");
+        List<String> entrypoint = (List<String>) masquerade.get("entrypoint");
+        String script = String.join("\n", entrypoint);
+
+        assertThat(script)
+            .as("masquerade sidecar must NAT VPN egress by NOT matching wg0, not by guessing the NIC name")
+            .contains("! -o wg0 -j MASQUERADE");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void authelia_runsAsUid1000_soItDoesNotReRootTheSharedConfigDir() throws Exception {
         // The authelia/authelia image entrypoint, when it runs as root, does
         //   chown -R "${PUID}:${PGID}" /config

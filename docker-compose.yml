@@ -148,8 +148,16 @@ services:
       - |
         until ip link show wg0 2>/dev/null; do sleep 2; done
         while ip link show wg0 2>/dev/null; do
+          # Docker network -> VPN: source-NAT bridge traffic as it leaves wg0.
           iptables -t nat -C POSTROUTING -s 172.20.0.0/16 -o wg0 -j MASQUERADE 2>/dev/null || \
             iptables -t nat -A POSTROUTING -s 172.20.0.0/16 -o wg0 -j MASQUERADE
+          # VPN -> anywhere off-tunnel: source-NAT anything leaving a non-wg0 interface
+          # so a LAN host behind a server peer can reach the server's VPC/LAN and get a
+          # return route. Matching `! -o wg0` is NIC-name agnostic, so it works whether the
+          # egress is the bridge (eth0) or the host NIC (ens5) -- unlike the wg0.conf
+          # PostUp's `-o eth+`, which is a no-op when the NIC isn't named eth*. #248.
+          iptables -t nat -C POSTROUTING ! -o wg0 -j MASQUERADE 2>/dev/null || \
+            iptables -t nat -A POSTROUTING ! -o wg0 -j MASQUERADE
           sleep 10
         done
         exit 1
