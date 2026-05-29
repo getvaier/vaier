@@ -697,9 +697,9 @@ function addProcessingCard(subdomain, requiresAuth, dnsPropagated) {
             </div>
         </div>
         <div style="padding:0.5rem 1rem 0.75rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:0.35rem">
-            <div id="proc-step-dns-create-${id}"    class="progress-step"><span class="step-icon">✓</span><span>DNS record created</span></div>
-            <div id="proc-step-dns-propagate-${id}" class="progress-step" style="opacity:${step2opacity}"><span class="step-icon">${step2icon}</span><span>Waiting for DNS propagation…</span></div>
-            <div id="proc-step-traefik-${id}"       class="progress-step" style="opacity:0.35"><span class="step-icon">⏳</span><span>Activating reverse proxy route…</span></div>
+            <div id="proc-step-dns-create-${id}"    class="progress-step" title="Your subdomain's DNS record has been added to Route53, pointing it at this server."><span class="step-icon">✓</span><span>DNS record created</span></div>
+            <div id="proc-step-dns-propagate-${id}" class="progress-step" style="opacity:${step2opacity}" title="Global DNS servers are syncing the new record. Usually takes 30–60 seconds. If it never resolves, the publish is rolled back and you can retry."><span class="step-icon">${step2icon}</span><span>Waiting for DNS propagation…</span></div>
+            <div id="proc-step-traefik-${id}"       class="progress-step" style="opacity:0.35" title="Traefik is wiring up a reverse-proxy route so HTTPS traffic to this subdomain reaches your service."><span class="step-icon">⏳</span><span>Activating reverse proxy route…</span></div>
         </div>`;
     document.getElementById('processing-container').appendChild(card);
     document.getElementById('processing-section').style.display = '';
@@ -783,6 +783,31 @@ function onPublishLanMachineChange() {
     }
 }
 
+// Turn a failed publish response into a human explanation + a suggested next step.
+// The backend sends the rejection reason as { "message": "..." } on a 400 (PublishError);
+// for other statuses we fall back to status-keyed guidance.
+async function explainPublishError(response, mode, body) {
+    let reason = '';
+    try {
+        const payload = await response.json();
+        if (payload && payload.message) reason = payload.message;
+    } catch (e) { /* no/!json body */ }
+
+    if (response.status === 400) {
+        if (reason) return `${reason}\n\nFix the highlighted value and publish again.`;
+        if (mode === 'lan')
+            return `Make sure ${body.machineName}'s LAN address sits inside one of your relay peers' lanCidr ranges, then try again.`;
+        return 'The request was rejected — check the subdomain, address and path prefix, then try again.';
+    }
+    if (response.status === 409)
+        return reason
+            ? `${reason}\n\nPick a different subdomain or path prefix.`
+            : 'That subdomain or path is already in use. Pick a different one.';
+    if (response.status >= 500)
+        return 'Something went wrong on the server while publishing. Check the Vaier logs, then try again.';
+    return `Unexpected response (HTTP ${response.status}). Check the Vaier logs and try again.`;
+}
+
 async function submitPublish() {
     const mode = publishMode();
     const subdomain          = document.getElementById('publishSubdomain').value.trim();
@@ -826,17 +851,16 @@ async function submitPublish() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        if (mode === 'lan' && response.status === 400) {
-            alert(`Could not publish — make sure ${body.machineName}'s lanAddress is inside a relay peer's lanCidr.`);
+        if (!response.ok) {
+            alert(`${errorPrefix}.\n\n${await explainPublishError(response, mode, body)}`);
             return;
         }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         hidePublishModal();
         addProcessingCard(subdomain, requiresAuth, false);
         if (mode === 'container') fetchPublishable();
     } catch (error) {
-        alert(`${errorPrefix}: ${error.message}`);
+        alert(`${errorPrefix}.\n\nVaier could not be reached (${error.message}). Check that the server is running and your VPN connection is up, then try again.`);
     } finally {
         submitBtn.disabled = false;
         cancelBtn.disabled = false;
@@ -1025,6 +1049,12 @@ _sse.addEventListener('publish-traefik-active', e => {
 _sse.addEventListener('publish-dns-timeout', e => {
     removeProcessingCard(e.data);
     alert(`DNS propagation timed out for "${e.data}". The DNS record was created but did not become visible on authoritative nameservers in time. Try publishing again — if it keeps failing, check your Route53 zone.`);
+    Promise.all([fetchServices(), fetchPublishable()]);
+});
+
+_sse.addEventListener('publish-rolled-back', e => {
+    removeProcessingCard(e.data);
+    alert(`Publishing "${e.data}" was rolled back — its DNS record and reverse-proxy route have been removed, so nothing is left half-configured. You can safely try publishing it again.`);
     Promise.all([fetchServices(), fetchPublishable()]);
 });
 

@@ -53,7 +53,7 @@ public class PublishedServiceRestController {
     }
 
     @PostMapping("/publish")
-    public ResponseEntity<Void> publishService(@RequestBody PublishRequest request) {
+    public ResponseEntity<?> publishService(@RequestBody PublishRequest request) {
         log.info("Publishing service: {}:{} as {}.* (auth={}, directUrlDisabled={}, pathPrefix={})",
             request.address(), request.port(), request.subdomain(), request.requiresAuth(),
             request.directUrlDisabled(), request.pathPrefix());
@@ -64,13 +64,13 @@ public class PublishedServiceRestController {
                 request.pathPrefix());
         } catch (IllegalArgumentException e) {
             log.warn("Publish rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(new PublishError(e.getMessage()));
         }
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/lan")
-    public ResponseEntity<Void> publishLanService(@RequestBody PublishLanRequest request) {
+    public ResponseEntity<?> publishLanService(@RequestBody PublishLanRequest request) {
         log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, pathPrefix={})",
             request.protocol(), request.machineName(), request.port(), request.subdomain(),
             request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
@@ -83,7 +83,7 @@ public class PublishedServiceRestController {
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
             log.warn("LAN publish rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(new PublishError(e.getMessage()));
         }
     }
 
@@ -140,4 +140,5 @@ public class PublishedServiceRestController {
                              boolean directUrlDisabled, String rootRedirectPath, String pathPrefix) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record IgnoreRequest(String key) {}
+    record PublishError(String message) {}
 }

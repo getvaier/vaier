@@ -42,7 +42,7 @@ class PublishedServiceRestControllerTest {
         var request = new PublishedServiceRestController.PublishLanRequest(
             "printer-ui", "printer", 9100, "http", false, false, null, null);
 
-        ResponseEntity<Void> response = controller.publishLanService(request);
+        ResponseEntity<?> response = controller.publishLanService(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(publishLanServiceUseCase).publishLanService(
@@ -54,7 +54,7 @@ class PublishedServiceRestControllerTest {
         var request = new PublishedServiceRestController.PublishLanRequest(
             "app", "rig", 3000, "http", false, false, "/builder/ui/", null);
 
-        ResponseEntity<Void> response = controller.publishLanService(request);
+        ResponseEntity<?> response = controller.publishLanService(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(publishLanServiceUseCase).publishLanService(
@@ -62,15 +62,33 @@ class PublishedServiceRestControllerTest {
     }
 
     @Test
-    void publishLanService_useCaseThrowsIllegalArgument_returns400() {
+    void publishLanService_useCaseThrowsIllegalArgument_returns400WithReason() {
         doThrow(new IllegalArgumentException("Unknown machine: ghost"))
             .when(publishLanServiceUseCase).publishLanService(
                 "x", "ghost", 80, "http", false, false, null, null);
         var request = new PublishedServiceRestController.PublishLanRequest(
             "x", "ghost", 80, "http", false, false, null, null);
 
-        ResponseEntity<Void> response = controller.publishLanService(request);
+        ResponseEntity<?> response = controller.publishLanService(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody())
+            .isEqualTo(new PublishedServiceRestController.PublishError("Unknown machine: ghost"));
+    }
+
+    @Test
+    void publishService_useCaseThrowsIllegalArgument_returns400WithReason() {
+        doThrow(new IllegalArgumentException("A route already exists on app.example.com"))
+            .when(publishPeerServiceUseCase).publishService(
+                "10.13.13.2", 8080, "app", false, null, false, null);
+        var request = new PublishedServiceRestController.PublishRequest(
+            "10.13.13.2", 8080, "app", false, null, false, null);
+
+        ResponseEntity<?> response = controller.publishService(request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody())
+            .isEqualTo(new PublishedServiceRestController.PublishError(
+                "A route already exists on app.example.com"));
     }
 }
