@@ -1,0 +1,26 @@
+name: Static Analysis (release)
+
+# SpotBugs (+ find-sec-bugs + fb-contrib) is intentionally NOT part of the
+# every-push / PR build (build-deploy.yml). It runs only when cutting a release
+# — on a v* tag push — or on demand via the Actions tab. The baseline noise
+# filter lives in spotbugs-exclude.xml; the build fails on any new finding.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  spotbugs:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: SpotBugs (find-sec-bugs + fb-contrib)
+      run: mvn -B clean compile com.github.spotbugs:spotbugs-maven-plugin:check
