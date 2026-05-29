@@ -355,4 +355,31 @@ class LanServerServiceTest {
             .isInstanceOf(java.util.NoSuchElementException.class);
         verify(forPersistingLanServers, never()).save(any());
     }
+
+    // --- generateSetupScript (#249) — orchestration only; the decision matrix is in
+    //     LanServerSetupScriptTest.forHost_* (domain). These verify the service reads the right
+    //     ports and passes the configured vpnSubnet through. ---
+
+    @Test
+    void generateSetupScript_relayAnchored_passesPortDataAndVpnSubnetToDomain() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nuc02", "192.168.3.50", false, null, null)));
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.9", "[Interface]",
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.121", null)));
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
+
+        String s = service.generateSetupScript("nuc02").orElseThrow();
+
+        assertThat(s).contains("ip route replace 172.31.16.0/20 via 192.168.3.121"); // server LAN CIDR
+        assertThat(s).contains("ip route replace 10.13.13.0/24 via 192.168.3.121");  // the vpnSubnet
+    }
+
+    @Test
+    void generateSetupScript_unknownServer_empty() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of());
+
+        assertThat(service.generateSetupScript("ghost")).isEmpty();
+    }
 }

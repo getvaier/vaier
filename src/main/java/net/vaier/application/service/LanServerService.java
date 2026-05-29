@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
+import net.vaier.application.GenerateLanServerSetupScriptUseCase;
 import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.RegisterLanServerUseCase;
 import net.vaier.application.RenameLanServerUseCase;
@@ -9,10 +10,12 @@ import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.LanServerSetupScript;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -27,11 +30,15 @@ public class LanServerService implements
     RenameLanServerUseCase,
     UpdateLanServerDescriptionUseCase,
     GetLanServersUseCase,
+    GenerateLanServerSetupScriptUseCase,
     ResolveLanAnchorUseCase {
 
     private final ForPersistingLanServers forPersistingLanServers;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
+
+    @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
+    private String vpnSubnet;
 
     public LanServerService(ForPersistingLanServers forPersistingLanServers,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
@@ -120,5 +127,15 @@ public class LanServerService implements
         return LanAnchor.resolve(lanAddress,
             forGettingPeerConfigurations.getAllPeerConfigs(),
             forResolvingServerLanCidr.resolve().orElse(null));
+    }
+
+    @Override
+    public Optional<String> generateSetupScript(String lanServerName) {
+        // Orchestration only: read the LAN server and the inputs the domain needs from the driven
+        // ports, then let the domain decide what the script must do and render it.
+        return LanServer.findByName(lanServerName, forPersistingLanServers.getAll())
+            .flatMap(server -> LanServerSetupScript.forHost(server,
+                forGettingPeerConfigurations.getAllPeerConfigs(),
+                forResolvingServerLanCidr.resolve().orElse(null), vpnSubnet));
     }
 }

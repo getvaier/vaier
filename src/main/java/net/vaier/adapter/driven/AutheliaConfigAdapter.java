@@ -213,6 +213,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                         - "^/users/me$"
                         - "^/favicon$"
                         - "^/launchpad/services$"
+                        - '^/lan-servers/[^/]+/setup\\.sh$'
                     - domain: "%s"
                       policy: one_factor
                 %s""",

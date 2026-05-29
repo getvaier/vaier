@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
+import net.vaier.application.GenerateLanServerSetupScriptUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.domain.Reachability;
 import net.vaier.application.GetLanServerScrapeUseCase;
@@ -18,14 +19,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,6 +43,7 @@ class LanServerRestControllerTest {
     @Mock GetLanServerReachabilityUseCase reachabilityUseCase;
     @Mock GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     @Mock ResolveLanAnchorUseCase resolveLanAnchorUseCase;
+    @Mock GenerateLanServerSetupScriptUseCase generateLanServerSetupScriptUseCase;
 
     @InjectMocks
     LanServerRestController controller;
@@ -124,61 +123,35 @@ class LanServerRestControllerTest {
         verify(deleteLanServerUseCase).delete("nas");
     }
 
-    // --- docker-setup.sh ---
+    // --- {name}/setup.sh (#249) ---
 
     @Test
-    void downloadDockerSetupScript_returns200WithShellAttachment() throws IOException {
-        ResponseEntity<Resource> response = controller.downloadDockerSetupScript();
+    void downloadSetupScript_returns200WithShellAttachment() {
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
+            .thenReturn(Optional.of("#!/usr/bin/env bash\nip route replace 172.31.16.0/20 via 192.168.3.121\n"));
+
+        ResponseEntity<?> response = controller.downloadSetupScript("nuc02");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.parseMediaType("application/x-sh"));
         assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
-            .contains("filename=lan-docker-setup.sh");
-        Resource body = response.getBody();
-        assertThat(body).isNotNull();
-        assertThat(body.contentLength()).isPositive();
+            .contains("filename=nuc02-setup.sh");
+        assertThat(response.getBody()).asString().contains("ip route replace 172.31.16.0/20 via 192.168.3.121");
     }
 
     @Test
-    void downloadDockerSetupScript_bodyHasShebangAndCoversNativeAndSnapDocker() throws IOException {
-        ResponseEntity<Resource> response = controller.downloadDockerSetupScript();
+    void downloadSetupScript_returns404WhenNothingToSetUp() {
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("ghost")).thenReturn(Optional.empty());
 
-        String body = new String(response.getBody().getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(controller.downloadSetupScript("ghost").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
 
-        // shebang + safe-mode
-        assertThat(body).startsWith("#!/usr/bin/env bash");
-        assertThat(body).contains("set -euo pipefail");
+    @Test
+    void downloadSetupScript_returns409WhenRelayHasNoLanAddress() {
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
+            .thenThrow(new IllegalStateException("Relay peer apalveien5 has no LAN address set"));
 
-        // accepts a --port flag (default 2375)
-        assertThat(body).contains("--port");
-        assertThat(body).contains("2375");
-
-        // detects snap docker and writes its daemon.json
-        assertThat(body).contains("snap list docker");
-        assertThat(body).contains("/var/snap/docker/current/config/daemon.json");
-        assertThat(body).contains("snap.docker.dockerd");
-
-        // native path: writes /etc/docker/daemon.json + systemd drop-in to clear -H
-        assertThat(body).contains("/etc/docker/daemon.json");
-        assertThat(body).contains("/etc/systemd/system/docker.service.d");
-        assertThat(body).contains("ExecStart=");
-
-        // tcp host string
-        assertThat(body).contains("tcp://0.0.0.0:");
-
-        // idempotency: skips re-write when daemon.json already has the desired hosts
-        assertThat(body).contains("already configured");
-
-        // verification: waits for docker info after restart
-        assertThat(body).contains("docker info");
-
-        // installs Docker from scratch if it isn't already present (Ubuntu-friendly)
-        assertThat(body).contains("command -v docker");
-        assertThat(body).contains("get.docker.com");
-
-        // reminds the operator about the security-group / firewall rule and how to register
-        assertThat(body).contains("security group");
-        assertThat(body).contains("Add Machine");
+        assertThat(controller.downloadSetupScript("nuc02").getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test

@@ -170,6 +170,8 @@ Each machine — VPN peer or LAN server — can carry an optional **description*
 
 Peers and LAN servers can be **renamed** in place — expand the card and edit the **Name** field. A peer's **name** is just a display label: editing it leaves the peer's underlying id (its config directory, REST paths, and routing) untouched, so the live tunnel and any published services keep working. The id is the slug Vaier derives from the name you first typed; the name is then yours to change freely.
 
+**LAN servers** (a NAS, printer, IPMI host, or an extra Docker host on a peer's LAN or in the Vaier server's own subnet) are added from **Add Machine** — Vaier only needs the host's LAN address. After adding, the machine's card offers a single **Setup script** to run on that host. The script adapts to what the host needs: it opens the Docker engine API (if you marked it as running Docker — native and snap installs covered) and installs persistent routes to the Vaier server's subnet (and other sites' LANs) via the host's relay peer, so a machine behind one relay can reach the rest of your Vaier network. It's idempotent and safe to re-run.
+
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 
 ### Show-once peer config

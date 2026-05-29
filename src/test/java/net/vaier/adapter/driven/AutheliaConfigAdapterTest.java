@@ -133,6 +133,33 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
+    void initialiseConfiguration_lanServerSetupScriptBypassesAuthentication() throws IOException {
+        // #249: the per-host LAN setup script is curl-piped to bash on a fresh LAN host with no
+        // Vaier session, so it must be reachable anonymously. It carries no secrets.
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        assertThat(content).contains("^/lan-servers/[^/]+/setup\\.sh$");
+    }
+
+    @Test
+    void initialiseConfiguration_generatesValidYaml() throws IOException {
+        // Regression guard: a regex resource with a backslash escape (e.g. \.) put in a
+        // double-quoted YAML scalar is an invalid escape and crash-loops Authelia. The generated
+        // config must always parse as YAML — a substring check alone wouldn't catch that.
+        AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
+
+        init.initialiseConfiguration();
+
+        String content = Files.readString(tempDir.resolve("configuration.yml"));
+        org.assertj.core.api.Assertions.assertThatCode(() -> new org.yaml.snakeyaml.Yaml().load(content))
+            .as("generated Authelia configuration.yml must be valid YAML")
+            .doesNotThrowAnyException();
+    }
+
+    @Test
     void initialiseConfiguration_stylesheetBypassesAuthentication() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 

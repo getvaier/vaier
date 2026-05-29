@@ -576,13 +576,11 @@
             </div>
             <div class="form-group" id="dockerPortGroup" style="display:none">
                 <label class="form-label" for="dockerPort">Docker API port</label>
-                <input type="number" id="dockerPort" class="form-input" min="1" max="65535" value="2375" oninput="updateDockerSetupHint()">
+                <input type="number" id="dockerPort" class="form-input" min="1" max="65535" value="2375">
                 <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.5rem;">
-                    Run this on the LAN host first to expose the Docker API (idempotent; covers native + snap):
-                </div>
-                <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.3rem">
-                    <code id="dockerSetupCmd" style="flex:1;font-size:0.72rem;background:var(--bg-input);padding:0.35rem 0.5rem;border-radius:3px;overflow-x:auto;white-space:nowrap;color:var(--text)"></code>
-                    <button type="button" class="btn btn-small btn-secondary" onclick="copyDockerSetupCmd()" title="Copy to clipboard">copy</button>
+                    After adding the machine, run its <strong>Setup script</strong> (from the machine's
+                    card) on the LAN host — it opens the Docker API and installs any routes the host
+                    needs. Idempotent; covers native + snap Docker.
                 </div>
             </div>
             <div class="modal-actions">
@@ -942,8 +940,11 @@
                     return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
                 return renderServiceList(services.containers);
             })();
-            const scriptBtn = server.runsDocker
-                ? `<button class="btn btn-small btn-secondary" onclick="showLanDockerSetupScript(${server.dockerPort || 2375})" title="Show the script to expose the Docker API on this host">script</button>`
+            // One adaptive setup script per host (#249): shown when the host runs Docker or is
+            // relay-anchored (so it has routes to install). Server-anchored / orphan hosts get none.
+            const isRelayAnchored = server.relayPeerName && server.relayPeerName !== 'Vaier server';
+            const scriptBtn = (server.runsDocker || isRelayAnchored)
+                ? `<button class="btn btn-small btn-secondary" onclick="showLanSetupScript('${server.name.replace(/'/g, "\\'")}')" title="Show this host's setup script — opens the Docker API if it runs Docker and installs routes via its relay peer">Setup script</button>`
                 : '';
 
             return `
@@ -1292,21 +1293,6 @@
             const runsDocker  = document.getElementById('runsDocker').checked;
             document.getElementById('dockerPortGroup').style.display =
                 (isLanServer && runsDocker) ? '' : 'none';
-            updateDockerSetupHint();
-        }
-
-        function updateDockerSetupHint() {
-            const el = document.getElementById('dockerSetupCmd');
-            if (!el) return;
-            const port = document.getElementById('dockerPort').value || '2375';
-            const url  = window.location.origin + '/lan-servers/docker-setup.sh';
-            el.textContent = `curl -sSL ${url} | sudo bash -s -- --port ${port}`;
-        }
-
-        function copyDockerSetupCmd() {
-            const el = document.getElementById('dockerSetupCmd');
-            if (!el) return;
-            navigator.clipboard.writeText(el.textContent).catch(() => {});
         }
 
         function hideCreatePeerModal() {
@@ -1816,15 +1802,15 @@
             if (_scriptDialogDownloadUrl) window.location.href = _scriptDialogDownloadUrl;
         }
 
-        function showLanDockerSetupScript(port) {
-            const url = `${window.location.origin}/lan-servers/docker-setup.sh`;
-            const p = (port && /^\d+$/.test(String(port))) ? port : 2375;
+        function showLanSetupScript(name) {
+            const url = `${window.location.origin}/lan-servers/${encodeURIComponent(name)}/setup.sh`;
             showSetupScriptDialog({
-                title: 'Open Docker API on a LAN host',
-                description: 'Idempotent — exposes the Docker engine API on tcp://0.0.0.0:<port>. '
-                    + 'Covers native (systemd drop-in) and Snap Docker installs. Static script with no secrets, served unauthenticated.',
+                title: 'Set up this LAN host',
+                description: 'Idempotent — adapts to this host: opens the Docker engine API if it runs '
+                    + 'Docker (native + snap) and installs persistent routes to the Vaier server subnet '
+                    + '(and other site LANs) via its relay peer. No secrets; served unauthenticated.',
                 downloadUrl: url,
-                curlCommand: `curl -sSL ${url} | sudo bash -s -- --port ${p}`,
+                curlCommand: `curl -sSL ${url} | sudo bash`,
                 requiresAuth: false,
             });
         }

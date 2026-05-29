@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeleteLanServerUseCase;
+import net.vaier.application.GenerateLanServerSetupScriptUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLanServersUseCase;
@@ -14,15 +15,12 @@ import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
 import net.vaier.domain.MachineStatus;
 import net.vaier.domain.Reachability;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -41,6 +39,7 @@ public class LanServerRestController {
     private final GetLanServerReachabilityUseCase reachabilityUseCase;
     private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     private final ResolveLanAnchorUseCase resolveLanAnchorUseCase;
+    private final GenerateLanServerSetupScriptUseCase generateLanServerSetupScriptUseCase;
 
     @GetMapping
     public List<LanServerResponse> list() {
@@ -129,20 +128,24 @@ public class LanServerRestController {
         return ResponseEntity.ok().build();
     }
 
-    @GetMapping(value = "/docker-setup.sh", produces = "application/x-sh")
-    public ResponseEntity<Resource> downloadDockerSetupScript() {
-        Resource script = new ClassPathResource("scripts/lan-docker-setup.sh");
-        long length;
+    /**
+     * The single per-host setup script (#249) — opens the Docker API if the host runs Docker and
+     * installs routes via its relay peer if it's relay-anchored. 404 when the host is unknown or
+     * has nothing to set up; 409 when its relay peer has no LAN address to route via.
+     */
+    @GetMapping(value = "/{name}/setup.sh", produces = "application/x-sh")
+    public ResponseEntity<?> downloadSetupScript(@PathVariable String name) {
         try {
-            length = script.contentLength();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to load lan-docker-setup.sh from classpath", e);
+            return generateLanServerSetupScriptUseCase.generateSetupScript(name)
+                .<ResponseEntity<?>>map(script -> ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + name + "-setup.sh")
+                    .contentType(MediaType.parseMediaType("application/x-sh"))
+                    .body(script))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            log.warn("Cannot generate setup script for {}: {}", name, e.getMessage());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
         }
-        return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=lan-docker-setup.sh")
-            .contentType(MediaType.parseMediaType("application/x-sh"))
-            .contentLength(length)
-            .body(script);
     }
 
     record RegisterRequest(String name, String lanAddress, boolean runsDocker, Integer dockerPort,

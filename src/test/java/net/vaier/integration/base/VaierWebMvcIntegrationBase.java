@@ -154,6 +154,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ResolveLanAnchorUseCase resolveLanAnchorUseCase;
 
     @MockBean
+    protected GenerateLanServerSetupScriptUseCase generateLanServerSetupScriptUseCase;
+
+    @MockBean
     protected IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
 
     @MockBean
