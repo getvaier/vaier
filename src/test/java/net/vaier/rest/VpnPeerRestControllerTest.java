@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
-import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.config.ConfigResolver;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.application.DeletePeerUseCase;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Optional;
@@ -49,7 +51,8 @@ class VpnPeerRestControllerTest {
     @Mock ReissuePeerConfigUseCase reissuePeerConfigUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
-    @Mock SseEventPublisher sseEventPublisher;
+    @Mock ForPublishingEvents forPublishingEvents;
+    @Mock ForSubscribingToEvents forSubscribingToEvents;
     @Mock GetServerLocationUseCase getServerLocationUseCase;
     @Mock ConfigResolver configResolver;
 
@@ -66,6 +69,17 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
+    void subscribeToEvents_subscribesToVpnPeersTopicViaPort() {
+        SseEmitter emitter = new SseEmitter();
+        when(forSubscribingToEvents.subscribe("vpn-peers")).thenReturn(emitter);
+
+        SseEmitter result = controller.subscribeToEvents();
+
+        assertThat(result).isSameAs(emitter);
+        verify(forSubscribingToEvents).subscribe("vpn-peers");
+    }
+
+    @Test
     void updateLanAddress_updatesAndReturnsNoContent() {
         var request = new VpnPeerRestController.UpdateLanAddressRequest("192.168.3.121");
 
@@ -73,7 +87,7 @@ class VpnPeerRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(forUpdatingPeerConfigurations).updateLanAddress("apalveien5", "192.168.3.121");
-        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
     }
 
     @Test
@@ -103,7 +117,7 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanAddress("ghost", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
-        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+        verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }
@@ -116,7 +130,7 @@ class VpnPeerRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(updateLanCidrUseCase).updateLanCidr("apalveien5", "192.168.3.0/24");
-        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
     }
 
     @Test
@@ -146,7 +160,7 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanCidr("ghost", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
-        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+        verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }
@@ -160,7 +174,7 @@ class VpnPeerRestControllerTest {
         var response = controller.updateLanCidr("apalveien5", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(409);
-        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+        verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }
@@ -173,7 +187,7 @@ class VpnPeerRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(renamePeerUseCase).renamePeer("laptop", "workstation");
-        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
     }
 
     @Test
@@ -184,7 +198,7 @@ class VpnPeerRestControllerTest {
         var response = controller.renamePeer("ghost", new VpnPeerRestController.RenamePeerRequest("phantom"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
-        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+        verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }
@@ -265,7 +279,7 @@ class VpnPeerRestControllerTest {
         assertThat(body.dockerCompose()).isEqualTo("compose-yaml");
         assertThat(body.setupScript()).isEqualTo("setup-sh");
         assertThat(body.availableArtifacts()).contains("WG_CONFIG", "DOCKER_COMPOSE", "SETUP_SCRIPT");
-        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
     }
 
     @Test
@@ -276,7 +290,7 @@ class VpnPeerRestControllerTest {
         var response = controller.reissuePeer("ghost");
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
-        verify(sseEventPublisher, never()).publish(any(), any(), any());
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
     }
 
     @Test
@@ -354,7 +368,7 @@ class VpnPeerRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(forUpdatingPeerConfigurations).updateDescription("nas", "Home media server");
-        verify(sseEventPublisher).publish("vpn-peers", "peers-updated", "");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
     }
 
     @Test
@@ -374,7 +388,7 @@ class VpnPeerRestControllerTest {
         var response = controller.updateDescription("ghost", request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
-        verify(sseEventPublisher, never()).publish(org.mockito.ArgumentMatchers.anyString(),
+        verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }

@@ -11,9 +11,10 @@ import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
-import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
@@ -48,7 +49,8 @@ public class VpnPeerRestController {
     private final ReissuePeerConfigUseCase reissuePeerConfigUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
-    private final SseEventPublisher sseEventPublisher;
+    private final ForPublishingEvents forPublishingEvents;
+    private final ForSubscribingToEvents forSubscribingToEvents;
     private final GetServerLocationUseCase getServerLocationUseCase;
     private final ConfigResolver configResolver;
 
@@ -63,7 +65,7 @@ public class VpnPeerRestController {
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
-        return sseEventPublisher.subscribe("vpn-peers");
+        return forSubscribingToEvents.subscribe("vpn-peers");
     }
 
     @GetMapping
@@ -136,7 +138,7 @@ public class VpnPeerRestController {
                 createdPeer.id(), createdPeer.name(), createdPeer.ipAddress(),
                 createdPeer.publicKey(), createdPeer.clientConfigFile(), createdPeer.peerType());
 
-        sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+        forPublishingEvents.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.ok(response);
     }
 
@@ -157,7 +159,7 @@ public class VpnPeerRestController {
                     reissued.id(), reissued.name(), reissued.ipAddress(),
                     reissued.publicKey(), reissued.clientConfigFile(), reissued.peerType());
 
-            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            forPublishingEvents.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.ok(response);
         } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for reissue: {}", LogSafe.forLog(peerId));
@@ -204,7 +206,7 @@ public class VpnPeerRestController {
         log.info("Renaming peer {} to {}", LogSafe.forLog(peerName), LogSafe.forLog(newName));
         try {
             renamePeerUseCase.renamePeer(peerName, newName);
-            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            forPublishingEvents.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for rename: {}", LogSafe.forLog(peerName));
@@ -227,7 +229,7 @@ public class VpnPeerRestController {
 
         try {
             deletePeerUseCase.deletePeer(peerIdentifier);
-            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            forPublishingEvents.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
             log.error("Peer not found: {}", e.getMessage());
@@ -250,7 +252,7 @@ public class VpnPeerRestController {
             LogSafe.forLog(peerName), LogSafe.forLog(lanAddress));
         try {
             forUpdatingPeerConfigurations.updateLanAddress(peerName, lanAddress);
-            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            forPublishingEvents.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for lan-address update: {}", LogSafe.forLog(peerName));
@@ -273,7 +275,7 @@ public class VpnPeerRestController {
             LogSafe.forLog(peerName), LogSafe.forLog(lanCidr));
         try {
             updateLanCidrUseCase.updateLanCidr(peerName, lanCidr);
-            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            forPublishingEvents.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for lan-cidr update: {}", LogSafe.forLog(peerName));
@@ -298,7 +300,7 @@ public class VpnPeerRestController {
         log.info("Updating description for peer {}", LogSafe.forLog(peerName));
         try {
             forUpdatingPeerConfigurations.updateDescription(peerName, description);
-            sseEventPublisher.publish("vpn-peers", "peers-updated", "");
+            forPublishingEvents.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
             log.warn("Peer not found for description update: {}", LogSafe.forLog(peerName));

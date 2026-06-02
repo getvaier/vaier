@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
-import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
@@ -17,9 +18,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class PublishedServiceRestControllerTest {
@@ -32,10 +36,22 @@ class PublishedServiceRestControllerTest {
     @Mock UpdatePublishedServiceUseCase updatePublishedServiceUseCase;
     @Mock IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     @Mock UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
-    @Mock SseEventPublisher sseEventPublisher;
+    @Mock ForPublishingEvents forPublishingEvents;
+    @Mock ForSubscribingToEvents forSubscribingToEvents;
 
     @InjectMocks
     PublishedServiceRestController controller;
+
+    @Test
+    void subscribeToEvents_subscribesToPublishedServicesTopicViaPort() {
+        SseEmitter emitter = new SseEmitter();
+        when(forSubscribingToEvents.subscribe("published-services")).thenReturn(emitter);
+
+        SseEmitter result = controller.subscribeToEvents();
+
+        assertThat(result).isSameAs(emitter);
+        verify(forSubscribingToEvents).subscribe("published-services");
+    }
 
     @Test
     void publishLanService_forwardsMachineNameVerbatimToUseCase() {

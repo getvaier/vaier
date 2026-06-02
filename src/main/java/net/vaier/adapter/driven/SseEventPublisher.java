@@ -2,6 +2,7 @@ package net.vaier.adapter.driven;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -13,10 +14,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 @Component
 @Slf4j
-public class SseEventPublisher implements ForPublishingEvents {
+public class SseEventPublisher implements ForPublishingEvents, ForSubscribingToEvents {
 
     private final ConcurrentHashMap<String, List<SseEmitter>> topicEmitters = new ConcurrentHashMap<>();
 
+    @Override
     public SseEmitter subscribe(String topic) {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
         topicEmitters.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(emitter);

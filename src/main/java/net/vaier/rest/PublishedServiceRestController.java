@@ -13,7 +13,8 @@ import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch;
-import net.vaier.adapter.driven.SseEventPublisher;
+import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -35,11 +36,12 @@ public class PublishedServiceRestController {
     private final UpdatePublishedServiceUseCase updatePublishedServiceUseCase;
     private final IgnorePublishableServiceUseCase ignorePublishableServiceUseCase;
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
-    private final SseEventPublisher sseEventPublisher;
+    private final ForPublishingEvents forPublishingEvents;
+    private final ForSubscribingToEvents forSubscribingToEvents;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
-        return sseEventPublisher.subscribe("published-services");
+        return forSubscribingToEvents.subscribe("published-services");
     }
 
     @GetMapping("/discover")
@@ -95,7 +97,7 @@ public class PublishedServiceRestController {
         log.info("Updating service {} (pathPrefix={}): {}",
             LogSafe.forLog(dnsName), LogSafe.forLog(pathPrefix), safePatch);
         updatePublishedServiceUseCase.updateService(dnsName, pathPrefix, patch);
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        forPublishingEvents.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 
@@ -121,7 +123,7 @@ public class PublishedServiceRestController {
             log.warn("Delete rejected: {}", e.getMessage());
             return ResponseEntity.badRequest().build();
         }
-        sseEventPublisher.publish("published-services", "service-updated", dnsName);
+        forPublishingEvents.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
 

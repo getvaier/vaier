@@ -3,8 +3,9 @@ package net.vaier.integration.base;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.*;
 import net.vaier.config.ConfigResolver;
-import net.vaier.adapter.driven.SseEventPublisher;
 import net.vaier.domain.port.ForGeolocatingIps;
+import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +36,10 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ConfigResolver configResolver;
 
     @MockBean
-    protected SseEventPublisher sseEventPublisher;
+    protected ForPublishingEvents forPublishingEvents;
+
+    @MockBean
+    protected ForSubscribingToEvents forSubscribingToEvents;
 
     @MockBean
     protected GetFaviconUseCase getFaviconUseCase;
