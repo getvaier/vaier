@@ -55,8 +55,8 @@ public class PublishedServiceRestController {
     @PostMapping("/publish")
     public ResponseEntity<?> publishService(@RequestBody PublishRequest request) {
         log.info("Publishing service: {}:{} as {}.* (auth={}, directUrlDisabled={}, pathPrefix={})",
-            request.address(), request.port(), request.subdomain(), request.requiresAuth(),
-            request.directUrlDisabled(), request.pathPrefix());
+            LogSafe.forLog(request.address()), request.port(), LogSafe.forLog(request.subdomain()),
+            request.requiresAuth(), request.directUrlDisabled(), LogSafe.forLog(request.pathPrefix()));
         try {
             publishPeerServiceUseCase.publishService(
                 request.address(), request.port(), request.subdomain(),
@@ -72,9 +72,9 @@ public class PublishedServiceRestController {
     @PostMapping("/lan")
     public ResponseEntity<?> publishLanService(@RequestBody PublishLanRequest request) {
         log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, pathPrefix={})",
-            request.protocol(), request.machineName(), request.port(), request.subdomain(),
-            request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
-            request.pathPrefix());
+            LogSafe.forLog(request.protocol()), LogSafe.forLog(request.machineName()), request.port(),
+            LogSafe.forLog(request.subdomain()), request.requireAuth(), request.directUrlDisabled(),
+            LogSafe.forLog(request.rootRedirectPath()), LogSafe.forLog(request.pathPrefix()));
         try {
             publishLanServiceUseCase.publishLanService(
                 request.subdomain(), request.machineName(), request.port(), request.protocol(),
@@ -91,7 +91,9 @@ public class PublishedServiceRestController {
     public ResponseEntity<Void> updateService(@PathVariable String dnsName,
                                               @RequestParam(value = "pathPrefix", required = false) String pathPrefix,
                                               @RequestBody PublishedServicePatch patch) {
-        log.info("Updating service {} (pathPrefix={}): {}", dnsName, pathPrefix, patch);
+        String safePatch = LogSafe.forLog(String.valueOf(patch));
+        log.info("Updating service {} (pathPrefix={}): {}",
+            LogSafe.forLog(dnsName), LogSafe.forLog(pathPrefix), safePatch);
         updatePublishedServiceUseCase.updateService(dnsName, pathPrefix, patch);
         sseEventPublisher.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
@@ -111,7 +113,8 @@ public class PublishedServiceRestController {
     @DeleteMapping("/{dnsName:.+}")
     public ResponseEntity<Void> deleteService(@PathVariable String dnsName,
                                               @RequestParam(value = "pathPrefix", required = false) String pathPrefix) {
-        log.info("Deleting published service: {} (pathPrefix: {})", dnsName, pathPrefix);
+        log.info("Deleting published service: {} (pathPrefix: {})",
+            LogSafe.forLog(dnsName), LogSafe.forLog(pathPrefix));
         try {
             deletePublishedServiceUseCase.deleteService(dnsName, pathPrefix);
         } catch (IllegalArgumentException e) {

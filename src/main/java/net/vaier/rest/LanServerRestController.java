@@ -75,7 +75,8 @@ public class LanServerRestController {
     @PostMapping
     public ResponseEntity<Void> register(@RequestBody RegisterRequest request) {
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
-            request.name(), request.lanAddress(), request.runsDocker(), request.dockerPort());
+            LogSafe.forLog(request.name()), LogSafe.forLog(request.lanAddress()),
+            request.runsDocker(), request.dockerPort());
         try {
             registerLanServerUseCase.register(
                 request.name(), request.lanAddress(), request.runsDocker(), request.dockerPort(),
@@ -91,12 +92,12 @@ public class LanServerRestController {
     public ResponseEntity<Void> rename(@PathVariable String name,
                                        @RequestBody(required = false) RenameRequest request) {
         String newName = request != null ? request.newName() : null;
-        log.info("Renaming LAN server {} to {}", name, newName);
+        log.info("Renaming LAN server {} to {}", LogSafe.forLog(name), LogSafe.forLog(newName));
         try {
             renameLanServerUseCase.rename(name, newName);
             return ResponseEntity.noContent().build();
         } catch (java.util.NoSuchElementException e) {
-            log.warn("LAN server not found for rename: {}", name);
+            log.warn("LAN server not found for rename: {}", LogSafe.forLog(name));
             return ResponseEntity.notFound().build();
         } catch (IllegalStateException e) {
             log.warn("LAN server rename conflict: {}", e.getMessage());
@@ -111,19 +112,19 @@ public class LanServerRestController {
     public ResponseEntity<Void> updateDescription(@PathVariable String name,
                                                   @RequestBody(required = false) UpdateDescriptionRequest request) {
         String description = request != null ? request.description() : null;
-        log.info("Updating description for LAN server {}", name);
+        log.info("Updating description for LAN server {}", LogSafe.forLog(name));
         try {
             updateLanServerDescriptionUseCase.updateDescription(name, description);
             return ResponseEntity.noContent().build();
         } catch (java.util.NoSuchElementException e) {
-            log.warn("LAN server not found for description update: {}", name);
+            log.warn("LAN server not found for description update: {}", LogSafe.forLog(name));
             return ResponseEntity.notFound().build();
         }
     }
 
     @DeleteMapping("/{name}")
     public ResponseEntity<Void> delete(@PathVariable String name) {
-        log.info("Deleting LAN server: {}", name);
+        log.info("Deleting LAN server: {}", LogSafe.forLog(name));
         deleteLanServerUseCase.delete(name);
         return ResponseEntity.ok().build();
     }
@@ -143,7 +144,7 @@ public class LanServerRestController {
                     .body(script))
                 .orElseGet(() -> ResponseEntity.notFound().build());
         } catch (IllegalStateException e) {
-            log.warn("Cannot generate setup script for {}: {}", name, e.getMessage());
+            log.warn("Cannot generate setup script for {}: {}", LogSafe.forLog(name), e.getMessage());
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
         }
     }

@@ -54,6 +54,30 @@ class PeerIdTest {
     }
 
     @Test
+    void constructor_rejectsPathTraversalSequence() {
+        assertThatThrownBy(() -> new PeerId("../etc"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void constructor_rejectsCharactersOutsideAllowedCharset() {
+        assertThatThrownBy(() -> new PeerId("a/b"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new PeerId("a.b"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new PeerId("a b"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new PeerId("a!b"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void constructor_acceptsValidCharsetValues() {
+        assertThat(new PeerId("Media-Server_01").value()).isEqualTo("Media-Server_01");
+        assertThat(new PeerId("nas").value()).isEqualTo("nas");
+    }
+
+    @Test
     void isSameAs_trueOnlyForIdenticalId() {
         PeerId id = PeerId.sanitized("nas");
         assertThat(id.isSameAs("nas")).isTrue();

@@ -17,6 +17,10 @@ public record PeerId(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("Peer id must not be blank");
         }
+        if (!value.matches("[A-Za-z0-9_-]+")) {
+            throw new IllegalArgumentException(
+                "Peer id must contain only [A-Za-z0-9_-]: " + value);
+        }
     }
 
     /**

@@ -58,14 +58,6 @@
         </Or>
     </Match>
 
-    <!-- Log-forging (CRLF in log lines) from user-supplied fields in the REST layer.
-         V1 is admin-only (Traefik forward-auth; every authenticated user is an admin),
-         so the only actor who could forge a log line is a trusted operator, and logback's
-         default encoder is in use. Low severity; deferred hardening tracked in #256. -->
-    <Match>
-        <Bug pattern="CRLF_INJECTION_LOGS"/>
-    </Match>
-
     <!-- Verified false positives:
          - POTENTIAL_XML_INJECTION on PeerSetupScript: it builds a shell SCRIPT from a
            template, not XML; the pattern misfires on the templating.
@@ -82,15 +74,12 @@
     </Match>
 
     <!-- PATH_TRAVERSAL_IN in VpnService.createPeer/findNextAvailableIp: the only operator
-         input that becomes a path segment is PeerId, and every PeerId is produced via
-         PeerId.sanitized()/generate(), which replace any char outside [A-Za-z0-9_-] with
-         '-' (so '/', '.' and '..' cannot survive). Mitigated by construction. Tightening
-         the PeerId compact constructor to enforce the same charset is tracked in #256. -->
+         input that becomes a path segment is PeerId, and the PeerId compact constructor now
+         rejects any value outside [A-Za-z0-9_-] (so '/', '.' and '..' cannot survive). Every
+         PeerId is therefore valid by construction — '../' can never reach a path. Mitigated by
+         construction; PeerId itself no longer needs suppression (#256). -->
     <Match>
-        <Or>
-            <Class name="net.vaier.application.service.VpnService"/>
-            <Class name="net.vaier.domain.PeerId"/>
-        </Or>
+        <Class name="net.vaier.application.service.VpnService"/>
         <Bug pattern="PATH_TRAVERSAL_IN"/>
     </Match>
 

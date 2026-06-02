@@ -176,6 +176,12 @@
                     <threshold>Medium</threshold>
                     <includeTests>false</includeTests>
                     <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+                    <!-- Teach find-sec-bugs that LogSafe.forLog() returns a CRLF-safe value, so
+                         the CRLF_INJECTION_LOGS taint analysis is cleared at every call site that
+                         routes user input through it (it cannot infer this from the regex alone).
+                         This lets us drop the blanket CRLF suppression and have the analysis verify
+                         the sanitiser is actually applied (#256). -->
+                    <jvmArgs>-Dfindsecbugs.taint.customconfigfile=${project.basedir}/findsecbugs-taint-config.txt</jvmArgs>
                     <plugins>
                         <plugin>
                             <groupId>com.h3xstream.findsecbugs</groupId>

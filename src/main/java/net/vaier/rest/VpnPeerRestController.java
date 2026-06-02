@@ -117,7 +117,7 @@ public class VpnPeerRestController {
 
     @PostMapping
     public ResponseEntity<CreatePeerResponse> createPeer(@RequestBody CreatePeerRequest request) {
-        log.info("Creating new VPN peer: {}", request.name());
+        log.info("Creating new VPN peer: {}", LogSafe.forLog(request.name()));
 
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 request.name(),
@@ -148,7 +148,7 @@ public class VpnPeerRestController {
      */
     @PostMapping("/{peerId}/reissue")
     public ResponseEntity<?> reissuePeer(@PathVariable String peerId) {
-        log.info("Reissuing config for peer: {}", peerId);
+        log.info("Reissuing config for peer: {}", LogSafe.forLog(peerId));
         try {
             ReissuePeerConfigUseCase.ReissuedPeerUco reissued =
                 reissuePeerConfigUseCase.reissuePeerConfig(peerId);
@@ -160,10 +160,10 @@ public class VpnPeerRestController {
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.ok(response);
         } catch (net.vaier.domain.PeerNotFoundException e) {
-            log.warn("Peer not found for reissue: {}", peerId);
+            log.warn("Peer not found for reissue: {}", LogSafe.forLog(peerId));
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
-            log.error("Failed to reissue config for peer {}: {}", peerId, e.getMessage(), e);
+            log.error("Failed to reissue config for peer {}: {}", LogSafe.forLog(peerId), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -201,29 +201,29 @@ public class VpnPeerRestController {
             @PathVariable String peerName,
             @RequestBody(required = false) RenamePeerRequest request) {
         String newName = request != null ? request.newName() : null;
-        log.info("Renaming peer {} to {}", peerName, newName);
+        log.info("Renaming peer {} to {}", LogSafe.forLog(peerName), LogSafe.forLog(newName));
         try {
             renamePeerUseCase.renamePeer(peerName, newName);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
-            log.warn("Peer not found for rename: {}", peerName);
+            log.warn("Peer not found for rename: {}", LogSafe.forLog(peerName));
             return ResponseEntity.notFound().build();
         } catch (IllegalStateException e) {
-            log.warn("Rename conflict for peer {}: {}", peerName, e.getMessage());
+            log.warn("Rename conflict for peer {}: {}", LogSafe.forLog(peerName), e.getMessage());
             return ResponseEntity.status(409).build();
         } catch (IllegalArgumentException e) {
-            log.warn("Bad rename request for peer {}: {}", peerName, e.getMessage());
+            log.warn("Bad rename request for peer {}: {}", LogSafe.forLog(peerName), e.getMessage());
             return ResponseEntity.badRequest().build();
         } catch (Exception e) {
-            log.error("Failed to rename peer {}: {}", peerName, e.getMessage(), e);
+            log.error("Failed to rename peer {}: {}", LogSafe.forLog(peerName), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @DeleteMapping("/{peerIdentifier}")
     public ResponseEntity<Void> deletePeer(@PathVariable String peerIdentifier) {
-        log.info("Deleting VPN peer: {}", peerIdentifier);
+        log.info("Deleting VPN peer: {}", LogSafe.forLog(peerIdentifier));
 
         try {
             deletePeerUseCase.deletePeer(peerIdentifier);
@@ -233,7 +233,7 @@ public class VpnPeerRestController {
             log.error("Peer not found: {}", e.getMessage());
             return ResponseEntity.notFound().build();
         } catch (IllegalArgumentException e) {
-            log.warn("Bad request deleting peer {}: {}", peerIdentifier, e.getMessage());
+            log.warn("Bad request deleting peer {}: {}", LogSafe.forLog(peerIdentifier), e.getMessage());
             return ResponseEntity.badRequest().build();
         } catch (Exception e) {
             log.error("Failed to delete peer: {}", e.getMessage(), e);
@@ -246,19 +246,20 @@ public class VpnPeerRestController {
             @PathVariable String peerName,
             @RequestBody(required = false) UpdateLanAddressRequest request) {
         String lanAddress = request != null ? request.lanAddress() : null;
-        log.info("Updating LAN address for peer {} to {}", peerName, lanAddress);
+        log.info("Updating LAN address for peer {} to {}",
+            LogSafe.forLog(peerName), LogSafe.forLog(lanAddress));
         try {
             forUpdatingPeerConfigurations.updateLanAddress(peerName, lanAddress);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
-            log.warn("Peer not found for lan-address update: {}", peerName);
+            log.warn("Peer not found for lan-address update: {}", LogSafe.forLog(peerName));
             return ResponseEntity.notFound().build();
         } catch (IllegalArgumentException e) {
-            log.warn("Bad lan-address request for peer {}: {}", peerName, e.getMessage());
+            log.warn("Bad lan-address request for peer {}: {}", LogSafe.forLog(peerName), e.getMessage());
             return ResponseEntity.badRequest().build();
         } catch (Exception e) {
-            log.error("Failed to update lan address for peer {}: {}", peerName, e.getMessage(), e);
+            log.error("Failed to update lan address for peer {}: {}", LogSafe.forLog(peerName), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -268,22 +269,23 @@ public class VpnPeerRestController {
             @PathVariable String peerName,
             @RequestBody(required = false) UpdateLanCidrRequest request) {
         String lanCidr = request != null ? request.lanCidr() : null;
-        log.info("Updating LAN CIDR for peer {} to {}", peerName, lanCidr);
+        log.info("Updating LAN CIDR for peer {} to {}",
+            LogSafe.forLog(peerName), LogSafe.forLog(lanCidr));
         try {
             updateLanCidrUseCase.updateLanCidr(peerName, lanCidr);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
-            log.warn("Peer not found for lan-cidr update: {}", peerName);
+            log.warn("Peer not found for lan-cidr update: {}", LogSafe.forLog(peerName));
             return ResponseEntity.notFound().build();
         } catch (IllegalArgumentException e) {
-            log.warn("Bad lan-cidr request for peer {}: {}", peerName, e.getMessage());
+            log.warn("Bad lan-cidr request for peer {}: {}", LogSafe.forLog(peerName), e.getMessage());
             return ResponseEntity.badRequest().build();
         } catch (IllegalStateException e) {
-            log.warn("LAN CIDR conflict for peer {}: {}", peerName, e.getMessage());
+            log.warn("LAN CIDR conflict for peer {}: {}", LogSafe.forLog(peerName), e.getMessage());
             return ResponseEntity.status(409).build();
         } catch (Exception e) {
-            log.error("Failed to update lan cidr for peer {}: {}", peerName, e.getMessage(), e);
+            log.error("Failed to update lan cidr for peer {}: {}", LogSafe.forLog(peerName), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -293,32 +295,32 @@ public class VpnPeerRestController {
             @PathVariable String peerName,
             @RequestBody(required = false) UpdateDescriptionRequest request) {
         String description = request != null ? request.description() : null;
-        log.info("Updating description for peer {}", peerName);
+        log.info("Updating description for peer {}", LogSafe.forLog(peerName));
         try {
             forUpdatingPeerConfigurations.updateDescription(peerName, description);
             sseEventPublisher.publish("vpn-peers", "peers-updated", "");
             return ResponseEntity.noContent().build();
         } catch (net.vaier.domain.PeerNotFoundException e) {
-            log.warn("Peer not found for description update: {}", peerName);
+            log.warn("Peer not found for description update: {}", LogSafe.forLog(peerName));
             return ResponseEntity.notFound().build();
         } catch (IllegalArgumentException e) {
-            log.warn("Bad description request for peer {}: {}", peerName, e.getMessage());
+            log.warn("Bad description request for peer {}: {}", LogSafe.forLog(peerName), e.getMessage());
             return ResponseEntity.badRequest().build();
         } catch (Exception e) {
-            log.error("Failed to update description for peer {}: {}", peerName, e.getMessage(), e);
+            log.error("Failed to update description for peer {}: {}", LogSafe.forLog(peerName), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
 
     @GetMapping("/{peerIdentifier}/config")
     public ResponseEntity<?> getPeerConfig(@PathVariable String peerIdentifier) {
-        log.info("Fetching config for peer: {}", peerIdentifier);
+        log.info("Fetching config for peer: {}", LogSafe.forLog(peerIdentifier));
 
         // /config accepts a name OR an IP. The marker is keyed by peer id (= dir name), so
         // we resolve via getPeerConfigUseCase first to map IP→id, then atomically mark.
         var config = getPeerConfigUseCase.getPeerConfig(peerIdentifier);
         if (config.isEmpty()) {
-            log.warn("Peer config not found for identifier: {}", peerIdentifier);
+            log.warn("Peer config not found for identifier: {}", LogSafe.forLog(peerIdentifier));
             return ResponseEntity.notFound().build();
         }
         if (!forTrackingPeerConfigRetrieval.markViewedIfNotAlready(config.get().id())) {
@@ -339,7 +341,7 @@ public class VpnPeerRestController {
 
     @GetMapping("/{peerName}/config-file")
     public ResponseEntity<?> downloadConfigFile(@PathVariable String peerName) {
-        log.info("Downloading config file for peer: {}", peerName);
+        log.info("Downloading config file for peer: {}", LogSafe.forLog(peerName));
         ResponseEntity<?> gate = checkOneShotGate(peerName);
         if (gate != null) return gate;
         return getPeerConfigUseCase.getPeerConfig(peerName)
@@ -358,7 +360,7 @@ public class VpnPeerRestController {
 
     @GetMapping("/{peerName}/qr-code")
     public ResponseEntity<?> getPeerQrCode(@PathVariable String peerName) {
-        log.info("Generating QR code for peer: {}", peerName);
+        log.info("Generating QR code for peer: {}", LogSafe.forLog(peerName));
         ResponseEntity<?> gate = checkOneShotGate(peerName);
         if (gate != null) return gate;
         var config = getPeerConfigUseCase.getPeerConfig(peerName);
@@ -369,7 +371,7 @@ public class VpnPeerRestController {
                     .contentType(MediaType.IMAGE_PNG)
                     .body(png);
         } catch (Exception e) {
-            log.error("Failed to generate QR code for peer {}: {}", peerName, e.getMessage(), e);
+            log.error("Failed to generate QR code for peer {}: {}", LogSafe.forLog(peerName), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -380,7 +382,7 @@ public class VpnPeerRestController {
             @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
             @RequestParam(required = false, defaultValue = ServiceNames.DEFAULT_WG_PORT) String serverPort
     ) {
-        log.info("Generating docker-compose for peer: {}", peerName);
+        log.info("Generating docker-compose for peer: {}", LogSafe.forLog(peerName));
         ResponseEntity<?> gate = checkOneShotGate(peerName);
         if (gate != null) return gate;
 
@@ -403,7 +405,7 @@ public class VpnPeerRestController {
             @RequestParam(required = false, defaultValue = "vaier.eilertsen.family") String serverUrl,
             @RequestParam(required = false, defaultValue = ServiceNames.DEFAULT_WG_PORT) String serverPort
     ) {
-        log.info("Generating setup script for peer: {}", peerName);
+        log.info("Generating setup script for peer: {}", LogSafe.forLog(peerName));
         ResponseEntity<?> gate = checkOneShotGate(peerName);
         if (gate != null) return gate;
 
@@ -418,7 +420,7 @@ public class VpnPeerRestController {
                             .<Object>body(resource);
                 })
                 .orElseGet(() -> {
-                    log.warn("Peer not found for setup script: {}", peerName);
+                    log.warn("Peer not found for setup script: {}", LogSafe.forLog(peerName));
                     return ResponseEntity.notFound().build();
                 });
     }
@@ -435,7 +437,7 @@ public class VpnPeerRestController {
             }
             return null;
         } catch (IllegalStateException e) {
-            log.warn("Peer not found for one-shot gate: {}", peerName);
+            log.warn("Peer not found for one-shot gate: {}", LogSafe.forLog(peerName));
             return ResponseEntity.notFound().build();
         }
     }
@@ -454,7 +456,7 @@ public class VpnPeerRestController {
         try {
             return java.util.Base64.getEncoder().encodeToString(encodeQrCodePng(content));
         } catch (Exception e) {
-            log.error("Failed to generate QR code for peer {}: {}", peerName, e.getMessage(), e);
+            log.error("Failed to generate QR code for peer {}: {}", LogSafe.forLog(peerName), e.getMessage(), e);
             return null;
         }
     }
