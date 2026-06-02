@@ -1,14 +1,14 @@
 package net.vaier.application.service;
 
-import net.vaier.application.GetLanServersUseCase;
-import net.vaier.application.GetLanServersUseCase.LanServerView;
-import net.vaier.application.GetVpnClientsUseCase;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.VpnClient;
+import net.vaier.domain.port.ForGettingLanServers;
+import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,19 +27,19 @@ import static org.mockito.Mockito.lenient;
 class MachineServiceTest {
 
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
-    @Mock GetVpnClientsUseCase getVpnClientsUseCase;
-    @Mock GetLanServersUseCase getLanServersUseCase;
+    @Mock ForGettingVpnClients forGettingVpnClients;
+    @Mock ForGettingLanServers forGettingLanServers;
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
 
     MachineService service;
 
     @BeforeEach
     void setUp() {
-        service = new MachineService(forGettingPeerConfigurations, getVpnClientsUseCase, getLanServersUseCase,
+        service = new MachineService(forGettingPeerConfigurations, forGettingVpnClients, forGettingLanServers,
             forResolvingServerLanCidr);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
-        lenient().when(getVpnClientsUseCase.getClients()).thenReturn(List.of());
-        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of());
+        lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
     }
 
@@ -53,7 +53,7 @@ class MachineServiceTest {
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("alice", "10.13.13.2", "", MachineType.UBUNTU_SERVER, null, null)
         ));
-        lenient().when(getVpnClientsUseCase.getClients()).thenReturn(List.of(
+        lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("pubkey", "10.13.13.2/32", "1.2.3.4", "51820",
                 "1700000000", "100", "200")
         ));
@@ -72,7 +72,7 @@ class MachineServiceTest {
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("phone", "10.13.13.10", "", MachineType.MOBILE_CLIENT, null, null)
         ));
-        lenient().when(getVpnClientsUseCase.getClients()).thenReturn(List.of(
+        lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("pk-phone", "10.13.13.10/32", null, null, null, null, null)
         ));
 
@@ -88,7 +88,7 @@ class MachineServiceTest {
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("offline", "10.13.13.99", "", MachineType.UBUNTU_SERVER, null, null)
         ));
-        lenient().when(getVpnClientsUseCase.getClients()).thenReturn(List.of());
+        lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
 
         List<Machine> machines = service.getAllMachines();
 
@@ -119,7 +119,7 @@ class MachineServiceTest {
 
     @Test
     void getAllMachines_includesLanServers_lanServerHasNullWgFields() {
-        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        lenient().when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "relay")
         ));
 
@@ -139,7 +139,7 @@ class MachineServiceTest {
 
     @Test
     void getAllMachines_lanServerRunsDockerFalse_dockerPortNull() {
-        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        lenient().when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "relay")
         ));
 
@@ -155,7 +155,7 @@ class MachineServiceTest {
             new PeerConfiguration("relay", "10.13.13.5", "", MachineType.UBUNTU_SERVER,
                 "192.168.3.0/24", "192.168.3.5")
         ));
-        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        lenient().when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "relay")
         ));
 
@@ -172,7 +172,7 @@ class MachineServiceTest {
     @Test
     void getAllMachines_lanServerAnchoredAtVaierServer_lanCidrIsServerLanCidr() {
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
-        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        lenient().when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("vpc-box", "172.31.5.20", true, 2375), "Vaier server")
         ));
 
@@ -189,7 +189,7 @@ class MachineServiceTest {
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("alice", "10.13.13.2", "", MachineType.UBUNTU_SERVER, null, null)
         ));
-        lenient().when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        lenient().when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), null)
         ));
 

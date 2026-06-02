@@ -2,7 +2,6 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetLanServerReachabilityUseCase;
-import net.vaier.application.GetLanServersUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.domain.LanServer;
@@ -10,6 +9,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.port.ForCheckingLanReachability;
+import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForPingingHost;
 import net.vaier.domain.port.ForProbingTcp;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
@@ -46,7 +46,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private static final String PUBLISHED_SERVICES_SSE_TOPIC = "published-services";
     private static final String PUBLISHED_SERVICES_SSE_EVENT = "service-updated";
 
-    private final GetLanServersUseCase getLanServersUseCase;
+    private final ForGettingLanServers forGettingLanServers;
     private final ForProbingTcp forProbingTcp;
     private final ForPingingHost forPingingHost;
     private final ForPublishingEvents forPublishingEvents;
@@ -60,7 +60,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
     private final Map<String, Reachability> pendingState = new ConcurrentHashMap<>();
     private final Map<String, Integer> pendingCount = new ConcurrentHashMap<>();
 
-    public LanServerReachabilityService(GetLanServersUseCase getLanServersUseCase,
+    public LanServerReachabilityService(ForGettingLanServers forGettingLanServers,
                                         ForProbingTcp forProbingTcp,
                                         ForPingingHost forPingingHost,
                                         ForPublishingEvents forPublishingEvents,
@@ -68,7 +68,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
                                         ForCheckingLanReachability cache,
                                         ForRecordingLanReachability recorder,
                                         PublishedServicesCacheInvalidator publishedServicesCacheInvalidator) {
-        this.getLanServersUseCase = getLanServersUseCase;
+        this.forGettingLanServers = forGettingLanServers;
         this.forProbingTcp = forProbingTcp;
         this.forPingingHost = forPingingHost;
         this.forPublishingEvents = forPublishingEvents;
@@ -95,7 +95,7 @@ public class LanServerReachabilityService implements GetLanServerReachabilityUse
         // Pingability is independent of Docker scrape state — probe every registered LAN
         // server. The UI combines this binary "is the host on the network" signal with the
         // Docker scrape result to produce green / yellow / red for Docker hosts.
-        for (var view : getLanServersUseCase.getAll()) {
+        for (var view : forGettingLanServers.getAll()) {
             LanServer server = view.server();
             // Key everything by lanAddress: the host's reachability survives a rename.
             String key = server.lanAddress();

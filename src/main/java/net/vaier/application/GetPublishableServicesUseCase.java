@@ -1,6 +1,6 @@
 package net.vaier.application;
 
-import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
+import net.vaier.domain.PublishableService;
 
 import java.util.List;
 

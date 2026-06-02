@@ -1,6 +1,6 @@
 package net.vaier.application;
 
-import net.vaier.domain.DockerService;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 
 import java.util.List;
 
@@ -18,13 +18,4 @@ public interface DiscoverLanServerContainersUseCase {
      * {@code runsDocker} is false.
      */
     LanServerContainers discoverLanServerContainersForHost(String name);
-
-    record LanServerContainers(
-        String name,
-        String lanAddress,
-        Integer dockerPort,
-        String relayPeerName,
-        String status,
-        List<DockerService> containers
-    ) {}
 }

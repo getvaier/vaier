@@ -1,12 +1,12 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.GetUsersUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierConfig;
+import net.vaier.domain.port.ForGettingUsers;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForSendingNotificationEmail;
@@ -21,18 +21,18 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
 
     private static final int DEFAULT_SMTP_PORT = 587;
 
-    private final GetUsersUseCase getUsersUseCase;
+    private final ForGettingUsers forGettingUsers;
     private final ForPersistingAppConfiguration configPersistence;
     private final ForReadingStoredSmtpPassword storedPasswordReader;
     private final ForSendingNotificationEmail emailSender;
     private final ConfigResolver configResolver;
 
-    public NotificationService(GetUsersUseCase getUsersUseCase,
+    public NotificationService(ForGettingUsers forGettingUsers,
                                ForPersistingAppConfiguration configPersistence,
                                ForReadingStoredSmtpPassword storedPasswordReader,
                                ForSendingNotificationEmail emailSender,
                                ConfigResolver configResolver) {
-        this.getUsersUseCase = getUsersUseCase;
+        this.forGettingUsers = forGettingUsers;
         this.configPersistence = configPersistence;
         this.storedPasswordReader = storedPasswordReader;
         this.emailSender = emailSender;
@@ -54,7 +54,7 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
             return;
         }
 
-        List<String> recipients = getUsersUseCase.getUsers().stream()
+        List<String> recipients = forGettingUsers.getUsers().stream()
                 .filter(User::isAdmin)
                 .map(User::getEmail)
                 .filter(e -> e != null && !e.isBlank())

@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.GetLanServersUseCase.LanServerView;
+import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;

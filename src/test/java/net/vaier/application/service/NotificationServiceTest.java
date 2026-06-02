@@ -1,6 +1,6 @@
 package net.vaier.application.service;
 
-import net.vaier.application.GetUsersUseCase;
+import net.vaier.domain.port.ForGettingUsers;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.MachineType;
@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
 
-    @Mock GetUsersUseCase getUsersUseCase;
+    @Mock ForGettingUsers forGettingUsers;
     @Mock ForPersistingAppConfiguration configPersistence;
     @Mock ForReadingStoredSmtpPassword storedPasswordReader;
     @Mock ForSendingNotificationEmail emailSender;
@@ -60,7 +60,7 @@ class NotificationServiceTest {
     void notifyAdmins_sendsEmailToEveryAdminUser() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("smtpPass"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(
+        when(forGettingUsers.getUsers()).thenReturn(List.of(
                 admin("alice", "alice@example.com"),
                 admin("bob", "bob@example.com"),
                 new User("carol", "carol", "carol@example.com", List.of("users"))
@@ -78,7 +78,7 @@ class NotificationServiceTest {
     void notifyAdmins_subjectIncludesPeerNameAndNewState_disconnected() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
 
         service.notifyAdmins(snapshot(false));
 
@@ -92,7 +92,7 @@ class NotificationServiceTest {
     void notifyAdmins_subjectIncludesPeerNameAndNewState_connected() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
 
         service.notifyAdmins(snapshot(true));
 
@@ -106,7 +106,7 @@ class NotificationServiceTest {
     void notifyAdmins_bodyIncludesPeerDetails_andLinkToVaier() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
         when(configResolver.getDomain()).thenReturn("example.com");
 
         service.notifyAdmins(snapshot(false));
@@ -148,7 +148,7 @@ class NotificationServiceTest {
     void notifyAdmins_skipsWhenNoAdminUsers() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(
+        when(forGettingUsers.getUsers()).thenReturn(List.of(
                 new User("carol", "carol", "carol@example.com", List.of("users"))
         ));
 
@@ -162,7 +162,7 @@ class NotificationServiceTest {
     void notifyAdmins_skipsAdminsWithBlankEmail() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(
+        when(forGettingUsers.getUsers()).thenReturn(List.of(
                 admin("alice", "alice@example.com"),
                 admin("ghost", "")
         ));
@@ -179,7 +179,7 @@ class NotificationServiceTest {
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(getUsersUseCase.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
         org.mockito.Mockito.doThrow(new RuntimeException("smtp down"))
                 .when(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
                         anyList(), any(), any());

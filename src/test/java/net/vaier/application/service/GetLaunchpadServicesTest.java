@@ -1,8 +1,8 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DiscoverPeerContainersUseCase;
-import net.vaier.application.DiscoverVaierServerContainersUseCase;
-import net.vaier.application.GetLanServerScrapeUseCase;
+import net.vaier.domain.port.ForDiscoveringPeerContainers;
+import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
+import net.vaier.domain.port.ForGettingLanServerScrape;
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.*;
@@ -64,13 +64,13 @@ class GetLaunchpadServicesTest {
     ConfigResolver configResolver;
 
     @Mock
-    DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
+    ForDiscoveringPeerContainers discoverPeerContainers;
 
     @Mock
-    DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
+    ForDiscoveringVaierServerContainers discoverVaierServerContainers;
 
     @Mock
-    GetLanServerScrapeUseCase getLanServerScrapeUseCase;
+    ForGettingLanServerScrape getLanServerScrape;
 
     @Mock
     ForProbingServiceVersion forProbingServiceVersion;
@@ -91,8 +91,8 @@ class GetLaunchpadServicesTest {
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
         lenient().when(forResolvingPeerNames.resolvePeerNameByIp(org.mockito.ArgumentMatchers.anyString()))
             .thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
-        lenient().when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
+        lenient().when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
+        lenient().when(getLanServerScrape.getLanServerContainers()).thenReturn(List.of());
         lenient().when(forCheckingLanReachability.snapshot()).thenReturn(java.util.Map.of());
         lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
     }
@@ -536,8 +536,8 @@ class GetLaunchpadServicesTest {
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
         setupEmptyLocalServices();
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
-            new DiscoverPeerContainersUseCase.PeerContainers("apalveien5", "10.13.13.6", "OK",
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
+            new net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers("apalveien5", "10.13.13.6", "OK",
                 List.of(new DockerService("id", "bookstack", "linuxserver/bookstack:24.05", "24.05",
                     List.of(new DockerService.PortMapping(80, 6875, "tcp", "0.0.0.0")), List.of(), "running")),
                 false, "")));
@@ -553,7 +553,7 @@ class GetLaunchpadServicesTest {
         setupOneRoute("app.example.com", "grafana", 3000);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
-        when(discoverVaierServerContainersUseCase.discover()).thenReturn(
+        when(discoverVaierServerContainers.discover()).thenReturn(
             List.of(new DockerService("id", "grafana", "grafana/grafana:11.3.0", "11.3.0",
                 List.of(new DockerService.PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running")));
 
@@ -610,7 +610,7 @@ class GetLaunchpadServicesTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
-        when(discoverVaierServerContainersUseCase.discover()).thenReturn(
+        when(discoverVaierServerContainers.discover()).thenReturn(
             List.of(new DockerService("id", "grafana", "grafana/grafana:11.3.0", "11.3.0",
                 List.of(new DockerService.PortMapping(3000, 3000, "tcp", "0.0.0.0")), List.of(), "running")));
         when(forProbingServiceVersion.probeVersion(any(), any())).thenReturn(Optional.of("custom-5.0"));

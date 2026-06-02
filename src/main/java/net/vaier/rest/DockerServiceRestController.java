@@ -1,9 +1,9 @@
 package net.vaier.rest;
 
-import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
-import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.DockerService;

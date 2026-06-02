@@ -1,16 +1,16 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DiscoverLanServerContainersUseCase;
-import net.vaier.application.DiscoverPeerContainersUseCase;
-import net.vaier.application.DiscoverVaierServerContainersUseCase;
-import net.vaier.application.GetLanServerScrapeUseCase;
-import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
-import net.vaier.application.GetVaierServerDockerServicesUseCase;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers;
+import net.vaier.domain.port.ForDiscoveringPeerContainers;
+import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
+import net.vaier.domain.port.ForGettingLanServerScrape;
+import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
+import net.vaier.domain.port.ForGettingVaierServerDockerServices;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.PublishPeerServiceUseCase.PendingPublication;
 import net.vaier.application.PublishPeerServiceUseCase.PublishStatus;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
+import net.vaier.domain.PublishableService;
+import net.vaier.domain.PublishableService.PublishableSource;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.*;
@@ -93,16 +93,16 @@ class PublishingServiceTest {
     PendingPublicationsService pendingPublicationsService;
 
     @Mock
-    DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
+    ForDiscoveringPeerContainers discoverPeerContainers;
 
     @Mock
-    DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
+    ForDiscoveringVaierServerContainers discoverVaierServerContainers;
 
     @Mock
-    GetLanServerScrapeUseCase getLanServerScrapeUseCase;
+    ForGettingLanServerScrape getLanServerScrape;
 
     @Mock
-    GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
+    ForGettingVaierServerDockerServices getVaierServerDockerServices;
 
     @Mock
     ForProbingServiceVersion forProbingServiceVersion;
@@ -221,7 +221,7 @@ class PublishingServiceTest {
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyVaierServerServices();
-        when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of(
+        when(discoverVaierServerContainers.discover()).thenReturn(List.of(
             new DockerService("id", "my-container", "grafana/grafana:11.3.0", "11.3.0",
                 List.of(new PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running")
         ));
@@ -254,7 +254,7 @@ class PublishingServiceTest {
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyVaierServerServices();
-        when(discoverVaierServerContainersUseCase.discover()).thenReturn(List.of(
+        when(discoverVaierServerContainers.discover()).thenReturn(List.of(
             new DockerService("id", "my-container", "grafana/grafana:11.3.0", "11.3.0",
                 List.of(new PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running")
         ));
@@ -1176,11 +1176,11 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_allPeersUnreachable_returnsOnlyLocalServices() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             unreachablePeer("alice", "10.13.13.2")
         ));
         PublishableService vsSvc = vaierServerService("my-app", 3000);
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of(vsSvc));
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of(vsSvc));
 
         List<PublishableService> result = service.getPublishableServices();
 
@@ -1190,10 +1190,10 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_peerWithTcpPortNotPublished_included() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainer("my-app", 8080, "tcp")))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
 
         List<PublishableService> result = service.getPublishableServices();
 
@@ -1208,10 +1208,10 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             routeForPublishable("10.13.13.2", 8080)
         ));
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainer("my-app", 8080, "tcp")))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
 
         assertThat(service.getPublishableServices()).isEmpty();
     }
@@ -1223,10 +1223,10 @@ class PublishingServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
         DockerService roon = new DockerService("id", "roonserver", "image", "latest",
             List.of(new PortMapping(9100, 9339, 9100, "tcp", "0.0.0.0")), List.of(), "running");
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("media", "10.13.13.5", List.of(roon))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
 
         assertThat(service.getPublishableServices()).isEmpty();
     }
@@ -1234,10 +1234,10 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_peerWithUdpPort_excluded() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainer("dns-server", 53, "udp")))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
 
         assertThat(service.getPublishableServices()).isEmpty();
     }
@@ -1245,11 +1245,11 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_mergesPeerAndLocalServices() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainer("peer-app", 9000, "tcp")))
         ));
         PublishableService vsSvc = vaierServerService("local-app", 3000);
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of(vsSvc));
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of(vsSvc));
 
         List<PublishableService> result = service.getPublishableServices();
 
@@ -1261,9 +1261,9 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_duplicates_deduplicated() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
         PublishableService svc = vaierServerService("my-app", 3000);
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any()))
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any()))
             .thenReturn(List.of(svc, svc));
 
         List<PublishableService> result = service.getPublishableServices();
@@ -1274,8 +1274,8 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_noPeersNoLocal_returnsEmpty() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
 
         assertThat(service.getPublishableServices()).isEmpty();
     }
@@ -1283,10 +1283,10 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_pendingPublication_excluded() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainer("my-app", 8080, "tcp")))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
         when(pendingPublicationsService.isPending("10.13.13.2", 8080)).thenReturn(true);
         assertThat(service.getPublishableServices()).isEmpty();
     }
@@ -1294,10 +1294,10 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_peerPortWithNullPublicPort_excluded() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainerWithNullPublicPort("my-app", 8080, "tcp")))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
 
         assertThat(service.getPublishableServices()).isEmpty();
     }
@@ -1305,9 +1305,9 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_ignoredLocalService_markedIgnored() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
         PublishableService svc = vaierServerService("boring-app", 3000);
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of(svc));
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of(svc));
         when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of("boring-app:3000"));
 
         List<PublishableService> result = service.getPublishableServices();
@@ -1319,10 +1319,10 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_ignoredPeerService_markedIgnored() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
             okPeer("alice", "10.13.13.2", List.of(peerContainer("peer-app", 8080, "tcp")))
         ));
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
         when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of("alice/peer-app:8080"));
 
         List<PublishableService> result = service.getPublishableServices();
@@ -1339,9 +1339,9 @@ class PublishingServiceTest {
         // collapses cleanly to `container @ relayPeer` after publication, instead of leaking the
         // LAN host name into the displayed subdomain.
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
-        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getLanServerScrape.getLanServerContainers()).thenReturn(List.of(
             okLanHost("nas", "192.168.1.50", 2375, "apalveien",
                 List.of(peerContainer("pihole", 80, "tcp")))
         ));
@@ -1362,9 +1362,9 @@ class PublishingServiceTest {
         // Ignore key for LAN_SERVER uses the LAN host IP (not the relay peer name) so two
         // LAN hosts behind the same relay with same-named containers don't collide.
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
-        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of(
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+        when(getLanServerScrape.getLanServerContainers()).thenReturn(List.of(
             okLanHost("nas", "192.168.1.50", 2375, "apalveien",
                 List.of(peerContainer("pihole", 80, "tcp")))
         ));
@@ -1379,9 +1379,9 @@ class PublishingServiceTest {
     @Test
     void getPublishableServices_nonIgnoredService_markedNotIgnored() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of());
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of());
         PublishableService svc = vaierServerService("useful-app", 3000);
-        when(getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(any())).thenReturn(List.of(svc));
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of(svc));
         when(forManagingIgnoredServices.getIgnoredServiceKeys()).thenReturn(Set.of());
 
         List<PublishableService> result = service.getPublishableServices();
@@ -1631,10 +1631,10 @@ class PublishingServiceTest {
         return new PeerContainers(name, ip, "OK", containers, false, "");
     }
 
-    private DiscoverLanServerContainersUseCase.LanServerContainers okLanHost(
+    private ForDiscoveringLanServerContainers.LanServerContainers okLanHost(
             String hostName, String hostIp, int port, String relayPeerName,
             List<DockerService> containers) {
-        return new DiscoverLanServerContainersUseCase.LanServerContainers(
+        return new ForDiscoveringLanServerContainers.LanServerContainers(
             hostName, hostIp, port, relayPeerName, "OK", containers);
     }
 

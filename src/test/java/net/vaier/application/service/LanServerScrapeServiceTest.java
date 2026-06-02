@@ -1,7 +1,7 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DiscoverLanServerContainersUseCase;
-import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.domain.port.ForPublishingEvents;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@ class LanServerScrapeServiceTest {
     /** Mirrors LanServerScrapeService.REQUIRED_CONSECUTIVE_SCRAPES — the dampening window. */
     private static final int CONFIRM = 3;
 
-    @Mock DiscoverLanServerContainersUseCase discoverer;
+    @Mock ForDiscoveringLanServerContainers discoverer;
     @Mock ForPublishingEvents forPublishingEvents;
 
     LanServerScrapeService service;

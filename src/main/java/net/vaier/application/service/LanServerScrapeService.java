@@ -1,9 +1,10 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.DiscoverLanServerContainersUseCase;
-import net.vaier.application.DiscoverLanServerContainersUseCase.LanServerContainers;
 import net.vaier.application.GetLanServerScrapeUseCase;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
+import net.vaier.domain.port.ForGettingLanServerScrape;
 import net.vaier.domain.port.ForPublishingEvents;
 import org.springframework.stereotype.Service;
 
@@ -16,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
-public class LanServerScrapeService implements GetLanServerScrapeUseCase {
+public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGettingLanServerScrape {
 
     // Same dampening shape as LanServerReachabilityService — the Docker socket on a relayed
     // LAN host is just as flap-prone as a TCP probe (slow response, brief socket restart,
@@ -27,13 +28,13 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase {
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-servers-updated";
 
-    private final DiscoverLanServerContainersUseCase discoverer;
+    private final ForDiscoveringLanServerContainers discoverer;
     private final ForPublishingEvents forPublishingEvents;
     private final Map<String, LanServerContainers> cache = new ConcurrentHashMap<>();
     private final Map<String, String> pendingStatus = new ConcurrentHashMap<>();
     private final Map<String, Integer> pendingCount = new ConcurrentHashMap<>();
 
-    public LanServerScrapeService(DiscoverLanServerContainersUseCase discoverer,
+    public LanServerScrapeService(ForDiscoveringLanServerContainers discoverer,
                                   ForPublishingEvents forPublishingEvents) {
         this.discoverer = discoverer;
         this.forPublishingEvents = forPublishingEvents;

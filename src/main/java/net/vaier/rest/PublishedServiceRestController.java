@@ -9,7 +9,7 @@ import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
 import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
+import net.vaier.domain.PublishableService;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch;

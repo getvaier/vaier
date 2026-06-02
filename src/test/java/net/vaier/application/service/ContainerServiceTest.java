@@ -1,10 +1,8 @@
 package net.vaier.application.service;
 
-import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
-import net.vaier.application.GetLanServersUseCase;
-import net.vaier.application.GetLanServersUseCase.LanServerView;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
+import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
+import net.vaier.domain.PublishableService;
+import net.vaier.domain.PublishableService.PublishableSource;
 import net.vaier.domain.LanServer;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.DockerService;
@@ -14,6 +12,8 @@ import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireguardClientImage;
+import net.vaier.domain.port.ForGettingLanServers;
+import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
@@ -47,14 +47,14 @@ class ContainerServiceTest {
     @Mock ForGettingVpnClients forGettingVpnClients;
     @Mock ForResolvingPeerNames forResolvingPeerNames;
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
-    @Mock GetLanServersUseCase getLanServersUseCase;
+    @Mock ForGettingLanServers forGettingLanServers;
 
     ContainerService service;
 
     @BeforeEach
     void setUp() {
         service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
-            forResolvingPeerNames, forGettingPeerConfigurations, getLanServersUseCase,
+            forResolvingPeerNames, forGettingPeerConfigurations, forGettingLanServers,
             VAIER_NETWORK, GATEWAY_IP);
     }
 
@@ -628,14 +628,14 @@ class ContainerServiceTest {
 
     @Test
     void discoverAllLanServerContainers_emptyWhenNoServersRegistered() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of());
+        when(forGettingLanServers.getAll()).thenReturn(List.of());
 
         assertThat(service.discoverAllLanServerContainers()).isEmpty();
     }
 
     @Test
     void discoverAllLanServerContainers_relayResolved_scrapesDockerSocket() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
         ));
         when(forGettingServerInfo.getServicesWithExposedPorts(
@@ -658,7 +658,7 @@ class ContainerServiceTest {
     void discoverAllLanServerContainers_serverAnchored_scrapesDirectly() {
         // A LAN server in the Vaier server's own subnet is anchored at "Vaier server" — the
         // scrape connects straight from the Vaier container, no relay hop.
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("vpc-box", "172.31.5.20", true, 2375), "Vaier server")
         ));
         when(forGettingServerInfo.getServicesWithExposedPorts(
@@ -676,7 +676,7 @@ class ContainerServiceTest {
 
     @Test
     void discoverAllLanServerContainers_relayUnknown_marksUnreachableAndDoesNotScrape() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), null)
         ));
 
@@ -690,7 +690,7 @@ class ContainerServiceTest {
 
     @Test
     void discoverAllLanServerContainers_dockerScrapeFails_marksUnreachable() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
         ));
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
@@ -705,7 +705,7 @@ class ContainerServiceTest {
 
     @Test
     void discoverAllLanServerContainers_skipsRunsDockerFalse() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5"),
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
         ));
@@ -721,7 +721,7 @@ class ContainerServiceTest {
 
     @Test
     void discoverLanServerContainersForHost_runsDockerFalse_throws() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("printer", "192.168.3.20", false, null), "apalveien5")
         ));
 
@@ -731,7 +731,7 @@ class ContainerServiceTest {
 
     @Test
     void discoverLanServerContainersForHost_unknownName_throws() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of());
+        when(forGettingLanServers.getAll()).thenReturn(List.of());
 
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
             () -> service.discoverLanServerContainersForHost("ghost"));
@@ -739,7 +739,7 @@ class ContainerServiceTest {
 
     @Test
     void discoverLanServerContainersForHost_runsDockerTrue_returnsContainers() {
-        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+        when(forGettingLanServers.getAll()).thenReturn(List.of(
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5")
         ));
         when(forGettingServerInfo.getServicesWithExposedPorts(

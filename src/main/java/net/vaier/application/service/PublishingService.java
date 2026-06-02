@@ -2,12 +2,7 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
-import net.vaier.application.DiscoverLanServerContainersUseCase;
-import net.vaier.application.DiscoverPeerContainersUseCase;
-import net.vaier.application.DiscoverVaierServerContainersUseCase;
-import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
-import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
@@ -28,14 +23,21 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.LaunchpadVisibility;
+import net.vaier.domain.PublishableService;
+import net.vaier.domain.PublishableService.PublishableSource;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCheckingLanReachability;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers;
+import net.vaier.domain.port.ForDiscoveringPeerContainers;
+import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
+import net.vaier.domain.port.ForGettingLanServerScrape;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
+import net.vaier.domain.port.ForGettingVaierServerDockerServices;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingDnsRecords;
@@ -83,10 +85,10 @@ public class PublishingService implements
     private final ForResolvingDns forResolvingDns;
     private final ForManagingIgnoredServices forManagingIgnoredServices;
     private final PendingPublicationsService pendingPublicationsService;
-    private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
-    private final DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
-    private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
-    private final GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase;
+    private final ForDiscoveringPeerContainers forDiscoveringPeerContainers;
+    private final ForDiscoveringVaierServerContainers forDiscoveringVaierServerContainers;
+    private final ForGettingLanServerScrape forGettingLanServerScrape;
+    private final ForGettingVaierServerDockerServices forGettingVaierServerDockerServices;
     private final ForProbingServiceVersion forProbingServiceVersion;
     private final ForCheckingLanReachability forCheckingLanReachability;
 
@@ -114,10 +116,10 @@ public class PublishingService implements
                              ForResolvingDns forResolvingDns,
                              ForManagingIgnoredServices forManagingIgnoredServices,
                              PendingPublicationsService pendingPublicationsService,
-                             DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
-                             DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase,
-                             GetLanServerScrapeUseCase getLanServerScrapeUseCase,
-                             GetVaierServerDockerServicesUseCase getVaierServerDockerServicesUseCase,
+                             ForDiscoveringPeerContainers forDiscoveringPeerContainers,
+                             ForDiscoveringVaierServerContainers forDiscoveringVaierServerContainers,
+                             ForGettingLanServerScrape forGettingLanServerScrape,
+                             ForGettingVaierServerDockerServices forGettingVaierServerDockerServices,
                              ForProbingServiceVersion forProbingServiceVersion,
                              ForCheckingLanReachability forCheckingLanReachability) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
@@ -133,10 +135,10 @@ public class PublishingService implements
         this.forResolvingDns = forResolvingDns;
         this.forManagingIgnoredServices = forManagingIgnoredServices;
         this.pendingPublicationsService = pendingPublicationsService;
-        this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
-        this.discoverVaierServerContainersUseCase = discoverVaierServerContainersUseCase;
-        this.getLanServerScrapeUseCase = getLanServerScrapeUseCase;
-        this.getVaierServerDockerServicesUseCase = getVaierServerDockerServicesUseCase;
+        this.forDiscoveringPeerContainers = forDiscoveringPeerContainers;
+        this.forDiscoveringVaierServerContainers = forDiscoveringVaierServerContainers;
+        this.forGettingLanServerScrape = forGettingLanServerScrape;
+        this.forGettingVaierServerDockerServices = forGettingVaierServerDockerServices;
         this.forProbingServiceVersion = forProbingServiceVersion;
         this.forCheckingLanReachability = forCheckingLanReachability;
     }
@@ -232,21 +234,21 @@ public class PublishingService implements
      * state-refresh caches, and only the local Docker socket is read live (sub-millisecond).
      */
     private ContainerImageSnapshot currentContainerImages() {
-        Map<String, List<DockerService>> peerContainers = discoverPeerContainersUseCase.discoverAll().stream()
+        Map<String, List<DockerService>> peerContainers = forDiscoveringPeerContainers.discoverAll().stream()
             .filter(p -> p.vpnIp() != null)
             .collect(java.util.stream.Collectors.toMap(
-                DiscoverPeerContainersUseCase.PeerContainers::vpnIp,
-                DiscoverPeerContainersUseCase.PeerContainers::containers,
+                ForDiscoveringPeerContainers.PeerContainers::vpnIp,
+                ForDiscoveringPeerContainers.PeerContainers::containers,
                 (a, b) -> a));
-        Map<String, List<DockerService>> lanServerContainers = getLanServerScrapeUseCase
+        Map<String, List<DockerService>> lanServerContainers = forGettingLanServerScrape
             .getLanServerContainers().stream()
             .filter(h -> h.lanAddress() != null)
             .collect(java.util.stream.Collectors.toMap(
-                DiscoverLanServerContainersUseCase.LanServerContainers::lanAddress,
-                DiscoverLanServerContainersUseCase.LanServerContainers::containers,
+                ForDiscoveringLanServerContainers.LanServerContainers::lanAddress,
+                ForDiscoveringLanServerContainers.LanServerContainers::containers,
                 (a, b) -> a));
         return new ContainerImageSnapshot(
-            discoverVaierServerContainersUseCase.discover(),
+            forDiscoveringVaierServerContainers.discover(),
             peerContainers, lanServerContainers);
     }
 
@@ -675,7 +677,7 @@ public class PublishingService implements
         var existingRoutes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
         var publishable = new ArrayList<PublishableService>();
 
-        discoverPeerContainersUseCase.discoverAll().stream()
+        forDiscoveringPeerContainers.discoverAll().stream()
             .filter(peer -> "OK".equals(peer.status()))
             .flatMap(peer -> peer.containers().stream()
                 .flatMap(container -> container.ports().stream()
@@ -690,7 +692,7 @@ public class PublishingService implements
             )
             .forEach(publishable::add);
 
-        getLanServerScrapeUseCase.getLanServerContainers().stream()
+        forGettingLanServerScrape.getLanServerContainers().stream()
             .filter(host -> "OK".equals(host.status()))
             .flatMap(host -> host.containers().stream()
                 .flatMap(container -> container.ports().stream()
@@ -706,7 +708,7 @@ public class PublishingService implements
             )
             .forEach(publishable::add);
 
-        getVaierServerDockerServicesUseCase.getUnpublishedVaierServerServices(existingRoutes).stream()
+        forGettingVaierServerDockerServices.getUnpublishedVaierServerServices(existingRoutes).stream()
             .filter(s -> !pendingPublicationsService.isPending(s.address(), s.port()))
             .forEach(publishable::add);
 

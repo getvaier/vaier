@@ -1,6 +1,6 @@
 package net.vaier.integration.controller;
 
-import net.vaier.application.DiscoverPeerContainersUseCase.PeerContainers;
+import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;

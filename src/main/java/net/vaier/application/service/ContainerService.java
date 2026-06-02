@@ -4,12 +4,10 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
-import net.vaier.application.GetLanServersUseCase;
-import net.vaier.application.GetLanServersUseCase.LanServerView;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetServerInfoUseCase;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableService;
-import net.vaier.application.PublishPeerServiceUseCase.PublishableSource;
+import net.vaier.domain.PublishableService;
+import net.vaier.domain.PublishableService.PublishableSource;
 import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.MachineType;
@@ -18,8 +16,14 @@ import net.vaier.domain.Server;
 import net.vaier.domain.VaierServerCatalogue;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireguardClientImage;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers;
+import net.vaier.domain.port.ForDiscoveringPeerContainers;
+import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
+import net.vaier.domain.port.ForGettingLanServers;
+import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
+import net.vaier.domain.port.ForGettingVaierServerDockerServices;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,13 +40,17 @@ public class ContainerService implements
     DiscoverLanServerContainersUseCase,
     GetServerInfoUseCase,
     GetVaierServerDockerServicesUseCase,
-    RefreshContainerStateUseCase {
+    RefreshContainerStateUseCase,
+    ForDiscoveringVaierServerContainers,
+    ForDiscoveringPeerContainers,
+    ForDiscoveringLanServerContainers,
+    ForGettingVaierServerDockerServices {
 
     private final ForGettingServerInfo forGettingServerInfo;
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
-    private final GetLanServersUseCase getLanServersUseCase;
+    private final ForGettingLanServers forGettingLanServers;
     private final String vaierNetworkName;
     private final String dockerGatewayIp;
 
@@ -64,9 +72,9 @@ public class ContainerService implements
                             ForGettingVpnClients forGettingVpnClients,
                             ForResolvingPeerNames forResolvingPeerNames,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
-                            GetLanServersUseCase getLanServersUseCase) {
+                            ForGettingLanServers forGettingLanServers) {
         this(forGettingServerInfo, forGettingVpnClients, forResolvingPeerNames, forGettingPeerConfigurations,
-            getLanServersUseCase,
+            forGettingLanServers,
             System.getenv().getOrDefault("VAIER_NETWORK_NAME", "vaier-network"),
             System.getenv().getOrDefault("VAIER_DOCKER_GATEWAY", "172.20.0.1"));
     }
@@ -75,14 +83,14 @@ public class ContainerService implements
                      ForGettingVpnClients forGettingVpnClients,
                      ForResolvingPeerNames forResolvingPeerNames,
                      ForGettingPeerConfigurations forGettingPeerConfigurations,
-                     GetLanServersUseCase getLanServersUseCase,
+                     ForGettingLanServers forGettingLanServers,
                      String vaierNetworkName,
                      String dockerGatewayIp) {
         this.forGettingServerInfo = forGettingServerInfo;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
-        this.getLanServersUseCase = getLanServersUseCase;
+        this.forGettingLanServers = forGettingLanServers;
         this.vaierNetworkName = vaierNetworkName;
         this.dockerGatewayIp = dockerGatewayIp;
     }
@@ -165,7 +173,7 @@ public class ContainerService implements
 
     @Override
     public List<LanServerContainers> discoverAllLanServerContainers() {
-        return getLanServersUseCase.getAll().stream()
+        return forGettingLanServers.getAll().stream()
             .filter(view -> view.server().runsDocker())
             .map(this::scrapeLanServer)
             .toList();
@@ -173,7 +181,7 @@ public class ContainerService implements
 
     @Override
     public LanServerContainers discoverLanServerContainersForHost(String name) {
-        LanServerView view = getLanServersUseCase.getAll().stream()
+        LanServerView view = forGettingLanServers.getAll().stream()
             .filter(v -> v.server().name().equals(name))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("LAN server not found: " + name));

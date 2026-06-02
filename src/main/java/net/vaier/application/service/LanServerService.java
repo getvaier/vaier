@@ -11,6 +11,7 @@ import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.LanServerSetupScript;
+import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
@@ -30,6 +31,7 @@ public class LanServerService implements
     RenameLanServerUseCase,
     UpdateLanServerDescriptionUseCase,
     GetLanServersUseCase,
+    ForGettingLanServers,
     GenerateLanServerSetupScriptUseCase,
     ResolveLanAnchorUseCase {
 

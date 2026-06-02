@@ -10,6 +10,7 @@ import net.vaier.application.UpdateUserDisplayNameUseCase;
 import net.vaier.application.UpdateUserEmailUseCase;
 import net.vaier.application.UpdateUserGroupsUseCase;
 import net.vaier.domain.User;
+import net.vaier.domain.port.ForGettingUsers;
 import net.vaier.domain.port.ForPersistingUsers;
 import org.springframework.stereotype.Service;
 
@@ -18,7 +19,7 @@ import java.util.List;
 
 @Service
 public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePasswordUseCase,
-        UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase, GetUsersUseCase,
+        UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase, GetUsersUseCase, ForGettingUsers,
         GetGroupsUseCase, UpdateUserGroupsUseCase, DeleteGroupUseCase {
 
     private final ForPersistingUsers forPersistingUsers;
