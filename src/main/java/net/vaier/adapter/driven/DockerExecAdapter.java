@@ -77,31 +77,37 @@ public class DockerExecAdapter implements ForExecutingInContainer {
     }
 
     @Override
-    public String execute(String containerName, String... command) throws IOException, InterruptedException {
-        ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(containerName)
-            .withCmd(command)
-            .withAttachStdout(true)
-            .withAttachStderr(true)
-            .exec();
+    public String execute(String containerName, String... command) {
+        try {
+            ExecCreateCmdResponse execCreateCmdResponse = dockerClient.execCreateCmd(containerName)
+                .withCmd(command)
+                .withAttachStdout(true)
+                .withAttachStderr(true)
+                .exec();
 
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
 
-        dockerClient.execStartCmd(execCreateCmdResponse.getId())
-            .exec(new DockerExecCallback(stdout, stderr))
-            .awaitCompletion();
+            dockerClient.execStartCmd(execCreateCmdResponse.getId())
+                .exec(new DockerExecCallback(stdout, stderr))
+                .awaitCompletion();
 
-        String stderrStr = stderr.toString();
-        if (!stderrStr.isEmpty()) {
-            log.debug("Command stderr: {}", stderrStr);
+            String stderrStr = stderr.toString();
+            if (!stderrStr.isEmpty()) {
+                log.debug("Command stderr: {}", stderrStr);
+            }
+
+            return stdout.toString();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while executing command in container " + containerName, e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to execute command in container " + containerName, e);
         }
-
-        return stdout.toString();
     }
 
     @Override
-    public String executeWithInput(String containerName, String input, String... command)
-            throws IOException, InterruptedException {
+    public String executeWithInput(String containerName, String input, String... command) {
         String bashCommand = String.format("echo '%s' | %s", input, String.join(" ", command));
         return execute(containerName, "bash", "-c", bashCommand);
     }

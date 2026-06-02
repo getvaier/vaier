@@ -89,7 +89,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         return stdout.toString();
     }
 
-    private String executeDockerExec(String... wgArgs) throws IOException {
+    private String executeDockerExec(String... wgArgs) {
         String containerName = System.getenv("WIREGUARD_CONTAINER_NAME");
         if (containerName == null) {
             containerName = wireguardContainerName;
@@ -99,12 +99,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
         command[0] = "wg";
         System.arraycopy(wgArgs, 0, command, 1, wgArgs.length);
 
-        try {
-            return forExecutingInContainer.execute(containerName, command);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Docker exec interrupted", e);
-        }
+        return forExecutingInContainer.execute(containerName, command);
     }
 
     record PeerInfo(String publicKey, String allowedIps) {}
