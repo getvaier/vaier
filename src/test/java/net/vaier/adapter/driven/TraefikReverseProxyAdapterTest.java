@@ -584,4 +584,135 @@ class TraefikReverseProxyAdapterTest {
         assertThat(adapter.getReverseProxyRoutes()).hasSize(1);
         assertThat(adapter.getIgnoredServiceKeys()).containsExactly("some-container");
     }
+
+    // --- offline page (vaier-errors) infra ---
+
+    @Test
+    void addReverseProxyRoute_attachesVaierErrorsMiddlewareToRouter() throws IOException {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getMiddlewares()).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+    }
+
+    @Test
+    void addLanReverseProxyRoute_attachesVaierErrorsMiddlewareToRouter() {
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", false, false, null);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getMiddlewares()).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+    }
+
+    @Test
+    void addReverseProxyRoute_definesErrorPagesServiceAndMiddleware() throws IOException {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        // error service points at the vaier container
+        assertThat(content).contains(ServiceNames.ERROR_PAGES_SERVICE);
+        assertThat(content).contains("http://vaier:8080");
+        // errors middleware with the status list + query
+        assertThat(content).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        assertThat(content).contains("/error-pages/{status}");
+        assertThat(content).contains("502");
+        assertThat(content).contains("503");
+        assertThat(content).contains("504");
+    }
+
+    @Test
+    void addReverseProxyRoute_errorPagesInfraIsIdempotent_singleServiceAcrossMultipleRoutes() {
+        adapter.addReverseProxyRoute("app1.example.com", "10.13.13.2", 8080, false, null);
+        adapter.addReverseProxyRoute("app2.example.com", "10.13.13.3", 9090, false, null);
+
+        // Both routers reference vaier-errors; the shared service/middleware exist once.
+        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
+        assertThat(routes).hasSize(2);
+        assertThat(routes).allSatisfy(r ->
+            assertThat(r.getMiddlewares()).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE));
+    }
+
+    @Test
+    void addReverseProxyRoute_withoutAuth_stillAttachesErrorsButNotAuth() throws IOException {
+        adapter.addReverseProxyRoute("open.example.com", "10.13.13.2", 8080, false, null);
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        assertThat(content).doesNotContain(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(content).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+    }
+
+    // --- backfill ---
+
+    @Test
+    void backfillErrorPages_addsVaierErrorsToRouterMissingIt_andCreatesInfra() throws IOException {
+        // Pre-existing config: a router that predates the offline page, with auth + redirect
+        // middlewares and x-vaier metadata that must all survive the backfill untouched.
+        String preExisting = """
+            http:
+              routers:
+                legacy-router:
+                  rule: "Host(`legacy.example.com`)"
+                  entryPoints:
+                  - websecure
+                  service: legacy-service
+                  tls:
+                    certResolver: letsencrypt
+                  middlewares:
+                  - auth-middleware
+                  - legacy-redirect
+              services:
+                legacy-service:
+                  loadBalancer:
+                    servers:
+                    - url: http://10.0.0.9:7000
+              middlewares:
+                auth-middleware:
+                  forwardAuth:
+                    address: http://authelia:9091/api/verify
+                legacy-redirect:
+                  redirectRegex:
+                    regex: "^https://legacy\\\\.example\\\\.com/?$"
+                    replacement: https://legacy.example.com/home
+            x-vaier-launchpad-alias:
+              legacy-router: My Legacy App
+            """;
+        Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
+
+        adapter.backfillErrorPages();
+
+        String content = Files.readString(tempDir.resolve("remote-apps.yml"));
+        // vaier-errors attached to the legacy router
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getMiddlewares()).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        // pre-existing middlewares are preserved on the router
+        assertThat(route.getMiddlewares()).contains("auth-middleware", "legacy-redirect");
+        // infra created
+        assertThat(content).contains(ServiceNames.ERROR_PAGES_SERVICE);
+        assertThat(content).contains("http://vaier:8080");
+        assertThat(content).contains("/error-pages/{status}");
+        // pre-existing server + metadata untouched
+        assertThat(content).contains("http://10.0.0.9:7000");
+        assertThat(content).contains("My Legacy App");
+        assertThat(content).contains("auth-middleware");
+        assertThat(content).contains("legacy-redirect");
+    }
+
+    @Test
+    void backfillErrorPages_isIdempotent_doesNotDuplicateMiddlewareOnRouter() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        adapter.backfillErrorPages();
+        adapter.backfillErrorPages();
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        long count = route.getMiddlewares().stream()
+            .filter(ServiceNames.ERROR_PAGES_MIDDLEWARE::equals).count();
+        assertThat(count).isEqualTo(1);
+    }
+
+    @Test
+    void backfillErrorPages_emptyConfig_doesNotThrow() {
+        adapter.backfillErrorPages();
+
+        assertThat(adapter.getReverseProxyRoutes()).isEmpty();
+    }
 }

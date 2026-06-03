@@ -846,11 +846,13 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
 
-        // Build middleware list
+        // Build middleware list. The errors middleware is always last so a backend failure on any
+        // route lands on Vaier's branded offline page.
         List<String> middlewareList = new ArrayList<>();
         if (requiresAuth) middlewareList.add(ServiceNames.AUTH_MIDDLEWARE);
         if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
-        if (!middlewareList.isEmpty()) routerConfig.put("middlewares", middlewareList);
+        middlewareList.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        routerConfig.put("middlewares", middlewareList);
 
         routers.put(routerName, routerConfig);
 
@@ -879,6 +881,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             redirectMiddleware.put("redirectRegex", redirectRegex);
             middlewaresSection.put(redirectMiddlewareName, redirectMiddleware);
         }
+        ensureErrorPagesInfraExists(http);
 
         saveConfig();
     }
@@ -918,7 +921,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         List<String> middlewareList = new ArrayList<>();
         if (requiresAuth) middlewareList.add(ServiceNames.AUTH_MIDDLEWARE);
         if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
-        if (!middlewareList.isEmpty()) routerConfig.put("middlewares", middlewareList);
+        middlewareList.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        routerConfig.put("middlewares", middlewareList);
         routers.put(routerName, routerConfig);
 
         Map<String, Object> serviceConfig = new LinkedHashMap<>();
@@ -942,6 +946,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             redirectMiddleware.put("redirectRegex", redirectRegex);
             middlewaresSection.put(redirectMiddlewareName, redirectMiddleware);
         }
+        ensureErrorPagesInfraExists(http);
 
         addLanServiceMarker(dnsName, scheme);
         if (directUrlDisabled) {
@@ -1346,6 +1351,97 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             authMiddleware.put("forwardAuth", forwardAuth);
             middlewares.put(ServiceNames.AUTH_MIDDLEWARE, authMiddleware);
         }
+    }
+
+    /**
+     * Ensure the shared offline-page infrastructure exists: an http service pointing at the Vaier
+     * container plus an {@code errors} middleware that catches 502/503/504 and serves Vaier's
+     * branded offline page. Idempotent — created once and reused by every router. Must be called
+     * AFTER routers and services are created to keep the routers/services/middlewares order.
+     */
+    private void ensureErrorPagesInfraExists(Map<String, Object> http) {
+        Map<String, Object> services = getOrCreateNestedMapOrdered(http, "services");
+        if (!services.containsKey(ServiceNames.ERROR_PAGES_SERVICE)) {
+            Map<String, Object> serviceConfig = new LinkedHashMap<>();
+            Map<String, Object> loadBalancer = new LinkedHashMap<>();
+            List<Map<String, Object>> servers = new ArrayList<>();
+            Map<String, Object> server = new LinkedHashMap<>();
+            // Traefik's errors middleware calls this URL directly, bypassing routers/auth, so it
+            // targets the Vaier container straight on its internal port.
+            server.put("url", "http://" + ServiceNames.VAIER + ":8080");
+            servers.add(server);
+            loadBalancer.put("servers", servers);
+            serviceConfig.put("loadBalancer", loadBalancer);
+            services.put(ServiceNames.ERROR_PAGES_SERVICE, serviceConfig);
+        }
+
+        Map<String, Object> middlewares = getOrCreateNestedMapOrdered(http, "middlewares");
+        if (!middlewares.containsKey(ServiceNames.ERROR_PAGES_MIDDLEWARE)) {
+            Map<String, Object> errors = new LinkedHashMap<>();
+            List<String> statuses = new ArrayList<>();
+            statuses.add("502");
+            statuses.add("503");
+            statuses.add("504");
+            errors.put("status", statuses);
+            errors.put("service", ServiceNames.ERROR_PAGES_SERVICE);
+            errors.put("query", "/error-pages/{status}");
+            Map<String, Object> errorsMiddleware = new LinkedHashMap<>();
+            errorsMiddleware.put("errors", errors);
+            middlewares.put(ServiceNames.ERROR_PAGES_MIDDLEWARE, errorsMiddleware);
+        }
+    }
+
+    /**
+     * Backfill the offline-page middleware onto every existing http router that lacks it, and ensure
+     * the shared service+middleware exist. Idempotent and additive: a router's existing middleware
+     * list (auth, redirects) is preserved and {@code vaier-errors} is appended only if missing;
+     * load-balancer servers and {@code x-vaier-*} metadata are never touched. Run on startup so
+     * routes that predate the offline page benefit immediately.
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void backfillErrorPagesOnStartup() {
+        try {
+            backfillErrorPages();
+        } catch (Exception e) {
+            log.warn("Offline-page backfill on startup failed", e);
+        }
+    }
+
+    public void backfillErrorPages() {
+        loadConfig();
+        if (config == null) return;
+        Map<String, Object> http = getNestedMap(config, "http");
+        if (http == null) return;
+        Map<String, Object> routers = getNestedMap(http, "routers");
+        if (routers == null || routers.isEmpty()) return;
+
+        boolean changed = false;
+        for (Object value : routers.values()) {
+            Map<String, Object> routerConfig = castToMap(value);
+            if (routerConfig == null) continue;
+            List<String> middlewares = extractMiddlewareList(routerConfig);
+            if (middlewares == null) middlewares = new ArrayList<>();
+            if (!middlewares.contains(ServiceNames.ERROR_PAGES_MIDDLEWARE)) {
+                middlewares.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+                routerConfig.put("middlewares", middlewares);
+                changed = true;
+            }
+        }
+
+        // Ensure shared infra regardless — a config could have routers already pointing at it but
+        // be missing the definition (or this is the first backfill on a fresh config).
+        int sizeBefore = sizeOfNested(http, "services") + sizeOfNested(http, "middlewares");
+        ensureErrorPagesInfraExists(http);
+        int sizeAfter = sizeOfNested(http, "services") + sizeOfNested(http, "middlewares");
+
+        if (changed || sizeAfter != sizeBefore) {
+            saveConfig();
+        }
+    }
+
+    private int sizeOfNested(Map<String, Object> map, String key) {
+        Map<String, Object> nested = getNestedMap(map, key);
+        return nested == null ? 0 : nested.size();
     }
 
     // --- ForManagingIgnoredServices ---

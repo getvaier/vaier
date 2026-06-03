@@ -13,6 +13,8 @@ public final class ServiceNames {
     public static final String TRAEFIK = "traefik";
 
     public static final String AUTH_MIDDLEWARE = "auth-middleware";
+    public static final String ERROR_PAGES_MIDDLEWARE = "vaier-errors";
+    public static final String ERROR_PAGES_SERVICE = "vaier-error-pages";
     public static final String CERT_RESOLVER = "letsencrypt";
     public static final String ENTRY_POINT_WEBSECURE = "websecure";
 
