@@ -534,15 +534,7 @@
     <div id="createPeerModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">Add Machine</div>
-            <div class="form-group">
-                <label class="form-label" for="peerName">Name</label>
-                <input type="text" id="peerName" class="form-input" placeholder="e.g. laptop, phone, nas">
-            </div>
-            <div class="form-group" id="descriptionGroup">
-                <label class="form-label" for="peerDescription">Description (optional)</label>
-                <input type="text" id="peerDescription" class="form-input" maxlength="200"
-                       placeholder="e.g. Home media server (NUC, Ubuntu 22.04)">
-            </div>
+            <!-- Type drives which fields below are shown, so it leads the form. -->
             <div class="form-group">
                 <label class="form-label" for="peerType">Type</label>
                 <select id="peerType" class="form-input" onchange="onPeerTypeChange()">
@@ -553,12 +545,32 @@
                     <option value="LAN_SERVER">LAN server (no VPN; behind a relay or in the server's subnet)</option>
                 </select>
             </div>
+            <div class="form-group">
+                <label class="form-label" for="peerName">Name</label>
+                <input type="text" id="peerName" class="form-input" placeholder="e.g. laptop, phone, nas">
+            </div>
+            <div class="form-group" id="descriptionGroup">
+                <label class="form-label" for="peerDescription">Description (optional)</label>
+                <input type="text" id="peerDescription" class="form-input" maxlength="200"
+                       placeholder="e.g. Home media server (NUC, Ubuntu 22.04)">
+            </div>
             <div class="form-group" id="lanCidrGroup" style="display:none">
                 <label class="form-label" for="lanCidr">LAN CIDR (optional)</label>
                 <input type="text" id="lanCidr" class="form-input" placeholder="e.g. 192.168.1.0/24">
             </div>
             <div class="form-group" id="lanAddressGroup" style="display:none">
                 <label class="form-label" for="lanAddress" id="lanAddressLabel">LAN address (optional)</label>
+                <!-- LAN scanner (#246) — Enterprise, LAN_SERVER only. Sits above the address input so the
+                     flow reads scan → pick → fills the address. The scan is async (POST, then poll). -->
+                <div id="lanScanRow" style="display:none;margin-bottom:0.5rem">
+                    <button type="button" id="lanScanModalBtn" class="btn btn-secondary btn-small"
+                            onclick="modalScanLan()">⌕ Scan LAN for machines</button>
+                    <span id="lanScanModalStatus" style="font-size:0.72rem;color:var(--text-muted);margin-left:0.5rem"></span>
+                    <select id="lanScanModalSelect" class="form-input" style="display:none;margin-top:0.4rem"
+                            onchange="pickDiscoveredHost()">
+                        <option value="">— pick a discovered machine —</option>
+                    </select>
+                </div>
                 <input type="text" id="lanAddress" class="form-input" placeholder="e.g. 192.168.1.50" oninput="updateLanAddressHint()">
                 <span id="lanAddressHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
                 <div id="lanAddressHelp" style="font-size:0.7rem;color:var(--text-dim);margin-top:0.25rem;">
@@ -1261,6 +1273,14 @@
             document.getElementById('lanAddressHint').textContent = '';
             document.getElementById('runsDocker').checked = false;
             document.getElementById('dockerPort').value = '2375';
+            // Reset the in-modal LAN scanner: invalidate any in-flight poll chain and clear the picker.
+            _modalScanToken++;
+            document.getElementById('lanScanModalBtn').textContent = '⌕ Scan LAN for machines';
+            document.getElementById('lanScanModalBtn').disabled = false;
+            document.getElementById('lanScanModalStatus').textContent = '';
+            document.getElementById('lanScanModalSelect').style.display = 'none';
+            document.getElementById('lanScanModalSelect').innerHTML =
+                '<option value="">— pick a discovered machine —</option>';
             onPeerTypeChange();
         }
 
@@ -1278,6 +1298,10 @@
             document.getElementById('lanAddressLabel').textContent =
                 isLanServer ? 'LAN address' : 'LAN address (optional)';
             document.getElementById('lanAddressHelp').style.display = isLanServer ? 'none' : '';
+
+            // In-modal LAN scanner (#246, Enterprise): only for LAN_SERVER — the one type where you
+            // discover a remote host behind a relay. An Ubuntu server's LAN address is its own IP.
+            syncModalScanControl(isLanServer);
 
             // Runs Docker / Docker port: only for LAN_SERVER.
             document.getElementById('runsDockerGroup').style.display = isLanServer ? '' : 'none';
@@ -1934,8 +1958,13 @@
             }
         }
 
+        // Close a modal only when the press both starts and ends on its backdrop. A click whose
+        // mousedown began inside the dialog — e.g. selecting text in an input and releasing on the
+        // backdrop — must NOT close it; that was wiping a half-filled Add Machine form mid-editing.
+        let _modalMouseDownTarget = null;
+        window.addEventListener('mousedown', e => { _modalMouseDownTarget = e.target; });
         window.onclick = e => {
-            if (e.target.classList.contains('modal')) {
+            if (e.target.classList.contains('modal') && _modalMouseDownTarget === e.target) {
                 if (e.target.id === 'peerDetailsModal') hidePeerDetailsModal();
                 else e.target.classList.remove('active');
             }
@@ -2141,11 +2170,129 @@
             }
         }
 
+        // LAN scanner (#246) — an Enterprise feature, surfaced inside the Add Machine modal next to
+        // the LAN address field. On a Community instance the control stays hidden (we check GET
+        // /license once on load); the /lan-scan endpoint is also gated server-side (402).
+        //
+        // The scan is asynchronous and on demand: the operator clicks "Scan LAN" (POST /lan-scan,
+        // which returns immediately), the control shows "Scanning…" and polls GET /lan-scan until the
+        // sweep finishes (~20s per LAN), then lists the discovered hosts in a picker. Choosing one
+        // fills the LAN address (and toggles "Runs Docker" for a detected Docker host). Opening the
+        // modal shows the last cached snapshot without re-scanning.
+        const LAN_MACHINE_ROLE_LABELS = {
+            DOCKER_HOST: 'Docker host', WEB_UI: 'Web UI', SSH_HOST: 'SSH host',
+            PRINTER: 'Printer', UNKNOWN: 'Unknown'
+        };
+
+        // Resolved once on load; gates whether the in-modal scan control is shown.
+        window._vaierEnterprise = false;
+        // Invalidates any in-flight poll chain when the modal is reset/closed.
+        let _modalScanToken = 0;
+
+        async function detectEdition() {
+            try {
+                const license = await (await fetch('/license', { cache: 'no-store' })).json();
+                window._vaierEnterprise = license.edition === 'ENTERPRISE';
+            } catch (e) { window._vaierEnterprise = false; }
+        }
+
+        // Start a background scan, then poll for results.
+        async function modalScanLan() {
+            try {
+                const resp = await fetch('/lan-scan', { method: 'POST' });
+                if (resp.status === 402) { displayError('Enterprise licence required for LAN scanning.'); return; }
+            } catch (e) { displayError(`Failed to start LAN scan: ${e.message}`); return; }
+            refreshModalScanResults(++_modalScanToken);
+        }
+
+        // Read the snapshot and render; while SCANNING, re-poll. Stops if the modal closed or a newer
+        // scan/modal-open superseded this chain (token guard).
+        async function refreshModalScanResults(token) {
+            if (token !== _modalScanToken) return;
+            if (!document.getElementById('createPeerModal').classList.contains('active')) return;
+            const btn = document.getElementById('lanScanModalBtn');
+            const status = document.getElementById('lanScanModalStatus');
+            const select = document.getElementById('lanScanModalSelect');
+            let snap;
+            try { snap = await (await fetch('/lan-scan', { cache: 'no-store' })).json(); }
+            catch (e) { return; }
+            if (token !== _modalScanToken) return;
+            const scanning = snap.status === 'SCANNING';
+            btn.disabled = scanning;
+            btn.textContent = scanning ? 'Scanning…' : '⌕ Scan LAN for machines';
+            if (scanning) {
+                status.textContent = 'Scanning relay LANs… (~20s per LAN)';
+                setTimeout(() => refreshModalScanResults(token), 3000);
+                return;
+            }
+            if (!snap.lastScanCompleted) { status.textContent = ''; select.style.display = 'none'; return; }
+            const machines = (snap.machines || []).slice().sort(compareByIp);
+            status.textContent = machines.length
+                ? `${machines.length} machine${machines.length === 1 ? '' : 's'} found — pick one below`
+                : 'No unregistered machines found.';
+            populateScanSelect(select, machines);
+        }
+
+        function compareByIp(a, b) {
+            const oct = s => s.ipAddress.split('.').map(Number);
+            const x = oct(a), y = oct(b);
+            for (let i = 0; i < 4; i++) { if (x[i] !== y[i]) return x[i] - y[i]; }
+            return 0;
+        }
+
+        function populateScanSelect(select, machines) {
+            if (!machines.length) { select.style.display = 'none'; return; }
+            const groups = {};
+            machines.forEach(m => { (groups[m.relayAnchor] = groups[m.relayAnchor] || []).push(m); });
+            let html = '<option value="">— pick a discovered machine —</option>';
+            Object.keys(groups).forEach(anchor => {
+                html += `<optgroup label="${escapeHtml(anchor)}">`;
+                groups[anchor].forEach(m => {
+                    const role = LAN_MACHINE_ROLE_LABELS[m.role] || m.role;
+                    const ports = (m.openPorts && m.openPorts.length) ? ' :' + m.openPorts.join(',') : '';
+                    html += `<option value="${escapeHtml(m.ipAddress)}" data-role="${escapeHtml(m.role)}">`
+                        + `${escapeHtml(m.ipAddress)} — ${escapeHtml(role)}${escapeHtml(ports)}</option>`;
+                });
+                html += '</optgroup>';
+            });
+            select.innerHTML = html;
+            select.style.display = '';
+        }
+
+        // Picking a discovered host fills the address field (and toggles Runs Docker for a Docker host).
+        function pickDiscoveredHost() {
+            const select = document.getElementById('lanScanModalSelect');
+            const opt = select.options[select.selectedIndex];
+            if (!opt || !opt.value) return;
+            document.getElementById('lanAddress').value = opt.value;
+            if (opt.dataset.role === 'DOCKER_HOST'
+                    && document.getElementById('peerType').value === 'LAN_SERVER') {
+                document.getElementById('runsDocker').checked = true;
+                onRunsDockerChange();
+            }
+            updateLanAddressHint();
+        }
+
+        // Show/hide the in-modal scan control and load any existing snapshot. Called from
+        // onPeerTypeChange whenever the LAN address field's visibility is recomputed.
+        function syncModalScanControl(isLanServer) {
+            const row = document.getElementById('lanScanRow');
+            const show = isLanServer && window._vaierEnterprise;
+            row.style.display = show ? '' : 'none';
+            if (show) refreshModalScanResults(++_modalScanToken);
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
         setupPeerMap();
         fetchPeers();
         fetchVaierServerServices();
         fetchLanServers();
         fetchServerLocation();
+        detectEdition();
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());

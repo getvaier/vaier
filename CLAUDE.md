@@ -84,12 +84,13 @@ GitHub Actions:
 
 ## Docker Stack
 
-The `docker-compose.yml` runs five services on a custom bridge network (`172.20.0.0/16`):
+The `docker-compose.yml` runs six services on a custom bridge network (`172.20.0.0/16`):
 1. **WireGuard** — VPN server (UDP 51820)
 2. **Traefik** — Reverse proxy with Let's Encrypt (ports 80, 443, 8080)
 3. **Authelia** — Authentication middleware
 4. **Redis** — Session store for Authelia
 5. **Vaier** — This Spring Boot app (port 8888 externally, 8080 internally)
+6. **vaier-offline** — Tiny always-up nginx serving the branded offline page when the Vaier container itself is down (a low-priority Traefik fallback router for the Vaier host)
 
 ### Sub-image version pinning
 

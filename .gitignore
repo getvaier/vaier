@@ -29,6 +29,9 @@ build/
 *.conf
 *.pem
 
+# ...but the offline fallback page's nginx config is a committed source file, not runtime state.
+!offline/default.conf
+
 # Runtime data (secrets, certs, state)
 wireguard/
 authelia/

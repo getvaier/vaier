@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetAppSettingsUseCase;
+import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
@@ -10,6 +11,7 @@ import net.vaier.config.ServiceNames;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import net.vaier.domain.port.ForReadingAppVersion;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForSendingTestEmail;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class SettingsService implements
     GetAppSettingsUseCase,
+    GetAppVersionUseCase,
     UpdateAwsCredentialsUseCase,
     UpdateSmtpSettingsUseCase,
     TestSmtpCredentialsUseCase {
@@ -33,6 +36,7 @@ public class SettingsService implements
     private final ForReadingStoredSmtpPassword storedPasswordReader;
     private final ForSendingTestEmail testEmailSender;
     private final ConfigResolver configResolver;
+    private final ForReadingAppVersion appVersionReader;
 
     public SettingsService(ForPersistingAppConfiguration configPersistence,
                            ForValidatingAwsCredentials forValidatingAwsCredentials,
@@ -41,7 +45,8 @@ public class SettingsService implements
                            ForVerifyingSmtpCredentials smtpVerifier,
                            ForReadingStoredSmtpPassword storedPasswordReader,
                            ForSendingTestEmail testEmailSender,
-                           ConfigResolver configResolver) {
+                           ConfigResolver configResolver,
+                           ForReadingAppVersion appVersionReader) {
         this.configPersistence = configPersistence;
         this.forValidatingAwsCredentials = forValidatingAwsCredentials;
         this.smtpNotifierConfig = smtpNotifierConfig;
@@ -50,6 +55,12 @@ public class SettingsService implements
         this.storedPasswordReader = storedPasswordReader;
         this.testEmailSender = testEmailSender;
         this.configResolver = configResolver;
+        this.appVersionReader = appVersionReader;
+    }
+
+    @Override
+    public String appVersion() {
+        return appVersionReader.currentVersion();
     }
 
     @Override

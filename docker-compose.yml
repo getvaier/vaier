@@ -472,6 +472,7 @@ services:
       # Also threaded into server peers' client-side AllowedIPs so they can initiate connections
       # back into the server's LAN through the tunnel (#204).
       VAIER_SERVER_LAN_CIDR: ${VAIER_SERVER_LAN_CIDR:-}
+      VAIER_LICENSE: ${VAIER_LICENSE:-}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
@@ -512,7 +513,7 @@ services:
       - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt
-      - traefik.http.routers.vaier.middlewares=vaier-auth
+      - traefik.http.routers.vaier.middlewares=vaier-auth,vaier-down
       - traefik.http.routers.vaier.priority=100
       # Authelia middleware
       - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${VAIER_DOMAIN}
@@ -520,5 +521,39 @@ services:
       - traefik.http.middlewares.vaier-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
       - traefik.http.middlewares.vaier-auth.forwardauth.maxResponseBodySize=65536
       - traefik.http.services.vaier.loadbalancer.server.port=8080
+      # When the Vaier backend itself is unreachable (502/503/504), the vaier-down errors middleware
+      # (defined on vaier-offline) serves the branded offline page instead of Traefik's bare "Bad
+      # gateway". vaier-public also carries it so unauthenticated public paths degrade gracefully.
+      - traefik.http.routers.vaier-public.middlewares=vaier-down
+    networks:
+      - vaier-network
+
+  # Tiny static page server that stands in for Vaier when Vaier is down. Deliberately independent of
+  # the vaier container so the branded offline page is still reachable while Vaier is unavailable.
+  vaier-offline:
+    image: nginx:1.27.5-alpine
+    container_name: vaier-offline
+    restart: unless-stopped
+    volumes:
+      - ./offline/html:/usr/share/nginx/html:ro
+      - ./offline/default.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.vaier-offline.loadbalancer.server.port=80
+      # Fallback router for the Vaier host. Its priority sits ABOVE the self-published file-provider
+      # router (priority 30 in remote-apps.yml, which still points at the dead backend when Vaier is
+      # down) but BELOW Vaier's own docker-label routers (priority 100/200). So while Vaier is up its
+      # real routers win; when the vaier container stops, those drop away and this one becomes the
+      # highest match — serving the branded offline page for any path instead of "Bad gateway".
+      - traefik.http.routers.vaier-offline.rule=Host(`vaier.${VAIER_DOMAIN}`)
+      - traefik.http.routers.vaier-offline.priority=50
+      - traefik.http.routers.vaier-offline.entrypoints=websecure
+      - traefik.http.routers.vaier-offline.tls.certresolver=letsencrypt
+      - traefik.http.routers.vaier-offline.service=vaier-offline
+      # Also catch app-level gateway errors while the vaier container is still running (e.g. a
+      # mid-restart 502/503/504): the errors middleware swaps in the same static page.
+      - traefik.http.middlewares.vaier-down.errors.status=502-504
+      - traefik.http.middlewares.vaier-down.errors.service=vaier-offline
+      - traefik.http.middlewares.vaier-down.errors.query=/
     networks:
       - vaier-network

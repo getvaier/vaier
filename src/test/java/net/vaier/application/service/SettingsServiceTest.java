@@ -7,6 +7,7 @@ import net.vaier.domain.DnsProvider;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import net.vaier.domain.port.ForReadingAppVersion;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForSendingTestEmail;
@@ -44,6 +45,7 @@ class SettingsServiceTest {
     @Mock ForReadingStoredSmtpPassword storedPasswordReader;
     @Mock ForSendingTestEmail testEmailSender;
     @Mock ConfigResolver configResolver;
+    @Mock ForReadingAppVersion appVersionReader;
 
     @InjectMocks SettingsService service;
 
@@ -54,6 +56,15 @@ class SettingsServiceTest {
             .awsSecret("secret")
             .acmeEmail("admin@example.com")
             .build();
+    }
+
+    // --- appVersion ---
+
+    @Test
+    void appVersion_delegatesToTheVersionPort() {
+        when(appVersionReader.currentVersion()).thenReturn("1.0.0");
+
+        assertThat(service.appVersion()).isEqualTo("1.0.0");
     }
 
     // --- getSettings ---

@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
+import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
@@ -21,12 +22,23 @@ import static org.mockito.Mockito.when;
 class SettingsRestControllerTest {
 
     @Mock GetAppSettingsUseCase getAppSettingsUseCase;
+    @Mock GetAppVersionUseCase getAppVersionUseCase;
     @Mock UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
     @Mock UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
     @Mock TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
 
     @InjectMocks
     SettingsRestController controller;
+
+    @Test
+    void getVersion_returnsTheRunningBuildVersion() {
+        when(getAppVersionUseCase.appVersion()).thenReturn("1.0.0");
+
+        ResponseEntity<SettingsRestController.VersionResponse> response = controller.getVersion();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody().version()).isEqualTo("1.0.0");
+    }
 
     @Test
     void getConfig_returnsCurrentSettings() {

@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
+import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
@@ -18,15 +19,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class SettingsRestController {
 
     private final GetAppSettingsUseCase getAppSettingsUseCase;
+    private final GetAppVersionUseCase getAppVersionUseCase;
     private final UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
     private final UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
     private final TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
 
     public SettingsRestController(GetAppSettingsUseCase getAppSettingsUseCase,
+                                  GetAppVersionUseCase getAppVersionUseCase,
                                   UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase,
                                   UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase,
                                   TestSmtpCredentialsUseCase testSmtpCredentialsUseCase) {
         this.getAppSettingsUseCase = getAppSettingsUseCase;
+        this.getAppVersionUseCase = getAppVersionUseCase;
         this.updateAwsCredentialsUseCase = updateAwsCredentialsUseCase;
         this.updateSmtpSettingsUseCase = updateSmtpSettingsUseCase;
         this.testSmtpCredentialsUseCase = testSmtpCredentialsUseCase;
@@ -35,6 +39,12 @@ public class SettingsRestController {
     @GetMapping("/config")
     public ResponseEntity<AppSettingsResult> getConfig() {
         return ResponseEntity.ok(getAppSettingsUseCase.getSettings());
+    }
+
+    /** The deployed Vaier version, surfaced so the operator always sees which build is running. */
+    @GetMapping("/version")
+    public ResponseEntity<VersionResponse> getVersion() {
+        return ResponseEntity.ok(new VersionResponse(getAppVersionUseCase.appVersion()));
     }
 
     @PutMapping("/aws")
@@ -71,6 +81,7 @@ public class SettingsRestController {
         }
     }
 
+    public record VersionResponse(String version) {}
     public record UpdateAwsRequest(String awsKey, String awsSecret) {}
     public record UpdateSmtpRequest(String smtpHost, int smtpPort, String smtpUsername,
                                     String smtpPassword, String smtpSender) {}

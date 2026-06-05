@@ -158,6 +158,15 @@
                         </exclude>
                     </excludes>
                 </configuration>
+                <executions>
+                    <!-- Bakes META-INF/build-info.properties (project.version, build time) into the
+                         jar so the running app can report the deployed version to the operator. -->
+                    <execution>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
