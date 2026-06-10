@@ -48,6 +48,17 @@ class OfflinePageServiceTest {
     }
 
     @Test
+    void emphasisesTheAiInTheVaierBrand() {
+        OfflinePage page = service("example.com").render(503, "bar.example.com");
+
+        // The "ai" in V-ai-er is set apart in its own fluorescent accent...
+        assertThat(page.html()).contains("V<span class=\"brand-ai\">ai</span>er");
+        // ...backed by a .brand-ai style using the fluorescent brand-ai colour.
+        assertThat(page.html()).contains(".brand-ai");
+        assertThat(page.html().toLowerCase()).contains("#39ff14");
+    }
+
+    @Test
     void missingHostStillRendersAGenericPage() {
         OfflinePage page = service("example.com").render(502, null);
 

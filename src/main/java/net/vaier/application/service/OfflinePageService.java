@@ -40,13 +40,14 @@ public class OfflinePageService implements GetOfflinePageUseCase {
             <title>%TITLE% &middot; Vaier</title>
             <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
             <style>
-            :root{--bg:#1e1e1e;--bg-card:#2d2d30;--border:#3c3c3c;--text:#d4d4d4;--text-muted:#858585;--accent:#4fc3f7;--accent-hover:#81d4fa;}
+            :root{--bg:#1e1e1e;--bg-card:#2d2d30;--border:#3c3c3c;--text:#d4d4d4;--text-muted:#858585;--accent:#4fc3f7;--accent-hover:#81d4fa;--brand-ai:#39ff14;}
             *{margin:0;padding:0;box-sizing:border-box;}
             html,body{height:100%;}
             body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;display:flex;align-items:center;justify-content:center;padding:1.5rem;}
             .card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:2.5rem;max-width:520px;width:100%;text-align:center;}
             .brand{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--accent);font-weight:600;margin-bottom:1.5rem;}
             .brand svg{display:block;}
+            .brand-ai{color:var(--brand-ai);text-shadow:0 0 6px rgba(57,255,20,0.55);}
             .code{font-size:2.6rem;font-weight:700;color:var(--accent);letter-spacing:0.05em;}
             h1{font-size:1.25rem;margin:0.5rem 0 0.75rem;color:var(--text);}
             p{color:var(--text-muted);}
@@ -62,7 +63,7 @@ public class OfflinePageService implements GetOfflinePageUseCase {
             <main class="card">
             <div class="brand">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/><line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/><line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/><circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/></svg>
-            <span>Vaier</span>
+            <span>V<span class="brand-ai">ai</span>er</span>
             </div>
             <div class="code">%CODE%</div>
             <h1>%TITLE%</h1>

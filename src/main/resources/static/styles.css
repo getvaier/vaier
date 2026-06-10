@@ -11,6 +11,7 @@
     --text-dim:     #5a5a5a;
     --accent:       #4fc3f7;
     --accent-hover: #81d4fa;
+    --brand-ai:     #39ff14;
     --green:        #4ec9b0;
     --red:          #f48771;
     --orange:       #ce9178;
@@ -68,6 +69,9 @@ body {
 
 .topbar-brand:hover { text-decoration: none; color: var(--accent); }
 .topbar-brand svg { flex-shrink: 0; }
+
+/* The "ai" in V-ai-er, lifted out in a fluorescent accent with a soft glow. */
+.brand-ai { color: var(--brand-ai); text-shadow: 0 0 6px rgba(57, 255, 20, 0.55); }
 
 .topbar-nav {
     display: flex;
