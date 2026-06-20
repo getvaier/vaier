@@ -11,6 +11,7 @@ public interface GetAppSettingsUseCase {
         Integer smtpPort,
         String smtpUsername,
         String smtpSender,
-        String dnsProvider
+        String dnsProvider,
+        int diskMonitorThresholdPercent
     ) {}
 }

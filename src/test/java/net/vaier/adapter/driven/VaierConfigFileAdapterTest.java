@@ -135,6 +135,37 @@ class VaierConfigFileAdapterTest {
     }
 
     @Test
+    void load_roundTripsDiskMonitorThreshold() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .diskMonitorThresholdPercent(70)
+            .build();
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getDiskMonitorThresholdPercent()).isEqualTo(70);
+    }
+
+    @Test
+    void load_diskMonitorThresholdNullWhenNotPresent() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .build();
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getDiskMonitorThresholdPercent()).isNull();
+    }
+
+    @Test
     void save_writesConfigFileWithOwnerOnlyPermissions() throws IOException {
         VaierConfig config = VaierConfig.builder()
             .domain("example.com")

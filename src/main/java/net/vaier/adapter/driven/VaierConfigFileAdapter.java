@@ -50,6 +50,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
                 .smtpPort((Integer) data.get("smtpPort"))
                 .smtpUsername((String) data.get("smtpUsername"))
                 .smtpSender((String) data.get("smtpSender"))
+                .diskMonitorThresholdPercent((Integer) data.get("diskMonitorThresholdPercent"))
                 .build());
         } catch (Exception e) {
             log.warn("Failed to load vaier config from {}", configFilePath, e);
@@ -78,6 +79,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration {
         data.put("smtpPort", config.getSmtpPort());
         data.put("smtpUsername", config.getSmtpUsername());
         data.put("smtpSender", config.getSmtpSender());
+        data.put("diskMonitorThresholdPercent", config.getDiskMonitorThresholdPercent());
 
         try (FileWriter writer = new FileWriter(file)) {
             yaml.dump(data, writer);

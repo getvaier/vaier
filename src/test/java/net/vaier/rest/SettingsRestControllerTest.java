@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +27,7 @@ class SettingsRestControllerTest {
     @Mock UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
     @Mock UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
     @Mock TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
+    @Mock UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -43,7 +45,7 @@ class SettingsRestControllerTest {
     @Test
     void getConfig_returnsCurrentSettings() {
         AppSettingsResult settings = new AppSettingsResult("example.com", "****MPLE", "admin@example.com",
-                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53");
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85);
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         ResponseEntity<AppSettingsResult> response = controller.getConfig();
@@ -110,6 +112,26 @@ class SettingsRestControllerTest {
         verify(testSmtpCredentialsUseCase).sendTestEmail(
                 "smtp.example.com", 587, "user@example.com", "pass",
                 "noreply@example.com", "admin@example.com");
+    }
+
+    @Test
+    void updateDiskMonitor_returns200AndDelegates() {
+        ResponseEntity<?> response = controller.updateDiskMonitor(
+                new SettingsRestController.UpdateDiskMonitorRequest(70));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(updateDiskMonitorSettingsUseCase).updateDiskMonitorThreshold(70);
+    }
+
+    @Test
+    void updateDiskMonitor_returns400OnInvalidValue() {
+        doThrow(new IllegalArgumentException("out of range"))
+                .when(updateDiskMonitorSettingsUseCase).updateDiskMonitorThreshold(org.mockito.ArgumentMatchers.anyInt());
+
+        ResponseEntity<?> response = controller.updateDiskMonitor(
+                new SettingsRestController.UpdateDiskMonitorRequest(0));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
     }
 
     @Test

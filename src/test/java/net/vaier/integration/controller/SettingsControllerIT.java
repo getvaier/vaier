@@ -19,7 +19,7 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
     void getConfig_returnsAppSettings() throws Exception {
         AppSettingsResult settings = new AppSettingsResult(
                 "example.com", "****MPLE", "admin@example.com",
-                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53");
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85);
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         mockMvc.perform(get("/settings/config"))
@@ -29,7 +29,33 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(jsonPath("$.acmeEmail").value("admin@example.com"))
                .andExpect(jsonPath("$.smtpHost").value("smtp.example.com"))
                .andExpect(jsonPath("$.smtpPort").value(587))
-               .andExpect(jsonPath("$.dnsProvider").value("ROUTE53"));
+               .andExpect(jsonPath("$.dnsProvider").value("ROUTE53"))
+               .andExpect(jsonPath("$.diskMonitorThresholdPercent").value(85));
+    }
+
+    @Test
+    void updateDiskMonitor_returns200AndDelegates() throws Exception {
+        mockMvc.perform(put("/settings/disk-monitor")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"diskMonitorThresholdPercent":70}
+                           """))
+               .andExpect(status().isOk());
+
+        verify(updateDiskMonitorSettingsUseCase).updateDiskMonitorThreshold(70);
+    }
+
+    @Test
+    void updateDiskMonitor_returns400OnInvalidValue() throws Exception {
+        doThrow(new IllegalArgumentException("out of range"))
+                .when(updateDiskMonitorSettingsUseCase).updateDiskMonitorThreshold(anyInt());
+
+        mockMvc.perform(put("/settings/disk-monitor")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"diskMonitorThresholdPercent":0}
+                           """))
+               .andExpect(status().isBadRequest());
     }
 
     @Test

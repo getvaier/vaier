@@ -17,6 +17,10 @@ public class VaierConfig {
     private Integer smtpPort;
     private String smtpUsername;
     private String smtpSender;
+    private Integer diskMonitorThresholdPercent;
+
+    /** The default host-disk alert threshold when none is configured: notify above 85% used. */
+    public static final int DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT = 85;
 
     public static void validateForSetup(String domain, String awsKey, String awsSecret, String acmeEmail) {
         requireNonBlank(domain, "domain");
@@ -42,6 +46,27 @@ public class VaierConfig {
             .smtpUsername(newSmtpUsername)
             .smtpSender(newSmtpSender)
             .build();
+    }
+
+    /** A copy with the host-disk alert threshold replaced; every other field carries over unchanged. */
+    public VaierConfig withDiskMonitorThreshold(int thresholdPercent) {
+        validateThreshold(thresholdPercent);
+        return toBuilder()
+            .diskMonitorThresholdPercent(thresholdPercent)
+            .build();
+    }
+
+    /** The effective alert threshold: the configured value, or {@link #DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT}. */
+    public int effectiveDiskMonitorThresholdPercent() {
+        return diskMonitorThresholdPercent != null
+            ? diskMonitorThresholdPercent
+            : DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT;
+    }
+
+    private static void validateThreshold(int thresholdPercent) {
+        if (thresholdPercent < 1 || thresholdPercent > 99) {
+            throw new IllegalArgumentException("diskMonitorThresholdPercent must be between 1 and 99");
+        }
     }
 
     /** Whether SMTP is configured enough to send mail — both a host and a username are set. */

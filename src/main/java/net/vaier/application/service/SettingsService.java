@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
@@ -26,6 +27,7 @@ public class SettingsService implements
     GetAppVersionUseCase,
     UpdateAwsCredentialsUseCase,
     UpdateSmtpSettingsUseCase,
+    UpdateDiskMonitorSettingsUseCase,
     TestSmtpCredentialsUseCase {
 
     private final ForPersistingAppConfiguration configPersistence;
@@ -67,7 +69,16 @@ public class SettingsService implements
     public AppSettingsResult getSettings() {
         return configPersistence.load()
             .map(this::toResult)
-            .orElse(new AppSettingsResult(null, null, null, null, null, null, null, dnsProviderName()));
+            .orElse(new AppSettingsResult(null, null, null, null, null, null, null, dnsProviderName(),
+                VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT));
+    }
+
+    @Override
+    public void updateDiskMonitorThreshold(int thresholdPercent) {
+        VaierConfig current = configPersistence.load().orElse(VaierConfig.builder().build());
+        configPersistence.save(current.withDiskMonitorThreshold(thresholdPercent));
+        configResolver.reload();
+        log.info("Host disk monitor threshold updated to {}%", thresholdPercent);
     }
 
     private String dnsProviderName() {
@@ -115,7 +126,8 @@ public class SettingsService implements
             config.getSmtpPort(),
             config.getSmtpUsername(),
             config.getSmtpSender(),
-            dnsProviderName()
+            dnsProviderName(),
+            config.effectiveDiskMonitorThresholdPercent()
         );
     }
 

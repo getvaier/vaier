@@ -179,6 +179,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
 
+    @MockBean
+    protected UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
+
     // --- Docker/server use cases ---
     @MockBean
     protected GetServerInfoUseCase getServerInfoUseCase;
@@ -231,6 +234,13 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- Peer notification use case ---
     @MockBean
     protected NotifyAdminsOfPeerTransitionUseCase notifyAdminsOfPeerTransitionUseCase;
+
+    // --- Host monitoring use cases ---
+    @MockBean
+    protected GetHostDiskUsageUseCase getHostDiskUsageUseCase;
+
+    @MockBean
+    protected NotifyAdminsOfDiskPressureUseCase notifyAdminsOfDiskPressureUseCase;
 
     // --- Launchpad use cases ---
     @MockBean

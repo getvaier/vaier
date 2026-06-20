@@ -189,6 +189,27 @@ class ConfigResolverTest {
     }
 
     @Test
+    void diskMonitorThreshold_defaultsTo85WhenUnset() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+
+        assertThat(resolver.getDiskMonitorThresholdPercent()).isEqualTo(85);
+    }
+
+    @Test
+    void diskMonitorThreshold_usesConfiguredValue() {
+        VaierConfig config = VaierConfig.builder()
+            .diskMonitorThresholdPercent(70)
+            .build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+
+        ConfigResolver resolver = new ConfigResolver(configPersistence, key -> null);
+
+        assertThat(resolver.getDiskMonitorThresholdPercent()).isEqualTo(70);
+    }
+
+    @Test
     void treatsBlankPersistedValueAsMissing() {
         VaierConfig config = VaierConfig.builder()
             .domain("   ")

@@ -334,6 +334,28 @@
             </div>
         </div>
 
+        <!-- Host disk monitoring -->
+        <div class="settings-section">
+            <div class="settings-section-title">Host disk monitoring</div>
+            <div class="settings-form-card">
+                <div class="settings-form-card-title">Disk-pressure alerts</div>
+                <div class="settings-form-card-desc">
+                    Vaier watches the host's free disk space and emails all admins when usage crosses
+                    this threshold (and again when it recovers). Requires SMTP above to be configured.
+                </div>
+                <div class="settings-form-row" style="align-items: flex-end;">
+                    <div class="settings-form-field" style="flex: 0; min-width: 120px;">
+                        <label>Alert above (%)</label>
+                        <input type="number" id="diskThreshold" min="1" max="99" placeholder="85">
+                    </div>
+                </div>
+                <div class="settings-form-actions" style="margin-top: 1rem;">
+                    <button class="btn btn-primary" onclick="saveDiskMonitor()">Save disk threshold</button>
+                    <span class="settings-form-note" id="diskNote"></span>
+                </div>
+            </div>
+        </div>
+
         <!-- About — which Vaier build/edition this instance is running -->
         <div class="settings-section">
             <div class="settings-section-title">About</div>
@@ -366,7 +388,32 @@
                 if (s.smtpPort) document.getElementById('smtpPort').value = s.smtpPort;
                 if (s.smtpUsername) document.getElementById('smtpUsername').value = s.smtpUsername;
                 if (s.smtpSender) document.getElementById('smtpSender').value = s.smtpSender;
+                if (s.diskMonitorThresholdPercent) document.getElementById('diskThreshold').value = s.diskMonitorThresholdPercent;
             } catch (_) {}
+        }
+
+        async function saveDiskMonitor() {
+            const threshold = parseInt(document.getElementById('diskThreshold').value);
+            if (!threshold || threshold < 1 || threshold > 99) {
+                setNote('diskNote', 'Enter a threshold between 1 and 99.', 'error');
+                return;
+            }
+            setNote('diskNote', 'Saving…', '');
+            try {
+                const r = await fetch('/settings/disk-monitor', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ diskMonitorThresholdPercent: threshold })
+                });
+                if (r.ok) {
+                    setNote('diskNote', 'Disk threshold saved.', 'ok');
+                } else {
+                    const err = await r.json().catch(() => ({}));
+                    setNote('diskNote', err.error || 'Save failed.', 'error');
+                }
+            } catch (e) {
+                setNote('diskNote', e.message, 'error');
+            }
         }
 
         async function saveAws() {

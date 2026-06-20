@@ -479,6 +479,7 @@ services:
       TRAEFIK_API_URL: http://traefik:8080
       AUTHELIA_CONFIG_PATH: /authelia/config
       VAIER_CONFIG_PATH: /vaier/config
+      VAIER_HOST_ROOT_PATH: /host
       DOCKER_HOST: tcp://docker-proxy:2375
     depends_on:
       vaier-init:
@@ -501,6 +502,8 @@ services:
       - ./authelia/config:/authelia/config
       - ./vaier/config:/vaier/config
       - ./geoip:/geoip:ro
+      # Host root, read-only — lets Vaier monitor real host disk free space (VAIER_HOST_ROOT_PATH)
+      - /:/host:ro
     restart: unless-stopped
     labels:
       - traefik.enable=true

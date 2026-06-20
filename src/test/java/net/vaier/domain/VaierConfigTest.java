@@ -40,6 +40,35 @@ class VaierConfigTest {
     }
 
     @Test
+    void effectiveDiskMonitorThresholdPercent_defaultsTo85WhenUnset() {
+        assertThat(VaierConfig.builder().build().effectiveDiskMonitorThresholdPercent()).isEqualTo(85);
+    }
+
+    @Test
+    void effectiveDiskMonitorThresholdPercent_usesConfiguredValue() {
+        VaierConfig config = VaierConfig.builder().diskMonitorThresholdPercent(70).build();
+
+        assertThat(config.effectiveDiskMonitorThresholdPercent()).isEqualTo(70);
+    }
+
+    @Test
+    void withDiskMonitorThreshold_replacesThresholdAndKeepsOtherFields() {
+        VaierConfig updated = fullConfig().withDiskMonitorThreshold(60);
+
+        assertThat(updated.getDiskMonitorThresholdPercent()).isEqualTo(60);
+        assertThat(updated.getDomain()).isEqualTo("vaier.net");
+        assertThat(updated.getSmtpHost()).isEqualTo("smtp.example.com");
+    }
+
+    @Test
+    void withDiskMonitorThreshold_rejectsOutOfRangeValues() {
+        assertThatThrownBy(() -> fullConfig().withDiskMonitorThreshold(0))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> fullConfig().withDiskMonitorThreshold(100))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void withAwsCredentials_replacesCredentialsAndCarriesEveryOtherFieldOver() {
         VaierConfig updated = fullConfig().withAwsCredentials("AKIANEWKEY999", "newsecret");
 

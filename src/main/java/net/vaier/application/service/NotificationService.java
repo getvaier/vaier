@@ -1,8 +1,10 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.NotifyAdminsOfDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.DiskUsage;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierConfig;
@@ -17,7 +19,9 @@ import java.util.Optional;
 
 @Service
 @Slf4j
-public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase {
+public class NotificationService implements
+        NotifyAdminsOfPeerTransitionUseCase,
+        NotifyAdminsOfDiskPressureUseCase {
 
     private static final int DEFAULT_SMTP_PORT = 587;
 
@@ -41,16 +45,37 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
 
     @Override
     public void notifyAdmins(PeerSnapshot snapshot) {
+        sendToAdmins(snapshot.notificationSubject(),
+                snapshot.notificationBody(configResolver.getDomain()),
+                "peer " + snapshot.name());
+    }
+
+    @Override
+    public void notifyAdminsOfDiskPressure(DiskUsage usage, int thresholdPercent) {
+        sendToAdmins(usage.pressureSubject(),
+                usage.pressureBody(thresholdPercent, configResolver.getDomain()),
+                "disk pressure on " + usage.path());
+    }
+
+    @Override
+    public void notifyAdminsOfDiskRecovery(DiskUsage usage, int thresholdPercent) {
+        sendToAdmins(usage.recoverySubject(),
+                usage.pressureBody(thresholdPercent, configResolver.getDomain()),
+                "disk recovery on " + usage.path());
+    }
+
+    /** Send {@code subject}/{@code body} to every admin with an email, if SMTP is fully configured. */
+    private void sendToAdmins(String subject, String body, String context) {
         Optional<VaierConfig> maybeConfig = configPersistence.load();
         if (maybeConfig.isEmpty() || !maybeConfig.get().isSmtpConfigured()) {
-            log.debug("SMTP not configured; skipping admin notification for {}", snapshot.name());
+            log.debug("SMTP not configured; skipping admin notification for {}", context);
             return;
         }
         VaierConfig config = maybeConfig.get();
 
         Optional<String> password = storedPasswordReader.readStoredPassword().filter(p -> !p.isBlank());
         if (password.isEmpty()) {
-            log.debug("SMTP password not stored; skipping admin notification for {}", snapshot.name());
+            log.debug("SMTP password not stored; skipping admin notification for {}", context);
             return;
         }
 
@@ -61,7 +86,7 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
                 .toList();
 
         if (recipients.isEmpty()) {
-            log.debug("No admin users with email; skipping notification for {}", snapshot.name());
+            log.debug("No admin users with email; skipping notification for {}", context);
             return;
         }
 
@@ -73,12 +98,11 @@ public class NotificationService implements NotifyAdminsOfPeerTransitionUseCase 
                     password.get(),
                     config.getSmtpSender(),
                     recipients,
-                    snapshot.notificationSubject(),
-                    snapshot.notificationBody(configResolver.getDomain()));
-            log.info("Sent admin notification: {} is now {}", snapshot.name(),
-                    snapshot.connected() ? "connected" : "disconnected");
+                    subject,
+                    body);
+            log.info("Sent admin notification: {}", subject);
         } catch (Exception e) {
-            log.warn("Failed to send admin notification for peer {}: {}", snapshot.name(), e.getMessage());
+            log.warn("Failed to send admin notification for {}: {}", context, e.getMessage());
         }
     }
 }

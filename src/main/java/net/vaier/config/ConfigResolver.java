@@ -22,6 +22,7 @@ public class ConfigResolver {
     private Integer smtpPort;
     private String smtpUsername;
     private String smtpSender;
+    private int diskMonitorThresholdPercent;
 
     @Autowired
     public ConfigResolver(ForPersistingAppConfiguration configPersistence) {
@@ -44,6 +45,7 @@ public class ConfigResolver {
         this.smtpPort = config.getSmtpPort();
         this.smtpUsername = config.getSmtpUsername();
         this.smtpSender = config.getSmtpSender();
+        this.diskMonitorThresholdPercent = config.effectiveDiskMonitorThresholdPercent();
         if (domain != null) {
             log.info("Configuration resolved for domain: {} (DNS provider: {})", domain, getDnsProvider());
         }
@@ -63,6 +65,7 @@ public class ConfigResolver {
     public Integer getSmtpPort() { return smtpPort; }
     public String getSmtpUsername() { return smtpUsername; }
     public String getSmtpSender() { return smtpSender; }
+    public int getDiskMonitorThresholdPercent() { return diskMonitorThresholdPercent; }
     public DnsProvider getDnsProvider() {
         boolean hasAwsCredentials = awsKey != null && !awsKey.isBlank()
             && awsSecret != null && !awsSecret.isBlank();

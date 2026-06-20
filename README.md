@@ -25,7 +25,8 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **Reverse proxy** | Traefik dynamic config generated automatically, with per-service Authelia toggle and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users and groups from the UI. |
-| **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down. |
+| **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, or when the Vaier server's own disk fills past a configurable threshold. |
+| **Host disk monitoring** | Vaier watches free space on its own host filesystem and emails all admins when usage crosses a configurable threshold (default 85%), with a recovery email once it drops back below. |
 | **Consistent branding** | Authelia login pages share Vaier's dark theme so the auth hand-off feels seamless. |
 | **LAN scanner** _(Enterprise)_ | When adding a **LAN server**, scan its relay's LAN right from the Add Machine dialog to discover hosts and pick one to fill in the address. Already-registered machines are filtered out, so only new hosts appear. Requires an Enterprise licence. |
 | **Version visibility** | The running Vaier version and edition (Community/Enterprise) are shown under *Settings → About*, so you always know which build is deployed. |
@@ -214,6 +215,27 @@ bmp.yourdomain.com/auth/*  →  http://rig.yourdomain.com:8090/auth/*
 The first publish on a host creates the DNS CNAME; later routes — host-only or path-prefixed — reuse it. Deleting any sibling leaves the CNAME alive; only when the last route on a host is removed does the CNAME go.
 
 For publishing services from non-peer LAN machines (NAS, printers, extra Docker hosts), see [`docs/ADVANCED.md`](docs/ADVANCED.md).
+
+---
+
+## Host disk monitoring
+
+Vaier polls the free space on its own host filesystem once a minute and emails every admin user when the disk fills past a threshold — useful for catching a runaway log or image cache before it takes the server down. A **recovery** email follows once usage drops back below the threshold, and Vaier only emails on a boundary crossing (not on every poll), so a disk hovering just over the line won't spam you.
+
+This reuses the same SMTP configuration as the up/down machine alerts (Settings → *Email notifications*), so it needs no extra mail setup. With SMTP unconfigured, monitoring is silent.
+
+**Threshold** — the alert fires when usage rises above the configured percentage (default **85%**). Adjust it in Settings; valid range is 1–99.
+
+**Requirements** — Vaier reads the host root filesystem through a read-only bind mount. The bundled `docker-compose.yml` already wires this up on the `vaier` service:
+
+```yaml
+    environment:
+      VAIER_HOST_ROOT_PATH: /host   # where the host root is mounted inside the container
+    volumes:
+      - /:/host:ro                  # host root, read-only
+```
+
+If you run Vaier without that mount, disk monitoring is inert (it has nothing to read) but the rest of Vaier is unaffected.
 
 ---
 

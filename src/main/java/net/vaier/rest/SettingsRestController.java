@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,17 +24,20 @@ public class SettingsRestController {
     private final UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase;
     private final UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
     private final TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
+    private final UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
 
     public SettingsRestController(GetAppSettingsUseCase getAppSettingsUseCase,
                                   GetAppVersionUseCase getAppVersionUseCase,
                                   UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase,
                                   UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase,
-                                  TestSmtpCredentialsUseCase testSmtpCredentialsUseCase) {
+                                  TestSmtpCredentialsUseCase testSmtpCredentialsUseCase,
+                                  UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase) {
         this.getAppSettingsUseCase = getAppSettingsUseCase;
         this.getAppVersionUseCase = getAppVersionUseCase;
         this.updateAwsCredentialsUseCase = updateAwsCredentialsUseCase;
         this.updateSmtpSettingsUseCase = updateSmtpSettingsUseCase;
         this.testSmtpCredentialsUseCase = testSmtpCredentialsUseCase;
+        this.updateDiskMonitorSettingsUseCase = updateDiskMonitorSettingsUseCase;
     }
 
     @GetMapping("/config")
@@ -69,6 +73,16 @@ public class SettingsRestController {
         }
     }
 
+    @PutMapping("/disk-monitor")
+    public ResponseEntity<?> updateDiskMonitor(@RequestBody UpdateDiskMonitorRequest request) {
+        try {
+            updateDiskMonitorSettingsUseCase.updateDiskMonitorThreshold(request.diskMonitorThresholdPercent());
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        }
+    }
+
     @PostMapping("/smtp/test")
     public ResponseEntity<?> testSmtp(@RequestBody TestSmtpRequest request) {
         try {
@@ -87,5 +101,6 @@ public class SettingsRestController {
                                     String smtpPassword, String smtpSender) {}
     public record TestSmtpRequest(String smtpHost, int smtpPort, String smtpUsername,
                                   String smtpPassword, String smtpSender, String recipient) {}
+    public record UpdateDiskMonitorRequest(int diskMonitorThresholdPercent) {}
     record ErrorResponse(String error) {}
 }

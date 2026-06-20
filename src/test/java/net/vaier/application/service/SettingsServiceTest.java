@@ -154,6 +154,62 @@ class SettingsServiceTest {
         assertThat(result.awsKeyHint()).isNotNull();
     }
 
+    @Test
+    void getSettings_includesDiskMonitorThreshold() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .diskMonitorThresholdPercent(70)
+            .build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+
+        AppSettingsResult result = service.getSettings();
+
+        assertThat(result.diskMonitorThresholdPercent()).isEqualTo(70);
+    }
+
+    @Test
+    void getSettings_diskMonitorThresholdDefaultsTo85WhenUnset() {
+        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
+
+        AppSettingsResult result = service.getSettings();
+
+        assertThat(result.diskMonitorThresholdPercent()).isEqualTo(85);
+    }
+
+    // --- updateDiskMonitorThreshold ---
+
+    @Test
+    void updateDiskMonitorThreshold_savesThresholdAndReloadsResolver() {
+        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
+
+        service.updateDiskMonitorThreshold(70);
+
+        ArgumentCaptor<VaierConfig> captor = ArgumentCaptor.forClass(VaierConfig.class);
+        verify(configPersistence).save(captor.capture());
+        assertThat(captor.getValue().getDiskMonitorThresholdPercent()).isEqualTo(70);
+        verify(configResolver).reload();
+    }
+
+    @Test
+    void updateDiskMonitorThreshold_preservesExistingFields() {
+        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
+
+        service.updateDiskMonitorThreshold(60);
+
+        ArgumentCaptor<VaierConfig> captor = ArgumentCaptor.forClass(VaierConfig.class);
+        verify(configPersistence).save(captor.capture());
+        assertThat(captor.getValue().getDomain()).isEqualTo("example.com");
+        assertThat(captor.getValue().getAwsKey()).isEqualTo("AKID");
+    }
+
+    @Test
+    void updateDiskMonitorThreshold_rejectsOutOfRange() {
+        assertThatThrownBy(() -> service.updateDiskMonitorThreshold(0))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(configPersistence, never()).save(any());
+    }
+
     // --- updateAwsCredentials ---
 
     @Test
