@@ -1,5 +1,7 @@
 package net.vaier.rest;
 
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.application.GenerateLanServerSetupScriptUseCase;
@@ -149,10 +151,10 @@ class LanServerRestControllerTest {
     @Test
     void downloadSetupScript_propagatesConflictWhenRelayHasNoLanAddress() {
         when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
-            .thenThrow(new net.vaier.domain.ConflictException("Relay peer apalveien5 has no LAN address set"));
+            .thenThrow(new ConflictException("Relay peer apalveien5 has no LAN address set"));
 
         assertThatThrownBy(() -> controller.downloadSetupScript("nuc02"))
-            .isInstanceOf(net.vaier.domain.ConflictException.class);
+            .isInstanceOf(ConflictException.class);
     }
 
     @Test
@@ -242,20 +244,20 @@ class LanServerRestControllerTest {
 
     @Test
     void rename_propagatesNotFound() {
-        doThrow(new net.vaier.domain.NotFoundException("LAN server not found: ghost"))
+        doThrow(new NotFoundException("LAN server not found: ghost"))
             .when(renameLanServerUseCase).rename("ghost", "phantom");
 
         assertThatThrownBy(() -> controller.rename("ghost", new LanServerRestController.RenameRequest("phantom")))
-            .isInstanceOf(net.vaier.domain.NotFoundException.class);
+            .isInstanceOf(NotFoundException.class);
     }
 
     @Test
     void rename_propagatesConflict() {
-        doThrow(new net.vaier.domain.ConflictException("A LAN server named printer already exists"))
+        doThrow(new ConflictException("A LAN server named printer already exists"))
             .when(renameLanServerUseCase).rename("nas", "printer");
 
         assertThatThrownBy(() -> controller.rename("nas", new LanServerRestController.RenameRequest("printer")))
-            .isInstanceOf(net.vaier.domain.ConflictException.class);
+            .isInstanceOf(ConflictException.class);
     }
 
     @Test
@@ -290,12 +292,12 @@ class LanServerRestControllerTest {
 
     @Test
     void updateDescription_propagatesNotFound() {
-        doThrow(new net.vaier.domain.NotFoundException("LAN server not found: ghost"))
+        doThrow(new NotFoundException("LAN server not found: ghost"))
             .when(updateLanServerDescriptionUseCase).updateDescription("ghost", "anything");
 
         assertThatThrownBy(() -> controller.updateDescription(
                 "ghost", new LanServerRestController.UpdateDescriptionRequest("anything")))
-            .isInstanceOf(net.vaier.domain.NotFoundException.class);
+            .isInstanceOf(NotFoundException.class);
     }
 
     @Test

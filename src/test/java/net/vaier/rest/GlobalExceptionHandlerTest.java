@@ -1,5 +1,7 @@
 package net.vaier.rest;
 
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.application.AddDnsRecordUseCase;
 import net.vaier.application.AddDnsZoneUseCase;
 import net.vaier.application.DeleteDnsRecordUseCase;
@@ -119,7 +121,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void notFoundException_mappedTo404Envelope() {
         ResponseEntity<ApiError> response =
-                new GlobalExceptionHandler().handleNotFound(new net.vaier.domain.NotFoundException("peer gone"));
+                new GlobalExceptionHandler().handleNotFound(new NotFoundException("peer gone"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
         assertThat(response.getBody().code()).isEqualTo("NOT_FOUND");
@@ -129,7 +131,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void conflictException_mappedTo409Envelope() {
         ResponseEntity<ApiError> response =
-                new GlobalExceptionHandler().handleConflict(new net.vaier.domain.ConflictException("name taken"));
+                new GlobalExceptionHandler().handleConflict(new ConflictException("name taken"));
 
         assertThat(response.getStatusCode().value()).isEqualTo(409);
         assertThat(response.getBody().code()).isEqualTo("CONFLICT");

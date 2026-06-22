@@ -10,6 +10,8 @@ import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.LanServerSetupScript;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -76,7 +78,7 @@ public class LanServerService implements
         LanServer existing = forPersistingLanServers.getAll().stream()
             .filter(s -> s.hasName(name))
             .findFirst()
-            .orElseThrow(() -> new net.vaier.domain.NotFoundException("LAN server not found: " + name));
+            .orElseThrow(() -> new NotFoundException("LAN server not found: " + name));
         forPersistingLanServers.save(existing.withDescription(description));
         log.info("Updated description for LAN server {}", name);
     }
@@ -95,7 +97,7 @@ public class LanServerService implements
         LanServer existing = all.stream()
             .filter(s -> s.hasName(currentName))
             .findFirst()
-            .orElseThrow(() -> new net.vaier.domain.NotFoundException("LAN server not found: " + currentName));
+            .orElseThrow(() -> new NotFoundException("LAN server not found: " + currentName));
 
         LanServer renamed = existing.renamedTo(newName);
 
@@ -104,7 +106,7 @@ public class LanServerService implements
             return;
         }
         if (all.stream().anyMatch(s -> s.hasName(renamed.name()))) {
-            throw new net.vaier.domain.ConflictException("A LAN server named " + renamed.name() + " already exists");
+            throw new ConflictException("A LAN server named " + renamed.name() + " already exists");
         }
 
         // save() upserts by name, so write the new entry then drop the old one.

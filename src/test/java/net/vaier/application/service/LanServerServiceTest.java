@@ -1,5 +1,7 @@
 package net.vaier.application.service;
 
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
@@ -278,7 +280,7 @@ class LanServerServiceTest {
         when(forPersistingLanServers.getAll()).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.rename("ghost", "phantom"))
-            .isInstanceOf(net.vaier.domain.NotFoundException.class);
+            .isInstanceOf(NotFoundException.class);
         verify(forPersistingLanServers, never()).save(any());
         verify(forPersistingLanServers, never()).deleteByName(any());
     }
@@ -291,7 +293,7 @@ class LanServerServiceTest {
         ));
 
         assertThatThrownBy(() -> service.rename("nas", "printer"))
-            .isInstanceOf(net.vaier.domain.ConflictException.class);
+            .isInstanceOf(ConflictException.class);
         verify(forPersistingLanServers, never()).save(any());
         verify(forPersistingLanServers, never()).deleteByName(any());
     }
@@ -352,7 +354,7 @@ class LanServerServiceTest {
         when(forPersistingLanServers.getAll()).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.updateDescription("ghost", "anything"))
-            .isInstanceOf(net.vaier.domain.NotFoundException.class);
+            .isInstanceOf(NotFoundException.class);
         verify(forPersistingLanServers, never()).save(any());
     }
 

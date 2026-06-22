@@ -1,5 +1,7 @@
 package net.vaier.rest;
 
+import net.vaier.domain.PeerNotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.config.ConfigResolver;
@@ -111,14 +113,14 @@ class VpnPeerRestControllerTest {
 
     @Test
     void updateLanAddress_propagatesPeerNotFound_withoutPublishing() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(forUpdatingPeerConfigurations).updateLanAddress("ghost", "192.168.3.121");
         var request = new VpnPeerRestController.UpdateLanAddressRequest("192.168.3.121");
 
         // The controller no longer maps exceptions; GlobalExceptionHandler renders 404. It must
         // still propagate (not swallow) and must not publish an update event on failure.
         assertThatThrownBy(() -> controller.updateLanAddress("ghost", request))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
@@ -155,12 +157,12 @@ class VpnPeerRestControllerTest {
 
     @Test
     void updateLanCidr_propagatesPeerNotFound_withoutPublishing() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(updateLanCidrUseCase).updateLanCidr("ghost", "192.168.3.0/24");
         var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
 
         assertThatThrownBy(() -> controller.updateLanCidr("ghost", request))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
@@ -170,12 +172,12 @@ class VpnPeerRestControllerTest {
     void updateLanCidr_propagatesConflict_withoutPublishing() {
         // updateLanCidr signals a CIDR-already-owned conflict via ConflictException (-> 409
         // at the handler). The controller must propagate it and not publish on failure.
-        doThrow(new net.vaier.domain.ConflictException("LAN CIDR 192.168.3.0/24 already owned by peer nuc02"))
+        doThrow(new ConflictException("LAN CIDR 192.168.3.0/24 already owned by peer nuc02"))
             .when(updateLanCidrUseCase).updateLanCidr("apalveien5", "192.168.3.0/24");
         var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
 
         assertThatThrownBy(() -> controller.updateLanCidr("apalveien5", request))
-            .isInstanceOf(net.vaier.domain.ConflictException.class);
+            .isInstanceOf(ConflictException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
@@ -194,11 +196,11 @@ class VpnPeerRestControllerTest {
 
     @Test
     void renamePeer_propagatesPeerNotFound_withoutPublishing() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(renamePeerUseCase).renamePeer("ghost", "phantom");
 
         assertThatThrownBy(() -> controller.renamePeer("ghost", new VpnPeerRestController.RenamePeerRequest("phantom")))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
@@ -275,10 +277,10 @@ class VpnPeerRestControllerTest {
     @Test
     void reissuePeer_unknownPeer_propagatesPeerNotFound_andPublishesNothing() {
         when(reissuePeerConfigUseCase.reissuePeerConfig("ghost"))
-            .thenThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"));
+            .thenThrow(new PeerNotFoundException("Peer not found: ghost"));
 
         assertThatThrownBy(() -> controller.reissuePeer("ghost"))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(any(), any(), any());
     }
 
@@ -370,12 +372,12 @@ class VpnPeerRestControllerTest {
 
     @Test
     void updateDescription_propagatesPeerNotFound_withoutPublishing() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(forUpdatingPeerConfigurations).updateDescription("ghost", "anything");
         var request = new VpnPeerRestController.UpdateDescriptionRequest("anything");
 
         assertThatThrownBy(() -> controller.updateDescription("ghost", request))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());

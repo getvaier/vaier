@@ -21,6 +21,8 @@ import net.vaier.config.ServiceNames;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
+import net.vaier.domain.PeerNotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.PeerSetupScript;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ServerLocationResolver;
@@ -304,7 +306,7 @@ public class VpnService implements
         }
 
         ForGettingPeerConfigurations.PeerConfiguration peer = peerConfigProvider.getPeerConfigByName(peerName)
-            .orElseThrow(() -> new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerName));
+            .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerName));
 
         String normalized = (lanCidr == null || lanCidr.isBlank()) ? null : lanCidr.trim();
 
@@ -314,7 +316,7 @@ public class VpnService implements
                     .lanCidrOwner(peerConfigProvider.getAllPeerConfigs(), normalized, peer.id())
                     .orElse(null);
             if (conflict != null) {
-                throw new net.vaier.domain.ConflictException(
+                throw new ConflictException(
                     "LAN CIDR " + normalized + " already owned by peer " + conflict.name());
             }
         }
@@ -350,7 +352,7 @@ public class VpnService implements
             String resolvedName = forResolvingPeerNames.resolvePeerNameByIp(peerIdentifier);
             if (resolvedName.equals(peerIdentifier)) {
                 log.error("Could not find peer name for IP: {}", peerIdentifier);
-                throw new net.vaier.domain.PeerNotFoundException("Peer not found for IP: " + peerIdentifier);
+                throw new PeerNotFoundException("Peer not found for IP: " + peerIdentifier);
             }
             peerName = resolvedName;
             log.info("Resolved IP {} to peer name: {}", peerIdentifier, peerName);
@@ -463,7 +465,7 @@ public class VpnService implements
     public ReissuedPeerUco reissuePeerConfig(String peerId) {
         log.info("Reissuing config for peer: {}", peerId);
         ForGettingPeerConfigurations.PeerConfiguration peer = peerConfigProvider.getPeerConfigByName(peerId)
-            .orElseThrow(() -> new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerId));
+            .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
         try {
             String serverPublicKey = getServerPublicKey(wireguardInterface);
             String serverEndpoint = extractServerEndpoint();
@@ -502,7 +504,7 @@ public class VpnService implements
         // The id is immutable — "renaming" sets the editable display name only. No config files
         // move, so live tunnels and published services are untouched.
         peerConfigProvider.getPeerConfigByName(peerId)
-            .orElseThrow(() -> new net.vaier.domain.PeerNotFoundException("Peer not found: " + peerId));
+            .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
 
         forUpdatingPeerConfigurations.updateName(peerId, newName);
         log.info("Set display name of peer {} to '{}'", peerId, newName);

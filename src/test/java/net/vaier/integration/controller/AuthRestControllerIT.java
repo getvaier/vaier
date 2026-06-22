@@ -1,5 +1,7 @@
 package net.vaier.integration.controller;
 
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.User;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
 import org.junit.jupiter.api.Test;
@@ -62,7 +64,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void addUser_returns409WhenUserAlreadyExists() throws Exception {
-        doThrow(new net.vaier.domain.ConflictException("User already exists: alice"))
+        doThrow(new ConflictException("User already exists: alice"))
                 .when(addUserUseCase).addUser(eq("alice"), any(), any(), any(), any());
 
         mockMvc.perform(post("/users")
@@ -111,7 +113,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void deleteUser_returns404WhenUserNotFound() throws Exception {
-        doThrow(new net.vaier.domain.NotFoundException("User not found: alice"))
+        doThrow(new NotFoundException("User not found: alice"))
                 .when(deleteUserUseCase).deleteUser("alice");
 
         mockMvc.perform(delete("/users/alice"))
@@ -133,7 +135,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void changePassword_returns404WhenUserNotFound() throws Exception {
-        doThrow(new net.vaier.domain.NotFoundException("User not found: alice"))
+        doThrow(new NotFoundException("User not found: alice"))
                 .when(changePasswordUseCase).changePassword(eq("alice"), any());
 
         mockMvc.perform(put("/users/alice/password")
@@ -276,7 +278,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void updateUserGroups_returns404WhenUserNotFound() throws Exception {
-        doThrow(new net.vaier.domain.NotFoundException("User not found: alice"))
+        doThrow(new NotFoundException("User not found: alice"))
                 .when(updateUserGroupsUseCase).updateUserGroups(eq("alice"), any());
 
         mockMvc.perform(put("/users/alice/groups")
