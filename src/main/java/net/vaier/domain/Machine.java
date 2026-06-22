@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 
+import java.util.Collection;
+
 /**
  * Unified read projection for every machine Vaier manages — both WireGuard peers
  * (the four {@link MachineType#isVpnPeer() VPN-backed} types) and {@link MachineType#LAN_SERVER}
@@ -61,5 +63,23 @@ public record Machine(
             server.runsDocker(),
             server.dockerPort()
         );
+    }
+
+    /**
+     * True when {@code candidate} collides with an existing machine name. Machine names are
+     * unique across all of Vaier (#284) — every machine, whether a VPN peer or a LAN server,
+     * has a distinct name, so an operator is never shown two machines wearing the same label
+     * and Vaier never confuses one for the other. Comparison is case-insensitive and ignores
+     * surrounding whitespace ("nas", "NAS" and " nas " are the same name). A null or blank
+     * candidate never collides, and null/blank entries in {@code existingNames} are skipped.
+     */
+    public static boolean nameIsTaken(String candidate, Collection<String> existingNames) {
+        if (candidate == null || candidate.isBlank()) {
+            return false;
+        }
+        String normalized = candidate.trim();
+        return existingNames.stream()
+            .filter(n -> n != null && !n.isBlank())
+            .anyMatch(n -> n.trim().equalsIgnoreCase(normalized));
     }
 }

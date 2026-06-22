@@ -19,6 +19,7 @@ import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 import net.vaier.domain.PeerNotFoundException;
@@ -34,6 +35,7 @@ import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeolocatingIps;
+import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
@@ -56,6 +58,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
@@ -102,6 +105,7 @@ public class VpnService implements
     private final ForExecutingInContainer forExecutingInContainer;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
+    private final ForGettingLanServers forGettingLanServers;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -118,7 +122,8 @@ public class VpnService implements
                       ForSyncingLanRoutes forSyncingLanRoutes,
                       ForExecutingInContainer forExecutingInContainer,
                       ForResolvingServerLanCidr forResolvingServerLanCidr,
-                      ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval) {
+                      ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval,
+                      ForGettingLanServers forGettingLanServers) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -135,6 +140,7 @@ public class VpnService implements
         this.forExecutingInContainer = forExecutingInContainer;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.forTrackingPeerConfigRetrieval = forTrackingPeerConfigRetrieval;
+        this.forGettingLanServers = forGettingLanServers;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -407,6 +413,11 @@ public class VpnService implements
             net.vaier.domain.Cidr.validateLanCidr(lanCidr);
         }
         MachineType resolvedType = peerType != null ? peerType : MachineType.defaultType();
+        // #284: machine names are unique across Vaier — a new peer may not reuse the name of any
+        // existing peer or LAN server. Checked before any key/IP/state is created.
+        if (Machine.nameIsTaken(name, otherMachineNames(null))) {
+            throw new ConflictException("A machine named " + name + " already exists");
+        }
         // The id is the slug of the operator-typed name, deduplicated against existing peers and
         // frozen for the life of the peer (its config directory name). The typed name is kept
         // verbatim as the editable display label.
@@ -506,8 +517,29 @@ public class VpnService implements
         peerConfigProvider.getPeerConfigByName(peerId)
             .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
 
+        // #284: the new display name must be free across every other machine. A blank newName
+        // clears the name (falls back to the humanised id) and never collides.
+        if (Machine.nameIsTaken(newName, otherMachineNames(peerId))) {
+            throw new ConflictException("A machine named " + newName + " already exists");
+        }
+
         forUpdatingPeerConfigurations.updateName(peerId, newName);
         log.info("Set display name of peer {} to '{}'", peerId, newName);
+    }
+
+    /**
+     * Names of every machine Vaier knows about — VPN peers and LAN servers — except the peer with
+     * id {@code excludePeerId} (pass null to exclude nothing). Orchestration only: gathers names
+     * from both driven ports so the domain ({@link Machine#nameIsTaken}) decides whether a
+     * candidate name is free across all of Vaier (#284).
+     */
+    private List<String> otherMachineNames(String excludePeerId) {
+        Stream<String> peerNames = peerConfigProvider.getAllPeerConfigs().stream()
+            .filter(p -> excludePeerId == null || !p.id().equals(excludePeerId))
+            .map(ForGettingPeerConfigurations.PeerConfiguration::name);
+        Stream<String> lanServerNames = forGettingLanServers.getAll().stream()
+            .map(v -> v.server().name());
+        return Stream.concat(peerNames, lanServerNames).toList();
     }
 
     private String findNextAvailableIp() throws IOException {

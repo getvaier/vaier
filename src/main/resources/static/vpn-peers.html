@@ -547,7 +547,8 @@
             </div>
             <div class="form-group">
                 <label class="form-label" for="peerName">Name</label>
-                <input type="text" id="peerName" class="form-input" placeholder="e.g. laptop, phone, nas">
+                <input type="text" id="peerName" class="form-input" placeholder="e.g. laptop, phone, nas" oninput="updatePeerNameHint()">
+                <span id="peerNameHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
             </div>
             <div class="form-group" id="descriptionGroup">
                 <label class="form-label" for="peerDescription">Description (optional)</label>
@@ -588,7 +589,7 @@
             </div>
             <div class="form-group" id="dockerPortGroup" style="display:none">
                 <label class="form-label" for="dockerPort">Docker API port</label>
-                <input type="number" id="dockerPort" class="form-input" min="1" max="65535" value="2375">
+                <input type="number" id="dockerPort" class="form-input" min="1" max="65535" value="2375" oninput="updateCreatePeerValidity()">
                 <div style="font-size:0.7rem;color:var(--text-dim);margin-top:0.5rem;">
                     After adding the machine, run its <strong>Setup script</strong> (from the machine's
                     card) on the LAN host — it opens the Docker API and installs any routes the host
@@ -776,24 +777,37 @@
         }
 
         function displayError(message) {
-            renderBanner('error-message', 'error', message);
+            renderBanner('error-message', 'error', message, 8000);
         }
 
         function displaySuccess(message) {
-            renderBanner('success-message', 'success', message);
-            const host = document.getElementById('success-message');
-            setTimeout(() => { host.innerHTML = ''; }, 5000);
+            renderBanner('success-message', 'success', message, 5000);
         }
+
+        // Auto-dismiss timer per banner host, so a fresh message cancels the previous one's
+        // pending clear instead of having a stale timeout wipe the new banner early.
+        const _bannerTimers = {};
 
         // Safe sink: set the message as text, never HTML, so callers never need to
         // escape and pre-escaped values can't double-escape into &amp; artifacts.
-        function renderBanner(hostId, cls, message) {
+        // dismissMs auto-clears the banner after that delay (omit/0 to leave it sticky).
+        function renderBanner(hostId, cls, message, dismissMs) {
             const host = document.getElementById(hostId);
+            if (_bannerTimers[hostId]) {
+                clearTimeout(_bannerTimers[hostId]);
+                delete _bannerTimers[hostId];
+            }
             host.innerHTML = '';
             const div = document.createElement('div');
             div.className = cls;
             div.textContent = message;
             host.appendChild(div);
+            if (dismissMs) {
+                _bannerTimers[hostId] = setTimeout(() => {
+                    host.innerHTML = '';
+                    delete _bannerTimers[hostId];
+                }, dismissMs);
+            }
         }
 
         function formatBytes(bytes) {
@@ -1282,6 +1296,8 @@
             document.getElementById('lanCidr').value = '';
             document.getElementById('lanAddress').value = '';
             document.getElementById('lanAddressHint').textContent = '';
+            document.getElementById('peerNameHint').textContent = '';
+            lanAddressRoutable = null;
             document.getElementById('runsDocker').checked = false;
             document.getElementById('dockerPort').value = '2375';
             // Reset the in-modal LAN scanner: invalidate any in-flight poll chain and clear the picker.
@@ -1328,6 +1344,7 @@
             const runsDocker  = document.getElementById('runsDocker').checked;
             document.getElementById('dockerPortGroup').style.display =
                 (isLanServer && runsDocker) ? '' : 'none';
+            updateCreatePeerValidity();
         }
 
         function hideCreatePeerModal() {
@@ -1335,21 +1352,74 @@
             if (lanAnchorTimer) { clearTimeout(lanAnchorTimer); lanAnchorTimer = null; }
         }
 
+        // Machine names are unique across Vaier (#284). The full machine list is already loaded
+        // client-side (peers + lanServers), so we flag a clash the instant it's typed — same live
+        // red-hint treatment as an unroutable LAN address. The server still enforces it (409).
+        function machineNameExists(name) {
+            const n = name.trim().toLowerCase();
+            if (!n) return false;
+            return peers.some(p => (p.name || '').trim().toLowerCase() === n)
+                || lanServers.some(s => (s.name || '').trim().toLowerCase() === n);
+        }
+
+        function updatePeerNameHint() {
+            const hint = document.getElementById('peerNameHint');
+            const name = document.getElementById('peerName').value.trim();
+            if (!name) {
+                hint.textContent = '';
+            } else if (machineNameExists(name)) {
+                hint.textContent = `A machine named "${name}" already exists.`;
+                hint.style.color = 'var(--red)';
+            } else {
+                hint.textContent = '';
+                hint.style.color = 'var(--text-muted)';
+            }
+            updateCreatePeerValidity();
+        }
+
+        // Enable the Add Machine button only when every field is valid, so the operator can't submit
+        // a request the server would reject. Re-run from every field's input/change handler.
+        function updateCreatePeerValidity() {
+            const submitBtn = document.getElementById('createPeerSubmitBtn');
+            if (!submitBtn) return;
+            const type = document.getElementById('peerType').value;
+            const name = document.getElementById('peerName').value.trim();
+
+            let valid = name !== '' && !machineNameExists(name);
+
+            if (valid && type === 'LAN_SERVER') {
+                const lanAddress = document.getElementById('lanAddress').value.trim();
+                // lanAddressRoutable is the server's verdict on the typed address (null while empty
+                // or still being checked) — a LAN server isn't valid until it's confirmed routable.
+                if (!lanAddress || lanAddressRoutable !== true) valid = false;
+                if (valid && document.getElementById('runsDocker').checked) {
+                    const port = parseInt(document.getElementById('dockerPort').value);
+                    if (!port || port < 1 || port > 65535) valid = false;
+                }
+            }
+            submitBtn.disabled = !valid;
+        }
+
         // Whether/how a typed LAN address is routable (relay peer or the Vaier server itself) is a
         // domain decision — we ask the server (`GET /lan-servers/lan-anchor`) rather than doing any
         // CIDR math here. Debounced, with a sequence guard so a stale response can't overwrite a newer one.
         let lanAnchorTimer = null;
         let lanAnchorSeq = 0;
+        // The server's routability verdict on the typed LAN address: true/false once known, null
+        // while empty or still being checked. Gates the Add Machine button for LAN servers.
+        let lanAddressRoutable = null;
 
         function updateLanAddressHint() {
             const hint = document.getElementById('lanAddressHint');
             const type = document.getElementById('peerType').value;
             const ip   = document.getElementById('lanAddress').value.trim();
             if (lanAnchorTimer) { clearTimeout(lanAnchorTimer); lanAnchorTimer = null; }
+            lanAddressRoutable = null;
             // Hint is informational only for VPN peers; show routability only for LAN_SERVER.
-            if (type !== 'LAN_SERVER' || !ip) { hint.textContent = ''; return; }
+            if (type !== 'LAN_SERVER' || !ip) { hint.textContent = ''; updateCreatePeerValidity(); return; }
             hint.textContent = 'Checking…';
             hint.style.color = 'var(--text-muted)';
+            updateCreatePeerValidity();   // keep the button disabled while the check is in flight
             const seq = ++lanAnchorSeq;
             lanAnchorTimer = setTimeout(async () => {
                 let anchor = null;
@@ -1358,14 +1428,17 @@
                     if (resp.ok) anchor = await resp.json();
                 } catch (e) { /* leave anchor null */ }
                 if (seq !== lanAnchorSeq) return;   // a newer keystroke superseded this lookup
-                if (anchor === null) { hint.textContent = ''; return; }
+                if (anchor === null) { hint.textContent = ''; updateCreatePeerValidity(); return; }
                 if (anchor.routable) {
+                    lanAddressRoutable = true;
                     hint.textContent = `Routes via ${anchor.routedVia}${anchor.cidr ? ` (${anchor.cidr})` : ''}`;
                     hint.style.color = 'var(--text-muted)';
                 } else {
+                    lanAddressRoutable = false;
                     hint.textContent = `${ip} isn't routable — not inside any relay peer's lanCidr or the Vaier server's own subnet.`;
                     hint.style.color = 'var(--red)';
                 }
+                updateCreatePeerValidity();
             }, 250);
         }
 
@@ -1415,7 +1488,9 @@
                     if (runsDocker && (!dockerPort || dockerPort < 1 || dockerPort > 65535)) {
                         displayError('Please enter a valid Docker port (1-65535)'); return;
                     }
-                    hideCreatePeerModal();
+                    // Keep the modal open during the request and close it only on success, so a
+                    // rejection (e.g. a 409 name conflict, #284) leaves the operator's input in
+                    // place to correct instead of vanishing. The busy overlay stacks on top.
                     showBusy(`Adding "${name}"…`);
                     const response = await fetch('/lan-servers', {
                         method: 'POST',
@@ -1426,20 +1501,32 @@
                         displayError(`${lanAddress} isn't routable — not inside any relay peer's lanCidr or the Vaier server's own subnet.`);
                         return;
                     }
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    if (!response.ok) {
+                        // Surface the ApiError envelope's message (e.g. a 409 name conflict, #284).
+                        const err = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+                        throw new Error(err.message || `HTTP ${response.status}`);
+                    }
+                    hideCreatePeerModal();
                     displaySuccess(`LAN server "${name}" added`);
                     fetchLanServers();
                 } else {
                     const lanCidr     = document.getElementById('lanCidr').value.trim() || null;
                     const lanAddress  = document.getElementById('lanAddress').value.trim() || null;
-                    hideCreatePeerModal();
+                    // Keep the modal open during the request and close it only on success, so a
+                    // rejection (e.g. a 409 name conflict, #284) leaves the operator's input in
+                    // place to correct instead of vanishing. The busy overlay stacks on top.
                     showBusy(`Adding "${name}"…`);
                     const response = await fetch('/vpn/peers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name, peerType: type, lanCidr, lanAddress, description })
                     });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    if (!response.ok) {
+                        // Surface the ApiError envelope's message (e.g. a 409 name conflict, #284).
+                        const err = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+                        throw new Error(err.message || `HTTP ${response.status}`);
+                    }
+                    hideCreatePeerModal();
                     const createdPeer = await response.json();
                     displaySuccess(`"${createdPeer.name}" added`);
                     showPeerDetails(createdPeer);
@@ -1449,9 +1536,11 @@
                 displayError(`Failed to add machine: ${error.message}`);
             } finally {
                 hideBusy();
-                submitBtn.disabled = false;
                 cancelBtn.disabled = false;
                 submitBtn.textContent = 'Add Machine';
+                // Re-evaluate rather than force-enable: if the submit failed and the modal stayed
+                // open (e.g. a name now shown as taken), the button stays correctly disabled.
+                updateCreatePeerValidity();
             }
         }
 
@@ -1576,7 +1665,7 @@
                     body: JSON.stringify({ newName })
                 });
                 if (response.status === 409) {
-                    displayError(`A LAN server named "${newName}" already exists`);
+                    displayError(`A machine named "${newName}" already exists`);
                     onLanServerNameInput(serverName);
                     return;
                 }

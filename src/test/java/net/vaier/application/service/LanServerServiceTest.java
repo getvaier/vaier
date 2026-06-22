@@ -89,6 +89,34 @@ class LanServerServiceTest {
     }
 
     @Test
+    void register_rejectsNameAlreadyUsedByAnotherLanServer() {
+        // #284: machine names are unique across Vaier. save() upserts by name, so without this
+        // guard a second register silently overwrites the first — data loss.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.3.50", true, 2375)
+        ));
+
+        assertThatThrownBy(() -> service.register("nas", "192.168.3.51", true, 2375))
+            .isInstanceOf(ConflictException.class);
+        verify(forPersistingLanServers, never()).save(any());
+    }
+
+    @Test
+    void register_rejectsNameAlreadyUsedByAVpnPeer() {
+        // #284: a LAN server may not reuse a VPN peer's name either.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        assertThatThrownBy(() -> service.register("apalveien5", "192.168.3.50", true, 2375))
+            .isInstanceOf(ConflictException.class);
+        verify(forPersistingLanServers, never()).save(any());
+    }
+
+    @Test
     void register_runsDockerTrueWithoutPort_throws() {
         assertThatThrownBy(() -> service.register("nas", "192.168.3.50", true, null))
             .isInstanceOf(IllegalArgumentException.class)
@@ -293,6 +321,22 @@ class LanServerServiceTest {
         ));
 
         assertThatThrownBy(() -> service.rename("nas", "printer"))
+            .isInstanceOf(ConflictException.class);
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forPersistingLanServers, never()).deleteByName(any());
+    }
+
+    @Test
+    void rename_rejectsNameAlreadyUsedByAVpnPeer() {
+        // #284: renaming a LAN server onto a VPN peer's name collides across machines too.
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.1.50", false, null)
+        ));
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        assertThatThrownBy(() -> service.rename("nas", "apalveien5"))
             .isInstanceOf(ConflictException.class);
         verify(forPersistingLanServers, never()).save(any());
         verify(forPersistingLanServers, never()).deleteByName(any());
