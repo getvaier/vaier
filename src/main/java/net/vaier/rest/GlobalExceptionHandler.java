@@ -30,6 +30,9 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    static final String INTERNAL_ERROR_CODE = "INTERNAL_ERROR";
+    static final String INTERNAL_ERROR_MESSAGE = "An unexpected error occurred. Please try again.";
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> handleBadRequest(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", e.getMessage()));
@@ -39,17 +42,25 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ApiError> handleUnexpected(Exception e) {
         log.error("Unhandled exception serving request", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiError.of("INTERNAL_ERROR", "An unexpected error occurred. Please try again."));
+                .body(ApiError.of(INTERNAL_ERROR_CODE, INTERNAL_ERROR_MESSAGE));
     }
 
     /**
-     * Renders the framework's own handled MVC exceptions in the {@link ApiError} envelope,
-     * preserving the status Spring chose and using its reason phrase as the (operator-safe)
-     * message — never the raw exception text, which can carry parser/internal detail.
+     * Renders the framework's own handled MVC exceptions in the {@link ApiError} envelope.
+     * Client errors ({@code 4xx}) keep Spring's status and reason phrase (operator-safe,
+     * and never the raw exception text, which can carry parser/internal detail). Server
+     * errors ({@code 5xx} — e.g. a response that fails to serialise) are treated exactly
+     * like any other unexpected failure: logged in full and reported with the same safe
+     * generic {@link #INTERNAL_ERROR_MESSAGE}, not the bare status reason.
      */
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(
             Exception ex, Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+        if (statusCode.is5xxServerError()) {
+            log.error("Unhandled framework exception serving request", ex);
+            return ResponseEntity.status(statusCode).headers(headers)
+                    .body(ApiError.of(INTERNAL_ERROR_CODE, INTERNAL_ERROR_MESSAGE));
+        }
         HttpStatus status = HttpStatus.resolve(statusCode.value());
         String code = (status != null) ? status.name() : "ERROR";
         String message = (status != null) ? status.getReasonPhrase() : "Request could not be processed.";
