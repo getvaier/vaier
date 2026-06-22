@@ -776,13 +776,24 @@
         }
 
         function displayError(message) {
-            document.getElementById('error-message').innerHTML = `<div class="error">${message}</div>`;
+            renderBanner('error-message', 'error', message);
         }
 
         function displaySuccess(message) {
-            const el = document.getElementById('success-message');
-            el.innerHTML = `<div class="success">${message}</div>`;
-            setTimeout(() => el.innerHTML = '', 5000);
+            renderBanner('success-message', 'success', message);
+            const host = document.getElementById('success-message');
+            setTimeout(() => { host.innerHTML = ''; }, 5000);
+        }
+
+        // Safe sink: set the message as text, never HTML, so callers never need to
+        // escape and pre-escaped values can't double-escape into &amp; artifacts.
+        function renderBanner(hostId, cls, message) {
+            const host = document.getElementById(hostId);
+            host.innerHTML = '';
+            const div = document.createElement('div');
+            div.className = cls;
+            div.textContent = message;
+            host.appendChild(div);
         }
 
         function formatBytes(bytes) {
@@ -1466,7 +1477,7 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = lanAddress;
-                displaySuccess(`LAN address saved for "${escapeHtml(peerDisplayName(peerId))}"`);
+                displaySuccess(`LAN address saved for "${peerDisplayName(peerId)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save LAN address: ${error.message}`);
@@ -1496,7 +1507,7 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = description;
-                displaySuccess(`Description saved for "${escapeHtml(peerDisplayName(peerId))}"`);
+                displaySuccess(`Description saved for "${peerDisplayName(peerId)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save description: ${error.message}`);
@@ -1529,12 +1540,12 @@
                     body: JSON.stringify({ newName })
                 });
                 if (response.status === 409) {
-                    displayError(`A machine named "${escapeHtml(newName)}" already exists`);
+                    displayError(`A machine named "${newName}" already exists`);
                     onPeerNameInput(peerId);
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                displaySuccess(`Renamed to "${escapeHtml(newName)}"`);
+                displaySuccess(`Renamed to "${newName}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to rename machine: ${error.message}`);
@@ -1630,7 +1641,7 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = lanCidr;
-                displaySuccess(`LAN CIDR saved for "${escapeHtml(peerDisplayName(peerId))}"`);
+                displaySuccess(`LAN CIDR saved for "${peerDisplayName(peerId)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save LAN CIDR: ${error.message}`);
@@ -1860,7 +1871,7 @@
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerToDelete)}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 hideDeleteConfirmModal();
-                displaySuccess(`Peer "${escapeHtml(peerName)}" deleted`);
+                displaySuccess(`Peer "${peerName}" deleted`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to delete peer: ${error.message}`);
@@ -1912,7 +1923,7 @@
                 });
                 if (!create.ok) throw new Error(`create HTTP ${create.status}`);
                 const newPeer = await create.json();
-                displaySuccess(`"${escapeHtml(newPeer.name)}" regenerated — save the new config now`);
+                displaySuccess(`"${newPeer.name}" regenerated — save the new config now`);
                 showPeerDetails(newPeer);
                 fetchPeers();
             } catch (error) {
@@ -1933,7 +1944,7 @@
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/reissue`, { method: 'POST' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const reissued = await response.json();
-                displaySuccess(`"${escapeHtml(reissued.name)}" reissued — reinstall the new config on the peer`);
+                displaySuccess(`"${reissued.name}" reissued — reinstall the new config on the peer`);
                 showPeerDetails(reissued);
                 fetchPeers();
             } catch (error) {
