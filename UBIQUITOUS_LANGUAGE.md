@@ -202,6 +202,7 @@ Hexagonal architecture (ports & adapters), four layers. See `CLAUDE.md` for the 
 | **Application service** | `*Service` — one per *domain concept*, not per use case. Implements every use case in its domain. | `VpnService`, `PublishingService`, `UserService`, `MachineService`, `LanServerService`, `LanServerReachabilityService`, `LanServerScrapeService`, `DnsService`, `ReverseProxyService`, `SettingsService`, `ContainerService`, `LifecycleService`, `NotificationService`, `HostMonitoringService` |
 | **Adapter** | `*Adapter` — driven adapter, implements `For*` ports. Lives in `adapter/driven/`. | `Route53DnsAdapter`, `WireGuardVpnAdapter`, `TraefikReverseProxyAdapter`, `LanServerFileAdapter`, `JavaSocketTcpProbeAdapter` |
 | **REST controller** | `*RestController`, in `rest/`. DTOs are inner `record` classes. | `MachineRestController`, `PublishedServiceRestController` |
+| **API error envelope** | The uniform JSON shape returned when a request fails: `ApiError(code, message, detail)`. `code` is a stable machine-readable token (e.g. `BAD_REQUEST`, `INTERNAL_ERROR`), `message` is an operator-safe human-readable explanation, `detail` is optional context (nullable). | `ApiError` |
 
 **Cross-domain orchestration goes through use-case interfaces, never class-to-class.** E.g. `VpnService.deletePeer` cascading into published-service cleanup is wired via `DeletePublishedServiceUseCase`, not a direct dependency on `PublishingService`.
 

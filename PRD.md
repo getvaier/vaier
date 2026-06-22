@@ -377,6 +377,18 @@ The scanner is surfaced **inside the Add Machine modal**, above the LAN address 
 
 Delivered in this slice: domain + role-guessing, scanning port + relay-exec adapter (with a unit-tested output parser), async stateful orchestration service with already-registered filtering and SSE completion event, async POST-trigger / GET-snapshot REST endpoints, and the in-modal pick-to-fill UI. **Backlog for #246:** per-host ignore list (the discovered-services ignore pattern), scheduled background scans on a slow cadence, MAC-vendor / mDNS hostname enrichment, per-relay enable/disable, and CIDRs larger than `/24` (the current sweep covers the `.1–.254` range of the network's first three octets).
 
+### 6.16 Uniform API error envelope ✅ (closes [#268](https://github.com/getvaier/vaier/issues/268))
+
+A step toward operator-friendly error feedback under the V2 usability theme: every uncaught exception from any controller is now translated into one consistent JSON shape so the web UI can always show the operator *what went wrong* instead of a bare status code or a leaked stack trace.
+
+- A `@RestControllerAdvice` (`net.vaier.rest.GlobalExceptionHandler`) maps uncaught exceptions to the **API error envelope** — `net.vaier.rest.ApiError(code, message, detail)`, where `code` is a stable machine-readable token, `message` is an operator-safe human-readable explanation, and `detail` is optional/nullable.
+- `IllegalArgumentException` — the convention domain validation throughout Vaier already uses to signal bad input — maps to `400` with `code=BAD_REQUEST` and the exception's message surfaced **verbatim**, so operator-readable validation messages reach the UI.
+- Any other exception maps to `500` with `code=INTERNAL_ERROR` and a safe generic message; the real exception is logged in full server-side and its details (which may include hostnames, IPs, or credentials) are **not** leaked to the client.
+
+**Backlog (still planned):**
+- Migrate the two controllers that still hand-roll their own error responses to the shared envelope — `PublishedServiceRestController` (returns `PublishError{message}`) and `SettingsRestController` (returns `ErrorResponse{error}`). Deliberately out of scope for this slice.
+- Standardise the frontend's error handling on the envelope's `.message` field once those flows are migrated.
+
 ---
 
 ## 7. End-to-End Workflows
