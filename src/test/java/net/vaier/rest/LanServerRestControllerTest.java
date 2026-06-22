@@ -95,7 +95,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void register_runsDockerTrueWithoutDockerPort_returns400() {
+    void register_runsDockerTrueWithoutDockerPort_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("dockerPort is required"))
             .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null);
         var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null);
@@ -105,7 +105,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void register_useCaseThrowsIllegalArgument_returns400() {
+    void register_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("not in any lanCidr"))
             .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null);
         var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375, null);
@@ -147,7 +147,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void downloadSetupScript_returns409WhenRelayHasNoLanAddress() {
+    void downloadSetupScript_propagatesConflictWhenRelayHasNoLanAddress() {
         when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
             .thenThrow(new net.vaier.domain.ConflictException("Relay peer apalveien5 has no LAN address set"));
 
@@ -241,7 +241,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void rename_returns404WhenLanServerNotFound() {
+    void rename_propagatesNotFound() {
         doThrow(new net.vaier.domain.NotFoundException("LAN server not found: ghost"))
             .when(renameLanServerUseCase).rename("ghost", "phantom");
 
@@ -250,7 +250,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void rename_returns409WhenNewNameAlreadyTaken() {
+    void rename_propagatesConflict() {
         doThrow(new net.vaier.domain.ConflictException("A LAN server named printer already exists"))
             .when(renameLanServerUseCase).rename("nas", "printer");
 
@@ -259,7 +259,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void rename_returns400WhenNewNameBlank() {
+    void rename_propagatesInvalidName() {
         doThrow(new IllegalArgumentException("New LAN server name must not be blank"))
             .when(renameLanServerUseCase).rename("nas", "  ");
 
@@ -289,7 +289,7 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void updateDescription_returns404WhenLanServerNotFound() {
+    void updateDescription_propagatesNotFound() {
         doThrow(new net.vaier.domain.NotFoundException("LAN server not found: ghost"))
             .when(updateLanServerDescriptionUseCase).updateDescription("ghost", "anything");
 

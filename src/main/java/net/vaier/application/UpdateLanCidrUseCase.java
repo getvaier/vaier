@@ -8,7 +8,7 @@ public interface UpdateLanCidrUseCase {
      * the CIDR flows through this peer, and persists the value in the peer's metadata.
      *
      * @throws IllegalArgumentException if the peer does not exist
-     * @throws IllegalStateException    if another peer already owns the CIDR
+     * @throws net.vaier.domain.ConflictException if another peer already owns the CIDR
      */
     void updateLanCidr(String peerName, String lanCidr);
 }
