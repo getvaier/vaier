@@ -377,11 +377,14 @@
                 list.innerHTML = '<span class="chip-empty">No groups</span>';
                 return;
             }
-            list.innerHTML = [...state.selected].sort().map(g => {
-                const safe = g.replace(/'/g, "\\'");
-                return `<span class="chip">${escapeHtml(g)}<button type="button" class="chip-remove"
-                        onclick="removeChip('${pickerId}','${safe}')">×</button></span>`;
-            }).join('');
+            const groups = [...state.selected].sort();
+            list.innerHTML = groups.map(g =>
+                `<span class="chip">${escapeHtml(g)}<button type="button" class="chip-remove">×</button></span>`
+            ).join('');
+            // Wire by index over the rendered order — never interpolate the group name
+            // into an onclick string (a " in the name would break out of the attribute).
+            list.querySelectorAll('.chip-remove').forEach((btn, i) =>
+                btn.addEventListener('click', () => removeChip(pickerId, groups[i])));
         }
 
         function addChip(pickerId) {
@@ -447,18 +450,18 @@
                 const displayname = user.displayname || user.name;
                 const email = user.email || '';
                 return `
-                <div class="user-card">
-                    <div class="user-header" onclick="toggleUser('${user.name.replace(/'/g, "\\'")}')">
+                <div class="user-card" data-card="${id}">
+                    <div class="user-header js-toggle">
                         <div class="user-header-left">
-                            <div class="user-avatar">${user.name.charAt(0).toUpperCase()}</div>
+                            <div class="user-avatar">${escapeHtml(user.name.charAt(0).toUpperCase())}</div>
                             <div>
                                 <div class="user-name">${escapeHtml(user.name)}</div>
                                 <div class="user-displayname">${escapeHtml(displayname)}</div>
                             </div>
                         </div>
                         <div class="user-actions">
-                            <button class="btn btn-small btn-secondary" onclick="event.stopPropagation();showChangePasswordModal('${user.name}')">passwd</button>
-                            <button class="btn btn-small btn-danger" onclick="event.stopPropagation();deleteUser('${user.name}')">
+                            <button class="btn btn-small btn-secondary js-passwd">passwd</button>
+                            <button class="btn btn-small btn-danger js-delete">
                                 <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
                             </button>
                             <span class="user-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
@@ -479,7 +482,7 @@
                                 <span class="detail-value">
                                     <div class="groups-edit-row">
                                         <div id="groups-picker-${id}" style="flex:1;min-width:200px"></div>
-                                        <button class="btn btn-small btn-secondary" onclick="saveUserGroups('${user.name.replace(/'/g, "\\'")}')">Save</button>
+                                        <button class="btn btn-small btn-secondary js-save-groups">Save</button>
                                     </div>
                                 </span>
                             </div>
@@ -493,6 +496,19 @@
             users.forEach(user => {
                 const id = cardId(user.name);
                 mountGroupsPicker('groups-picker-' + id, 'user-' + id, user.groups || []);
+
+                // Wire handlers via closures over the raw username — never interpolate it
+                // into an onclick string, where a " in the name breaks out of the attribute.
+                const card = container.querySelector(`[data-card="${id}"]`);
+                if (!card) return;
+                card.querySelector('.js-toggle')?.addEventListener('click', () => toggleUser(user.name));
+                card.querySelector('.js-passwd')?.addEventListener('click', e => {
+                    e.stopPropagation(); showChangePasswordModal(user.name);
+                });
+                card.querySelector('.js-delete')?.addEventListener('click', e => {
+                    e.stopPropagation(); deleteUser(user.name);
+                });
+                card.querySelector('.js-save-groups')?.addEventListener('click', () => saveUserGroups(user.name));
             });
         }
 
@@ -573,9 +589,13 @@
                 list.innerHTML = groups.map(g => `
                     <div class="group-row">
                         <span class="group-name">${escapeHtml(g)}</span>
-                        <button class="btn btn-small btn-danger" onclick="deleteGroup('${g.replace(/'/g, "\\'")}')">Delete</button>
+                        <button class="btn btn-small btn-danger js-delete-group">Delete</button>
                     </div>
                 `).join('');
+                // Wire by index over the rendered order — keeps the group name out of any
+                // onclick string, where a " in the name would break out of the attribute.
+                list.querySelectorAll('.js-delete-group').forEach((btn, i) =>
+                    btn.addEventListener('click', () => deleteGroup(groups[i])));
             } catch (error) {
                 list.innerHTML = `<div class="error">Failed to load groups: ${escapeHtml(error.message)}</div>`;
             }
