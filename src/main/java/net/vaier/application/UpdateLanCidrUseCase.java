@@ -7,7 +7,7 @@ public interface UpdateLanCidrUseCase {
      * peer is responsible for. Updates the server-side wg0 routing table so traffic for
      * the CIDR flows through this peer, and persists the value in the peer's metadata.
      *
-     * @throws IllegalArgumentException if the peer does not exist
+     * @throws net.vaier.domain.PeerNotFoundException if the peer does not exist
      * @throws net.vaier.domain.ConflictException if another peer already owns the CIDR
      */
     void updateLanCidr(String peerName, String lanCidr);
