@@ -521,10 +521,12 @@ public class VpnService implements
         peerConfigProvider.getPeerConfigByName(peerId)
             .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
 
-        // #284: the new display name must be free across every other machine. A blank newName
-        // clears the name (falls back to the humanised id) and never collides.
-        if (Machine.nameIsTaken(newName, otherMachineNames(peerConfigProvider.getAllPeerConfigs(), peerId))) {
-            throw new ConflictException("A machine named \"" + newName.trim() + "\" already exists");
+        // #284: the resulting *effective* display label must be free across every other machine.
+        // Clearing the name (blank newName) reverts the peer to its humanised-id fallback, which is
+        // itself a label subject to the uniqueness rule — so check that fallback too, never skip it.
+        String effectiveLabel = (newName == null || newName.isBlank()) ? PeerId.display(peerId) : newName;
+        if (Machine.nameIsTaken(effectiveLabel, otherMachineNames(peerConfigProvider.getAllPeerConfigs(), peerId))) {
+            throw new ConflictException("A machine named \"" + effectiveLabel.trim() + "\" already exists");
         }
 
         forUpdatingPeerConfigurations.updateName(peerId, newName);

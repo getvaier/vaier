@@ -1004,6 +1004,31 @@ class VpnServiceTest {
         verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
     }
 
+    @Test
+    void renamePeer_clearingName_rejectedWhenHumanisedIdFallbackTakenByAnotherMachine() {
+        // #284 review: clearing reverts the peer to its PeerId.display(id) label ("media server"),
+        // which must still be unique — here a LAN server already wears that label.
+        when(peerConfigProvider.getPeerConfigByName("media-server"))
+            .thenReturn(Optional.of(new PeerConfiguration("media-server", "10.13.13.2", "config")));
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("media server", "192.168.1.50", false, null)
+        ));
+
+        assertThatThrownBy(() -> service.renamePeer("media-server", ""))
+            .isInstanceOf(ConflictException.class);
+        verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
+    }
+
+    @Test
+    void renamePeer_clearingName_allowedWhenHumanisedIdFallbackIsFree() {
+        when(peerConfigProvider.getPeerConfigByName("media-server"))
+            .thenReturn(Optional.of(new PeerConfiguration("media-server", "10.13.13.2", "config")));
+
+        service.renamePeer("media-server", "");
+
+        verify(forUpdatingPeerConfigurations).updateName("media-server", "");
+    }
+
     // --- renamePeer: sets the display name; the id is immutable (#209, #55) ---
 
     @Test
