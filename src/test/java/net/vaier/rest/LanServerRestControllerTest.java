@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -99,9 +100,8 @@ class LanServerRestControllerTest {
             .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null);
         var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null);
 
-        ResponseEntity<Void> response = controller.register(request);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThatThrownBy(() -> controller.register(request))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -110,9 +110,9 @@ class LanServerRestControllerTest {
             .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null);
         var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375, null);
 
-        ResponseEntity<Void> response = controller.register(request);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        // GlobalExceptionHandler renders 400; the controller must propagate, not swallow.
+        assertThatThrownBy(() -> controller.register(request))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -149,9 +149,10 @@ class LanServerRestControllerTest {
     @Test
     void downloadSetupScript_returns409WhenRelayHasNoLanAddress() {
         when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
-            .thenThrow(new IllegalStateException("Relay peer apalveien5 has no LAN address set"));
+            .thenThrow(new net.vaier.domain.ConflictException("Relay peer apalveien5 has no LAN address set"));
 
-        assertThat(controller.downloadSetupScript("nuc02").getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThatThrownBy(() -> controller.downloadSetupScript("nuc02"))
+            .isInstanceOf(net.vaier.domain.ConflictException.class);
     }
 
     @Test
@@ -241,22 +242,20 @@ class LanServerRestControllerTest {
 
     @Test
     void rename_returns404WhenLanServerNotFound() {
-        doThrow(new java.util.NoSuchElementException("LAN server not found: ghost"))
+        doThrow(new net.vaier.domain.NotFoundException("LAN server not found: ghost"))
             .when(renameLanServerUseCase).rename("ghost", "phantom");
 
-        var response = controller.rename("ghost", new LanServerRestController.RenameRequest("phantom"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.rename("ghost", new LanServerRestController.RenameRequest("phantom")))
+            .isInstanceOf(net.vaier.domain.NotFoundException.class);
     }
 
     @Test
     void rename_returns409WhenNewNameAlreadyTaken() {
-        doThrow(new IllegalStateException("A LAN server named printer already exists"))
+        doThrow(new net.vaier.domain.ConflictException("A LAN server named printer already exists"))
             .when(renameLanServerUseCase).rename("nas", "printer");
 
-        var response = controller.rename("nas", new LanServerRestController.RenameRequest("printer"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThatThrownBy(() -> controller.rename("nas", new LanServerRestController.RenameRequest("printer")))
+            .isInstanceOf(net.vaier.domain.ConflictException.class);
     }
 
     @Test
@@ -264,9 +263,8 @@ class LanServerRestControllerTest {
         doThrow(new IllegalArgumentException("New LAN server name must not be blank"))
             .when(renameLanServerUseCase).rename("nas", "  ");
 
-        var response = controller.rename("nas", new LanServerRestController.RenameRequest("  "));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThatThrownBy(() -> controller.rename("nas", new LanServerRestController.RenameRequest("  ")))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     // --- description (#54) ---
@@ -292,13 +290,12 @@ class LanServerRestControllerTest {
 
     @Test
     void updateDescription_returns404WhenLanServerNotFound() {
-        doThrow(new java.util.NoSuchElementException("LAN server not found: ghost"))
+        doThrow(new net.vaier.domain.NotFoundException("LAN server not found: ghost"))
             .when(updateLanServerDescriptionUseCase).updateDescription("ghost", "anything");
 
-        var response = controller.updateDescription(
-                "ghost", new LanServerRestController.UpdateDescriptionRequest("anything"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.updateDescription(
+                "ghost", new LanServerRestController.UpdateDescriptionRequest("anything")))
+            .isInstanceOf(net.vaier.domain.NotFoundException.class);
     }
 
     @Test

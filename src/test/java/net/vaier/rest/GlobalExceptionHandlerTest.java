@@ -117,6 +117,26 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void notFoundException_mappedTo404Envelope() {
+        ResponseEntity<ApiError> response =
+                new GlobalExceptionHandler().handleNotFound(new net.vaier.domain.NotFoundException("peer gone"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThat(response.getBody().code()).isEqualTo("NOT_FOUND");
+        assertThat(response.getBody().message()).isEqualTo("peer gone");
+    }
+
+    @Test
+    void conflictException_mappedTo409Envelope() {
+        ResponseEntity<ApiError> response =
+                new GlobalExceptionHandler().handleConflict(new net.vaier.domain.ConflictException("name taken"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody().code()).isEqualTo("CONFLICT");
+        assertThat(response.getBody().message()).isEqualTo("name taken");
+    }
+
+    @Test
     void frameworkException_mappedTo4xx_usesStatusReasonInTheEnvelope() {
         GlobalExceptionHandler handler = new GlobalExceptionHandler();
 

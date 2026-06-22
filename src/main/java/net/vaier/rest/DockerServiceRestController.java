@@ -41,12 +41,8 @@ public class DockerServiceRestController {
         @RequestParam(required = false) Integer port,
         @RequestParam(defaultValue = "false") boolean tlsEnabled
     ) {
-        try {
-            Server server = new Server(address, port, tlsEnabled);
-            return ResponseEntity.ok(getServerInfoUseCase.getServicesWithExposedPorts(server));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        Server server = new Server(address, port, tlsEnabled);
+        return ResponseEntity.ok(getServerInfoUseCase.getServicesWithExposedPorts(server));
     }
 
     @GetMapping("/vaier-server")
@@ -65,19 +61,11 @@ public class DockerServiceRestController {
 
     @GetMapping("/peers")
     public ResponseEntity<List<PeerContainers>> discoverPeerContainers() {
-        try {
-            return ResponseEntity.ok(discoverPeerContainersUseCase.discoverAll());
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        return ResponseEntity.ok(discoverPeerContainersUseCase.discoverAll());
     }
 
     @GetMapping("/lan-servers")
     public ResponseEntity<List<LanServerContainers>> discoverLanServerContainers() {
-        try {
-            return ResponseEntity.ok(getLanServerScrapeUseCase.getLanServerContainers());
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().build();
-        }
+        return ResponseEntity.ok(getLanServerScrapeUseCase.getLanServerContainers());
     }
 }

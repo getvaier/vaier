@@ -76,7 +76,7 @@ public class LanServerService implements
         LanServer existing = forPersistingLanServers.getAll().stream()
             .filter(s -> s.hasName(name))
             .findFirst()
-            .orElseThrow(() -> new NoSuchElementException("LAN server not found: " + name));
+            .orElseThrow(() -> new net.vaier.domain.NotFoundException("LAN server not found: " + name));
         forPersistingLanServers.save(existing.withDescription(description));
         log.info("Updated description for LAN server {}", name);
     }
@@ -95,7 +95,7 @@ public class LanServerService implements
         LanServer existing = all.stream()
             .filter(s -> s.hasName(currentName))
             .findFirst()
-            .orElseThrow(() -> new NoSuchElementException("LAN server not found: " + currentName));
+            .orElseThrow(() -> new net.vaier.domain.NotFoundException("LAN server not found: " + currentName));
 
         LanServer renamed = existing.renamedTo(newName);
 
@@ -104,7 +104,7 @@ public class LanServerService implements
             return;
         }
         if (all.stream().anyMatch(s -> s.hasName(renamed.name()))) {
-            throw new IllegalStateException("A LAN server named " + renamed.name() + " already exists");
+            throw new net.vaier.domain.ConflictException("A LAN server named " + renamed.name() + " already exists");
         }
 
         // save() upserts by name, so write the new entry then drop the old one.

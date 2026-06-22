@@ -158,7 +158,7 @@ class LanServerSetupScriptTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(
                 () -> LanServerSetupScript.forHost(server, peers, "172.31.16.0/20", "10.13.13.0/24"))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(ConflictException.class)
             .hasMessageContaining("apalveien5");
     }
 

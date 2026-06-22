@@ -126,7 +126,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
 
         // Check if user already exists
         if (usersMap.containsKey(username)) {
-            throw new RuntimeException("User already exists: " + username);
+            throw new net.vaier.domain.ConflictException("User already exists: " + username);
         }
 
         // Hash password with Argon2id
@@ -188,7 +188,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         @SuppressWarnings("unchecked")
         Map<String, Object> usersMap = (Map<String, Object>) config.get("users");
         if (usersMap == null || !usersMap.containsKey(username)) {
-            throw new RuntimeException("User not found: " + username);
+            throw new net.vaier.domain.NotFoundException("User not found: " + username);
         }
 
         usersMap.remove(username);
@@ -242,7 +242,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         @SuppressWarnings("unchecked")
         Map<String, Object> usersMap = (Map<String, Object>) config.get("users");
         if (usersMap == null || !usersMap.containsKey(username)) {
-            throw new RuntimeException("User not found: " + username);
+            throw new net.vaier.domain.NotFoundException("User not found: " + username);
         }
 
         @SuppressWarnings("unchecked")
@@ -281,7 +281,7 @@ public class AutheliaUserAdapter implements ForPersistingUsers {
         @SuppressWarnings("unchecked")
         Map<String, Object> usersMap = (Map<String, Object>) config.get("users");
         if (usersMap == null || !usersMap.containsKey(username)) {
-            throw new RuntimeException("User not found: " + username);
+            throw new net.vaier.domain.NotFoundException("User not found: " + username);
         }
 
         @SuppressWarnings("unchecked")

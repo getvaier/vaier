@@ -278,7 +278,7 @@ class LanServerServiceTest {
         when(forPersistingLanServers.getAll()).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.rename("ghost", "phantom"))
-            .isInstanceOf(java.util.NoSuchElementException.class);
+            .isInstanceOf(net.vaier.domain.NotFoundException.class);
         verify(forPersistingLanServers, never()).save(any());
         verify(forPersistingLanServers, never()).deleteByName(any());
     }
@@ -291,7 +291,7 @@ class LanServerServiceTest {
         ));
 
         assertThatThrownBy(() -> service.rename("nas", "printer"))
-            .isInstanceOf(IllegalStateException.class);
+            .isInstanceOf(net.vaier.domain.ConflictException.class);
         verify(forPersistingLanServers, never()).save(any());
         verify(forPersistingLanServers, never()).deleteByName(any());
     }
@@ -352,7 +352,7 @@ class LanServerServiceTest {
         when(forPersistingLanServers.getAll()).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.updateDescription("ghost", "anything"))
-            .isInstanceOf(java.util.NoSuchElementException.class);
+            .isInstanceOf(net.vaier.domain.NotFoundException.class);
         verify(forPersistingLanServers, never()).save(any());
     }
 

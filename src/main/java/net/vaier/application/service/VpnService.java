@@ -314,7 +314,7 @@ public class VpnService implements
                     .lanCidrOwner(peerConfigProvider.getAllPeerConfigs(), normalized, peer.id())
                     .orElse(null);
             if (conflict != null) {
-                throw new IllegalStateException(
+                throw new net.vaier.domain.ConflictException(
                     "LAN CIDR " + normalized + " already owned by peer " + conflict.name());
             }
         }

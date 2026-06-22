@@ -51,7 +51,7 @@ public final class LanServerSetupScript {
             PeerConfiguration relay = anchor.get().relayPeer().orElseThrow();
             gateway = relay.lanAddress();
             if (gateway == null || gateway.isBlank()) {
-                throw new IllegalStateException("Relay peer " + relay.name()
+                throw new ConflictException("Relay peer " + relay.name()
                     + " has no LAN address set — set it before generating a setup script for "
                     + server.name());
             }

@@ -59,23 +59,17 @@ public class AuthRestController {
 
     @PostMapping("/users")
     public ResponseEntity<String> addUser(@RequestBody AddUserRequest request) {
-        try {
-            addUserUseCase.addUser(request.username(), request.password(), request.email(),
-                    request.displayname(), request.groups());
-            return ResponseEntity.ok("User added successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        // Validation -> 400, duplicate -> 409 (ConflictException), infra failure -> 500
+        // are all rendered as ApiError by GlobalExceptionHandler.
+        addUserUseCase.addUser(request.username(), request.password(), request.email(),
+                request.displayname(), request.groups());
+        return ResponseEntity.ok("User added successfully");
     }
 
     @DeleteMapping("/users/{username}")
     public ResponseEntity<String> deleteUser(@PathVariable String username) {
-        try {
-            deleteUserUseCase.deleteUser(username);
-            return ResponseEntity.ok("User deleted successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        deleteUserUseCase.deleteUser(username);
+        return ResponseEntity.ok("User deleted successfully");
     }
 
     @PutMapping("/users/{username}/password")
@@ -83,12 +77,8 @@ public class AuthRestController {
         @PathVariable String username,
         @RequestBody ChangePasswordRequest request
     ) {
-        try {
-            changePasswordUseCase.changePassword(username, request.newPassword());
-            return ResponseEntity.ok("Password changed successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        changePasswordUseCase.changePassword(username, request.newPassword());
+        return ResponseEntity.ok("Password changed successfully");
     }
 
     @PutMapping("/users/{username}/email")
@@ -96,12 +86,8 @@ public class AuthRestController {
         @PathVariable String username,
         @RequestBody UpdateEmailRequest request
     ) {
-        try {
-            updateUserEmailUseCase.updateEmail(username, request.email());
-            return ResponseEntity.ok("Email updated successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        updateUserEmailUseCase.updateEmail(username, request.email());
+        return ResponseEntity.ok("Email updated successfully");
     }
 
     @PutMapping("/users/{username}/displayname")
@@ -109,12 +95,8 @@ public class AuthRestController {
         @PathVariable String username,
         @RequestBody UpdateDisplayNameRequest request
     ) {
-        try {
-            updateUserDisplayNameUseCase.updateDisplayName(username, request.displayname());
-            return ResponseEntity.ok("Display name updated successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        updateUserDisplayNameUseCase.updateDisplayName(username, request.displayname());
+        return ResponseEntity.ok("Display name updated successfully");
     }
 
     @PutMapping("/users/{username}/groups")
@@ -122,12 +104,8 @@ public class AuthRestController {
         @PathVariable String username,
         @RequestBody UpdateGroupsRequest request
     ) {
-        try {
-            updateUserGroupsUseCase.updateUserGroups(username, request.groups());
-            return ResponseEntity.ok("Groups updated successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        updateUserGroupsUseCase.updateUserGroups(username, request.groups());
+        return ResponseEntity.ok("Groups updated successfully");
     }
 
     @GetMapping("/users/me")
@@ -149,12 +127,8 @@ public class AuthRestController {
 
     @DeleteMapping("/groups/{groupName}")
     public ResponseEntity<String> deleteGroup(@PathVariable String groupName) {
-        try {
-            deleteGroupUseCase.deleteGroup(groupName);
-            return ResponseEntity.ok("Group deleted successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+        deleteGroupUseCase.deleteGroup(groupName);
+        return ResponseEntity.ok("Group deleted successfully");
     }
 
     public record AddUserRequest(String username, String password, String email, String displayname, List<String> groups) {}

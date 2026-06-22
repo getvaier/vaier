@@ -889,7 +889,7 @@ class VpnServiceTest {
             new PeerConfiguration("nuc02",      "10.13.13.8", "config", MachineType.UBUNTU_SERVER, "192.168.3.0/24", null)));
 
         assertThatThrownBy(() -> service.updateLanCidr("apalveien5", "192.168.3.0/24"))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(net.vaier.domain.ConflictException.class)
             .hasMessageContaining("nuc02")
             .hasMessageContaining("192.168.3.0/24");
 
