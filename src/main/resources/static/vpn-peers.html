@@ -781,7 +781,7 @@
 
         function displaySuccess(message) {
             const el = document.getElementById('success-message');
-            el.innerHTML = `<div class="success">${message}</div>`;
+            el.innerHTML = `<div class="success">${escapeHtml(message)}</div>`;
             setTimeout(() => el.innerHTML = '', 5000);
         }
 
