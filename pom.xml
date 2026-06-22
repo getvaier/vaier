@@ -174,6 +174,16 @@
                 <configuration>
                     <!-- Exclude live integration tests (real AWS) from mvn test -->
                     <excludedGroups>integration-live</excludedGroups>
+                    <!-- Run unit tests AND the mocked @WebMvcTest controller ITs under `mvn test`.
+                         Surefire's default patterns don't match *IT, so without this the
+                         integration/controller/*IT suite silently never runs (#276). The only
+                         real-AWS *IT is @Tag("integration-live") and is excluded above; Failsafe
+                         still runs it during `mvn verify`. -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*Tests.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
                 </configuration>
             </plugin>
             <plugin>

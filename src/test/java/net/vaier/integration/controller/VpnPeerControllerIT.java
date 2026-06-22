@@ -2,17 +2,19 @@ package net.vaier.integration.controller;
 
 import net.vaier.application.CreatePeerUseCase.CreatedPeerUco;
 import net.vaier.application.GetPeerConfigUseCase.PeerConfigResult;
+import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.domain.MachineType;
-import net.vaier.domain.VpnClient;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -21,7 +23,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void listPeers_returnsEmptyListOnException() throws Exception {
-        when(getVpnClientsUseCase.getClients()).thenThrow(new RuntimeException("WireGuard not available"));
+        when(getVpnPeersUseCase.getVpnPeers()).thenThrow(new RuntimeException("WireGuard not available"));
 
         mockMvc.perform(get("/vpn/peers"))
                .andExpect(status().isOk())
@@ -30,12 +32,12 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void listPeers_returnsMappedPeerList() throws Exception {
-        VpnClient client = new VpnClient("pubkey123", "10.13.13.2/32", "1.2.3.4",
-                "51820", "2024-01-01", "100", "200");
-        when(getVpnClientsUseCase.getClients()).thenReturn(List.of(client));
-        when(resolveVpnPeerNameUseCase.resolvePeerNameByIp("10.13.13.2")).thenReturn("peer1");
-        when(getPeerConfigUseCase.getPeerConfigByIp("10.13.13.2")).thenReturn(
-                Optional.of(new PeerConfigResult("peer1", "10.13.13.2", "[Interface]", MachineType.UBUNTU_SERVER)));
+        VpnPeerView view = new VpnPeerView(
+                "peer1", "peer1", "pubkey123", "10.13.13.2/32", "10.13.13.2",
+                "1.2.3.4", "51820", "2024-01-01", true, "100", "200",
+                MachineType.UBUNTU_SERVER, true, false, false, Set.of(),
+                null, null, null, Optional.empty(), false);
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(view));
 
         mockMvc.perform(get("/vpn/peers"))
                .andExpect(status().isOk())
@@ -64,10 +66,13 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void createPeer_defaultsPeerTypeToUbuntuServerWhenNull() throws Exception {
+    void createPeer_forwardsNullPeerType_whenOmitted() throws Exception {
+        // The controller passes the request's peerType through verbatim; defaulting a null
+        // type to UBUNTU_SERVER is the domain's job (GetVpnPeersUseCase/CreatePeerUseCase),
+        // not the controller's. So an omitted peerType reaches the use case as null.
         CreatedPeerUco created = new CreatedPeerUco(
                 "peer1", "peer1", "10.13.13.2", "pubkey", "privkey", "[Interface]", MachineType.UBUNTU_SERVER);
-        when(createPeerUseCase.createPeer(eq("peer1"), eq(MachineType.UBUNTU_SERVER), any(), any(), any()))
+        when(createPeerUseCase.createPeer(eq("peer1"), isNull(), any(), any(), any()))
                 .thenReturn(created);
 
         mockMvc.perform(post("/vpn/peers")
@@ -77,6 +82,8 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
                            """))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.peerType").value("UBUNTU_SERVER"));
+
+        verify(createPeerUseCase).createPeer(eq("peer1"), isNull(), any(), any(), any());
     }
 
     @Test
