@@ -416,7 +416,7 @@ public class VpnService implements
         // #284: machine names are unique across Vaier — a new peer may not reuse the name of any
         // existing peer or LAN server. Checked before any key/IP/state is created.
         if (Machine.nameIsTaken(name, otherMachineNames(null))) {
-            throw new ConflictException("A machine named " + name + " already exists");
+            throw new ConflictException("A machine named \"" + name.trim() + "\" already exists");
         }
         // The id is the slug of the operator-typed name, deduplicated against existing peers and
         // frozen for the life of the peer (its config directory name). The typed name is kept
@@ -520,7 +520,7 @@ public class VpnService implements
         // #284: the new display name must be free across every other machine. A blank newName
         // clears the name (falls back to the humanised id) and never collides.
         if (Machine.nameIsTaken(newName, otherMachineNames(peerId))) {
-            throw new ConflictException("A machine named " + newName + " already exists");
+            throw new ConflictException("A machine named \"" + newName.trim() + "\" already exists");
         }
 
         forUpdatingPeerConfigurations.updateName(peerId, newName);

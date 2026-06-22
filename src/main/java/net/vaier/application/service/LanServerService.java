@@ -72,7 +72,7 @@ public class LanServerService implements
         // #284: machine names are unique across Vaier. save() upserts by name, so without this
         // guard registering a duplicate name would silently overwrite the existing machine.
         if (Machine.nameIsTaken(name, otherMachineNames(null))) {
-            throw new ConflictException("A machine named " + name + " already exists");
+            throw new ConflictException("A machine named \"" + name.trim() + "\" already exists");
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             name, lanAddress, runsDocker, dockerPort);
@@ -114,7 +114,7 @@ public class LanServerService implements
         }
         // #284: the new name must be free across every machine — other LAN servers and VPN peers.
         if (Machine.nameIsTaken(renamed.name(), otherMachineNames(currentName))) {
-            throw new ConflictException("A machine named " + renamed.name() + " already exists");
+            throw new ConflictException("A machine named \"" + renamed.name() + "\" already exists");
         }
 
         // save() upserts by name, so write the new entry then drop the old one.
