@@ -117,6 +117,22 @@ class LanServerServiceTest {
     }
 
     @Test
+    void register_trimsSurroundingWhitespaceFromNameAndAddress() {
+        // #284 review: the persisted identity must match the trimmed uniqueness-comparison rule,
+        // and stay a clean /lan-servers/{name} path segment.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        service.register("  nas  ", " 192.168.3.50 ", true, 2375);
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().name()).isEqualTo("nas");
+        assertThat(captor.getValue().lanAddress()).isEqualTo("192.168.3.50");
+    }
+
+    @Test
     void register_runsDockerTrueWithoutPort_throws() {
         assertThatThrownBy(() -> service.register("nas", "192.168.3.50", true, null))
             .isInstanceOf(IllegalArgumentException.class)
