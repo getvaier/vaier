@@ -115,7 +115,10 @@ public class LanServerRestController {
      * installs routes via its relay peer if it's relay-anchored. 404 when the host is unknown or
      * has nothing to set up; 409 when its relay peer has no LAN address to route via.
      */
-    @GetMapping(value = "/{name}/setup.sh", produces = "application/x-sh")
+    // No `produces` constraint: the success path sets the x-sh content type explicitly, and
+    // leaving it off lets error responses (e.g. a 409 ConflictException) render as JSON ApiError
+    // instead of failing content negotiation with a 406.
+    @GetMapping(value = "/{name}/setup.sh")
     public ResponseEntity<?> downloadSetupScript(@PathVariable String name) {
         // A relay-without-LAN-address conflict propagates as ConflictException -> 409 ApiError;
         // an unknown/empty host stays a body-less 404 (GET of an optional artifact).

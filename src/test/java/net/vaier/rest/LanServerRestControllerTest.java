@@ -29,11 +29,17 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
 class LanServerRestControllerTest {
@@ -146,6 +152,22 @@ class LanServerRestControllerTest {
         when(generateLanServerSetupScriptUseCase.generateSetupScript("ghost")).thenReturn(Optional.empty());
 
         assertThat(controller.downloadSetupScript("ghost").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void downloadSetupScript_conflict_rendersJsonEnvelope_throughTheHandler() throws Exception {
+        // With produces="application/x-sh" a JSON/API client (Accept: application/json) couldn't
+        // even match the handler, so the 409 ApiError was unreachable (406). Without the constraint
+        // the conflict renders as the JSON envelope through the real dispatcher + handler.
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
+            .thenThrow(new ConflictException("Relay peer apalveien5 has no LAN address set"));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        mockMvc.perform(get("/lan-servers/nuc02/setup.sh").accept(MediaType.APPLICATION_JSON))
+               .andExpect(status().isConflict())
+               .andExpect(jsonPath("$.code").value("CONFLICT"));
     }
 
     @Test
