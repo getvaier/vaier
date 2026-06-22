@@ -152,10 +152,21 @@
                 if (!me.username) return;
                 const name = me.displayname || me.username;
                 const logout = me.logoutUrl || '#';
-                userEl.innerHTML = `
-                    <a href="/mypage.html" class="display-name" title="${name}">${name}</a>
-                    <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
-                `;
+                // Build via the DOM: the display name is user-controlled, and setting it
+                // through .title/.textContent is safe in both the attribute and text
+                // contexts (escapeHtml would not escape the " that breaks out of title=).
+                const profile = document.createElement('a');
+                profile.href = '/mypage.html';
+                profile.className = 'display-name';
+                profile.title = name;
+                profile.textContent = name;
+                const logoutLink = document.createElement('a');
+                logoutLink.href = logout;
+                logoutLink.className = 'topbar-item';
+                logoutLink.title = 'Logout';
+                logoutLink.setAttribute('aria-label', 'Logout');
+                logoutLink.innerHTML = ICON_LOGOUT; // trusted constant SVG
+                userEl.replaceChildren(profile, logoutLink);
             } catch (_) {}
         }
 
