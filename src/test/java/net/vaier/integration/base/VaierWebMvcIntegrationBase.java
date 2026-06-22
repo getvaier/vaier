@@ -44,6 +44,11 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetFaviconUseCase getFaviconUseCase;
 
+    // Required by WebConfig -> EnterpriseLicenseInterceptor, which every @WebMvcTest
+    // context loads; without it the whole controller IT suite fails to start.
+    @MockBean
+    protected GetEditionUseCase getEditionUseCase;
+
     // --- User use cases ---
     @MockBean
     protected GetUsersUseCase getUsersUseCase;
@@ -245,4 +250,23 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- Launchpad use cases ---
     @MockBean
     protected GetLaunchpadServicesUseCase getLaunchpadServicesUseCase;
+
+    // --- Settings / version ---
+    @MockBean
+    protected GetAppVersionUseCase getAppVersionUseCase;
+
+    // --- Licensing ---
+    @MockBean
+    protected GetLicenseStatusUseCase getLicenseStatusUseCase;
+
+    // --- LAN scanner (Enterprise) use cases ---
+    @MockBean
+    protected ScanLanUseCase scanLanUseCase;
+
+    @MockBean
+    protected GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
+
+    // --- Offline page ---
+    @MockBean
+    protected GetOfflinePageUseCase getOfflinePageUseCase;
 }

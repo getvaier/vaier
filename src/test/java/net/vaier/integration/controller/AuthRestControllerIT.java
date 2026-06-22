@@ -293,10 +293,10 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
 
     @Test
     void deleteGroup_returns400WhenInvalid() throws Exception {
-        doThrow(new IllegalArgumentException("group name must not be blank"))
-                .when(deleteGroupUseCase).deleteGroup("");
+        doThrow(new IllegalArgumentException("no such group: ghost"))
+                .when(deleteGroupUseCase).deleteGroup("ghost");
 
-        mockMvc.perform(delete("/groups/ "))
+        mockMvc.perform(delete("/groups/ghost"))
                .andExpect(status().isBadRequest());
     }
 }
