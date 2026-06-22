@@ -11,11 +11,46 @@ import org.springframework.http.MediaType;
 
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
+
+    @Test
+    void publishService_validationFailure_returnsUniformApiError() throws Exception {
+        doThrow(new IllegalArgumentException("A route already exists on app.example.com"))
+                .when(publishPeerServiceUseCase).publishService(
+                        any(), anyInt(), any(), anyBoolean(), any(), anyBoolean(), any());
+
+        mockMvc.perform(post("/published-services/publish")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"address":"10.13.13.2","port":8080,"subdomain":"app"}
+                           """))
+               .andExpect(status().isBadRequest())
+               .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+               .andExpect(jsonPath("$.message").value("A route already exists on app.example.com"));
+    }
+
+    @Test
+    void publishLanService_validationFailure_returnsUniformApiError() throws Exception {
+        doThrow(new IllegalArgumentException("Unknown machine: ghost"))
+                .when(publishLanServiceUseCase).publishLanService(
+                        any(), any(), anyInt(), any(), anyBoolean(), anyBoolean(), any(), any());
+
+        mockMvc.perform(post("/published-services/lan")
+                       .contentType(MediaType.APPLICATION_JSON)
+                       .content("""
+                           {"subdomain":"x","machineName":"ghost","port":80,"protocol":"http"}
+                           """))
+               .andExpect(status().isBadRequest())
+               .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+               .andExpect(jsonPath("$.message").value("Unknown machine: ghost"));
+    }
 
     @Test
     void discover_returnsPublishedServices() throws Exception {

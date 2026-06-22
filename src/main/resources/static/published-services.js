@@ -784,8 +784,8 @@ function onPublishLanMachineChange() {
 }
 
 // Turn a failed publish response into a human explanation + a suggested next step.
-// The backend sends the rejection reason as { "message": "..." } on a 400 (PublishError);
-// for other statuses we fall back to status-keyed guidance.
+// The backend sends the rejection reason as the ApiError envelope { "message": "..." }
+// on a 400; for other statuses we fall back to status-keyed guidance.
 async function explainPublishError(response, mode, body) {
     let reason = '';
     try {

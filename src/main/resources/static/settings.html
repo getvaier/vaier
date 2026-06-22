@@ -409,7 +409,7 @@
                     setNote('diskNote', 'Disk threshold saved.', 'ok');
                 } else {
                     const err = await r.json().catch(() => ({}));
-                    setNote('diskNote', err.error || 'Save failed.', 'error');
+                    setNote('diskNote', err.message || 'Save failed.', 'error');
                 }
             } catch (e) {
                 setNote('diskNote', e.message, 'error');
@@ -436,8 +436,8 @@
                     document.getElementById('awsNewKey').value = '';
                     document.getElementById('awsNewSecret').value = '';
                 } else {
-                    const err = await r.json().catch(() => ({ error: r.statusText }));
-                    setNote('awsNote', err.error || 'Validation failed.', 'error');
+                    const err = await r.json().catch(() => ({ message: r.statusText }));
+                    setNote('awsNote', err.message || 'Validation failed.', 'error');
                 }
             } catch (e) {
                 setNote('awsNote', e.message, 'error');
@@ -465,8 +465,8 @@
                     setNote('smtpNote', 'SMTP settings saved.', 'ok');
                     document.getElementById('smtpPassword').value = '';
                 } else {
-                    const err = await r.json().catch(() => ({ error: r.statusText }));
-                    setNote('smtpNote', err.error || 'Save failed.', 'error');
+                    const err = await r.json().catch(() => ({ message: r.statusText }));
+                    setNote('smtpNote', err.message || 'Save failed.', 'error');
                 }
             } catch (e) {
                 setNote('smtpNote', e.message, 'error');
@@ -498,8 +498,8 @@
                 if (r.ok) {
                     setNote('smtpNote', 'Test email sent. Check ' + recipient + '.', 'ok');
                 } else {
-                    const err = await r.json().catch(() => ({ error: r.statusText }));
-                    setNote('smtpNote', err.error || 'Test failed.', 'error');
+                    const err = await r.json().catch(() => ({ message: r.statusText }));
+                    setNote('smtpNote', err.message || 'Test failed.', 'error');
                 }
             } catch (e) {
                 setNote('smtpNote', e.message, 'error');

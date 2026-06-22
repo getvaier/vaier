@@ -384,10 +384,8 @@ A step toward operator-friendly error feedback under the V2 usability theme: eve
 - A `@RestControllerAdvice` (`net.vaier.rest.GlobalExceptionHandler`) maps uncaught exceptions to the **API error envelope** — `net.vaier.rest.ApiError(code, message, detail)`, where `code` is a stable machine-readable token, `message` is an operator-safe human-readable explanation, and `detail` is optional/nullable.
 - `IllegalArgumentException` — the convention domain validation throughout Vaier already uses to signal bad input — maps to `400` with `code=BAD_REQUEST` and the exception's message surfaced **verbatim**, so operator-readable validation messages reach the UI.
 - Any other exception maps to `500` with `code=INTERNAL_ERROR` and a safe generic message; the real exception is logged in full server-side and its details (which may include hostnames, IPs, or credentials) are **not** leaked to the client.
-
-**Backlog (still planned):**
-- Migrate the two controllers that still hand-roll their own error responses to the shared envelope — `PublishedServiceRestController` (returns `PublishError{message}`) and `SettingsRestController` (returns `ErrorResponse{error}`). Deliberately out of scope for this slice.
-- Standardise the frontend's error handling on the envelope's `.message` field once those flows are migrated.
+- **Migrated the two remaining bespoke error flows onto the shared envelope ✅ (closes [#275](https://github.com/getvaier/vaier/issues/275)).** `PublishedServiceRestController` no longer catches `IllegalArgumentException` to return a `PublishError{message}` for publish / LAN-publish / delete — those validation failures now propagate to the `GlobalExceptionHandler` and render as the uniform `400` `ApiError`; the `PublishError` record is deleted. `SettingsRestController` keeps its deliberate `Exception`→`400` mapping (bad AWS creds / SMTP auth failures are client errors that should be `400`, not the generic `500` a raw SDK exception would otherwise yield) but now emits the shared `ApiError` instead of its own `ErrorResponse{error}`, which is deleted. The frontend is standardised on the envelope's `.message` field (`settings.html` now reads `err.message`; the publish flow already did).
+- **Caveat:** the enterprise-gate `402` (`EnterpriseLicenseInterceptor`) is the one intentional non-`ApiError` failure shape remaining in the app.
 
 ---
 

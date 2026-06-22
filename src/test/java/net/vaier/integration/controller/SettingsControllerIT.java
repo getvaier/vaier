@@ -80,7 +80,11 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
                        .content("""
                            {"awsKey":"BAD","awsSecret":"BAD"}
                            """))
-               .andExpect(status().isBadRequest());
+               .andExpect(status().isBadRequest())
+               // Settings keeps its deliberate Exception->400 mapping (bad creds/SMTP are
+               // client errors), but now emits the same ApiError envelope as everything else.
+               .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+               .andExpect(jsonPath("$.message").value("Invalid credentials"));
     }
 
     @Test
