@@ -63,7 +63,11 @@ public class LanServerService implements
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                          String description) {
         LanServer.validate(name, lanAddress, runsDocker, dockerPort);
-        if (resolveLanAnchor(lanAddress).isEmpty()) {
+        // Read the peer configs and server LAN CIDR once (both are filesystem/metadata reads) and
+        // reuse them for routability and the name-collision check.
+        List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
+        if (LanAnchor.resolve(lanAddress, peers, serverLanCidr).isEmpty()) {
             throw new IllegalArgumentException(
                 "lanAddress " + lanAddress + " is not inside any relay peer's lanCidr, " +
                 "nor inside the Vaier server's own LAN CIDR. Set lanCidr on a relay peer first " +
@@ -71,7 +75,7 @@ public class LanServerService implements
         }
         // #284: machine names are unique across Vaier. save() upserts by name, so without this
         // guard registering a duplicate name would silently overwrite the existing machine.
-        if (Machine.nameIsTaken(name, otherMachineNames(null))) {
+        if (Machine.nameIsTaken(name, otherMachineNames(peers, forPersistingLanServers.getAll(), null))) {
             throw new ConflictException("A machine named \"" + name.trim() + "\" already exists");
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
@@ -113,7 +117,10 @@ public class LanServerService implements
             return;
         }
         // #284: the new name must be free across every machine — other LAN servers and VPN peers.
-        if (Machine.nameIsTaken(renamed.name(), otherMachineNames(currentName))) {
+        // Reuse the already-loaded `all` list rather than re-reading the LAN-server file.
+        List<String> otherNames = otherMachineNames(
+            forGettingPeerConfigurations.getAllPeerConfigs(), all, currentName);
+        if (Machine.nameIsTaken(renamed.name(), otherNames)) {
             throw new ConflictException("A machine named \"" + renamed.name() + "\" already exists");
         }
 
@@ -153,14 +160,15 @@ public class LanServerService implements
 
     /**
      * Names of every machine Vaier knows about — VPN peers and LAN servers — except the LAN
-     * server called {@code excludeLanServerName} (pass null to exclude nothing). Orchestration
-     * only: gathers names from both driven ports so the domain ({@link Machine#nameIsTaken})
-     * can decide whether a candidate name is free across all of Vaier.
+     * server called {@code excludeLanServerName} (pass null to exclude nothing). The caller passes
+     * the already-read peer configs and LAN servers so each source is read at most once per
+     * operation. Orchestration only: the domain ({@link Machine#nameIsTaken}) decides whether a
+     * candidate name is free across all of Vaier.
      */
-    private List<String> otherMachineNames(String excludeLanServerName) {
-        Stream<String> peerNames = forGettingPeerConfigurations.getAllPeerConfigs().stream()
-            .map(ForGettingPeerConfigurations.PeerConfiguration::name);
-        Stream<String> lanServerNames = forPersistingLanServers.getAll().stream()
+    private List<String> otherMachineNames(List<PeerConfiguration> peers, List<LanServer> lanServers,
+                                           String excludeLanServerName) {
+        Stream<String> peerNames = peers.stream().map(PeerConfiguration::name);
+        Stream<String> lanServerNames = lanServers.stream()
             .filter(s -> excludeLanServerName == null || !s.hasName(excludeLanServerName))
             .map(LanServer::name);
         return Stream.concat(peerNames, lanServerNames).toList();

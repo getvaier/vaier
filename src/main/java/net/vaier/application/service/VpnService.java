@@ -19,6 +19,7 @@ import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
@@ -35,9 +36,9 @@ import net.vaier.domain.port.ForDeletingVpnPeers;
 import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeolocatingIps;
-import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
@@ -105,7 +106,7 @@ public class VpnService implements
     private final ForExecutingInContainer forExecutingInContainer;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
-    private final ForGettingLanServers forGettingLanServers;
+    private final ForPersistingLanServers forPersistingLanServers;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -123,7 +124,7 @@ public class VpnService implements
                       ForExecutingInContainer forExecutingInContainer,
                       ForResolvingServerLanCidr forResolvingServerLanCidr,
                       ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval,
-                      ForGettingLanServers forGettingLanServers) {
+                      ForPersistingLanServers forPersistingLanServers) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -140,7 +141,7 @@ public class VpnService implements
         this.forExecutingInContainer = forExecutingInContainer;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.forTrackingPeerConfigRetrieval = forTrackingPeerConfigRetrieval;
-        this.forGettingLanServers = forGettingLanServers;
+        this.forPersistingLanServers = forPersistingLanServers;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -413,15 +414,18 @@ public class VpnService implements
             net.vaier.domain.Cidr.validateLanCidr(lanCidr);
         }
         MachineType resolvedType = peerType != null ? peerType : MachineType.defaultType();
+        // Read the peer configs once (a filesystem scan) and reuse for both the name-collision
+        // check and id generation.
+        List<ForGettingPeerConfigurations.PeerConfiguration> allPeers = peerConfigProvider.getAllPeerConfigs();
         // #284: machine names are unique across Vaier — a new peer may not reuse the name of any
         // existing peer or LAN server. Checked before any key/IP/state is created.
-        if (Machine.nameIsTaken(name, otherMachineNames(null))) {
+        if (Machine.nameIsTaken(name, otherMachineNames(allPeers, null))) {
             throw new ConflictException("A machine named \"" + name.trim() + "\" already exists");
         }
         // The id is the slug of the operator-typed name, deduplicated against existing peers and
         // frozen for the life of the peer (its config directory name). The typed name is kept
         // verbatim as the editable display label.
-        Set<String> existingIds = peerConfigProvider.getAllPeerConfigs().stream()
+        Set<String> existingIds = allPeers.stream()
                 .map(ForGettingPeerConfigurations.PeerConfiguration::id)
                 .collect(Collectors.toSet());
         String id = PeerId.generate(name, existingIds).value();
@@ -519,7 +523,7 @@ public class VpnService implements
 
         // #284: the new display name must be free across every other machine. A blank newName
         // clears the name (falls back to the humanised id) and never collides.
-        if (Machine.nameIsTaken(newName, otherMachineNames(peerId))) {
+        if (Machine.nameIsTaken(newName, otherMachineNames(peerConfigProvider.getAllPeerConfigs(), peerId))) {
             throw new ConflictException("A machine named \"" + newName.trim() + "\" already exists");
         }
 
@@ -529,16 +533,19 @@ public class VpnService implements
 
     /**
      * Names of every machine Vaier knows about — VPN peers and LAN servers — except the peer with
-     * id {@code excludePeerId} (pass null to exclude nothing). Orchestration only: gathers names
-     * from both driven ports so the domain ({@link Machine#nameIsTaken}) decides whether a
-     * candidate name is free across all of Vaier (#284).
+     * id {@code excludePeerId} (pass null to exclude nothing). The caller passes the already-read
+     * peer configs so the create/rename path scans the peer files only once; LAN-server names are
+     * read raw via {@code ForPersistingLanServers} (no anchor resolution — names are all we need).
+     * Orchestration only: the domain ({@link Machine#nameIsTaken}) decides whether a candidate
+     * name is free across all of Vaier (#284).
      */
-    private List<String> otherMachineNames(String excludePeerId) {
-        Stream<String> peerNames = peerConfigProvider.getAllPeerConfigs().stream()
+    private List<String> otherMachineNames(
+            List<ForGettingPeerConfigurations.PeerConfiguration> peers, String excludePeerId) {
+        Stream<String> peerNames = peers.stream()
             .filter(p -> excludePeerId == null || !p.id().equals(excludePeerId))
             .map(ForGettingPeerConfigurations.PeerConfiguration::name);
-        Stream<String> lanServerNames = forGettingLanServers.getAll().stream()
-            .map(v -> v.server().name());
+        Stream<String> lanServerNames = forPersistingLanServers.getAll().stream()
+            .map(LanServer::name);
         return Stream.concat(peerNames, lanServerNames).toList();
     }
 

@@ -13,8 +13,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
-import net.vaier.domain.port.ForGettingLanServers;
-import net.vaier.domain.port.ForGettingLanServers.LanServerView;
+import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig;
@@ -70,7 +69,7 @@ class VpnServiceTest {
     @Mock ForExecutingInContainer forExecutingInContainer;
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
     @Mock net.vaier.domain.port.ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
-    @Mock ForGettingLanServers forGettingLanServers;
+    @Mock ForPersistingLanServers forPersistingLanServers;
 
     @InjectMocks VpnService service;
 
@@ -983,8 +982,8 @@ class VpnServiceTest {
 
     @Test
     void createPeer_rejectsNameAlreadyUsedByLanServer() {
-        when(forGettingLanServers.getAll()).thenReturn(List.of(
-            new LanServerView(new LanServer("nas", "192.168.1.50", false, null), "apalveien5")
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.1.50", false, null)
         ));
 
         assertThatThrownBy(() -> service.createPeer("nas"))
@@ -996,8 +995,8 @@ class VpnServiceTest {
     void renamePeer_rejectsNameAlreadyUsedByAnotherMachine() {
         when(peerConfigProvider.getPeerConfigByName("laptp"))
             .thenReturn(Optional.of(new PeerConfiguration("laptp", "10.13.13.2", "config")));
-        when(forGettingLanServers.getAll()).thenReturn(List.of(
-            new LanServerView(new LanServer("nas", "192.168.1.50", false, null), "apalveien5")
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.1.50", false, null)
         ));
 
         assertThatThrownBy(() -> service.renamePeer("laptp", "nas"))
