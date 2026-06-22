@@ -55,38 +55,30 @@ public class PublishedServiceRestController {
     }
 
     @PostMapping("/publish")
-    public ResponseEntity<?> publishService(@RequestBody PublishRequest request) {
+    public ResponseEntity<Void> publishService(@RequestBody PublishRequest request) {
         log.info("Publishing service: {}:{} as {}.* (auth={}, directUrlDisabled={}, pathPrefix={})",
             LogSafe.forLog(request.address()), request.port(), LogSafe.forLog(request.subdomain()),
             request.requiresAuth(), request.directUrlDisabled(), LogSafe.forLog(request.pathPrefix()));
-        try {
-            publishPeerServiceUseCase.publishService(
-                request.address(), request.port(), request.subdomain(),
-                request.requiresAuth(), request.rootRedirectPath(), request.directUrlDisabled(),
-                request.pathPrefix());
-        } catch (IllegalArgumentException e) {
-            log.warn("Publish rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(new PublishError(e.getMessage()));
-        }
+        // Validation failures surface as IllegalArgumentException and are rendered as a
+        // uniform 400 ApiError by GlobalExceptionHandler — no hand-rolled error body here.
+        publishPeerServiceUseCase.publishService(
+            request.address(), request.port(), request.subdomain(),
+            request.requiresAuth(), request.rootRedirectPath(), request.directUrlDisabled(),
+            request.pathPrefix());
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/lan")
-    public ResponseEntity<?> publishLanService(@RequestBody PublishLanRequest request) {
+    public ResponseEntity<Void> publishLanService(@RequestBody PublishLanRequest request) {
         log.info("Publishing LAN service: {}://{}:{} as {}.* (auth={}, directUrlDisabled={}, redirect={}, pathPrefix={})",
             LogSafe.forLog(request.protocol()), LogSafe.forLog(request.machineName()), request.port(),
             LogSafe.forLog(request.subdomain()), request.requireAuth(), request.directUrlDisabled(),
             LogSafe.forLog(request.rootRedirectPath()), LogSafe.forLog(request.pathPrefix()));
-        try {
-            publishLanServiceUseCase.publishLanService(
-                request.subdomain(), request.machineName(), request.port(), request.protocol(),
-                request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
-                request.pathPrefix());
-            return ResponseEntity.ok().build();
-        } catch (IllegalArgumentException e) {
-            log.warn("LAN publish rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(new PublishError(e.getMessage()));
-        }
+        publishLanServiceUseCase.publishLanService(
+            request.subdomain(), request.machineName(), request.port(), request.protocol(),
+            request.requireAuth(), request.directUrlDisabled(), request.rootRedirectPath(),
+            request.pathPrefix());
+        return ResponseEntity.ok().build();
     }
 
     @PatchMapping("/{dnsName:.+}")
@@ -117,12 +109,9 @@ public class PublishedServiceRestController {
                                               @RequestParam(value = "pathPrefix", required = false) String pathPrefix) {
         log.info("Deleting published service: {} (pathPrefix: {})",
             LogSafe.forLog(dnsName), LogSafe.forLog(pathPrefix));
-        try {
-            deletePublishedServiceUseCase.deleteService(dnsName, pathPrefix);
-        } catch (IllegalArgumentException e) {
-            log.warn("Delete rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
-        }
+        // A rejected delete (IllegalArgumentException) propagates to GlobalExceptionHandler
+        // as a uniform 400 ApiError, like every other validation failure.
+        deletePublishedServiceUseCase.deleteService(dnsName, pathPrefix);
         forPublishingEvents.publish("published-services", "service-updated", dnsName);
         return ResponseEntity.ok().build();
     }
@@ -145,5 +134,4 @@ public class PublishedServiceRestController {
                              boolean directUrlDisabled, String rootRedirectPath, String pathPrefix) {}
     record PublishStatusResponse(boolean dnsPropagated, boolean traefikActive) {}
     record IgnoreRequest(String key) {}
-    record PublishError(String message) {}
 }

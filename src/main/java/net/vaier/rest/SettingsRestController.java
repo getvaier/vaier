@@ -57,7 +57,7 @@ public class SettingsRestController {
             updateAwsCredentialsUseCase.updateAwsCredentials(request.awsKey(), request.awsSecret());
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", e.getMessage()));
         }
     }
 
@@ -69,7 +69,7 @@ public class SettingsRestController {
                 request.smtpPassword(), request.smtpSender());
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", e.getMessage()));
         }
     }
 
@@ -79,7 +79,7 @@ public class SettingsRestController {
             updateDiskMonitorSettingsUseCase.updateDiskMonitorThreshold(request.diskMonitorThresholdPercent());
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", e.getMessage()));
         }
     }
 
@@ -91,7 +91,7 @@ public class SettingsRestController {
                 request.smtpSender(), request.recipient());
             return ResponseEntity.ok().build();
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+            return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", e.getMessage()));
         }
     }
 
@@ -102,5 +102,4 @@ public class SettingsRestController {
     public record TestSmtpRequest(String smtpHost, int smtpPort, String smtpUsername,
                                   String smtpPassword, String smtpSender, String recipient) {}
     public record UpdateDiskMonitorRequest(int diskMonitorThresholdPercent) {}
-    record ErrorResponse(String error) {}
 }
