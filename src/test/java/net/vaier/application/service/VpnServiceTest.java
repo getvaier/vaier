@@ -1,5 +1,7 @@
 package net.vaier.application.service;
 
+import net.vaier.domain.PeerNotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.GetPeerConfigUseCase.PeerConfigResult;
 import net.vaier.application.GetServerLocationUseCase.ServerLocation;
@@ -542,7 +544,7 @@ class VpnServiceTest {
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.99")).thenReturn("10.13.13.99");
 
         assertThatThrownBy(() -> service.deletePeer("10.13.13.99"))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class)
+            .isInstanceOf(PeerNotFoundException.class)
             .hasMessageContaining("10.13.13.99");
     }
 
@@ -551,7 +553,7 @@ class VpnServiceTest {
         when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.99")).thenReturn("10.13.13.99");
 
         assertThatThrownBy(() -> service.deletePeer("10.13.13.99"))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
 
         verifyNoInteractions(vpnPeerDeleter);
     }
@@ -889,7 +891,7 @@ class VpnServiceTest {
             new PeerConfiguration("nuc02",      "10.13.13.8", "config", MachineType.UBUNTU_SERVER, "192.168.3.0/24", null)));
 
         assertThatThrownBy(() -> service.updateLanCidr("apalveien5", "192.168.3.0/24"))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(ConflictException.class)
             .hasMessageContaining("nuc02")
             .hasMessageContaining("192.168.3.0/24");
 
@@ -916,7 +918,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.updateLanCidr("ghost", "192.168.3.0/24"))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class)
+            .isInstanceOf(PeerNotFoundException.class)
             .hasMessageContaining("ghost");
 
         verifyNoInteractions(forUpdatingServerAllowedIps);
@@ -991,7 +993,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.renamePeer("ghost", "Phantom"))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
     }
 
@@ -1135,7 +1137,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.reissuePeerConfig("ghost"))
-            .isInstanceOf(net.vaier.domain.PeerNotFoundException.class);
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forUpdatingPeerConfigurations, never()).rewriteConfig(any(), any());
     }
 

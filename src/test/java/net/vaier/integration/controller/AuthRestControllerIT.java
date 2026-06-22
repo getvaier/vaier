@@ -1,5 +1,7 @@
 package net.vaier.integration.controller;
 
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.User;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
 import org.junit.jupiter.api.Test;
@@ -61,8 +63,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void addUser_returns400WhenUserAlreadyExists() throws Exception {
-        doThrow(new RuntimeException("User already exists: alice"))
+    void addUser_returns409WhenUserAlreadyExists() throws Exception {
+        doThrow(new ConflictException("User already exists: alice"))
                 .when(addUserUseCase).addUser(eq("alice"), any(), any(), any(), any());
 
         mockMvc.perform(post("/users")
@@ -70,7 +72,9 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
                        .content("""
                            {"username":"alice","password":"secret","email":"alice@example.com","displayname":"Alice","groups":["admins"]}
                            """))
-               .andExpect(status().isBadRequest());
+               .andExpect(status().isConflict())
+               .andExpect(jsonPath("$.code").value("CONFLICT"))
+               .andExpect(jsonPath("$.message").value("User already exists: alice"));
     }
 
     @Test
@@ -108,12 +112,13 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void deleteUser_returns400WhenUserNotFound() throws Exception {
-        doThrow(new RuntimeException("User not found: alice"))
+    void deleteUser_returns404WhenUserNotFound() throws Exception {
+        doThrow(new NotFoundException("User not found: alice"))
                 .when(deleteUserUseCase).deleteUser("alice");
 
         mockMvc.perform(delete("/users/alice"))
-               .andExpect(status().isBadRequest());
+               .andExpect(status().isNotFound())
+               .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -129,8 +134,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void changePassword_returns400WhenUserNotFound() throws Exception {
-        doThrow(new RuntimeException("User not found: alice"))
+    void changePassword_returns404WhenUserNotFound() throws Exception {
+        doThrow(new NotFoundException("User not found: alice"))
                 .when(changePasswordUseCase).changePassword(eq("alice"), any());
 
         mockMvc.perform(put("/users/alice/password")
@@ -138,7 +143,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
                        .content("""
                            {"newPassword":"newpass"}
                            """))
-               .andExpect(status().isBadRequest());
+               .andExpect(status().isNotFound())
+               .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -271,8 +277,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void updateUserGroups_returns400WhenUserNotFound() throws Exception {
-        doThrow(new RuntimeException("User not found: alice"))
+    void updateUserGroups_returns404WhenUserNotFound() throws Exception {
+        doThrow(new NotFoundException("User not found: alice"))
                 .when(updateUserGroupsUseCase).updateUserGroups(eq("alice"), any());
 
         mockMvc.perform(put("/users/alice/groups")
@@ -280,7 +286,8 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
                        .content("""
                            {"groups":["admins"]}
                            """))
-               .andExpect(status().isBadRequest());
+               .andExpect(status().isNotFound())
+               .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test

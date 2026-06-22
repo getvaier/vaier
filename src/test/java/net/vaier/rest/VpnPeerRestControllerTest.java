@@ -1,5 +1,7 @@
 package net.vaier.rest;
 
+import net.vaier.domain.PeerNotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.config.ConfigResolver;
@@ -30,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -109,14 +112,15 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void updateLanAddress_returns404WhenPeerNotFound() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+    void updateLanAddress_propagatesPeerNotFound_withoutPublishing() {
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(forUpdatingPeerConfigurations).updateLanAddress("ghost", "192.168.3.121");
         var request = new VpnPeerRestController.UpdateLanAddressRequest("192.168.3.121");
 
-        var response = controller.updateLanAddress("ghost", request);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        // The controller no longer maps exceptions; GlobalExceptionHandler renders 404. It must
+        // still propagate (not swallow) and must not publish an update event on failure.
+        assertThatThrownBy(() -> controller.updateLanAddress("ghost", request))
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
@@ -152,28 +156,28 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void updateLanCidr_returns404WhenPeerNotFound() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+    void updateLanCidr_propagatesPeerNotFound_withoutPublishing() {
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(updateLanCidrUseCase).updateLanCidr("ghost", "192.168.3.0/24");
         var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
 
-        var response = controller.updateLanCidr("ghost", request);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.updateLanCidr("ghost", request))
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
-    void updateLanCidr_returns409WhenAnotherPeerOwnsTheCidr() {
-        doThrow(new IllegalStateException("LAN CIDR 192.168.3.0/24 already owned by peer nuc02"))
+    void updateLanCidr_propagatesConflict_withoutPublishing() {
+        // updateLanCidr signals a CIDR-already-owned conflict via ConflictException (-> 409
+        // at the handler). The controller must propagate it and not publish on failure.
+        doThrow(new ConflictException("LAN CIDR 192.168.3.0/24 already owned by peer nuc02"))
             .when(updateLanCidrUseCase).updateLanCidr("apalveien5", "192.168.3.0/24");
         var request = new VpnPeerRestController.UpdateLanCidrRequest("192.168.3.0/24");
 
-        var response = controller.updateLanCidr("apalveien5", request);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThatThrownBy(() -> controller.updateLanCidr("apalveien5", request))
+            .isInstanceOf(ConflictException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
@@ -191,36 +195,24 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void renamePeer_returns404WhenPeerNotFound() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+    void renamePeer_propagatesPeerNotFound_withoutPublishing() {
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(renamePeerUseCase).renamePeer("ghost", "phantom");
 
-        var response = controller.renamePeer("ghost", new VpnPeerRestController.RenamePeerRequest("phantom"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.renamePeer("ghost", new VpnPeerRestController.RenamePeerRequest("phantom")))
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
-    void renamePeer_returns409WhenNewNameAlreadyTaken() {
-        doThrow(new IllegalStateException("A peer named desktop already exists"))
-            .when(renamePeerUseCase).renamePeer("laptop", "desktop");
-
-        var response = controller.renamePeer("laptop", new VpnPeerRestController.RenamePeerRequest("desktop"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(409);
-    }
-
-    @Test
-    void renamePeer_returns400WhenNewNameInvalid() {
+    void renamePeer_propagatesInvalidName() {
         doThrow(new IllegalArgumentException("New peer name is empty after sanitisation"))
             .when(renamePeerUseCase).renamePeer("laptop", "   ");
 
-        var response = controller.renamePeer("laptop", new VpnPeerRestController.RenamePeerRequest("   "));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThatThrownBy(() -> controller.renamePeer("laptop", new VpnPeerRestController.RenamePeerRequest("   ")))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -283,13 +275,12 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void reissuePeer_unknownPeer_returns404AndPublishesNothing() {
+    void reissuePeer_unknownPeer_propagatesPeerNotFound_andPublishesNothing() {
         when(reissuePeerConfigUseCase.reissuePeerConfig("ghost"))
-            .thenThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"));
+            .thenThrow(new PeerNotFoundException("Peer not found: ghost"));
 
-        var response = controller.reissuePeer("ghost");
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.reissuePeer("ghost"))
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(any(), any(), any());
     }
 
@@ -380,14 +371,13 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
-    void updateDescription_returns404WhenPeerNotFound() {
-        doThrow(new net.vaier.domain.PeerNotFoundException("Peer not found: ghost"))
+    void updateDescription_propagatesPeerNotFound_withoutPublishing() {
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(forUpdatingPeerConfigurations).updateDescription("ghost", "anything");
         var request = new VpnPeerRestController.UpdateDescriptionRequest("anything");
 
-        var response = controller.updateDescription("ghost", request);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.updateDescription("ghost", request))
+            .isInstanceOf(PeerNotFoundException.class);
         verify(forPublishingEvents, never()).publish(org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString(),
                                                     org.mockito.ArgumentMatchers.anyString());

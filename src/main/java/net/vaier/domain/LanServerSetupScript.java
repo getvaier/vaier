@@ -36,7 +36,7 @@ public final class LanServerSetupScript {
      *       server, which is already on its own subnet) — see {@link #routedDestinations}.</li>
      * </ul>
      * Returns empty when there is nothing to set up (no Docker and not relay-anchored). Throws
-     * {@link IllegalStateException} when the relay peer has no LAN address to route via.
+     * {@link ConflictException} when the relay peer has no LAN address to route via.
      */
     public static Optional<String> forHost(LanServer server, List<PeerConfiguration> allPeers,
                                            String serverLanCidr, String vpnSubnet) {
@@ -51,7 +51,7 @@ public final class LanServerSetupScript {
             PeerConfiguration relay = anchor.get().relayPeer().orElseThrow();
             gateway = relay.lanAddress();
             if (gateway == null || gateway.isBlank()) {
-                throw new IllegalStateException("Relay peer " + relay.name()
+                throw new ConflictException("Relay peer " + relay.name()
                     + " has no LAN address set — set it before generating a setup script for "
                     + server.name());
             }

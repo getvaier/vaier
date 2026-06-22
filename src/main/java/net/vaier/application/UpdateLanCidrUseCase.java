@@ -1,5 +1,8 @@
 package net.vaier.application;
 
+import net.vaier.domain.PeerNotFoundException;
+import net.vaier.domain.ConflictException;
+
 public interface UpdateLanCidrUseCase {
 
     /**
@@ -7,8 +10,8 @@ public interface UpdateLanCidrUseCase {
      * peer is responsible for. Updates the server-side wg0 routing table so traffic for
      * the CIDR flows through this peer, and persists the value in the peer's metadata.
      *
-     * @throws IllegalArgumentException if the peer does not exist
-     * @throws IllegalStateException    if another peer already owns the CIDR
+     * @throws PeerNotFoundException if the peer does not exist
+     * @throws ConflictException if another peer already owns the CIDR
      */
     void updateLanCidr(String peerName, String lanCidr);
 }

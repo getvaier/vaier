@@ -1,5 +1,7 @@
 package net.vaier.rest;
 
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.ConflictException;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.application.GenerateLanServerSetupScriptUseCase;
@@ -27,10 +29,17 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
 class LanServerRestControllerTest {
@@ -94,25 +103,24 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void register_runsDockerTrueWithoutDockerPort_returns400() {
+    void register_runsDockerTrueWithoutDockerPort_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("dockerPort is required"))
             .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null);
         var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null);
 
-        ResponseEntity<Void> response = controller.register(request);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThatThrownBy(() -> controller.register(request))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void register_useCaseThrowsIllegalArgument_returns400() {
+    void register_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("not in any lanCidr"))
             .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null);
         var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375, null);
 
-        ResponseEntity<Void> response = controller.register(request);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        // GlobalExceptionHandler renders 400; the controller must propagate, not swallow.
+        assertThatThrownBy(() -> controller.register(request))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -147,11 +155,28 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void downloadSetupScript_returns409WhenRelayHasNoLanAddress() {
+    void downloadSetupScript_conflict_rendersJsonEnvelope_throughTheHandler() throws Exception {
+        // With produces="application/x-sh" a JSON/API client (Accept: application/json) couldn't
+        // even match the handler, so the 409 ApiError was unreachable (406). Without the constraint
+        // the conflict renders as the JSON envelope through the real dispatcher + handler.
         when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
-            .thenThrow(new IllegalStateException("Relay peer apalveien5 has no LAN address set"));
+            .thenThrow(new ConflictException("Relay peer apalveien5 has no LAN address set"));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
 
-        assertThat(controller.downloadSetupScript("nuc02").getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        mockMvc.perform(get("/lan-servers/nuc02/setup.sh").accept(MediaType.APPLICATION_JSON))
+               .andExpect(status().isConflict())
+               .andExpect(jsonPath("$.code").value("CONFLICT"));
+    }
+
+    @Test
+    void downloadSetupScript_propagatesConflictWhenRelayHasNoLanAddress() {
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
+            .thenThrow(new ConflictException("Relay peer apalveien5 has no LAN address set"));
+
+        assertThatThrownBy(() -> controller.downloadSetupScript("nuc02"))
+            .isInstanceOf(ConflictException.class);
     }
 
     @Test
@@ -240,33 +265,30 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void rename_returns404WhenLanServerNotFound() {
-        doThrow(new java.util.NoSuchElementException("LAN server not found: ghost"))
+    void rename_propagatesNotFound() {
+        doThrow(new NotFoundException("LAN server not found: ghost"))
             .when(renameLanServerUseCase).rename("ghost", "phantom");
 
-        var response = controller.rename("ghost", new LanServerRestController.RenameRequest("phantom"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.rename("ghost", new LanServerRestController.RenameRequest("phantom")))
+            .isInstanceOf(NotFoundException.class);
     }
 
     @Test
-    void rename_returns409WhenNewNameAlreadyTaken() {
-        doThrow(new IllegalStateException("A LAN server named printer already exists"))
+    void rename_propagatesConflict() {
+        doThrow(new ConflictException("A LAN server named printer already exists"))
             .when(renameLanServerUseCase).rename("nas", "printer");
 
-        var response = controller.rename("nas", new LanServerRestController.RenameRequest("printer"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThatThrownBy(() -> controller.rename("nas", new LanServerRestController.RenameRequest("printer")))
+            .isInstanceOf(ConflictException.class);
     }
 
     @Test
-    void rename_returns400WhenNewNameBlank() {
+    void rename_propagatesInvalidName() {
         doThrow(new IllegalArgumentException("New LAN server name must not be blank"))
             .when(renameLanServerUseCase).rename("nas", "  ");
 
-        var response = controller.rename("nas", new LanServerRestController.RenameRequest("  "));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThatThrownBy(() -> controller.rename("nas", new LanServerRestController.RenameRequest("  ")))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     // --- description (#54) ---
@@ -291,14 +313,13 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void updateDescription_returns404WhenLanServerNotFound() {
-        doThrow(new java.util.NoSuchElementException("LAN server not found: ghost"))
+    void updateDescription_propagatesNotFound() {
+        doThrow(new NotFoundException("LAN server not found: ghost"))
             .when(updateLanServerDescriptionUseCase).updateDescription("ghost", "anything");
 
-        var response = controller.updateDescription(
-                "ghost", new LanServerRestController.UpdateDescriptionRequest("anything"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(404);
+        assertThatThrownBy(() -> controller.updateDescription(
+                "ghost", new LanServerRestController.UpdateDescriptionRequest("anything")))
+            .isInstanceOf(NotFoundException.class);
     }
 
     @Test

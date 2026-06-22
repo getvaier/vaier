@@ -77,15 +77,10 @@ public class LanServerRestController {
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             LogSafe.forLog(request.name()), LogSafe.forLog(request.lanAddress()),
             request.runsDocker(), request.dockerPort());
-        try {
-            registerLanServerUseCase.register(
-                request.name(), request.lanAddress(), request.runsDocker(), request.dockerPort(),
-                request.description());
-            return ResponseEntity.ok().build();
-        } catch (IllegalArgumentException e) {
-            log.warn("LAN server registration rejected: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
-        }
+        registerLanServerUseCase.register(
+            request.name(), request.lanAddress(), request.runsDocker(), request.dockerPort(),
+            request.description());
+        return ResponseEntity.ok().build();
     }
 
     @PatchMapping("/{name}")
@@ -93,19 +88,10 @@ public class LanServerRestController {
                                        @RequestBody(required = false) RenameRequest request) {
         String newName = request != null ? request.newName() : null;
         log.info("Renaming LAN server {} to {}", LogSafe.forLog(name), LogSafe.forLog(newName));
-        try {
-            renameLanServerUseCase.rename(name, newName);
-            return ResponseEntity.noContent().build();
-        } catch (java.util.NoSuchElementException e) {
-            log.warn("LAN server not found for rename: {}", LogSafe.forLog(name));
-            return ResponseEntity.notFound().build();
-        } catch (IllegalStateException e) {
-            log.warn("LAN server rename conflict: {}", e.getMessage());
-            return ResponseEntity.status(409).build();
-        } catch (IllegalArgumentException e) {
-            log.warn("Bad LAN server rename request: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
-        }
+        // not-found -> 404, name conflict -> 409, bad name -> 400 all render as ApiError
+        // via GlobalExceptionHandler (NotFoundException / ConflictException / IllegalArgumentException).
+        renameLanServerUseCase.rename(name, newName);
+        return ResponseEntity.noContent().build();
     }
 
     @PatchMapping("/{name}/description")
@@ -113,13 +99,8 @@ public class LanServerRestController {
                                                   @RequestBody(required = false) UpdateDescriptionRequest request) {
         String description = request != null ? request.description() : null;
         log.info("Updating description for LAN server {}", LogSafe.forLog(name));
-        try {
-            updateLanServerDescriptionUseCase.updateDescription(name, description);
-            return ResponseEntity.noContent().build();
-        } catch (java.util.NoSuchElementException e) {
-            log.warn("LAN server not found for description update: {}", LogSafe.forLog(name));
-            return ResponseEntity.notFound().build();
-        }
+        updateLanServerDescriptionUseCase.updateDescription(name, description);
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{name}")
@@ -134,19 +115,19 @@ public class LanServerRestController {
      * installs routes via its relay peer if it's relay-anchored. 404 when the host is unknown or
      * has nothing to set up; 409 when its relay peer has no LAN address to route via.
      */
-    @GetMapping(value = "/{name}/setup.sh", produces = "application/x-sh")
+    // No `produces` constraint: the success path sets the x-sh content type explicitly, and
+    // leaving it off lets error responses (e.g. a 409 ConflictException) render as JSON ApiError
+    // instead of failing content negotiation with a 406.
+    @GetMapping(value = "/{name}/setup.sh")
     public ResponseEntity<?> downloadSetupScript(@PathVariable String name) {
-        try {
-            return generateLanServerSetupScriptUseCase.generateSetupScript(name)
-                .<ResponseEntity<?>>map(script -> ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + name + "-setup.sh")
-                    .contentType(MediaType.parseMediaType("application/x-sh"))
-                    .body(script))
-                .orElseGet(() -> ResponseEntity.notFound().build());
-        } catch (IllegalStateException e) {
-            log.warn("Cannot generate setup script for {}: {}", LogSafe.forLog(name), e.getMessage());
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
-        }
+        // A relay-without-LAN-address conflict propagates as ConflictException -> 409 ApiError;
+        // an unknown/empty host stays a body-less 404 (GET of an optional artifact).
+        return generateLanServerSetupScriptUseCase.generateSetupScript(name)
+            .<ResponseEntity<?>>map(script -> ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + name + "-setup.sh")
+                .contentType(MediaType.parseMediaType("application/x-sh"))
+                .body(script))
+            .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     record RegisterRequest(String name, String lanAddress, boolean runsDocker, Integer dockerPort,

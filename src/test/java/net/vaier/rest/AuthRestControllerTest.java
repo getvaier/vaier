@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,14 +47,15 @@ class AuthRestControllerTest {
     }
 
     @Test
-    void changePassword_returns400WhenUseCaseFails() {
-        doThrow(new RuntimeException("User not found: alice"))
+    void changePassword_propagatesUseCaseFailure() {
+        // The controller no longer swallows exceptions into a 400 string; it propagates to
+        // GlobalExceptionHandler, which renders the uniform ApiError (here a generic 500).
+        doThrow(new RuntimeException("password write failed"))
                 .when(changePasswordUseCase).changePassword(eq("alice"), any());
 
-        ResponseEntity<String> response = controller.changePassword("alice",
-                new AuthRestController.ChangePasswordRequest("newpassword"));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThatThrownBy(() -> controller.changePassword("alice",
+                new AuthRestController.ChangePasswordRequest("newpassword")))
+            .isInstanceOf(RuntimeException.class);
     }
 
     @Test
