@@ -519,7 +519,7 @@
 
         function displayMessage(message, type) {
             const el = document.getElementById('message');
-            el.innerHTML = `<div class="${type}">${message}</div>`;
+            el.innerHTML = `<div class="${type}">${escapeHtml(message)}</div>`;
             setTimeout(() => el.innerHTML = '', 5000);
         }
 

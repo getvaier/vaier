@@ -776,7 +776,7 @@
         }
 
         function displayError(message) {
-            document.getElementById('error-message').innerHTML = `<div class="error">${message}</div>`;
+            document.getElementById('error-message').innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
         }
 
         function displaySuccess(message) {
