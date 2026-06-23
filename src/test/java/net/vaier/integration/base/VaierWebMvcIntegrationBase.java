@@ -269,4 +269,8 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- Offline page ---
     @MockBean
     protected GetOfflinePageUseCase getOfflinePageUseCase;
+
+    // --- Concepts (operator glossary) ---
+    @MockBean
+    protected GetConceptsUseCase getConceptsUseCase;
 }

@@ -15,6 +15,7 @@ Terms are drawn from the domain model (`src/main/java/net/vaier/domain/`), the u
 | **Operator** | The human running Vaier — typically a homelab developer. Not "user" (which means an Authelia account). |
 | **Stack** | The five containers in `docker-compose.yml`: `wireguard`, `traefik`, `authelia`, `redis`, `vaier`. Stack components are upstream and pinned by tag — never floating `:latest`. |
 | **Bootstrap admin** | The one-time `admin` user Vaier creates on first boot, with a password written to `authelia/config/.bootstrap-admin-password`. The operator reads it, logs in, changes the password, and deletes the file. |
+| **Concepts page** | The in-app, operator-facing glossary shown inside the admin shell: a trimmed, plain-language subset of this document's terms, grouped, each with a short definition and a one-line "why it matters". Its terms are a curated subset of the ones defined here. |
 
 ---
 
