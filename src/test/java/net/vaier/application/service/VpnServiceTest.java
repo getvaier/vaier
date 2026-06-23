@@ -8,10 +8,12 @@ import net.vaier.application.GetServerLocationUseCase.ServerLocation;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForDeletingVpnPeers;
+import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig;
@@ -67,6 +69,7 @@ class VpnServiceTest {
     @Mock ForExecutingInContainer forExecutingInContainer;
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
     @Mock net.vaier.domain.port.ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
+    @Mock ForPersistingLanServers forPersistingLanServers;
 
     @InjectMocks VpnService service;
 
@@ -962,6 +965,68 @@ class VpnServiceTest {
 
         verifyNoInteractions(peerConfigProvider, forUpdatingServerAllowedIps,
             forUpdatingPeerConfigurations, forGettingVpnClients);
+    }
+
+    // --- createPeer / renamePeer: machine names are unique across Vaier (#284) ---
+
+    @Test
+    void createPeer_rejectsNameAlreadyUsedByAnotherPeer() {
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nas", "10.13.13.2", "config")
+        ));
+
+        assertThatThrownBy(() -> service.createPeer("nas"))
+            .isInstanceOf(ConflictException.class);
+        verify(forExecutingInContainer, never()).execute(any(), any(), any());
+    }
+
+    @Test
+    void createPeer_rejectsNameAlreadyUsedByLanServer() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.1.50", false, null)
+        ));
+
+        assertThatThrownBy(() -> service.createPeer("nas"))
+            .isInstanceOf(ConflictException.class);
+        verify(forExecutingInContainer, never()).execute(any(), any(), any());
+    }
+
+    @Test
+    void renamePeer_rejectsNameAlreadyUsedByAnotherMachine() {
+        when(peerConfigProvider.getPeerConfigByName("laptp"))
+            .thenReturn(Optional.of(new PeerConfiguration("laptp", "10.13.13.2", "config")));
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("nas", "192.168.1.50", false, null)
+        ));
+
+        assertThatThrownBy(() -> service.renamePeer("laptp", "nas"))
+            .isInstanceOf(ConflictException.class);
+        verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
+    }
+
+    @Test
+    void renamePeer_clearingName_rejectedWhenHumanisedIdFallbackTakenByAnotherMachine() {
+        // #284 review: clearing reverts the peer to its PeerId.display(id) label ("media server"),
+        // which must still be unique — here a LAN server already wears that label.
+        when(peerConfigProvider.getPeerConfigByName("media-server"))
+            .thenReturn(Optional.of(new PeerConfiguration("media-server", "10.13.13.2", "config")));
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("media server", "192.168.1.50", false, null)
+        ));
+
+        assertThatThrownBy(() -> service.renamePeer("media-server", ""))
+            .isInstanceOf(ConflictException.class);
+        verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
+    }
+
+    @Test
+    void renamePeer_clearingName_allowedWhenHumanisedIdFallbackIsFree() {
+        when(peerConfigProvider.getPeerConfigByName("media-server"))
+            .thenReturn(Optional.of(new PeerConfiguration("media-server", "10.13.13.2", "config")));
+
+        service.renamePeer("media-server", "");
+
+        verify(forUpdatingPeerConfigurations).updateName("media-server", "");
     }
 
     // --- renamePeer: sets the display name; the id is immutable (#209, #55) ---

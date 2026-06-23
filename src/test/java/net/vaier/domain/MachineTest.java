@@ -3,6 +3,8 @@ package net.vaier.domain;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class MachineTest {
@@ -52,5 +54,33 @@ class MachineTest {
         assertThat(machine.lanAddress()).isEqualTo("172.31.5.20");
         assertThat(machine.runsDocker()).isTrue();
         assertThat(machine.dockerPort()).isEqualTo(2375);
+    }
+
+    // --- nameIsTaken: machine names are unique across Vaier (#284) ---
+
+    @Test
+    void nameIsTaken_trueWhenAnotherMachineHasTheSameName() {
+        assertThat(Machine.nameIsTaken("nas", List.of("router", "nas", "printer"))).isTrue();
+    }
+
+    @Test
+    void nameIsTaken_falseWhenNameIsFree() {
+        assertThat(Machine.nameIsTaken("media-nas", List.of("router", "nas"))).isFalse();
+    }
+
+    @Test
+    void nameIsTaken_isCaseInsensitiveAndIgnoresSurroundingWhitespace() {
+        assertThat(Machine.nameIsTaken("  NAS ", List.of("nas"))).isTrue();
+    }
+
+    @Test
+    void nameIsTaken_nullOrBlankCandidateNeverCollides() {
+        assertThat(Machine.nameIsTaken(null, List.of("nas"))).isFalse();
+        assertThat(Machine.nameIsTaken("   ", List.of("nas"))).isFalse();
+    }
+
+    @Test
+    void nameIsTaken_ignoresNullAndBlankExistingNames() {
+        assertThat(Machine.nameIsTaken("nas", java.util.Arrays.asList(null, "", "  "))).isFalse();
     }
 }

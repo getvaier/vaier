@@ -10,6 +10,7 @@ import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.Machine;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.LanServerSetupScript;
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
@@ -60,16 +62,30 @@ public class LanServerService implements
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                          String description) {
-        LanServer.validate(name, lanAddress, runsDocker, dockerPort);
-        if (resolveLanAnchor(lanAddress).isEmpty()) {
+        // Normalise inputs up front so the persisted identity matches the (trimmed) uniqueness
+        // comparison rule and stays a clean `/lan-servers/{name}` path segment — mirrors
+        // LanServer.renamedTo, which also trims.
+        String trimmedName = name == null ? null : name.trim();
+        String trimmedAddress = lanAddress == null ? null : lanAddress.trim();
+        LanServer.validate(trimmedName, trimmedAddress, runsDocker, dockerPort);
+        // Read the peer configs and server LAN CIDR once (both are filesystem/metadata reads) and
+        // reuse them for routability and the name-collision check.
+        List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
+        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
+        if (LanAnchor.resolve(trimmedAddress, peers, serverLanCidr).isEmpty()) {
             throw new IllegalArgumentException(
-                "lanAddress " + lanAddress + " is not inside any relay peer's lanCidr, " +
+                "lanAddress " + trimmedAddress + " is not inside any relay peer's lanCidr, " +
                 "nor inside the Vaier server's own LAN CIDR. Set lanCidr on a relay peer first " +
                 "(or, on EC2, the server LAN CIDR is auto-detected from instance metadata).");
         }
+        // #284: machine names are unique across Vaier. save() upserts by name, so without this
+        // guard registering a duplicate name would silently overwrite the existing machine.
+        if (Machine.nameIsTaken(trimmedName, otherMachineNames(peers, forPersistingLanServers.getAll(), null))) {
+            throw new ConflictException("A machine named \"" + trimmedName + "\" already exists");
+        }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
-            name, lanAddress, runsDocker, dockerPort);
-        forPersistingLanServers.save(new LanServer(name, lanAddress, runsDocker, dockerPort, description));
+            trimmedName, trimmedAddress, runsDocker, dockerPort);
+        forPersistingLanServers.save(new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description));
     }
 
     @Override
@@ -105,8 +121,12 @@ public class LanServerService implements
             log.info("Rename no-op: LAN server {} already has that name", currentName);
             return;
         }
-        if (all.stream().anyMatch(s -> s.hasName(renamed.name()))) {
-            throw new ConflictException("A LAN server named " + renamed.name() + " already exists");
+        // #284: the new name must be free across every machine — other LAN servers and VPN peers.
+        // Reuse the already-loaded `all` list rather than re-reading the LAN-server file.
+        List<String> otherNames = otherMachineNames(
+            forGettingPeerConfigurations.getAllPeerConfigs(), all, currentName);
+        if (Machine.nameIsTaken(renamed.name(), otherNames)) {
+            throw new ConflictException("A machine named \"" + renamed.name() + "\" already exists");
         }
 
         // save() upserts by name, so write the new entry then drop the old one.
@@ -141,5 +161,21 @@ public class LanServerService implements
             .flatMap(server -> LanServerSetupScript.forHost(server,
                 forGettingPeerConfigurations.getAllPeerConfigs(),
                 forResolvingServerLanCidr.resolve().orElse(null), vpnSubnet));
+    }
+
+    /**
+     * Names of every machine Vaier knows about — VPN peers and LAN servers — except the LAN
+     * server called {@code excludeLanServerName} (pass null to exclude nothing). The caller passes
+     * the already-read peer configs and LAN servers so each source is read at most once per
+     * operation. Orchestration only: the domain ({@link Machine#nameIsTaken}) decides whether a
+     * candidate name is free across all of Vaier.
+     */
+    private List<String> otherMachineNames(List<PeerConfiguration> peers, List<LanServer> lanServers,
+                                           String excludeLanServerName) {
+        Stream<String> peerNames = peers.stream().map(PeerConfiguration::name);
+        Stream<String> lanServerNames = lanServers.stream()
+            .filter(s -> excludeLanServerName == null || !s.hasName(excludeLanServerName))
+            .map(LanServer::name);
+        return Stream.concat(peerNames, lanServerNames).toList();
     }
 }
