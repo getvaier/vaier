@@ -824,6 +824,37 @@
             return new Date(h * 1000).toLocaleString();
         }
 
+        // Compact "Xs/m/h/d ago" for a handshake/probe epoch; null when never seen (#270).
+        function relativeTime(handshakeEpoch) {
+            const t = parseInt(handshakeEpoch);
+            if (isNaN(t) || t <= 0) return null;
+            const secs = Math.max(0, Math.floor(Date.now() / 1000) - t);
+            if (secs < 60)  return secs + 's ago';
+            const mins = Math.floor(secs / 60);
+            if (mins < 60)  return mins + 'm ago';
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return hours + 'h ago';
+            return Math.floor(hours / 24) + 'd ago';
+        }
+
+        // Plain-language machine state + the evidence behind it, for the icon's hover tooltip
+        // (#270). Mirrors the four-state machine-icon colour defined in UBIQUITOUS_LANGUAGE.md.
+        function statusTooltip(statusClass, handshakeEpoch) {
+            const ago = relativeTime(handshakeEpoch);
+            switch (statusClass) {
+                case 'status-connected':
+                    return ago ? `Green — connected, last handshake ${ago}` : 'Green — reachable';
+                case 'status-degraded':
+                    return ago ? `Amber — reachable but Docker scrape failed (last seen ${ago})`
+                               : 'Amber — reachable but Docker scrape failed';
+                case 'status-disconnected':
+                    return ago ? `Red — unreachable, last handshake ${ago}`
+                               : 'Red — unreachable / no handshake';
+                default:
+                    return 'Grey — not yet probed';
+            }
+        }
+
         // Inline SVG icons keep the cards self-contained and recolour via currentColor.
         function machineIconSvg(kind) {
             const A = 'width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
@@ -988,7 +1019,7 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml('lan', 'LAN server (no VPN; behind a relay or in the server\'s subnet)', iconStatusClass(statusClass))}
+                        ${machineIconHtml('lan', 'LAN server (no VPN; behind a relay or in the server\'s subnet) · ' + statusTooltip(statusClass, server.lastSeen), iconStatusClass(statusClass))}
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${server.name}</span>
@@ -1082,7 +1113,7 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml('vaier', 'Vaier server', iconStatusClass(statusClass))}
+                        ${machineIconHtml('vaier', 'Vaier server · ' + statusTooltip(statusClass, null), iconStatusClass(statusClass))}
                         <span class="peer-name">Vaier server</span>
                         ${capabilitySlotsHtml([null, { kind: 'docker', title: 'Vaier server Docker engine', label: 'Docker' }])}
                     </div>
@@ -1152,7 +1183,7 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${peer.id}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml(iconKind, typeTooltip, iconStatusClass(statusClass), 'hdr-icon-' + id)}
+                        ${machineIconHtml(iconKind, typeTooltip + ' · ' + statusTooltip(statusClass, peer.latestHandshake), iconStatusClass(statusClass), 'hdr-icon-' + id)}
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${escapeHtml(peer.name)}</span>
@@ -2409,7 +2440,14 @@
                     const rxtx           = document.getElementById('rxtx-'             + id);
                     const lastSeenDetail = document.getElementById('last-seen-detail-' + id);
 
-                    if (hdrIcon)        { hdrIcon.className = 'machine-icon ' + iconCls; }
+                    if (hdrIcon)        {
+                        hdrIcon.className = 'machine-icon ' + iconCls;
+                        // Keep the hover tooltip's plain-language state + handshake evidence in
+                        // sync with the live status, preserving the machine-type prefix (#270).
+                        const statusClass = s.connected ? 'status-connected' : 'status-disconnected';
+                        const prefix = (hdrIcon.title || '').split(' · ')[0];
+                        hdrIcon.title = prefix + ' · ' + statusTooltip(statusClass, s.latestHandshake);
+                    }
                     if (rxtx)           { rxtx.textContent = formatBytes(s.transferRx) + ' / ' + formatBytes(s.transferTx); }
                     if (lastSeenDetail) { lastSeenDetail.textContent = lastSeenAbsolute(s.latestHandshake); }
 
