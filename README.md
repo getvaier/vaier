@@ -27,6 +27,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **User management** | Manage Authelia users and groups from the UI. |
 | **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, or when the Vaier server's own disk fills past a configurable threshold. |
 | **Host disk monitoring** | Vaier watches free space on its own host filesystem and emails all admins when usage crosses a configurable threshold (default 85%), with a recovery email once it drops back below. |
+| **Inline field help** | Advanced fields (LAN CIDR, path prefix, root redirect, the auth toggle, direct LAN URL, hide-from-launchpad, version endpoint) carry a small "?" you can hover for a one-line plain-language explanation — no need to read the docs to know what a field does. |
 | **Consistent branding** | Authelia login pages share Vaier's dark theme so the auth hand-off feels seamless. |
 | **LAN scanner** _(Enterprise)_ | When adding a **LAN server**, scan its relay's LAN right from the Add Machine dialog to discover hosts and pick one to fill in the address. Already-registered machines are filtered out, so only new hosts appear. Requires an Enterprise licence. |
 | **Version visibility** | The running Vaier version and edition (Community/Enterprise) are shown under *Settings → About*, so you always know which build is deployed. |

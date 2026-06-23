@@ -91,7 +91,7 @@
                         <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
                     </div>
                     <div class="form-group" style="flex:1;margin-bottom:1rem;">
-                        <label class="form-label" for="publishPathPrefix" title="Optional. Scope this route to a path prefix so multiple services can share one subdomain.">Path prefix <span style="color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                        <label class="form-label" for="publishPathPrefix">Path prefix <span style="color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span><span class="help-tip" aria-label="Serve this service under a sub-path of a shared subdomain, e.g. /grafana — lets several services share one subdomain." title="Serve this service under a sub-path of a shared subdomain, e.g. /grafana — lets several services share one subdomain.">?</span></label>
                         <input type="text" id="publishPathPrefix" class="form-input" placeholder="e.g. /auth">
                     </div>
                 </div>
@@ -109,15 +109,17 @@
                 <div class="form-checkbox">
                     <input type="checkbox" id="publishRequiresAuth">
                     <label for="publishRequiresAuth">Require Authelia authentication</label>
+                    <span class="help-tip" aria-label="Require login (Authelia) before this service can be reached." title="Require login (Authelia) before this service can be reached.">?</span>
                 </div>
                 <div class="form-checkbox">
                     <input type="checkbox" id="publishDirectUrlEnabled" checked>
-                    <label for="publishDirectUrlEnabled" title="When checked, the launchpad links to the direct LAN URL when the caller shares the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Link directly to LAN URL</label>
+                    <label for="publishDirectUrlEnabled">Link directly to LAN URL</label>
+                    <span class="help-tip" aria-label="Let callers on the LAN reach this service directly, bypassing the reverse proxy, when they share the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden)." title="Let callers on the LAN reach this service directly, bypassing the reverse proxy, when they share the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">?</span>
                 </div>
                 <details id="publishAdvanced" style="margin-top:0.75rem;">
                     <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none;">Advanced options</summary>
                     <div class="form-group" style="margin-top:0.6rem;">
-                        <label class="form-label" for="publishRootRedirectPath" title="If set, visiting the service root (/) will redirect to this path">Root path redirect</label>
+                        <label class="form-label" for="publishRootRedirectPath">Root path redirect<span class="help-tip" aria-label="If set, visiting the service root (/) redirects to this path, e.g. /dashboard — for apps whose landing page isn't at the root." title="If set, visiting the service root (/) redirects to this path, e.g. /dashboard — for apps whose landing page isn't at the root.">?</span></label>
                         <input type="text" id="publishRootRedirectPath" class="form-input" placeholder="e.g. /dashboard">
                     </div>
                 </details>

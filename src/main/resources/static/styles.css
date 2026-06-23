@@ -495,6 +495,29 @@ body {
     letter-spacing: 0.06em;
 }
 
+/* Inline help affordance (#269): a small visible "?" carrying a one-line plain-language
+   explanation in its title, so advanced fields are self-explanatory without reading the docs. */
+.help-tip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 0.35rem;
+    border: 1px solid var(--text-dim);
+    border-radius: 50%;
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    user-select: none;
+    vertical-align: middle;
+    text-transform: none;
+    letter-spacing: 0;
+}
+.help-tip:hover { color: var(--text); border-color: var(--text-muted); }
+
 .form-input {
     width: 100%;
     padding: 0.4rem 0.6rem;

@@ -5,6 +5,13 @@ const expandedServices = new Set();
 // collapses the section it stays collapsed across re-renders.
 const advancedExpanded = new Map();
 
+// Inline help affordance (#269): a visible "?" carrying a one-line plain-language
+// explanation, so advanced fields are self-explanatory without reading the docs.
+function helpTip(text) {
+    const t = text.replace(/"/g, '&quot;');
+    return `<span class="help-tip" aria-label="${t}" title="${t}">?</span>`;
+}
+
 function hasAdvancedNonDefault(service) {
     return !!service.rootRedirectPath
         || !!service.versionEndpoint
@@ -319,7 +326,7 @@ function renderServiceCard(service) {
                     </div>
                     ${versionRowHtml(service)}
                     <div class="detail-row">
-                        <span class="detail-label">Auth</span>
+                        <span class="detail-label">Auth${helpTip('Require login (Authelia) before this service can be reached.')}</span>
                         <span class="detail-value">
                             <input type="checkbox" id="requiresAuth-${id}"
                                 ${service.authenticated ? 'checked' : ''}
@@ -345,7 +352,7 @@ function renderServiceCard(service) {
                     <summary>Advanced</summary>
                     <div class="service-details">
                     <div class="detail-row">
-                        <span class="detail-label">Redirect</span>
+                        <span class="detail-label">Redirect${helpTip('If set, visiting the service root (/) redirects to this path, e.g. /dashboard — for apps whose landing page isn\'t at the root.')}</span>
                         <span class="detail-value">
                             <input type="text" id="redirect-${id}" class="form-input" style="width:100%;max-width:240px"
                                    value="${service.rootRedirectPath || ''}"
@@ -356,7 +363,7 @@ function renderServiceCard(service) {
                         </span>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label" title="Read this service's running version over HTTP and show it on its launchpad tile. Endpoint is a path on the service (or a full URL); property is the label name to read the version from. Useful for services not backed by a discoverable container (e.g. running natively on a LAN machine).">Version endpoint</span>
+                        <span class="detail-label">Version endpoint${helpTip("Read this service's running version over HTTP and show it on its launchpad tile. Endpoint is a path on the service (or a full URL); property is the field to read the version from. Useful for services not backed by a discoverable container (e.g. running natively on a LAN machine).")}</span>
                         <span class="detail-value" style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap">
                             <input type="text" id="verEndpoint-${id}" class="form-input" style="flex:2;min-width:0;max-width:170px"
                                    value="${service.versionEndpoint || ''}"
@@ -373,7 +380,7 @@ function renderServiceCard(service) {
                         </span>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label" title="When checked, the launchpad uses the direct LAN URL for callers sharing the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).">Direct LAN URL</span>
+                        <span class="detail-label">Direct LAN URL${helpTip("Let callers on the LAN reach this service directly, bypassing the reverse proxy, when they share the peer's NAT. Uncheck for apps whose public origin differs from http://lan:port (e.g. Vaultwarden).")}</span>
                         <span class="detail-value">
                             <input type="checkbox" id="dulEnabled-${id}"
                                 ${service.directUrlDisabled ? '' : 'checked'}
@@ -383,7 +390,7 @@ function renderServiceCard(service) {
                         </span>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label" title="When checked, the launchpad renders a tile for this service. Uncheck for internal APIs that back another service and don't need their own tile.">Launchpad</span>
+                        <span class="detail-label">Launchpad${helpTip("Keep this service off the dashboard by unchecking. Uncheck for internal APIs that back another service and don't need their own tile.")}</span>
                         <span class="detail-value">
                             <input type="checkbox" id="showOnLaunchpad-${id}"
                                 ${service.hiddenFromLaunchpad ? '' : 'checked'}
