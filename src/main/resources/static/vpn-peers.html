@@ -637,7 +637,10 @@
                 Rotate the WireGuard keypair for <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="regeneratePeerName"></code>?
             </p>
             <p style="font-size:0.78rem;color:var(--orange,#ffaa00);margin-top:0.5rem;">
-                The existing config will stop working immediately. The new config is delivered exactly once — save it before closing the modal.
+                The existing config will stop working immediately, and every device using it must install the new one. The new config is delivered exactly once — save it before closing the modal.
+            </p>
+            <p style="font-size:0.75rem;color:var(--text-dim);margin-top:0.4rem;">
+                Just need a copy of the current config? Cancel and use <strong>Reissue config</strong> instead — it keeps the keys and leaves the live tunnel working.
             </p>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="hideRegenerateConfirmModal()">Cancel</button>
@@ -1187,7 +1190,7 @@
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${escapeHtml(peer.name)}</span>
-                                ${peer.configOutOfDate ? `<span class="config-stale-warn" title="Config out of date — it predates a change in how Vaier generates configs. Reissue it (keys preserved) and reinstall it on the peer.">⚠</span>` : ''}
+                                ${peer.configOutOfDate ? `<span class="config-stale-warn" title="Out-of-date config — Vaier's config-generation logic has changed since this peer was created, so its installed config is stale. What to do: click Reissue config below (keys preserved), then reinstall the delivered config on the peer.">⚠</span>` : ''}
                                 ${capabilitySlotsHtml([relaySlot, dockerSlot])}
                             </div>
                             ${peer.description ? `<div class="peer-desc" title="${escapeHtml(peer.description)}">${escapeHtml(peer.description)}</div>` : ''}
@@ -1281,9 +1284,9 @@
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
                             <button class="btn btn-small ${peer.configOutOfDate ? 'btn-primary' : 'btn-secondary'}" onclick="reissuePeerConfig('${peer.id}')"
-                                    title="Re-render this peer's config from current logic, keeping its keypair. The live tunnel is untouched — reinstall the new config on the peer to apply it.">Reissue config</button>
+                                    title="Reissue — re-render this peer's config from the current logic, keeping its keypair so the live tunnel is untouched. Use it to recover a lost config or refresh one that's out of date (⚠), then reinstall the delivered config on the peer.">Reissue config</button>
                             <button class="btn btn-small btn-secondary" onclick="confirmRegeneratePeer('${peer.id}')"
-                                    title="Rotate the WireGuard keypair and re-deliver the config — old config stops working immediately">Regenerate</button>
+                                    title="Regenerate — rotate the WireGuard keypair and deliver a fresh config once. Use it only to replace a compromised config; the old config stops working immediately and must be reinstalled on the peer.">Regenerate</button>
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.id}')">Delete</button>
                     </div>
@@ -1888,9 +1891,10 @@
             document.getElementById('peerDetailsContent').innerHTML = `
                 ${gettingStartedHtml(peer)}
                 <div class="show-once-warning">
-                    <strong>Save these now — they will not be retrievable again.</strong>
-                    The WireGuard config is delivered exactly once. To get a fresh config later,
-                    use <em>Regenerate</em> on the peer's row (which rotates the keypair).
+                    <strong>Save these now — they will not be shown again.</strong>
+                    For your security, this config is delivered exactly once and can't be retrieved later.
+                    Lost it? Use <em>Reissue</em> on the peer's row to deliver the same config again (keys preserved).
+                    Use <em>Regenerate</em> only to rotate the keypair — that invalidates the old config.
                 </div>
                 <div class="peer-details">
                     <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${escapeHtml(peer.name)}</span></div>

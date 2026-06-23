@@ -188,7 +188,7 @@ The WireGuard config for a peer is delivered **exactly once**, at create time: t
 
 To get a fresh config for an existing peer, the peer's row offers two actions:
 
-- **Reissue config** — re-renders the config from the *current* generation logic while **keeping the peer's keypair**, then re-opens the one-shot delivery. Use this when Vaier's config format has changed since the peer was created (the peer's row shows a **Config out of date** badge). The live tunnel keeps working; reinstall the reissued config on the peer machine to apply it.
+- **Reissue config** — re-renders the config from the *current* generation logic while **keeping the peer's keypair**, then re-opens the one-shot delivery. Use this to **recover a lost config** (you get the same working config back), or to refresh one that's gone **out of date** because Vaier's config format changed since the peer was created (the peer's row shows a ⚠ **out-of-date config** badge). The live tunnel keeps working; reinstall the reissued config on the peer machine to apply it.
 - **Regenerate** — deletes and recreates the peer with the same name, **rotating the keypair** as a side effect. Use this if the key may be compromised; the old config stops working immediately.
 
 Why show-once: WireGuard has no session concept, no server-side revocation, and the same config works on any number of devices. A leaked screenshot or `.conf` would otherwise be a permanent backdoor.
