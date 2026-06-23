@@ -181,6 +181,8 @@ Peers and LAN servers can be **renamed** in place — expand the card and edit t
 
 Every machine card carries a **status colour** on its type icon — green (reachable / connected), amber (reachable but the Docker scrape failed), red (unreachable), or grey (not yet probed). Hovering a machine's icon shows the state in plain language with the evidence behind it (e.g. "Green — connected, last handshake 12s ago").
 
+The Machines page offers three views via a tab switcher: a **List** of machine cards, a **Map** plotting each machine at its geographic location on a world map, and a **Network** diagram — a hub-and-spoke bird's-eye view of the whole Vaier network. In the Network view the Vaier server sits at the centre, every VPN peer radiates from it, and each LAN server branches outward from the relay peer (or the Vaier server) it sits behind. Edges are coloured and dashed by connectivity status (green for connected, red for down, yellow for degraded, grey for unknown), reusing the same machine icons and status colours as the other tabs, and the whole diagram updates live as machines come and go.
+
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 
 ### Show-once peer config

@@ -28,6 +28,101 @@
         .map-attribution a { color: var(--text-muted); text-decoration: none; }
         .map-attribution a:hover { color: var(--text); }
 
+        /* Network diagram: hub-and-spoke birds-eye view of the whole Vaier net.
+           Nodes are absolutely-positioned divs; edges are drawn in an SVG layer behind them. */
+        #network-diagram {
+            position: relative;
+            height: calc(100vh - 14rem);
+            min-height: 320px;
+            margin-bottom: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--bg);
+            overflow: hidden;
+        }
+        #network-diagram svg.net-edges {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .net-edge { stroke: var(--text-muted); stroke-width: 1.5; fill: none; opacity: 0.55; }
+        .net-edge.up        { stroke: var(--green); opacity: 0.45; }
+        .net-edge.degraded  { stroke: var(--yellow); opacity: 0.5; }
+        .net-edge.down      { stroke: var(--red); stroke-dasharray: 5 4; opacity: 0.45; }
+        .net-edge.unknown   { stroke-dasharray: 5 4; opacity: 0.4; }
+        .net-node {
+            position: absolute;
+            /* (left, top) is placed at the node's icon centre so edges — drawn to that same
+               point — run through the icon, not through the label below it. The Y shift equals
+               half the icon height (44/2); the centre node overrides it (58/2). */
+            transform: translate(-50%, -22px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 96px;
+            text-align: center;
+            pointer-events: auto;
+        }
+        .net-node.center { transform: translate(-50%, -29px); }
+        .net-node .net-icon {
+            position: relative;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            background: var(--bg);
+            color: var(--text-muted);
+        }
+        .net-node .net-icon svg { width: 24px; height: 24px; }
+        .net-node.center .net-icon { width: 58px; height: 58px; border-color: var(--green); }
+        .net-node.center .net-icon svg { width: 32px; height: 32px; }
+        .net-icon.icon-up        { color: var(--green); }
+        .net-icon.icon-down      { color: var(--red); }
+        .net-icon.icon-degraded  { color: var(--yellow); }
+        .net-icon.icon-unknown   { color: var(--text-dim); }
+        .net-node .net-cap {
+            position: absolute;
+            right: -4px;
+            bottom: -4px;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: #2496ed;
+        }
+        .net-node .net-cap svg { width: 12px; height: 12px; }
+        .net-node .net-label {
+            margin-top: 0.35rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            max-width: 96px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .net-node .net-sub {
+            font-size: 0.62rem;
+            color: var(--text-dim);
+            font-family: var(--mono);
+        }
+        .net-empty {
+            position: absolute;
+            top: 62%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+
         .tab-nav {
             display: flex;
             gap: 0.25rem;
@@ -510,8 +605,9 @@
 <body>
     <div class="container">
         <div class="tab-nav">
-            <button class="tab-button active" data-tab="list" onclick="switchTab('list')">List</button>
-            <button class="tab-button"        data-tab="map"  onclick="switchTab('map')">Map</button>
+            <button class="tab-button active" data-tab="list"    onclick="switchTab('list')">List</button>
+            <button class="tab-button"        data-tab="map"     onclick="switchTab('map')">Map</button>
+            <button class="tab-button"        data-tab="diagram" onclick="switchTab('diagram')">Network</button>
         </div>
         <div class="tab-panel active" id="tab-panel-list">
             <div id="peers-container">
@@ -521,6 +617,9 @@
         <div class="tab-panel" id="tab-panel-map">
             <div id="peer-map"></div>
             <div class="map-attribution">IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a></div>
+        </div>
+        <div class="tab-panel" id="tab-panel-diagram">
+            <div id="network-diagram"></div>
         </div>
     </div>
     <button class="fab" onclick="showCreatePeerModal()" aria-label="Add Machine" title="Add Machine">+</button>
@@ -1320,6 +1419,7 @@
 
             container.innerHTML = html;
             refreshPeerMap();
+            renderNetworkDiagram();
         }
 
         function showCreatePeerModal() {
@@ -2124,6 +2224,11 @@
             if (tab === 'map' && _peerMap) {
                 setTimeout(() => { _peerMap.invalidateSize(); refreshPeerMap(); }, 0);
             }
+            // The SVG diagram lays out against its container's pixel size, which is only
+            // known once the panel is visible (display:none reports clientWidth 0).
+            if (tab === 'diagram') {
+                setTimeout(renderNetworkDiagram, 0);
+            }
         }
 
         function setupPeerMap() {
@@ -2289,6 +2394,114 @@
             }
         }
 
+        // Hub-and-spoke network diagram: the Vaier server sits at the centre, every VPN peer
+        // radiates from it on an inner ring, and each LAN server branches outward from the relay
+        // peer (or the Vaier server) it sits behind. Reuses the same icons, status colours and
+        // data (`peers`, `lanServers`, `_serverLocation`) as the List and Map tabs.
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+
+        function iconClassFromKey(statusKey) {
+            return 'icon-' + statusKey; // 'up'|'down'|'degraded'|'unknown' -> existing colour classes
+        }
+
+        function netAddEdge(svg, x1, y1, x2, y2, statusKey) {
+            const line = document.createElementNS(SVG_NS, 'line');
+            line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+            line.setAttribute('class', 'net-edge ' + statusKey);
+            svg.appendChild(line);
+        }
+
+        function netAddNode(host, x, y, iconKind, statusKey, label, sub, isCenter, isRelay) {
+            const node = document.createElement('div');
+            node.className = 'net-node' + (isCenter ? ' center' : '');
+            node.style.left = x + 'px';
+            node.style.top = y + 'px';
+            node.title = sub ? `${label}\n${sub}` : label;
+            const cap = isRelay
+                ? `<span class="net-cap" title="Relay — routes LAN traffic for machines behind it">${capabilityIconSvg('relay')}</span>`
+                : '';
+            node.innerHTML =
+                `<div class="net-icon ${iconClassFromKey(statusKey)}">${machineIconSvg(iconKind)}${cap}</div>`
+                + `<div class="net-label">${escapeHtml(label)}</div>`
+                + (sub ? `<div class="net-sub">${escapeHtml(sub)}</div>` : '');
+            host.appendChild(node);
+        }
+
+        function renderNetworkDiagram() {
+            const host = document.getElementById('network-diagram');
+            if (!host) return;
+            const W = host.clientWidth, H = host.clientHeight;
+            if (W === 0 || H === 0) return; // panel not visible yet — switchTab re-renders on show
+
+            host.innerHTML = '';
+            const edges = document.createElementNS(SVG_NS, 'svg');
+            edges.setAttribute('class', 'net-edges');
+            host.appendChild(edges);
+
+            const cx = W / 2, cy = H / 2;
+            const minDim = Math.min(W, H);
+            const ringPeers = minDim * 0.30;
+            const ringLan = minDim * 0.44;
+            const peerAngles = {}; // peer name -> { x, y, ang }
+
+            // Centre: the Vaier hub. Always shown, even with no peers and no geoip data.
+            const hubSub = (_serverLocation && _serverLocation.publicHost) ? _serverLocation.publicHost : '';
+            netAddNode(host, cx, cy, 'vaier', 'up', 'Vaier server', hubSub, true, false);
+
+            // Inner ring: every VPN peer, spread evenly, an edge back to the hub.
+            const n = peers.length;
+            peers.forEach((p, i) => {
+                const ang = (i / Math.max(n, 1)) * 2 * Math.PI - Math.PI / 2;
+                const x = cx + ringPeers * Math.cos(ang);
+                const y = cy + ringPeers * Math.sin(ang);
+                peerAngles[p.name] = { x, y, ang };
+                const statusKey = statusKeyForPeer(p);
+                netAddEdge(edges, cx, cy, x, y, statusKey);
+                const sub = p.tunnelIp || p.endpointIp || '';
+                netAddNode(host, x, y, peerTypeIconKind(p.peerType), statusKey, p.name, sub, false, !!p.isRelay);
+            });
+
+            // Outer ring: LAN servers branch from the relay peer (or the Vaier server) they sit
+            // behind. Multiple machines behind one relay fan out around that relay's direction.
+            const behind = {};
+            lanServers.forEach(s => {
+                if (!s.relayPeerName) return;
+                (behind[s.relayPeerName] = behind[s.relayPeerName] || []).push(s);
+            });
+            Object.keys(behind).forEach(relayName => {
+                const servers = behind[relayName];
+                let ax, ay, baseAng;
+                if (relayName === 'Vaier server') {
+                    ax = cx; ay = cy; baseAng = -Math.PI / 2;
+                } else if (peerAngles[relayName]) {
+                    ax = peerAngles[relayName].x; ay = peerAngles[relayName].y; baseAng = peerAngles[relayName].ang;
+                } else {
+                    return; // relay peer not in the list — nothing to anchor to
+                }
+                servers.forEach((s, k) => {
+                    const ang = baseAng + (k - (servers.length - 1) / 2) * 0.30;
+                    const x = cx + ringLan * Math.cos(ang);
+                    const y = cy + ringLan * Math.sin(ang);
+                    const statusKey = statusKeyForLanServer(s);
+                    netAddEdge(edges, ax, ay, x, y, statusKey);
+                    netAddNode(host, x, y, 'lan', statusKey, s.name, s.lanAddress || '', false, false);
+                });
+            });
+
+            if (peers.length === 0 && lanServers.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'net-empty';
+                empty.textContent = 'No machines yet — add a VPN peer or LAN server to see the network.';
+                host.appendChild(empty);
+            }
+        }
+
+        // Re-lay-out when the iframe/window resizes while the diagram tab is showing.
+        window.addEventListener('resize', () => {
+            if (_activeTab === 'diagram') renderNetworkDiagram();
+        });
+
         async function fetchServerLocation() {
             // Always fetch — the response carries both the Map tab's lat/lon and the Vaier-server
             // machine card's LAN CIDR (#204). Either group can be absent (null lat/lon when the
@@ -2300,6 +2513,8 @@
                 if (_peerMap) refreshPeerMap();
                 // Re-render the Machines list so the Vaier server card picks up the LAN CIDR.
                 if (peers && peers.length) displayPeers(peers);
+                // Keep the diagram's hub label in sync even on an empty net (no peers => no displayPeers).
+                renderNetworkDiagram();
             } catch (e) {
                 console.error('Failed to load server location:', e);
             }

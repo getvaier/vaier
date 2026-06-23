@@ -139,7 +139,8 @@ Avoid: "vhost", "site", "auth provider".
 | **Disk alert threshold** | The percentage of host filesystem capacity in use at or above which Vaier raises **disk pressure** (default 85%). Configurable in Settings. |
 | **Capability strip** | Fixed-column row of capability icons (relay, docker) on the right side of each machine card header. Empty slots render as placeholders so the same capability lines up vertically across every card. |
 | **Geolocation** | `GeoLocation(latitude, longitude, city, country)` resolved by `DbIpGeolocationAdapter` against a DB-IP City Lite MMDB downloaded by the `geoip-init` container. Used for the Map tab. |
-| **Map tab** / **List tab** | The two views on the Machines page. The Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering. |
+| **Map tab** / **List tab** / **Network tab** | The three views on the Machines page. The List tab shows machine cards; the Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering; the Network tab renders the **network diagram**. |
+| **Network diagram** | The hub-and-spoke, bird's-eye view of the whole Vaier network shown on the Machines page's **Network tab**: the Vaier server at the centre, every VPN peer radiating from it, and each LAN server branching outward from the relay peer (or the Vaier server) it sits behind. Edges are coloured and dashed by connectivity status, reusing the same machine icons and status colours as the List and Map tabs. |
 | **Server marker** | The single distinct marker for the Vaier server itself on the Map tab. |
 | **Mobile/client dual marker** | Mobile/Windows-client peers plot twice: a dotted "approx. ISP" marker at the carrier IP plus a firm marker stacked at the Vaier server. Reflects `AllowedIPs = 0.0.0.0/0` full-tunnel routing. |
 
