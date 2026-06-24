@@ -537,4 +537,71 @@ class WireGuardPeerConfigTest {
 
         assertThat(json).doesNotContain("deviceCategory");
     }
+
+    // --- internet gateway: server-side AllowedIPs + metadata (#174) ---
+
+    @Test
+    void serverAllowedIps_withGateway_appendsDefaultRoute() {
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", null, true))
+            .isEqualTo("10.13.13.5/32,0.0.0.0/0");
+    }
+
+    @Test
+    void serverAllowedIps_withoutGateway_unchanged() {
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", null, false))
+            .isEqualTo("10.13.13.5/32");
+    }
+
+    @Test
+    void serverAllowedIps_withGatewayAndLanCidr_includesBoth() {
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", "192.168.1.0/24", true))
+            .isEqualTo("10.13.13.5/32,192.168.1.0/24,0.0.0.0/0");
+    }
+
+    @Test
+    void serverAllowedIps_twoArgOverload_isNotAGateway() {
+        // The pre-#174 2-arg overload must keep meaning "not a gateway".
+        assertThat(WireGuardPeerConfig.serverAllowedIps("10.13.13.5", "192.168.1.0/24"))
+            .isEqualTo("10.13.13.5/32,192.168.1.0/24");
+    }
+
+    @Test
+    void vaierJson_withGateway_emitsGatewayTrue() {
+        String json = WireGuardPeerConfig.vaierJson(
+                MachineType.UBUNTU_SERVER, null, null, null, "usa-box", null, true);
+
+        assertThat(json).contains("\"gateway\":true");
+    }
+
+    @Test
+    void vaierJson_withoutGateway_omitsGatewayKey() {
+        String json = WireGuardPeerConfig.vaierJson(
+                MachineType.UBUNTU_SERVER, null, null, null, "usa-box", null, false);
+
+        assertThat(json).doesNotContain("gateway");
+    }
+
+    @Test
+    void isOutOfDate_unaffectedByGatewayDesignation() {
+        // The gateway flag is pure server-side AllowedIPs metadata — it must NEVER enter the
+        // client-side tunnel directives. Toggling it (simulated by injecting "gateway":true into
+        // the # VAIER comment) must not make the on-disk client config look out of date.
+        String rendered = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "usa-box", "172.31.16.0/20");
+
+        String gatewayMetaLine =
+                "# VAIER: {\"peerType\":\"UBUNTU_SERVER\",\"name\":\"usa-box\",\"gateway\":true}";
+        String existing = rendered.lines()
+                .map(l -> l.startsWith("# VAIER:") ? gatewayMetaLine : l)
+                .collect(java.util.stream.Collectors.joining("\n", "", "\n"));
+
+        assertThat(existing).isNotEqualTo(rendered);
+
+        assertThat(WireGuardPeerConfig.isOutOfDate(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "usa-box",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20"))
+            .isFalse();
+    }
 }

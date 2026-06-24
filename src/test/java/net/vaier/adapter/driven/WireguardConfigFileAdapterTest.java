@@ -550,6 +550,52 @@ class WireguardConfigFileAdapterTest {
             () -> adapter.updateDeviceCategory("ghost", "NAS"));
     }
 
+    // --- internet gateway metadata round-trip (#174) ---
+
+    @Test
+    void getPeerConfigByName_parsesGatewayFlagFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("usa", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"gateway\":true}");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("usa").orElseThrow();
+
+        assertThat(result.internetGateway()).isTrue();
+    }
+
+    @Test
+    void getPeerConfigByName_gatewayFalseWhenAbsentFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+
+        assertThat(result.internetGateway()).isFalse();
+    }
+
+    @Test
+    void updateInternetGateway_writesFlagAndPreservesOtherMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\",\"name\":\"Spain\"}");
+
+        adapter.updateInternetGateway("apalveien5", true);
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.internetGateway()).isTrue();
+        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
+        assertThat(result.name()).isEqualTo("Spain");
+    }
+
+    @Test
+    void updateInternetGateway_falseClearsFlag() throws IOException {
+        createPeerConfWithVaierMetadata("usa", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"gateway\":true}");
+
+        adapter.updateInternetGateway("usa", false);
+
+        PeerConfiguration result = adapter.getPeerConfigByName("usa").orElseThrow();
+        assertThat(result.internetGateway()).isFalse();
+        assertThat(result.configContent()).doesNotContain("gateway");
+    }
+
     @Test
     void updateDescription_preservesExistingDeviceCategory() throws IOException {
         createPeerConfWithVaierMetadata("nuc", "10.13.13.7",

@@ -64,4 +64,20 @@ class MachineTypeTest {
     void defaultType_isUbuntuServer() {
         assertThat(MachineType.defaultType()).isEqualTo(MachineType.UBUNTU_SERVER);
     }
+
+    // --- internet-gateway eligibility (#174) ---
+
+    @Test
+    void canBeInternetGateway_isTrueForUbuntuServerOnly() {
+        // Only Linux server peers run the bash setup script that installs the egress NAT rules.
+        assertThat(MachineType.UBUNTU_SERVER.canBeInternetGateway()).isTrue();
+    }
+
+    @Test
+    void canBeInternetGateway_isFalseForEveryOtherType() {
+        assertThat(MachineType.MOBILE_CLIENT.canBeInternetGateway()).isFalse();
+        assertThat(MachineType.WINDOWS_CLIENT.canBeInternetGateway()).isFalse();
+        assertThat(MachineType.WINDOWS_SERVER.canBeInternetGateway()).isFalse();
+        assertThat(MachineType.LAN_SERVER.canBeInternetGateway()).isFalse();
+    }
 }

@@ -138,6 +138,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected net.vaier.application.UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
 
     @MockBean
+    protected net.vaier.application.DesignateInternetGatewayUseCase designateInternetGatewayUseCase;
+
+    @MockBean
     protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
 
     @MockBean

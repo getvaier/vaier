@@ -1191,6 +1191,26 @@
             }
         }
 
+        // Single-select internet gateway (#174): checking a peer designates it (un-picking any
+        // other); unchecking clears the designation. The server enforces the at-most-one invariant,
+        // so we just PUT/DELETE then refresh to reflect the new single selection.
+        async function onInternetGatewayChange(peerId, checkbox) {
+            const designate = checkbox.checked;
+            try {
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/gateway`, {
+                    method: designate ? 'PUT' : 'DELETE'
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                displaySuccess(designate
+                    ? 'Internet gateway designated — ensure this peer has run its setup script'
+                    : 'Internet gateway cleared');
+                fetchPeers();
+            } catch (error) {
+                checkbox.checked = !designate;
+                displayError(`Failed to update internet gateway: ${error.message}`);
+            }
+        }
+
         function togglePeer(peerName) {
             const id = cardId(peerName);
             const body    = document.getElementById('body-' + id);
@@ -1511,6 +1531,17 @@
                             <span class="detail-value" id="rxtx-${id}">${formatBytes(peer.transferRx)} / ${formatBytes(peer.transferTx)}</span>
                         </div>
                         ${outdatedRow}
+                        ${peer.peerType === 'UBUNTU_SERVER' ? `
+                        <div class="detail-row">
+                            <span class="detail-label">Internet gateway
+                                <span class="help-tip" aria-label="Route all full-tunnel client internet traffic out this peer instead of the Vaier server (e.g. appear in another country). Only one peer can be the internet gateway at a time. The peer must have run its setup script so the egress NAT rules are installed." title="Route all full-tunnel client internet traffic out this peer instead of the Vaier server (e.g. appear in another country). Only one peer can be the internet gateway at a time. The peer must have run its setup script so the egress NAT rules are installed.">?</span>
+                            </span>
+                            <span class="detail-value" style="display:flex;gap:8px;align-items:center">
+                                <input type="checkbox" id="gateway-${id}" ${peer.isInternetGateway ? 'checked' : ''}
+                                       onchange="onInternetGatewayChange('${peer.id}', this)">
+                                <label for="gateway-${id}" style="cursor:pointer">${peer.isInternetGateway ? 'Designated internet gateway' : 'Designate as internet gateway'}</label>
+                            </span>
+                        </div>` : ''}
                         ${isServer ? `
                         <div class="detail-row">
                             <span class="detail-label">LAN CIDR</span>

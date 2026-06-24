@@ -17,6 +17,13 @@ public interface ForUpdatingPeerConfigurations {
     void updateDeviceCategory(String peerId, String deviceCategory);
 
     /**
+     * Marks (or, with {@code false}, unmarks) a peer as Vaier's internet gateway in its
+     * {@code # VAIER:} metadata (#174). Server-side metadata only — never touches the client tunnel
+     * directives. The caller enforces the at-most-one-gateway invariant; this only writes the flag.
+     */
+    void updateInternetGateway(String peerId, boolean isGateway);
+
+    /**
      * Sets a peer's display name — the freely editable, operator-facing label. The peer's
      * {@code id} is never affected. A null or blank value clears the stored name, after which
      * the peer falls back to its id's humanised form for display.

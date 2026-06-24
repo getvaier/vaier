@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.application.DeletePeerUseCase;
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.DesignateInternetGatewayUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
@@ -79,6 +80,7 @@ public class VpnService implements
     RenamePeerUseCase,
     ReissuePeerConfigUseCase,
     UpdatePeerDeviceCategoryUseCase,
+    DesignateInternetGatewayUseCase,
     SyncLanRoutesUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
@@ -223,6 +225,9 @@ public class VpnService implements
         boolean deviceCategoryOverridden = rawCfg
             .map(ForGettingPeerConfigurations.PeerConfiguration::deviceCategoryOverridden)
             .orElse(false);
+        boolean isInternetGateway = rawCfg
+            .map(ForGettingPeerConfigurations.PeerConfiguration::internetGateway)
+            .orElse(false);
         return new VpnPeerView(
             id, name, client.publicKey(), client.allowedIps(), peerIp,
             client.endpointIp(), client.endpointPort(), client.latestHandshake(),
@@ -230,7 +235,7 @@ public class VpnService implements
             peerType, isServer, isClient, isRelay,
             net.vaier.domain.PeerArtifact.forPeerType(peerType),
             lanCidr, lanAddress, description, geo, configOutOfDate,
-            deviceCategory, deviceCategoryOverridden);
+            deviceCategory, deviceCategoryOverridden, isInternetGateway);
     }
 
     /**
@@ -318,7 +323,7 @@ public class VpnService implements
 
         return getPeerConfig(peerName).map(peerConfig -> PeerSetupScript.generate(
             peerName, peerConfig.ipAddress(), serverUrl, serverPort,
-            peerConfig.configContent(), peerConfig.lanCidr(), vpnSubnet));
+            peerConfig.configContent(), peerConfig.lanCidr(), vpnSubnet, peerConfig.peerType()));
     }
 
     // --- UpdateLanCidrUseCase ---
@@ -354,6 +359,48 @@ public class VpnService implements
         log.info("Updated lanCidr for peer {} to {} (server-side AllowedIPs: {})", peerName, normalized, newAllowedIps);
 
         syncLanRoutes();
+    }
+
+    // --- DesignateInternetGatewayUseCase (#174) ---
+
+    @Override
+    public void setInternetGateway(String peerName) {
+        ForGettingPeerConfigurations.PeerConfiguration peer = peerConfigProvider.getPeerConfigByName(peerName)
+            .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerName));
+        // The domain owns the eligibility rule: only a peer type that runs the egress setup script
+        // (UBUNTU_SERVER) may carry the gateway role. Reject everything else at the boundary (-> 400).
+        if (!peer.peerType().canBeInternetGateway()) {
+            throw new IllegalArgumentException(
+                "Peer " + peerName + " (" + peer.peerType() + ") cannot be an internet gateway");
+        }
+
+        // At most one gateway: revert any other currently-designated peer first. Idempotent when
+        // the target is already the gateway — its revert would be skipped, then it's re-set.
+        peerConfigProvider.getAllPeerConfigs().stream()
+            .filter(ForGettingPeerConfigurations.PeerConfiguration::internetGateway)
+            .filter(p -> !p.id().equals(peer.id()))
+            .forEach(this::revertGateway);
+
+        String newAllowedIps = WireGuardPeerConfig.serverAllowedIps(peer.ipAddress(), peer.lanCidr(), true);
+        forUpdatingServerAllowedIps.setPeerAllowedIps(peer.ipAddress(), newAllowedIps);
+        forUpdatingPeerConfigurations.updateInternetGateway(peer.id(), true);
+        log.info("Designated peer {} as internet gateway (server-side AllowedIPs: {})", peerName, newAllowedIps);
+    }
+
+    @Override
+    public void clearInternetGateway() {
+        peerConfigProvider.getAllPeerConfigs().stream()
+            .filter(ForGettingPeerConfigurations.PeerConfiguration::internetGateway)
+            .forEach(this::revertGateway);
+    }
+
+    /** Reverts a peer's server-side AllowedIPs to its non-gateway value and clears the flag. */
+    private void revertGateway(ForGettingPeerConfigurations.PeerConfiguration peer) {
+        String reverted = WireGuardPeerConfig.serverAllowedIps(peer.ipAddress(), peer.lanCidr(), false);
+        forUpdatingServerAllowedIps.setPeerAllowedIps(peer.ipAddress(), reverted);
+        forUpdatingPeerConfigurations.updateInternetGateway(peer.id(), false);
+        log.info("Cleared internet-gateway designation from peer {} (server-side AllowedIPs: {})",
+            peer.id(), reverted);
     }
 
     // --- SyncLanRoutesUseCase ---

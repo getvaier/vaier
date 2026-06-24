@@ -28,6 +28,10 @@ public interface ForGettingPeerConfigurations {
      *             the effective category is then auto-detected. Orthogonal to {@code peerType}:
      *             it only picks an icon, never routing. Backward-compatible: absent in pre-feature
      *             configs, reads as null.
+     * @param internetGateway true when this peer is designated Vaier's single internet gateway —
+     *             the central internet egress for full-tunnel clients (#174). Affects only the
+     *             server-side {@code AllowedIPs}; never the client tunnel. Backward-compatible:
+     *             absent in pre-feature configs, reads as false.
      */
     record PeerConfiguration(
         String id,
@@ -38,28 +42,37 @@ public interface ForGettingPeerConfigurations {
         String lanCidr,
         String lanAddress,
         String description,
-        DeviceCategory deviceCategory
+        DeviceCategory deviceCategory,
+        boolean internetGateway
     ) {
         public PeerConfiguration(String id, String ipAddress, String configContent) {
             this(id, PeerId.display(id), ipAddress, configContent, MachineType.UBUNTU_SERVER,
-                null, null, null, null);
+                null, null, null, null, false);
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null, false);
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null, null, false);
         }
 
         /** Pre-device-category constructor: no override, effective category is auto-detected. */
         public PeerConfiguration(String id, String name, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress,
                                  String description) {
-            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null);
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null, false);
+        }
+
+        /** Pre-internet-gateway constructor: not a gateway. */
+        public PeerConfiguration(String id, String name, String ipAddress, String configContent,
+                                 MachineType peerType, String lanCidr, String lanAddress,
+                                 String description, DeviceCategory deviceCategory) {
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description,
+                deviceCategory, false);
         }
 
         /**

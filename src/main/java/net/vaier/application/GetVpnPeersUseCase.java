@@ -44,6 +44,9 @@ public interface GetVpnPeersUseCase {
      *                            never null. Orthogonal to {@code peerType} — it only picks an icon.
      * @param deviceCategoryOverridden  true when an explicit override is stored (rather than
      *                            auto-detected).
+     * @param isInternetGateway   true when this peer is Vaier's designated internet gateway — the
+     *                            central internet egress for full-tunnel clients (#174). At most
+     *                            one peer is true. The UI renders a single-select toggle from it.
      */
     record VpnPeerView(
         String id,
@@ -68,6 +71,7 @@ public interface GetVpnPeersUseCase {
         Optional<GeoLocation> geoLocation,
         boolean configOutOfDate,
         DeviceCategory deviceCategory,
-        boolean deviceCategoryOverridden
+        boolean deviceCategoryOverridden,
+        boolean isInternetGateway
     ) {}
 }
