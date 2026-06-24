@@ -49,6 +49,9 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (hasControlCharacters(newName)) {
             throw new IllegalArgumentException("LAN server name must not contain control characters");
         }
+        if (newName.indexOf('/') >= 0) {
+            throw new IllegalArgumentException("LAN server name must not contain '/'");
+        }
         return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description, deviceCategory);
     }
 
@@ -91,6 +94,11 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         }
         if (hasControlCharacters(name)) {
             throw new IllegalArgumentException("name must not contain control characters");
+        }
+        if (name.indexOf('/') >= 0) {
+            // The name is used as a /lan-servers/{name} REST path segment; a '/' would make the
+            // server impossible to address (Spring rejects encoded slashes).
+            throw new IllegalArgumentException("name must not contain '/'");
         }
         if (lanAddress == null || lanAddress.isBlank()) {
             throw new IllegalArgumentException("lanAddress must not be blank");

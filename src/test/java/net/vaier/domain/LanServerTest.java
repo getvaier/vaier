@@ -69,6 +69,14 @@ class LanServerTest {
     }
 
     @Test
+    void validate_nameWithSlash_throws() {
+        // The name is a /lan-servers/{name} path segment; a '/' makes the server unaddressable.
+        assertThatThrownBy(() -> LanServer.validate("nas/2", "192.168.3.50", false, null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("name");
+    }
+
+    @Test
     void validate_blankLanAddress_throws() {
         assertThatThrownBy(() -> LanServer.validate("nas", "", true, 2375))
             .isInstanceOf(IllegalArgumentException.class)
@@ -149,6 +157,14 @@ class LanServerTest {
         LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
 
         assertThatThrownBy(() -> nas.renamedTo("media\r\nnas"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void renamedTo_rejectsNameWithSlash() {
+        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
+
+        assertThatThrownBy(() -> nas.renamedTo("media/nas"))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
