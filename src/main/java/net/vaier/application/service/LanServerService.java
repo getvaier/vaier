@@ -72,8 +72,8 @@ public class LanServerService implements
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                          String description, DeviceCategory deviceCategory) {
         // Normalise inputs up front so the persisted identity matches the (trimmed) uniqueness
-        // comparison rule and stays a clean `/lan-servers/{name}` path segment — mirrors
-        // LanServer.renamedTo, which also trims.
+        // comparison rule — mirrors LanServer.renamedTo, which also trims. (Trimming only strips
+        // surrounding whitespace; it does not guarantee a URL-safe name.)
         String trimmedName = name == null ? null : name.trim();
         String trimmedAddress = lanAddress == null ? null : lanAddress.trim();
         LanServer.validate(trimmedName, trimmedAddress, runsDocker, dockerPort);

@@ -544,13 +544,16 @@ public class VpnService implements
         // Validate the override value BEFORE any lookup or state change: a non-blank value must be a
         // valid DeviceCategory. fromString throws IllegalArgumentException (-> 400) on a bad value;
         // null/blank parses to null, meaning "clear the override". The domain owns the parse rule.
-        DeviceCategory.fromString(deviceCategory);
+        DeviceCategory parsed = DeviceCategory.fromString(deviceCategory);
 
         peerConfigProvider.getPeerConfigByName(peerId)
             .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
 
-        forUpdatingPeerConfigurations.updateDeviceCategory(peerId, deviceCategory);
-        log.info("Set device category of peer {} to '{}'", peerId, deviceCategory);
+        // Persist and log the parsed value, never the raw request string: an enum name is a fixed
+        // safe token, so this can't forge multiline log entries the way raw input (e.g. "\n…") could.
+        String normalized = parsed == null ? null : parsed.name();
+        forUpdatingPeerConfigurations.updateDeviceCategory(peerId, normalized);
+        log.info("Set device category of peer {} to '{}'", peerId, parsed == null ? "auto-detect" : parsed.name());
     }
 
     // --- RenamePeerUseCase ---

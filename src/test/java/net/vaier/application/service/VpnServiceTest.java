@@ -1049,7 +1049,20 @@ class VpnServiceTest {
 
         service.updatePeerDeviceCategory("nas", "  ");
 
-        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", "  ");
+        // Blank normalises to null ("clear the override") — the service never forwards the raw,
+        // unparsed request string to the port.
+        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", null);
+    }
+
+    @Test
+    void updatePeerDeviceCategory_persistsNormalisedEnumNameNotRawCasing() {
+        when(peerConfigProvider.getPeerConfigByName("nas"))
+            .thenReturn(Optional.of(new PeerConfiguration("nas", "10.13.13.2", "config")));
+
+        service.updatePeerDeviceCategory("nas", "nas");
+
+        // The parsed enum name is persisted, not the raw lower-case request value.
+        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", "NAS");
     }
 
     @Test
