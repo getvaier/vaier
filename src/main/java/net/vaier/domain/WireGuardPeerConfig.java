@@ -117,7 +117,9 @@ public final class WireGuardPeerConfig {
     /** Removes the single {@code # VAIER:} metadata comment line from a config string. */
     private static String stripVaierMetadata(String content) {
         if (content == null) return "";
-        return content.replaceAll("(?m)^# VAIER:.*$\n?", "");
+        // Consume the whole line break after the comment (\R matches \n, \r\n or \r) so a CRLF
+        // on-disk config doesn't leave a stray \r that diverges from an LF-generated one.
+        return content.replaceAll("(?m)^# VAIER:.*$\\R?", "");
     }
 
     public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,

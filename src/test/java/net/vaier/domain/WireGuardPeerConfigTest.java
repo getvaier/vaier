@@ -472,6 +472,26 @@ class WireGuardPeerConfigTest {
             .isFalse();
     }
 
+    @Test
+    void isOutOfDate_falseWhenMetadataLineUsesCrlfTerminator() {
+        // A config written with a CRLF terminator on its "# VAIER:" line must still be recognised
+        // as current: stripping the comment has to consume the whole line break (\r\n), not leave a
+        // stray \r that diverges from the LF-generated rendered config.
+        String rendered = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", "172.31.16.0/20");
+
+        // Replace only the line break after the metadata comment with CRLF; all other lines stay LF.
+        String existing = rendered.replaceFirst("(?m)^(# VAIER:.*)$\n", "$1\r\n");
+        assertThat(existing).isNotEqualTo(rendered);
+
+        assertThat(WireGuardPeerConfig.isOutOfDate(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20"))
+            .isFalse();
+    }
+
     // --- reissue preserves the operator's device-category override (Part 2) ---
 
     @Test
