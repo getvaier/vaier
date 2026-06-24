@@ -51,7 +51,45 @@ class LanScannerRestControllerTest {
         assertThat(response.getBody().status()).isEqualTo("IDLE");
         assertThat(response.getBody().lastScanCompleted()).isEqualTo("2026-06-04T12:00:00Z");
         assertThat(response.getBody().machines()).containsExactly(new DiscoveredMachineDto(
-            "192.168.3.10", "docker01", List.of(2375, 22), "DOCKER_HOST", "apalveien5"));
+            "192.168.3.10", "docker01", List.of(2375, 22), "DOCKER_HOST", "apalveien5", "SERVER"));
+    }
+
+    @Test
+    void getDerivesDeviceCategoryFromHostnameThenRole() {
+        // Hostname keyword "synology" wins over the WEB_UI role guess from port 443.
+        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
+            ScanStatus.IDLE,
+            List.of(new DiscoveredLanMachine("192.168.3.11", "my-synology", List.of(443), "apalveien5")),
+            Instant.parse("2026-06-04T12:00:00Z")));
+
+        var machine = controller.getSnapshot().getBody().machines().get(0);
+
+        assertThat(machine.deviceCategory()).isEqualTo("NAS");
+    }
+
+    @Test
+    void getDeviceCategoryFallsBackToRoleWhenHostnameHasNoKeyword() {
+        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
+            ScanStatus.IDLE,
+            List.of(new DiscoveredLanMachine("192.168.3.12", "box-9", List.of(9100), "apalveien5")),
+            Instant.parse("2026-06-04T12:00:00Z")));
+
+        var machine = controller.getSnapshot().getBody().machines().get(0);
+
+        assertThat(machine.deviceCategory()).isEqualTo("PRINTER");
+    }
+
+    @Test
+    void getDeviceCategoryFallsBackToGenericWhenNoSignal() {
+        // Unknown role (no telling ports) and no hostname keyword -> GENERIC (LAN role contributes none).
+        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
+            ScanStatus.IDLE,
+            List.of(new DiscoveredLanMachine("192.168.3.13", "box-9", List.of(12345), "apalveien5")),
+            Instant.parse("2026-06-04T12:00:00Z")));
+
+        var machine = controller.getSnapshot().getBody().machines().get(0);
+
+        assertThat(machine.deviceCategory()).isEqualTo("GENERIC");
     }
 
     @Test

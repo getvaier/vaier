@@ -8,6 +8,8 @@ import net.vaier.application.RegisterLanServerUseCase;
 import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
+import net.vaier.application.UpdateLanServerDeviceCategoryUseCase;
+import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
@@ -34,6 +36,7 @@ public class LanServerService implements
     DeleteLanServerUseCase,
     RenameLanServerUseCase,
     UpdateLanServerDescriptionUseCase,
+    UpdateLanServerDeviceCategoryUseCase,
     GetLanServersUseCase,
     ForGettingLanServers,
     GenerateLanServerSetupScriptUseCase,
@@ -56,15 +59,21 @@ public class LanServerService implements
 
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
-        register(name, lanAddress, runsDocker, dockerPort, null);
+        register(name, lanAddress, runsDocker, dockerPort, null, null);
     }
 
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                          String description) {
+        register(name, lanAddress, runsDocker, dockerPort, description, null);
+    }
+
+    @Override
+    public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                         String description, DeviceCategory deviceCategory) {
         // Normalise inputs up front so the persisted identity matches the (trimmed) uniqueness
-        // comparison rule and stays a clean `/lan-servers/{name}` path segment — mirrors
-        // LanServer.renamedTo, which also trims.
+        // comparison rule — mirrors LanServer.renamedTo, which also trims. (Trimming only strips
+        // surrounding whitespace; it does not guarantee a URL-safe name.)
         String trimmedName = name == null ? null : name.trim();
         String trimmedAddress = lanAddress == null ? null : lanAddress.trim();
         LanServer.validate(trimmedName, trimmedAddress, runsDocker, dockerPort);
@@ -85,7 +94,22 @@ public class LanServerService implements
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             trimmedName, trimmedAddress, runsDocker, dockerPort);
-        forPersistingLanServers.save(new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description));
+        forPersistingLanServers.save(
+            new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description, deviceCategory));
+    }
+
+    @Override
+    public void updateDeviceCategory(String name, String deviceCategory) {
+        // Validate the override value first: a non-blank value must be a valid DeviceCategory
+        // (IllegalArgumentException -> 400). Null/blank parses to null = "clear the override".
+        // The domain owns the parse rule; withDeviceCategory owns carrying everything else over.
+        DeviceCategory parsed = DeviceCategory.fromString(deviceCategory);
+        LanServer existing = forPersistingLanServers.getAll().stream()
+            .filter(s -> s.hasName(name))
+            .findFirst()
+            .orElseThrow(() -> new NotFoundException("LAN server not found: " + name));
+        forPersistingLanServers.save(existing.withDeviceCategory(parsed));
+        log.info("Updated device category for LAN server {} to {}", forLog(existing.name()), parsed);
     }
 
     @Override
@@ -96,12 +120,12 @@ public class LanServerService implements
             .findFirst()
             .orElseThrow(() -> new NotFoundException("LAN server not found: " + name));
         forPersistingLanServers.save(existing.withDescription(description));
-        log.info("Updated description for LAN server {}", name);
+        log.info("Updated description for LAN server {}", forLog(existing.name()));
     }
 
     @Override
     public void delete(String name) {
-        log.info("Deleting LAN server: {}", name);
+        log.info("Deleting LAN server: {}", forLog(name));
         forPersistingLanServers.deleteByName(name);
     }
 
@@ -118,7 +142,7 @@ public class LanServerService implements
         LanServer renamed = existing.renamedTo(newName);
 
         if (renamed.hasName(currentName)) {
-            log.info("Rename no-op: LAN server {} already has that name", currentName);
+            log.info("Rename no-op: LAN server {} already has that name", forLog(existing.name()));
             return;
         }
         // #284: the new name must be free across every machine — other LAN servers and VPN peers.
@@ -132,7 +156,7 @@ public class LanServerService implements
         // save() upserts by name, so write the new entry then drop the old one.
         forPersistingLanServers.save(renamed);
         forPersistingLanServers.deleteByName(currentName);
-        log.info("Renamed LAN server {} to {}", currentName, renamed.name());
+        log.info("Renamed LAN server {} to {}", forLog(existing.name()), renamed.name());
     }
 
     @Override
@@ -177,5 +201,20 @@ public class LanServerService implements
             .filter(s -> excludeLanServerName == null || !s.hasName(excludeLanServerName))
             .map(LanServer::name);
         return Stream.concat(peerNames, lanServerNames).toList();
+    }
+
+    /**
+     * Renders an operator-supplied name safe for a single log line. The lookup that precedes these
+     * logs trims the request value, so a name like {@code "nas\n…"} can still reach a log statement;
+     * collapsing CR/LF (and other ISO control chars) to spaces prevents forged multiline log entries.
+     */
+    private static String forLog(String name) {
+        if (name == null) return "null";
+        StringBuilder sb = new StringBuilder(name.length());
+        name.codePoints().forEach(c -> {
+            if (Character.isISOControl(c)) sb.append(' ');
+            else sb.appendCodePoint(c);
+        });
+        return sb.toString();
     }
 }

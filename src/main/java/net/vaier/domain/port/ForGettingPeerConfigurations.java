@@ -1,5 +1,6 @@
 package net.vaier.domain.port;
 
+import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 
@@ -23,6 +24,10 @@ public interface ForGettingPeerConfigurations {
      * @param name the operator-facing display label, freely editable. Always populated: for
      *             peers created before the id/name split it falls back to {@link PeerId#display}
      *             of the id.
+     * @param deviceCategory the operator's device-category override, or null when none is pinned —
+     *             the effective category is then auto-detected. Orthogonal to {@code peerType}:
+     *             it only picks an icon, never routing. Backward-compatible: absent in pre-feature
+     *             configs, reads as null.
      */
     record PeerConfiguration(
         String id,
@@ -32,21 +37,46 @@ public interface ForGettingPeerConfigurations {
         MachineType peerType,
         String lanCidr,
         String lanAddress,
-        String description
+        String description,
+        DeviceCategory deviceCategory
     ) {
         public PeerConfiguration(String id, String ipAddress, String configContent) {
             this(id, PeerId.display(id), ipAddress, configContent, MachineType.UBUNTU_SERVER,
-                null, null, null);
+                null, null, null, null);
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null);
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null, null);
+        }
+
+        /** Pre-device-category constructor: no override, effective category is auto-detected. */
+        public PeerConfiguration(String id, String name, String ipAddress, String configContent,
+                                 MachineType peerType, String lanCidr, String lanAddress,
+                                 String description) {
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null);
+        }
+
+        /**
+         * The category Vaier shows for this peer: the operator's {@link #deviceCategory() override}
+         * when one is pinned, otherwise the category auto-detected from the display {@code name} and
+         * {@code peerType} (no LAN role — peers aren't scanned). Detection runs on the live name, so
+         * renaming a peer re-detects when there is no override. Never null.
+         */
+        public DeviceCategory effectiveDeviceCategory() {
+            return deviceCategory != null
+                ? deviceCategory
+                : DeviceCategory.detect(name, peerType, null);
+        }
+
+        /** True when an explicit device-category override is pinned (rather than auto-detected). */
+        public boolean deviceCategoryOverridden() {
+            return deviceCategory != null;
         }
 
         /**

@@ -44,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
@@ -1029,6 +1030,57 @@ class VpnServiceTest {
         verify(forUpdatingPeerConfigurations).updateName("media-server", "");
     }
 
+    // --- updatePeerDeviceCategory: orthogonal icon override ---
+
+    @Test
+    void updatePeerDeviceCategory_persistsValidOverride() {
+        when(peerConfigProvider.getPeerConfigByName("nas"))
+            .thenReturn(Optional.of(new PeerConfiguration("nas", "10.13.13.2", "config")));
+
+        service.updatePeerDeviceCategory("nas", "NAS");
+
+        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", "NAS");
+    }
+
+    @Test
+    void updatePeerDeviceCategory_blankClearsOverride() {
+        when(peerConfigProvider.getPeerConfigByName("nas"))
+            .thenReturn(Optional.of(new PeerConfiguration("nas", "10.13.13.2", "config")));
+
+        service.updatePeerDeviceCategory("nas", "  ");
+
+        // Blank normalises to null ("clear the override") — the service never forwards the raw,
+        // unparsed request string to the port.
+        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", null);
+    }
+
+    @Test
+    void updatePeerDeviceCategory_persistsNormalisedEnumNameNotRawCasing() {
+        when(peerConfigProvider.getPeerConfigByName("nas"))
+            .thenReturn(Optional.of(new PeerConfiguration("nas", "10.13.13.2", "config")));
+
+        service.updatePeerDeviceCategory("nas", "nas");
+
+        // The parsed enum name is persisted, not the raw lower-case request value.
+        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", "NAS");
+    }
+
+    @Test
+    void updatePeerDeviceCategory_rejectsInvalidValueWithoutPersisting() {
+        assertThatThrownBy(() -> service.updatePeerDeviceCategory("nas", "BANANA"))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forUpdatingPeerConfigurations, never()).updateDeviceCategory(any(), any());
+    }
+
+    @Test
+    void updatePeerDeviceCategory_throwsWhenPeerMissing() {
+        when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updatePeerDeviceCategory("ghost", "NAS"))
+            .isInstanceOf(PeerNotFoundException.class);
+        verify(forUpdatingPeerConfigurations, never()).updateDeviceCategory(any(), any());
+    }
+
     // --- renamePeer: sets the display name; the id is immutable (#209, #55) ---
 
     @Test
@@ -1100,6 +1152,22 @@ class VpnServiceTest {
         assertThat(view.lanAddress()).isEqualTo("192.168.1.10");
         assertThat(view.description()).isEqualTo("alice's box");
         assertThat(view.geoLocation()).contains(new GeoLocation(59.91, 10.74, "Oslo", "Norway"));
+    }
+
+    @Test
+    void getVpnPeers_readsEachPeerConfigOnlyOnce() {
+        // The peer view derives both its device category and its config fields from the same
+        // on-disk config — it must load that config once per peer, not twice (perf regression guard).
+        VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice-1");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.of(
+            new PeerConfiguration("alice-1", "Alice", "10.13.13.2", "[Interface]",
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10", "alice's box")));
+
+        service.getVpnPeers();
+
+        verify(peerConfigProvider, times(1)).getPeerConfigByIp("10.13.13.2");
     }
 
     @Test
@@ -1204,6 +1272,59 @@ class VpnServiceTest {
         assertThatThrownBy(() -> service.reissuePeerConfig("ghost"))
             .isInstanceOf(PeerNotFoundException.class);
         verify(forUpdatingPeerConfigurations, never()).rewriteConfig(any(), any());
+    }
+
+    @Test
+    void reissuePeerConfig_retainsStoredDeviceCategoryOverride() throws Exception {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        ReflectionTestUtils.setField(service, "wireguardContainerName", "wireguard");
+        ReflectionTestUtils.setField(service, "wireguardInterface", "wg0");
+
+        String existing = net.vaier.domain.WireGuardPeerConfig.generate(
+            "PRIVKEY", "10.13.13.6", "SERVER_PUB", "PSK", "vaier.example.com:51820",
+            MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, "apalveien5", null);
+        when(peerConfigProvider.getPeerConfigByName("apalveien5")).thenReturn(Optional.of(
+            new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", existing,
+                MachineType.UBUNTU_SERVER, null, null, null,
+                net.vaier.domain.DeviceCategory.NAS)));
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
+        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
+            .thenReturn("SERVER_PUB\n");
+        when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
+            .thenReturn("PEER_PUB\n");
+
+        service.reissuePeerConfig("apalveien5");
+
+        ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
+        verify(forUpdatingPeerConfigurations).rewriteConfig(eq("apalveien5"), content.capture());
+        assertThat(content.getValue()).contains("\"deviceCategory\":\"NAS\"");
+    }
+
+    @Test
+    void reissuePeerConfig_nonOverriddenPeer_writesNoDeviceCategoryKey() throws Exception {
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+        ReflectionTestUtils.setField(service, "wireguardContainerName", "wireguard");
+        ReflectionTestUtils.setField(service, "wireguardInterface", "wg0");
+
+        String existing = net.vaier.domain.WireGuardPeerConfig.generate(
+            "PRIVKEY", "10.13.13.6", "SERVER_PUB", "PSK", "vaier.example.com:51820",
+            MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, "apalveien5", null);
+        when(peerConfigProvider.getPeerConfigByName("apalveien5")).thenReturn(Optional.of(
+            new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", existing,
+                MachineType.UBUNTU_SERVER, null, null, null, null)));
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
+        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
+            .thenReturn("SERVER_PUB\n");
+        when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
+            .thenReturn("PEER_PUB\n");
+
+        service.reissuePeerConfig("apalveien5");
+
+        ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
+        verify(forUpdatingPeerConfigurations).rewriteConfig(eq("apalveien5"), content.capture());
+        assertThat(content.getValue()).doesNotContain("deviceCategory");
     }
 
     @Test

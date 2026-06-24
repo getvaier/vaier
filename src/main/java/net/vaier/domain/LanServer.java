@@ -6,14 +6,20 @@ import java.util.Collection;
 import java.util.Optional;
 
 public record LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
-                        String description) {
+                        String description, DeviceCategory deviceCategory) {
 
     private static final int MIN_PORT = 1;
     private static final int MAX_PORT = 65535;
 
-    /** Convenience constructor for a LAN server with no description. */
+    /** Convenience constructor for a LAN server with no description and no device-category override. */
     public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
-        this(name, lanAddress, runsDocker, dockerPort, null);
+        this(name, lanAddress, runsDocker, dockerPort, null, null);
+    }
+
+    /** Convenience constructor for a LAN server with a description but no device-category override. */
+    public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                     String description) {
+        this(name, lanAddress, runsDocker, dockerPort, description, null);
     }
 
     /** True when this LAN server is the one named {@code candidate} (exact match). */
@@ -40,7 +46,13 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (newName == null || newName.isBlank()) {
             throw new IllegalArgumentException("LAN server name must not be blank");
         }
-        return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description);
+        if (hasControlCharacters(newName)) {
+            throw new IllegalArgumentException("LAN server name must not contain control characters");
+        }
+        if (newName.indexOf('/') >= 0) {
+            throw new IllegalArgumentException("LAN server name must not contain '/'");
+        }
+        return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description, deviceCategory);
     }
 
     /**
@@ -50,12 +62,43 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
     public LanServer withDescription(String newDescription) {
         String normalized = (newDescription == null || newDescription.isBlank())
             ? null : newDescription.trim();
-        return new LanServer(name, lanAddress, runsDocker, dockerPort, normalized);
+        return new LanServer(name, lanAddress, runsDocker, dockerPort, normalized, deviceCategory);
+    }
+
+    /**
+     * Returns a copy of this LAN server with its device-category override set. A null value clears
+     * the override, reverting the effective category to auto-detection. Everything else carries over.
+     */
+    public LanServer withDeviceCategory(DeviceCategory newDeviceCategory) {
+        return new LanServer(name, lanAddress, runsDocker, dockerPort, description, newDeviceCategory);
+    }
+
+    /**
+     * The category Vaier shows for this LAN server: the operator's {@link #deviceCategory() override}
+     * when one is pinned, otherwise the category auto-detected from the name. A LAN server persists no
+     * {@link MachineType} or {@link LanMachineRole}, so detection runs on the name alone (with
+     * {@link DeviceCategory#GENERIC} as the fallback). Never null.
+     */
+    public DeviceCategory effectiveDeviceCategory() {
+        return deviceCategory != null ? deviceCategory : DeviceCategory.detect(name, null, null);
+    }
+
+    /** True when an explicit device-category override is pinned (rather than auto-detected). */
+    public boolean deviceCategoryOverridden() {
+        return deviceCategory != null;
     }
 
     public static void validate(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("name must not be blank");
+        }
+        if (hasControlCharacters(name)) {
+            throw new IllegalArgumentException("name must not contain control characters");
+        }
+        if (name.indexOf('/') >= 0) {
+            // The name is used as a /lan-servers/{name} REST path segment; a '/' would make the
+            // server impossible to address (Spring rejects encoded slashes).
+            throw new IllegalArgumentException("name must not contain '/'");
         }
         if (lanAddress == null || lanAddress.isBlank()) {
             throw new IllegalArgumentException("lanAddress must not be blank");
@@ -77,5 +120,14 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
                     "dockerPort must be between " + MIN_PORT + " and " + MAX_PORT + " (was " + dockerPort + ")");
             }
         }
+    }
+
+    /**
+     * True when {@code value} contains any ISO control character (e.g. CR/LF). Such characters are
+     * never legitimate in a machine name and, if persisted, would let an operator-controlled name
+     * forge multiline log entries — so names carrying them are rejected at the boundary.
+     */
+    private static boolean hasControlCharacters(String value) {
+        return value.chars().anyMatch(Character::isISOControl);
     }
 }

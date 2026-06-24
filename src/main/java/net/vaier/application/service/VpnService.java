@@ -16,6 +16,8 @@ import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.ResolveVpnPeerNameUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
+import net.vaier.application.UpdatePeerDeviceCategoryUseCase;
+import net.vaier.domain.DeviceCategory;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.GeoLocation;
@@ -76,6 +78,7 @@ public class VpnService implements
     UpdateLanCidrUseCase,
     RenamePeerUseCase,
     ReissuePeerConfigUseCase,
+    UpdatePeerDeviceCategoryUseCase,
     SyncLanRoutesUseCase {
 
     @Value("${wireguard.config.path:/wireguard/config}")
@@ -185,7 +188,15 @@ public class VpnService implements
     private VpnPeerView toVpnPeerView(VpnClient client, ServerRenderContext serverContext) {
         String peerIp = client.vpnIp();
         String id = forResolvingPeerNames.resolvePeerNameByIp(peerIp);
-        Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = getPeerConfigByIp(peerIp);
+        // The raw PeerConfiguration carries the device-category override and owns the effective-
+        // category decision; the PeerConfigResult below is the existing view of the same config.
+        Optional<ForGettingPeerConfigurations.PeerConfiguration> rawCfg =
+            peerConfigProvider.getPeerConfigByIp(peerIp);
+        // Reuse the already-loaded raw config rather than re-reading it via getPeerConfigByIp —
+        // one filesystem scan/parse per peer per refresh, not two.
+        Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = rawCfg
+            .map(c -> new GetPeerConfigUseCase.PeerConfigResult(c.id(), c.name(), c.ipAddress(),
+                c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress(), c.description()));
         MachineType peerType = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType)
             .orElse(MachineType.defaultType());
         String name = cfg.map(GetPeerConfigUseCase.PeerConfigResult::name)
@@ -204,13 +215,22 @@ public class VpnService implements
                 cfg.get().configContent(), peerType, lanCidr, lanAddress, description,
                 storedName(cfg.get().configContent(), name), serverContext.serverPublicKey(),
                 serverContext.serverEndpoint(), vpnSubnet, serverContext.serverLanCidr());
+        // The domain owns the effective-category decision (override else detect). For a peer with no
+        // on-disk config yet, detect from the live name + type (no override, never overridden).
+        DeviceCategory deviceCategory = rawCfg
+            .map(ForGettingPeerConfigurations.PeerConfiguration::effectiveDeviceCategory)
+            .orElseGet(() -> DeviceCategory.detect(name, peerType, null));
+        boolean deviceCategoryOverridden = rawCfg
+            .map(ForGettingPeerConfigurations.PeerConfiguration::deviceCategoryOverridden)
+            .orElse(false);
         return new VpnPeerView(
             id, name, client.publicKey(), client.allowedIps(), peerIp,
             client.endpointIp(), client.endpointPort(), client.latestHandshake(),
             client.isConnected(), client.transferRx(), client.transferTx(),
             peerType, isServer, isClient, isRelay,
             net.vaier.domain.PeerArtifact.forPeerType(peerType),
-            lanCidr, lanAddress, description, geo, configOutOfDate);
+            lanCidr, lanAddress, description, geo, configOutOfDate,
+            deviceCategory, deviceCategoryOverridden);
     }
 
     /**
@@ -488,10 +508,15 @@ public class VpnService implements
 
             // Re-render from current logic, preserving the keypair/PSK/tunnel IP baked into the
             // on-disk config. Pass the raw stored name (null when absent) so the metadata round-trips.
+            // Pass the raw device-category override only (null when not overridden) — never the
+            // effective category — so a non-overridden peer's reissued metadata stays free of the
+            // key and keeps auto-detecting.
+            String deviceCategoryOverride = peer.deviceCategory() != null
+                ? peer.deviceCategory().name() : null;
             String newContent = WireGuardPeerConfig.reissue(
                 peer.configContent(), peer.peerType(), peer.lanCidr(), peer.lanAddress(),
                 peer.description(), storedName(peer.configContent(), peer.name()),
-                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr);
+                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, deviceCategoryOverride);
 
             forUpdatingPeerConfigurations.rewriteConfig(peer.id(), newContent);
             // Deliberate operator-initiated re-exposure: re-open the one-shot retrieval budget.
@@ -510,6 +535,25 @@ public class VpnService implements
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to reissue config for peer " + peerId + ": " + e.getMessage(), e);
         }
+    }
+
+    // --- UpdatePeerDeviceCategoryUseCase ---
+
+    @Override
+    public void updatePeerDeviceCategory(String peerId, String deviceCategory) {
+        // Validate the override value BEFORE any lookup or state change: a non-blank value must be a
+        // valid DeviceCategory. fromString throws IllegalArgumentException (-> 400) on a bad value;
+        // null/blank parses to null, meaning "clear the override". The domain owns the parse rule.
+        DeviceCategory parsed = DeviceCategory.fromString(deviceCategory);
+
+        peerConfigProvider.getPeerConfigByName(peerId)
+            .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
+
+        // Persist and log the parsed value, never the raw request string: an enum name is a fixed
+        // safe token, so this can't forge multiline log entries the way raw input (e.g. "\n…") could.
+        String normalized = parsed == null ? null : parsed.name();
+        forUpdatingPeerConfigurations.updateDeviceCategory(peerId, normalized);
+        log.info("Set device category of peer {} to '{}'", peerId, parsed == null ? "auto-detect" : parsed.name());
     }
 
     // --- RenamePeerUseCase ---

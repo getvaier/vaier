@@ -56,6 +56,41 @@ class MachineTest {
         assertThat(machine.dockerPort()).isEqualTo(2375);
     }
 
+    // --- device category (effective) ---
+
+    @Test
+    void fromPeer_carriesEffectiveDeviceCategoryFromTheConfig() {
+        // No override; name "Laptop" detects to LAPTOP for a WINDOWS_CLIENT.
+        PeerConfiguration peer = new PeerConfiguration("laptop", "Laptop", "10.13.13.4", "",
+            MachineType.WINDOWS_CLIENT, null, null, null);
+
+        assertThat(Machine.fromPeer(peer, null).deviceCategory()).isEqualTo(DeviceCategory.LAPTOP);
+    }
+
+    @Test
+    void fromPeer_overrideWins() {
+        PeerConfiguration peer = new PeerConfiguration("laptop", "Laptop", "10.13.13.4", "",
+            MachineType.WINDOWS_CLIENT, null, null, null, DeviceCategory.SERVER);
+
+        assertThat(Machine.fromPeer(peer, null).deviceCategory()).isEqualTo(DeviceCategory.SERVER);
+    }
+
+    @Test
+    void fromLanServer_carriesEffectiveDeviceCategory() {
+        LanServer server = new LanServer("my-synology", "172.31.5.20", false, null);
+
+        assertThat(Machine.fromLanServer(server, "172.31.0.0/16").deviceCategory())
+            .isEqualTo(DeviceCategory.NAS);
+    }
+
+    @Test
+    void fromLanServer_overrideWins() {
+        LanServer server = new LanServer("box", "172.31.5.20", false, null, null, DeviceCategory.PRINTER);
+
+        assertThat(Machine.fromLanServer(server, "172.31.0.0/16").deviceCategory())
+            .isEqualTo(DeviceCategory.PRINTER);
+    }
+
     // --- nameIsTaken: machine names are unique across Vaier (#284) ---
 
     @Test

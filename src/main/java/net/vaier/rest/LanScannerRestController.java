@@ -63,12 +63,18 @@ public class LanScannerRestController {
     public record LanScanResponse(String status, String lastScanCompleted,
                                   List<DiscoveredMachineDto> machines) {}
 
-    /** What the launchpad/machines page renders per discovered host. */
+    /**
+     * What the launchpad/machines page renders per discovered host. {@code deviceCategory} is the
+     * derived (never persisted) icon hint: {@code DeviceCategory.detect(hostname, null, role)} —
+     * hostname keyword first, then the guessed role, then GENERIC. Lets the UI show a device icon
+     * per scanned host.
+     */
     public record DiscoveredMachineDto(String ipAddress, String hostname, List<Integer> openPorts,
-                                       String role, String relayAnchor) {
+                                       String role, String relayAnchor, String deviceCategory) {
         static DiscoveredMachineDto from(DiscoveredLanMachine m) {
             return new DiscoveredMachineDto(m.ipAddress(), m.hostname(), m.openPorts(),
-                m.guessedRole().name(), m.relayAnchor());
+                m.guessedRole().name(), m.relayAnchor(),
+                net.vaier.domain.DeviceCategory.detect(m.hostname(), null, m.guessedRole()).name());
         }
     }
 }

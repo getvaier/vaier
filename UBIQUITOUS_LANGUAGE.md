@@ -15,6 +15,7 @@ Terms are drawn from the domain model (`src/main/java/net/vaier/domain/`), the u
 | **Operator** | The human running Vaier — typically a homelab developer. Not "user" (which means an Authelia account). |
 | **Stack** | The five containers in `docker-compose.yml`: `wireguard`, `traefik`, `authelia`, `redis`, `vaier`. Stack components are upstream and pinned by tag — never floating `:latest`. |
 | **Bootstrap admin** | The one-time `admin` user Vaier creates on first boot, with a password written to `authelia/config/.bootstrap-admin-password`. The operator reads it, logs in, changes the password, and deletes the file. |
+| **Concepts page** | The in-app, operator-facing glossary shown inside the admin shell: a trimmed, plain-language subset of this document's terms, grouped, each with a short definition and a one-line "why it matters". Its terms are a curated subset of the ones defined here. |
 
 ---
 
@@ -25,7 +26,10 @@ The unified term is **machine**. A machine is anything Vaier knows about that ca
 | Term | Definition |
 |------|------------|
 | **Machine** | Read projection (`domain.Machine`) covering every host Vaier manages. Has a `MachineType` and a **name** that is unique across all of Vaier (case-insensitive). Returned by `GET /machines`. |
-| **MachineType** | Enum with five values: `MOBILE_CLIENT`, `WINDOWS_CLIENT`, `UBUNTU_SERVER`, `WINDOWS_SERVER`, `LAN_SERVER`. The first four are **VPN peers**; the fifth is not. |
+| **MachineType** | Enum with five values: `MOBILE_CLIENT`, `WINDOWS_CLIENT`, `UBUNTU_SERVER`, `WINDOWS_SERVER`, `LAN_SERVER`. The first four are **VPN peers**; the fifth is not. The **routing** concept — it drives WireGuard client/server config. Distinct from **device category**, which is icon-only. |
+| **Device category** | The kind of device a machine is (`domain.DeviceCategory`: `PHONE`, `LAPTOP`, `DESKTOP`, `SERVER`, `NAS`, `PRINTER`, `ROUTER`, `GATEWAY`, `IOT`, `CAMERA`, `MEDIA`, `GENERIC`). A purely presentational, orthogonal attribute: it picks the icon shown for a machine and never affects routing, keys, or how a service is exposed. `GENERIC` is the fallback when nothing else signals. Distinct from **machine type**, which is the routing concept — a NAS and a desktop may both be `UBUNTU_SERVER` peers yet carry different device categories. Within the enum, `ROUTER` (a LAN router or Wi-Fi access point) and `GATEWAY` (an internet-edge or IoT-hub bridge, e.g. a Zigbee/Z-Wave or Home Assistant hub) are separate categories, not synonyms; the device-category `GATEWAY` is also unrelated to the routing-level **gateway peer**. |
+| **Effective device category** | The **device category** actually shown for a machine: its **device category override** when one is set, otherwise the auto-detected category. Never blank — falls back to `GENERIC`. |
+| **Device category override** | An explicit **device category** an operator pins on a machine, taking precedence over auto-detection. Optional; when absent the machine uses its detected category, and clearing it reverts to auto-detection. |
 | **VPN peer** / **peer** | A machine connected to Vaier over WireGuard. Equivalent to "MachineType where `isVpnPeer()` is true". Use "peer" in UI and casual reference; "VPN peer" when disambiguating from a LAN server. |
 | **Client peer** | Mobile or Windows client; default `AllowedIPs = 0.0.0.0/0` (full tunnel). Cannot host containers in the Vaier model. |
 | **Server peer** | `UBUNTU_SERVER` or `WINDOWS_SERVER`; default `AllowedIPs` is the VPN subnet only (split tunnel). Can host Docker containers. `MachineType.isServerType()` also returns true for `LAN_SERVER`. |
@@ -138,7 +142,8 @@ Avoid: "vhost", "site", "auth provider".
 | **Disk alert threshold** | The percentage of host filesystem capacity in use at or above which Vaier raises **disk pressure** (default 85%). Configurable in Settings. |
 | **Capability strip** | Fixed-column row of capability icons (relay, docker) on the right side of each machine card header. Empty slots render as placeholders so the same capability lines up vertically across every card. |
 | **Geolocation** | `GeoLocation(latitude, longitude, city, country)` resolved by `DbIpGeolocationAdapter` against a DB-IP City Lite MMDB downloaded by the `geoip-init` container. Used for the Map tab. |
-| **Map tab** / **List tab** | The two views on the Machines page. The Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering. |
+| **Map tab** / **List tab** / **Network tab** | The three views on the Machines page. The List tab shows machine cards; the Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering; the Network tab renders the **network diagram**. |
+| **Network diagram** | The hub-and-spoke, bird's-eye view of the whole Vaier network shown on the Machines page's **Network tab**: the Vaier server at the centre, every VPN peer radiating from it, and each LAN server branching outward from the relay peer (or the Vaier server) it sits behind. Edges are coloured and dashed by connectivity status, reusing the same machine icons and status colours as the List and Map tabs. |
 | **Server marker** | The single distinct marker for the Vaier server itself on the Map tab. |
 | **Mobile/client dual marker** | Mobile/Windows-client peers plot twice: a dotted "approx. ISP" marker at the carrier IP plus a firm marker stacked at the Vaier server. Reflects `AllowedIPs = 0.0.0.0/0` full-tunnel routing. |
 
@@ -232,6 +237,8 @@ These pairs come up often. Use the left, never the right.
 | Use | Don't use |
 |-----|-----------|
 | machine | node, device, host (when ambiguous) |
+| machine type | peer type (in routing context), device category (means the icon, not routing) |
+| device category | device type, icon kind, machine type (means routing, not the icon) |
 | peer / VPN peer | client (alone), VPN node |
 | relay peer | bridge peer, gateway (means #174) |
 | LAN server | LAN docker host (legacy, code path migrated) |

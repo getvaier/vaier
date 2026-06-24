@@ -52,6 +52,7 @@ class VpnPeerRestControllerTest {
     @Mock UpdateLanCidrUseCase updateLanCidrUseCase;
     @Mock RenamePeerUseCase renamePeerUseCase;
     @Mock ReissuePeerConfigUseCase reissuePeerConfigUseCase;
+    @Mock net.vaier.application.UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     @Mock ForPublishingEvents forPublishingEvents;
@@ -68,7 +69,8 @@ class VpnPeerRestControllerTest {
             endpointIp, "51820", "0", connected, "0", "0",
             type, type.isServerType(), type.isVpnPeer() && !type.isServerType(), false,
             net.vaier.domain.PeerArtifact.forPeerType(type),
-            null, null, description, geo, false);
+            null, null, description, geo, false,
+            net.vaier.domain.DeviceCategory.detect(name, type, null), false);
     }
 
     @Test
@@ -291,7 +293,8 @@ class VpnPeerRestControllerTest {
                 "", "51820", "0", false, "0", "0",
                 MachineType.UBUNTU_SERVER, true, false, false,
                 net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
-                null, null, null, Optional.empty(), true)
+                null, null, null, Optional.empty(), true,
+                net.vaier.domain.DeviceCategory.SERVER, false)
         ));
 
         assertThat(controller.listPeers().getBody().get(0).configOutOfDate()).isTrue();
@@ -349,6 +352,55 @@ class VpnPeerRestControllerTest {
         assertThat(peer.longitude()).isNull();
         assertThat(peer.city()).isNull();
         assertThat(peer.country()).isNull();
+    }
+
+    // --- device category ---
+
+    @Test
+    void listPeers_exposesEffectiveDeviceCategoryAndOverrideFlag() {
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            new VpnPeerView("nas", "nas", "pub", "10.13.13.6/32", "10.13.13.6",
+                "", "51820", "0", false, "0", "0",
+                MachineType.UBUNTU_SERVER, true, false, false,
+                net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
+                null, null, null, Optional.empty(), true,
+                net.vaier.domain.DeviceCategory.NAS, true)
+        ));
+
+        var peer = controller.listPeers().getBody().get(0);
+
+        assertThat(peer.deviceCategory()).isEqualTo("NAS");
+        assertThat(peer.deviceCategoryOverridden()).isTrue();
+    }
+
+    @Test
+    void updateDeviceCategory_updatesAndReturnsNoContent() {
+        var request = new VpnPeerRestController.UpdateDeviceCategoryRequest("NAS");
+
+        var response = controller.updateDeviceCategory("nas", request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(updatePeerDeviceCategoryUseCase).updatePeerDeviceCategory("nas", "NAS");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void updateDeviceCategory_nullBodyIsTreatedAsClear() {
+        var response = controller.updateDeviceCategory("nas", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(updatePeerDeviceCategoryUseCase).updatePeerDeviceCategory("nas", null);
+    }
+
+    @Test
+    void updateDeviceCategory_propagatesInvalidValue_withoutPublishing() {
+        doThrow(new IllegalArgumentException("bad category"))
+            .when(updatePeerDeviceCategoryUseCase).updatePeerDeviceCategory("nas", "BANANA");
+        var request = new VpnPeerRestController.UpdateDeviceCategoryRequest("BANANA");
+
+        assertThatThrownBy(() -> controller.updateDeviceCategory("nas", request))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
     }
 
     @Test

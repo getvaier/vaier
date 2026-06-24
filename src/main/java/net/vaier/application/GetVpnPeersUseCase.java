@@ -1,5 +1,6 @@
 package net.vaier.application;
 
+import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerArtifact;
@@ -39,6 +40,10 @@ public interface GetVpnPeersUseCase {
      * @param configOutOfDate     true when the peer's on-disk config differs from what current
      *                            generation logic would render (keys preserved) — i.e. a
      *                            {@code Reissue} would change it. The UI surfaces this as a badge.
+     * @param deviceCategory      the EFFECTIVE device category (override if pinned, else detected);
+     *                            never null. Orthogonal to {@code peerType} — it only picks an icon.
+     * @param deviceCategoryOverridden  true when an explicit override is stored (rather than
+     *                            auto-detected).
      */
     record VpnPeerView(
         String id,
@@ -61,6 +66,8 @@ public interface GetVpnPeersUseCase {
         String lanAddress,
         String description,
         Optional<GeoLocation> geoLocation,
-        boolean configOutOfDate
+        boolean configOutOfDate,
+        DeviceCategory deviceCategory,
+        boolean deviceCategoryOverridden
     ) {}
 }

@@ -9,6 +9,14 @@ public interface ForUpdatingPeerConfigurations {
     void updateDescription(String peerId, String description);
 
     /**
+     * Sets a peer's device-category override — the operator-pinned icon hint, orthogonal to the
+     * peer's {@code MachineType} (which drives routing). {@code deviceCategory} is a
+     * {@link net.vaier.domain.DeviceCategory} name; a null or blank value clears the override, after
+     * which the effective category reverts to auto-detection. The value is validated by the caller.
+     */
+    void updateDeviceCategory(String peerId, String deviceCategory);
+
+    /**
      * Sets a peer's display name — the freely editable, operator-facing label. The peer's
      * {@code id} is never affected. A null or blank value clears the stored name, after which
      * the peer falls back to its id's humanised form for display.

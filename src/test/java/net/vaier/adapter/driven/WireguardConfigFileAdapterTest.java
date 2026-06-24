@@ -473,6 +473,94 @@ class WireguardConfigFileAdapterTest {
             () -> adapter.updateName("ghost", "Phantom"));
     }
 
+    // --- VAIER metadata (deviceCategory override) ---
+
+    @Test
+    void getPeerConfigByName_parsesDeviceCategoryFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("nas", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nas").orElseThrow();
+
+        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+        assertThat(result.deviceCategoryOverridden()).isTrue();
+    }
+
+    @Test
+    void getPeerConfigByName_deviceCategoryNullWhenAbsentFromVaierComment() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+
+        assertThat(result.deviceCategory()).isNull();
+        assertThat(result.deviceCategoryOverridden()).isFalse();
+    }
+
+    @Test
+    void updateDeviceCategory_writesOverrideIntoVaierMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        adapter.updateDeviceCategory("nuc", "NAS");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+    }
+
+    @Test
+    void updateDeviceCategory_preservesOtherMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\","
+                + "\"lanAddress\":\"192.168.3.121\",\"description\":\"Spain relay\",\"name\":\"Spain\"}");
+
+        adapter.updateDeviceCategory("apalveien5", "ROUTER");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.ROUTER);
+        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
+        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
+        assertThat(result.description()).isEqualTo("Spain relay");
+        assertThat(result.name()).isEqualTo("Spain");
+    }
+
+    @Test
+    void updateDeviceCategory_blankClearsOverride() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}");
+
+        adapter.updateDeviceCategory("nuc", "");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.deviceCategory()).isNull();
+    }
+
+    @Test
+    void updateDeviceCategory_addsVaierCommentWhenMissing() throws IOException {
+        createPeerConf("nuc", "10.13.13.7");
+
+        adapter.updateDeviceCategory("nuc", "PRINTER");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
+        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.PRINTER);
+    }
+
+    @Test
+    void updateDeviceCategory_throwsWhenPeerDoesNotExist() {
+        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
+            () -> adapter.updateDeviceCategory("ghost", "NAS"));
+    }
+
+    @Test
+    void updateDescription_preservesExistingDeviceCategory() throws IOException {
+        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}");
+
+        adapter.updateDescription("nuc", "keep category");
+
+        assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().deviceCategory())
+            .isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+    }
+
     // --- getAllPeerConfigs ---
 
     @Test
