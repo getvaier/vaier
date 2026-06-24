@@ -309,7 +309,9 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         try {
             return net.vaier.domain.DeviceCategory.fromString(value);
         } catch (IllegalArgumentException e) {
-            log.warn("Unknown device category '{}', treating as no override", value);
+            // value comes from the on-disk # VAIER metadata, which can be hand-edited — collapse any
+            // CR/LF so a malformed value can't forge multiline log entries.
+            log.warn("Unknown device category '{}', treating as no override", value.replaceAll("[\r\n]+", "_"));
             return null;
         }
     }
