@@ -444,4 +444,77 @@ class WireGuardPeerConfigTest {
                 "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20"))
             .isFalse();
     }
+
+    @Test
+    void isOutOfDate_falseWhenOnlyVaierMetadataCommentDiffers() {
+        // The "# VAIER:" comment is pure Vaier-side metadata — never installed into the tunnel.
+        // Out-of-date must reflect divergence in the real tunnel directives only. Simulate the
+        // Jackson-written metadata line: a different field order *and* a deviceCategory key that
+        // generate() does not emit. All real directives are identical to the rendered config, so
+        // the peer is NOT out of date.
+        String rendered = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", "172.31.16.0/20");
+
+        String jacksonMetaLine =
+                "# VAIER: {\"peerType\":\"UBUNTU_SERVER\",\"name\":\"apalveien5\",\"deviceCategory\":\"GATEWAY\"}";
+        String existing = rendered.lines()
+                .map(l -> l.startsWith("# VAIER:") ? jacksonMetaLine : l)
+                .collect(java.util.stream.Collectors.joining("\n", "", "\n"));
+
+        // Sanity: the raw strings really do differ (only on the metadata line).
+        assertThat(existing).isNotEqualTo(rendered);
+
+        assertThat(WireGuardPeerConfig.isOutOfDate(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20"))
+            .isFalse();
+    }
+
+    // --- reissue preserves the operator's device-category override (Part 2) ---
+
+    @Test
+    void reissue_retainsDeviceCategoryOverrideInRegeneratedMetadata() {
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", null);
+
+        String reissued = WireGuardPeerConfig.reissue(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20", "NAS");
+
+        assertThat(reissued).contains("\"deviceCategory\":\"NAS\"");
+    }
+
+    @Test
+    void reissue_withoutDeviceCategoryOverride_omitsDeviceCategoryKey() {
+        String existing = WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.6", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24",
+                null, "apalveien5", null);
+
+        String reissued = WireGuardPeerConfig.reissue(
+                existing, MachineType.UBUNTU_SERVER, null, null, null, "apalveien5",
+                "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24", "172.31.16.0/20", null);
+
+        assertThat(reissued).doesNotContain("deviceCategory");
+    }
+
+    @Test
+    void vaierJson_appendsDeviceCategoryLastWhenOverridePresent() {
+        String json = WireGuardPeerConfig.vaierJson(
+                MachineType.UBUNTU_SERVER, null, null, "a desc", "apalveien5", "GATEWAY");
+
+        assertThat(json).endsWith(",\"deviceCategory\":\"GATEWAY\"}");
+    }
+
+    @Test
+    void vaierJson_blankDeviceCategory_omitsKey() {
+        String json = WireGuardPeerConfig.vaierJson(
+                MachineType.UBUNTU_SERVER, null, null, null, "apalveien5", "  ");
+
+        assertThat(json).doesNotContain("deviceCategory");
+    }
 }

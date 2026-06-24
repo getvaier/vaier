@@ -33,8 +33,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record VaierMetadata(String peerType, String lanCidr, String lanAddress, String description,
-                                 String name) {
-        VaierMetadata() { this(null, null, null, null, null); }
+                                 String name, String deviceCategory) {
+        VaierMetadata() { this(null, null, null, null, null, null); }
     }
 
     /**
@@ -62,7 +62,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
             return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
                     configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
-                    meta.description()));
+                    meta.description(), parseDeviceCategory(meta.deviceCategory())));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -100,7 +100,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
                 return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
                         configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
-                        meta.description()));
+                        meta.description(), parseDeviceCategory(meta.deviceCategory())));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -201,7 +201,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(lanAddress);
         rewriteVaierMetadata(peerId, "lanAddress", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                normalized, existing.description(), existing.name()));
+                normalized, existing.description(), existing.name(), existing.deviceCategory()));
     }
 
     @Override
@@ -209,7 +209,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(lanCidr);
         rewriteVaierMetadata(peerId, "lanCidr", normalized,
             existing -> new VaierMetadata(existing.peerType(), normalized,
-                existing.lanAddress(), existing.description(), existing.name()));
+                existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory()));
     }
 
     @Override
@@ -217,7 +217,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(description);
         rewriteVaierMetadata(peerId, "description", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), normalized, existing.name()));
+                existing.lanAddress(), normalized, existing.name(), existing.deviceCategory()));
     }
 
     @Override
@@ -225,7 +225,15 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(name);
         rewriteVaierMetadata(peerId, "name", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), existing.description(), normalized));
+                existing.lanAddress(), existing.description(), normalized, existing.deviceCategory()));
+    }
+
+    @Override
+    public void updateDeviceCategory(String peerId, String deviceCategory) {
+        String normalized = blankToNull(deviceCategory);
+        rewriteVaierMetadata(peerId, "deviceCategory", normalized,
+            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
+                existing.lanAddress(), existing.description(), existing.name(), normalized));
     }
 
     @Override
@@ -263,7 +271,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             // rewritten comment is well-formed rather than missing peerType entirely.
             VaierMetadata withType = new VaierMetadata(
                 existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
-                existing.lanCidr(), existing.lanAddress(), existing.description(), existing.name());
+                existing.lanCidr(), existing.lanAddress(), existing.description(), existing.name(),
+                existing.deviceCategory());
             VaierMetadata updated = mutator.apply(withType);
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
 
@@ -288,6 +297,20 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         } catch (IllegalArgumentException e) {
             log.warn("Unknown peer type '{}', defaulting to UBUNTU_SERVER", value);
             return MachineType.UBUNTU_SERVER;
+        }
+    }
+
+    /**
+     * The device-category override stored in metadata, or null when absent. An unrecognised value
+     * reads as "no override" (logged) rather than failing the whole config read — the category just
+     * falls back to auto-detection.
+     */
+    private net.vaier.domain.DeviceCategory parseDeviceCategory(String value) {
+        try {
+            return net.vaier.domain.DeviceCategory.fromString(value);
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown device category '{}', treating as no override", value);
+            return null;
         }
     }
 }

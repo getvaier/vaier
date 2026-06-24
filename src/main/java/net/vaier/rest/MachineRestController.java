@@ -36,7 +36,8 @@ public class MachineRestController {
         String lanCidr,
         String lanAddress,
         boolean runsDocker,
-        Integer dockerPort
+        Integer dockerPort,
+        String deviceCategory
     ) {
         static MachineResponse from(Machine m) {
             return new MachineResponse(
@@ -52,7 +53,8 @@ public class MachineRestController {
                 m.lanCidr(),
                 m.lanAddress(),
                 m.runsDocker(),
-                m.dockerPort()
+                m.dockerPort(),
+                m.deviceCategory().name()
             );
         }
     }

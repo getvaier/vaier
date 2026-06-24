@@ -184,4 +184,34 @@ class LanServerFileAdapterTest {
 
         assertThat(adapter.getAll().get(0).description()).isNull();
     }
+
+    // --- device category override ---
+
+    @Test
+    void save_withDeviceCategory_thenGetAll_roundTripsTheOverride() {
+        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, null,
+            net.vaier.domain.DeviceCategory.NAS));
+
+        LanServer loaded = adapter.getAll().get(0);
+        assertThat(loaded.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+    }
+
+    @Test
+    void getAll_lanServerWithoutDeviceCategory_readsBackNullOverride() {
+        // A pre-feature lan-servers.yml entry has no `deviceCategory` key — must still load.
+        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+
+        assertThat(adapter.getAll().get(0).deviceCategory()).isNull();
+    }
+
+    @Test
+    void save_deviceCategoryRoundTripsThroughFreshAdapter() {
+        adapter.save(new LanServer("cam", "192.168.3.70", false, null, "Front door",
+            net.vaier.domain.DeviceCategory.CAMERA));
+
+        LanServerFileAdapter fresh = new LanServerFileAdapter(tempDir.toString());
+        LanServer loaded = fresh.getAll().get(0);
+        assertThat(loaded.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.CAMERA);
+        assertThat(loaded.description()).isEqualTo("Front door");
+    }
 }

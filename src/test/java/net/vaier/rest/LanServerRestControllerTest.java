@@ -47,6 +47,7 @@ class LanServerRestControllerTest {
     @Mock RegisterLanServerUseCase registerLanServerUseCase;
     @Mock RenameLanServerUseCase renameLanServerUseCase;
     @Mock UpdateLanServerDescriptionUseCase updateLanServerDescriptionUseCase;
+    @Mock net.vaier.application.UpdateLanServerDeviceCategoryUseCase updateLanServerDeviceCategoryUseCase;
     @Mock DeleteLanServerUseCase deleteLanServerUseCase;
     @Mock GetLanServersUseCase getLanServersUseCase;
     @Mock GetLanServerReachabilityUseCase reachabilityUseCase;
@@ -84,29 +85,29 @@ class LanServerRestControllerTest {
 
     @Test
     void register_runsDockerTrueWithDockerPort_delegatesToUseCase() {
-        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, 2375, null);
+        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, 2375, null, null);
 
         ResponseEntity<Void> response = controller.register(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, null);
+        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, null, null);
     }
 
     @Test
     void register_runsDockerFalseWithoutDockerPort_delegatesToUseCase() {
-        var request = new LanServerRestController.RegisterRequest("printer", "192.168.3.20", false, null, null);
+        var request = new LanServerRestController.RegisterRequest("printer", "192.168.3.20", false, null, null, null);
 
         ResponseEntity<Void> response = controller.register(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(registerLanServerUseCase).register("printer", "192.168.3.20", false, null, null);
+        verify(registerLanServerUseCase).register("printer", "192.168.3.20", false, null, null, null);
     }
 
     @Test
     void register_runsDockerTrueWithoutDockerPort_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("dockerPort is required"))
-            .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null);
-        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null);
+            .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null, null);
+        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null, null);
 
         assertThatThrownBy(() -> controller.register(request))
             .isInstanceOf(IllegalArgumentException.class);
@@ -115,8 +116,8 @@ class LanServerRestControllerTest {
     @Test
     void register_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("not in any lanCidr"))
-            .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null);
-        var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375, null);
+            .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null, null);
+        var request = new LanServerRestController.RegisterRequest("nas", "10.99.99.99", true, 2375, null, null);
 
         // GlobalExceptionHandler renders 400; the controller must propagate, not swallow.
         assertThatThrownBy(() -> controller.register(request))
@@ -296,11 +297,82 @@ class LanServerRestControllerTest {
     @Test
     void register_passesDescriptionToUseCase() {
         var request = new LanServerRestController.RegisterRequest(
-                "nas", "192.168.3.50", true, 2375, "Synology NAS");
+                "nas", "192.168.3.50", true, 2375, "Synology NAS", null);
 
         controller.register(request);
 
-        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, "Synology NAS");
+        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, "Synology NAS", null);
+    }
+
+    // --- device category ---
+
+    @Test
+    void register_passesDeviceCategoryOverrideToUseCase() {
+        var request = new LanServerRestController.RegisterRequest(
+                "nas", "192.168.3.50", true, 2375, null, "NAS");
+
+        controller.register(request);
+
+        verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, null,
+            net.vaier.domain.DeviceCategory.NAS);
+    }
+
+    @Test
+    void register_invalidDeviceCategory_propagatesIllegalArgument() {
+        var request = new LanServerRestController.RegisterRequest(
+                "nas", "192.168.3.50", true, 2375, null, "BANANA");
+
+        assertThatThrownBy(() -> controller.register(request))
+            .isInstanceOf(IllegalArgumentException.class);
+        org.mockito.Mockito.verifyNoInteractions(registerLanServerUseCase);
+    }
+
+    @Test
+    void list_exposesEffectiveDeviceCategoryAndOverrideFlag() {
+        when(getLanServersUseCase.getAll()).thenReturn(List.of(
+            // No override; name "my-synology" auto-detects to NAS.
+            new LanServerView(new LanServer("my-synology", "192.168.3.50", false, null), "apalveien5"),
+            // Explicit override to PRINTER, even though name would detect GENERIC.
+            new LanServerView(new LanServer("box-9", "192.168.3.20", false, null, null,
+                net.vaier.domain.DeviceCategory.PRINTER), "apalveien5")
+        ));
+        when(reachabilityUseCase.getReachability(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Reachability.UNKNOWN);
+        when(getLanServerScrapeUseCase.getLanServerContainers()).thenReturn(List.of());
+
+        var response = controller.list();
+
+        assertThat(response.get(0).deviceCategory()).isEqualTo("NAS");
+        assertThat(response.get(0).deviceCategoryOverridden()).isFalse();
+        assertThat(response.get(1).deviceCategory()).isEqualTo("PRINTER");
+        assertThat(response.get(1).deviceCategoryOverridden()).isTrue();
+    }
+
+    @Test
+    void updateDeviceCategory_returns204OnSuccess() {
+        var response = controller.updateDeviceCategory(
+            "nas", new LanServerRestController.UpdateDeviceCategoryRequest("NAS"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(updateLanServerDeviceCategoryUseCase).updateDeviceCategory("nas", "NAS");
+    }
+
+    @Test
+    void updateDeviceCategory_nullBodyIsTreatedAsClear() {
+        var response = controller.updateDeviceCategory("nas", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(updateLanServerDeviceCategoryUseCase).updateDeviceCategory("nas", null);
+    }
+
+    @Test
+    void updateDeviceCategory_propagatesInvalidValue() {
+        doThrow(new IllegalArgumentException("bad category"))
+            .when(updateLanServerDeviceCategoryUseCase).updateDeviceCategory("nas", "BANANA");
+
+        assertThatThrownBy(() -> controller.updateDeviceCategory(
+            "nas", new LanServerRestController.UpdateDeviceCategoryRequest("BANANA")))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

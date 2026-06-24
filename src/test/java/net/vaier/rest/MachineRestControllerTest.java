@@ -35,10 +35,10 @@ class MachineRestControllerTest {
             new Machine("alice", MachineType.UBUNTU_SERVER,
                 "pubkey", "10.13.13.2/32", "1.2.3.4", "51820",
                 "1700000000", "100", "200",
-                null, null, true, null),
+                null, null, true, null, net.vaier.domain.DeviceCategory.SERVER),
             new Machine("nas", MachineType.LAN_SERVER,
                 null, null, null, null, null, null, null,
-                "192.168.3.0/24", "192.168.3.50", true, 2375)
+                "192.168.3.0/24", "192.168.3.50", true, 2375, net.vaier.domain.DeviceCategory.NAS)
         ));
 
         var response = controller.list();
@@ -51,5 +51,7 @@ class MachineRestControllerTest {
         assertThat(response.get(1).publicKey()).isNull();
         assertThat(response.get(1).runsDocker()).isTrue();
         assertThat(response.get(1).dockerPort()).isEqualTo(2375);
+        assertThat(response.get(0).deviceCategory()).isEqualTo("SERVER");
+        assertThat(response.get(1).deviceCategory()).isEqualTo("NAS");
     }
 }

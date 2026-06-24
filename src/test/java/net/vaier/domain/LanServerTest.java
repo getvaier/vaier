@@ -207,4 +207,75 @@ class LanServerTest {
     void findByName_emptyList_returnsEmpty() {
         assertThat(LanServer.findByName("nas", List.of())).isEmpty();
     }
+
+    // --- device category (override + effective) ---
+
+    @Test
+    void existingConstructors_defaultDeviceCategoryOverrideToNull() {
+        assertThat(new LanServer("nas", "192.168.1.50", false, null).deviceCategory()).isNull();
+        assertThat(new LanServer("nas", "192.168.1.50", false, null, "desc").deviceCategory()).isNull();
+    }
+
+    @Test
+    void effectiveDeviceCategory_detectsFromNameWhenNoOverride() {
+        // No persisted LAN role; name keyword "synology" -> NAS.
+        LanServer s = new LanServer("my-synology", "192.168.1.50", false, null, null, null);
+
+        assertThat(s.effectiveDeviceCategory()).isEqualTo(DeviceCategory.NAS);
+        assertThat(s.deviceCategoryOverridden()).isFalse();
+    }
+
+    @Test
+    void effectiveDeviceCategory_fallsBackToGenericWhenNoSignal() {
+        LanServer s = new LanServer("box-17", "192.168.1.50", false, null, null, null);
+
+        assertThat(s.effectiveDeviceCategory()).isEqualTo(DeviceCategory.GENERIC);
+        assertThat(s.deviceCategoryOverridden()).isFalse();
+    }
+
+    @Test
+    void effectiveDeviceCategory_overrideWins() {
+        LanServer s = new LanServer("my-synology", "192.168.1.50", false, null, null, DeviceCategory.PRINTER);
+
+        assertThat(s.effectiveDeviceCategory()).isEqualTo(DeviceCategory.PRINTER);
+        assertThat(s.deviceCategoryOverridden()).isTrue();
+    }
+
+    @Test
+    void withDeviceCategory_setsOverrideKeepingEverythingElse() {
+        LanServer s = new LanServer("nas", "192.168.1.50", true, 2375, "desc")
+            .withDeviceCategory(DeviceCategory.NAS);
+
+        assertThat(s.deviceCategory()).isEqualTo(DeviceCategory.NAS);
+        assertThat(s.name()).isEqualTo("nas");
+        assertThat(s.lanAddress()).isEqualTo("192.168.1.50");
+        assertThat(s.runsDocker()).isTrue();
+        assertThat(s.dockerPort()).isEqualTo(2375);
+        assertThat(s.description()).isEqualTo("desc");
+    }
+
+    @Test
+    void withDeviceCategory_nullClearsOverride() {
+        LanServer s = new LanServer("nas", "192.168.1.50", false, null, null, DeviceCategory.PRINTER)
+            .withDeviceCategory(null);
+
+        assertThat(s.deviceCategory()).isNull();
+        assertThat(s.deviceCategoryOverridden()).isFalse();
+    }
+
+    @Test
+    void renamedTo_carriesDeviceCategoryOverride() {
+        LanServer renamed = new LanServer("nas", "192.168.1.50", false, null, null, DeviceCategory.NAS)
+            .renamedTo("storage");
+
+        assertThat(renamed.deviceCategory()).isEqualTo(DeviceCategory.NAS);
+    }
+
+    @Test
+    void withDescription_carriesDeviceCategoryOverride() {
+        LanServer s = new LanServer("nas", "192.168.1.50", false, null, null, DeviceCategory.NAS)
+            .withDescription("a description");
+
+        assertThat(s.deviceCategory()).isEqualTo(DeviceCategory.NAS);
+    }
 }

@@ -418,6 +418,79 @@ class LanServerServiceTest {
         verify(forPersistingLanServers, never()).save(any());
     }
 
+    // --- register with optional device-category override ---
+
+    @Test
+    void register_withDeviceCategoryOverride_persistsIt() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        service.register("box", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS);
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+    }
+
+    @Test
+    void register_withoutDeviceCategoryOverride_persistsNullOverride() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        service.register("box", "192.168.3.50", true, 2375);
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().deviceCategory()).isNull();
+    }
+
+    // --- updateDeviceCategory ---
+
+    @Test
+    void updateDeviceCategory_savesOverrideKeepingEverythingElse() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375, "desc")));
+
+        service.updateDeviceCategory("nas", "NAS");
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+        assertThat(captor.getValue().description()).isEqualTo("desc");
+        assertThat(captor.getValue().lanAddress()).isEqualTo("192.168.1.50");
+    }
+
+    @Test
+    void updateDeviceCategory_blankClearsOverride() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", false, null, null,
+                net.vaier.domain.DeviceCategory.NAS)));
+
+        service.updateDeviceCategory("nas", "  ");
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue().deviceCategory()).isNull();
+    }
+
+    @Test
+    void updateDeviceCategory_rejectsInvalidValueWithoutSaving() {
+        assertThatThrownBy(() -> service.updateDeviceCategory("nas", "BANANA"))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forPersistingLanServers, never()).save(any());
+    }
+
+    @Test
+    void updateDeviceCategory_throwsWhenLanServerNotFound() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.updateDeviceCategory("ghost", "NAS"))
+            .isInstanceOf(NotFoundException.class);
+        verify(forPersistingLanServers, never()).save(any());
+    }
+
     // --- generateSetupScript (#249) — orchestration only; the decision matrix is in
     //     LanServerSetupScriptTest.forHost_* (domain). These verify the service reads the right
     //     ports and passes the configured vpnSubnet through. ---

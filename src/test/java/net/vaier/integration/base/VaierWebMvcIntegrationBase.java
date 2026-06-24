@@ -135,6 +135,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ReissuePeerConfigUseCase reissuePeerConfigUseCase;
 
     @MockBean
+    protected net.vaier.application.UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
+
+    @MockBean
     protected ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
 
     @MockBean
@@ -212,6 +215,9 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected UpdateLanServerDescriptionUseCase updateLanServerDescriptionUseCase;
+
+    @MockBean
+    protected net.vaier.application.UpdateLanServerDeviceCategoryUseCase updateLanServerDeviceCategoryUseCase;
 
     @MockBean
     protected DeleteLanServerUseCase deleteLanServerUseCase;

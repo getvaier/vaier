@@ -11,6 +11,7 @@ import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.ReissuePeerConfigUseCase;
 import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
+import net.vaier.application.UpdatePeerDeviceCategoryUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -47,6 +48,7 @@ public class VpnPeerRestController {
     private final UpdateLanCidrUseCase updateLanCidrUseCase;
     private final RenamePeerUseCase renamePeerUseCase;
     private final ReissuePeerConfigUseCase reissuePeerConfigUseCase;
+    private final UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     private final ForPublishingEvents forPublishingEvents;
@@ -95,7 +97,8 @@ public class VpnPeerRestController {
             v.geoLocation().map(GeoLocation::longitude).orElse(null),
             v.geoLocation().map(GeoLocation::city).orElse(null),
             v.geoLocation().map(GeoLocation::country).orElse(null),
-            v.configOutOfDate());
+            v.configOutOfDate(),
+            v.deviceCategory().name(), v.deviceCategoryOverridden());
     }
 
     @GetMapping("/server-location")
@@ -243,6 +246,23 @@ public class VpnPeerRestController {
         String description = request != null ? request.description() : null;
         log.info("Updating description for peer {}", LogSafe.forLog(peerName));
         forUpdatingPeerConfigurations.updateDescription(peerName, description);
+        forPublishingEvents.publish("vpn-peers", "peers-updated", "");
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Sets (or, with a blank/null value, clears) the peer's device-category override — the icon
+     * hint, orthogonal to the routing {@code peerType}. An invalid category value propagates as
+     * {@code IllegalArgumentException} -> 400; an unknown peer as {@code PeerNotFoundException} -> 404.
+     */
+    @PatchMapping("/{peerName}/device-category")
+    public ResponseEntity<Void> updateDeviceCategory(
+            @PathVariable String peerName,
+            @RequestBody(required = false) UpdateDeviceCategoryRequest request) {
+        String deviceCategory = request != null ? request.deviceCategory() : null;
+        log.info("Updating device category for peer {} to {}",
+            LogSafe.forLog(peerName), LogSafe.forLog(deviceCategory));
+        updatePeerDeviceCategoryUseCase.updatePeerDeviceCategory(peerName, deviceCategory);
         forPublishingEvents.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.noContent().build();
     }
@@ -457,7 +477,9 @@ public class VpnPeerRestController {
             Double longitude,
             String city,
             String country,
-            boolean configOutOfDate
+            boolean configOutOfDate,
+            String deviceCategory,
+            boolean deviceCategoryOverridden
     ) {}
 
     public record CreatePeerRequest(
@@ -495,6 +517,10 @@ public class VpnPeerRestController {
 
     public record RenamePeerRequest(
             String newName
+    ) {}
+
+    public record UpdateDeviceCategoryRequest(
+            String deviceCategory
     ) {}
 
     public record PeerConfigResponse(

@@ -12,6 +12,8 @@ import net.vaier.application.RegisterLanServerUseCase;
 import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
+import net.vaier.application.UpdateLanServerDeviceCategoryUseCase;
+import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.domain.MachineStatus;
 import net.vaier.domain.Reachability;
@@ -34,6 +36,7 @@ public class LanServerRestController {
     private final RegisterLanServerUseCase registerLanServerUseCase;
     private final RenameLanServerUseCase renameLanServerUseCase;
     private final UpdateLanServerDescriptionUseCase updateLanServerDescriptionUseCase;
+    private final UpdateLanServerDeviceCategoryUseCase updateLanServerDeviceCategoryUseCase;
     private final DeleteLanServerUseCase deleteLanServerUseCase;
     private final GetLanServersUseCase getLanServersUseCase;
     private final GetLanServerReachabilityUseCase reachabilityUseCase;
@@ -77,9 +80,10 @@ public class LanServerRestController {
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             LogSafe.forLog(request.name()), LogSafe.forLog(request.lanAddress()),
             request.runsDocker(), request.dockerPort());
+        // An invalid deviceCategory value throws IllegalArgumentException -> 400 via the handler.
         registerLanServerUseCase.register(
             request.name(), request.lanAddress(), request.runsDocker(), request.dockerPort(),
-            request.description());
+            request.description(), DeviceCategory.fromString(request.deviceCategory()));
         return ResponseEntity.ok().build();
     }
 
@@ -100,6 +104,21 @@ public class LanServerRestController {
         String description = request != null ? request.description() : null;
         log.info("Updating description for LAN server {}", LogSafe.forLog(name));
         updateLanServerDescriptionUseCase.updateDescription(name, description);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Sets (or, with a blank/null value, clears) the LAN server's device-category override — the
+     * icon hint. An invalid category value propagates as {@code IllegalArgumentException} -> 400;
+     * an unknown server as {@code NotFoundException} -> 404.
+     */
+    @PatchMapping("/{name}/device-category")
+    public ResponseEntity<Void> updateDeviceCategory(@PathVariable String name,
+                                                     @RequestBody(required = false) UpdateDeviceCategoryRequest request) {
+        String deviceCategory = request != null ? request.deviceCategory() : null;
+        log.info("Updating device category for LAN server {} to {}",
+            LogSafe.forLog(name), LogSafe.forLog(deviceCategory));
+        updateLanServerDeviceCategoryUseCase.updateDeviceCategory(name, deviceCategory);
         return ResponseEntity.noContent().build();
     }
 
@@ -131,11 +150,13 @@ public class LanServerRestController {
     }
 
     record RegisterRequest(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
-                           String description) {}
+                           String description, String deviceCategory) {}
 
     record RenameRequest(String newName) {}
 
     record UpdateDescriptionRequest(String description) {}
+
+    record UpdateDeviceCategoryRequest(String deviceCategory) {}
 
     /** {@code routedVia} is a relay peer name or "Vaier server"; both null when not routable. */
     record LanAnchorResponse(boolean routable, String routedVia, String cidr) {}
@@ -149,7 +170,9 @@ public class LanServerRestController {
         String relayPeerName,
         String reachability,
         MachineStatus status,
-        Long lastSeen
+        Long lastSeen,
+        String deviceCategory,
+        boolean deviceCategoryOverridden
     ) {
         static LanServerResponse from(LanServerView view, String reachability, MachineStatus status, Long lastSeen) {
             return new LanServerResponse(
@@ -161,7 +184,9 @@ public class LanServerRestController {
                 view.relayPeerName(),
                 reachability,
                 status,
-                lastSeen);
+                lastSeen,
+                view.server().effectiveDeviceCategory().name(),
+                view.server().deviceCategoryOverridden());
         }
     }
 }

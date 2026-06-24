@@ -99,6 +99,12 @@
             border: 1px solid var(--border);
             color: #2496ed;
         }
+        /* Docker badge sits bottom-LEFT so it doesn't overlap the bottom-right relay badge. */
+        .net-node .net-cap.left {
+            right: auto;
+            left: -4px;
+            color: #2496ed;
+        }
         .net-node .net-cap svg { width: 12px; height: 12px; }
         .net-node .net-label {
             margin-top: 0.35rem;
@@ -292,6 +298,49 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        /* "Auto-detected: <category>" caption beside the device-type selector. */
+        .device-cat-auto {
+            font-size: 0.72rem;
+            color: var(--text-dim);
+        }
+        /* LAN-scan discovered-host picker — a clickable list of rows, each with a device icon. */
+        .scan-host-list {
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            max-height: 220px;
+            overflow-y: auto;
+            background: var(--bg-input);
+        }
+        .scan-host-group {
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-dim);
+            padding: 0.35rem 0.6rem 0.2rem;
+        }
+        .scan-host-row {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            padding: 0.4rem 0.6rem;
+            cursor: pointer;
+            font-size: 0.78rem;
+            color: var(--text);
+            border-top: 1px solid var(--border);
+        }
+        .scan-host-row:hover { background: var(--bg-hover); }
+        .scan-host-row .scan-host-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+        .scan-host-row .scan-host-icon svg { width: 20px; height: 20px; }
+        .scan-host-ip { font-family: var(--mono); }
+        .scan-host-meta { color: var(--text-muted); }
 
         .peer-name {
             font-size: 0.85rem;
@@ -666,10 +715,9 @@
                     <button type="button" id="lanScanModalBtn" class="btn btn-secondary btn-small"
                             onclick="modalScanLan()">⌕ Scan LAN for machines</button>
                     <span id="lanScanModalStatus" style="font-size:0.72rem;color:var(--text-muted);margin-left:0.5rem"></span>
-                    <select id="lanScanModalSelect" class="form-input" style="display:none;margin-top:0.4rem"
-                            onchange="pickDiscoveredHost()">
-                        <option value="">— pick a discovered machine —</option>
-                    </select>
+                    <!-- Discovered hosts render as a clickable list (not a <select>) so each row can
+                         show its device icon (#device-category). Clicking a row fills the LAN address. -->
+                    <div id="lanScanModalList" class="scan-host-list" style="display:none;margin-top:0.4rem"></div>
                 </div>
                 <input type="text" id="lanAddress" class="form-input" placeholder="e.g. 192.168.1.50" oninput="updateLanAddressHint()">
                 <span id="lanAddressHint" style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:0.3rem"></span>
@@ -961,9 +1009,21 @@
         function machineIconSvg(kind) {
             const A = 'width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"';
             switch (kind) {
-                case 'mobile':  return `<svg ${A}><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/></svg>`;
+                // 'mobile' kept as the phone glyph; 'phone' is an alias so deviceCategoryIconKind
+                // can name the category directly without the renderer caring which it gets.
+                case 'mobile':
+                case 'phone':   return `<svg ${A}><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/></svg>`;
                 case 'laptop':  return `<svg ${A}><rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/></svg>`;
-                case 'server':  return `<svg ${A}><path d="M8 1.5 L13.5 3.5 V8 C13.5 11.3 11.2 13.7 8 14.5 C4.8 13.7 2.5 11.3 2.5 8 V3.5 Z"/><polyline points="5.5 8.2 7.3 10 10.6 6.5"/></svg>`;
+                case 'desktop': return `<svg ${A}><rect x="2" y="2" width="12" height="8.5" rx="1"/><line x1="6" y1="13.5" x2="10" y2="13.5"/><line x1="8" y1="10.5" x2="8" y2="13.5"/></svg>`;
+                case 'server':  return `<svg ${A}><rect x="2.5" y="2.5" width="11" height="4" rx="0.8"/><rect x="2.5" y="9" width="11" height="4" rx="0.8"/><circle cx="4.6" cy="4.5" r="0.55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r="0.55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/></svg>`;
+                case 'nas':     return `<svg ${A}><rect x="4" y="1.5" width="8" height="13" rx="1"/><line x1="6.2" y1="3.5" x2="6.2" y2="10.5"/><line x1="8" y1="3.5" x2="8" y2="10.5"/><line x1="9.8" y1="3.5" x2="9.8" y2="10.5"/><circle cx="8" cy="12.5" r="0.55" fill="currentColor" stroke="none"/></svg>`;
+                case 'printer': return `<svg ${A}><polyline points="4.5 5.5 4.5 2.5 11.5 2.5 11.5 5.5"/><rect x="2.5" y="5.5" width="11" height="5" rx="0.8"/><rect x="4.5" y="9.5" width="7" height="4"/><circle cx="11.5" cy="7.5" r="0.5" fill="currentColor" stroke="none"/></svg>`;
+                case 'router':  return `<svg ${A}><rect x="2.5" y="8.5" width="11" height="5" rx="0.8"/><circle cx="5" cy="11" r="0.5" fill="currentColor" stroke="none"/><line x1="11" y1="11" x2="12" y2="11"/><line x1="5.5" y1="8.5" x2="4" y2="3.5"/><line x1="10.5" y1="8.5" x2="12" y2="3.5"/></svg>`;
+                case 'gateway': return `<svg ${A}><rect x="3" y="3" width="10" height="10" rx="1"/><polyline points="6 7.5 6 5 7.8 6.5"/><polyline points="10 8.5 10 11 8.2 9.5"/></svg>`;
+                case 'iot':     return `<svg ${A}><rect x="4.5" y="4.5" width="7" height="7" rx="0.8"/><line x1="6.5" y1="4.5" x2="6.5" y2="2.5"/><line x1="9.5" y1="4.5" x2="9.5" y2="2.5"/><line x1="6.5" y1="13.5" x2="6.5" y2="11.5"/><line x1="9.5" y1="13.5" x2="9.5" y2="11.5"/><line x1="4.5" y1="6.5" x2="2.5" y2="6.5"/><line x1="4.5" y1="9.5" x2="2.5" y2="9.5"/><line x1="13.5" y1="6.5" x2="11.5" y2="6.5"/><line x1="13.5" y1="9.5" x2="11.5" y2="9.5"/></svg>`;
+                case 'camera':  return `<svg ${A}><rect x="2" y="4" width="12" height="9" rx="1.5"/><circle cx="8" cy="8.5" r="2.5"/><line x1="11" y1="6" x2="12" y2="6"/></svg>`;
+                case 'media':   return `<svg ${A}><rect x="2" y="2.5" width="12" height="8.5" rx="1"/><line x1="5" y1="13.5" x2="11" y2="13.5"/></svg>`;
+                case 'generic': return `<svg ${A}><rect x="2.5" y="3" width="11" height="8" rx="1"/><line x1="5.5" y1="13.5" x2="10.5" y2="13.5"/><line x1="8" y1="11" x2="8" y2="13.5"/></svg>`;
                 case 'lan':     return `<svg ${A}><path d="M2 7.5 L8 2.5 L14 7.5 V14 H2 Z"/><line x1="6.5" y1="14" x2="6.5" y2="10"/><line x1="9.5" y1="14" x2="9.5" y2="10"/></svg>`;
                 case 'vaier':   return `<svg ${A}><circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/><line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/><line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/><circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/></svg>`;
             }
@@ -1036,6 +1096,95 @@
                 case 'MOBILE_CLIENT':  return 'mobile';
                 case 'WINDOWS_CLIENT': return 'laptop';
                 default:               return 'server';
+            }
+        }
+
+        // Device category (#…): the effective category every machine carries (peers, LAN servers,
+        // scanned hosts) drives which machine icon renders. Single source of truth for the enum
+        // values + their friendly labels, used both by the icon mapper and the card selector so
+        // the option list isn't duplicated. Order matches the spec.
+        const DEVICE_CATEGORIES = [
+            { value: 'PHONE',   label: 'Phone' },
+            { value: 'LAPTOP',  label: 'Laptop' },
+            { value: 'DESKTOP', label: 'Desktop' },
+            { value: 'SERVER',  label: 'Server' },
+            { value: 'NAS',     label: 'NAS' },
+            { value: 'PRINTER', label: 'Printer' },
+            { value: 'ROUTER',  label: 'Router' },
+            { value: 'GATEWAY', label: 'Gateway' },
+            { value: 'IOT',     label: 'IoT device' },
+            { value: 'CAMERA',  label: 'Camera' },
+            { value: 'MEDIA',   label: 'TV / Media' },
+            { value: 'GENERIC', label: 'Generic' },
+        ];
+        const DEVICE_CATEGORY_LABELS =
+            Object.fromEntries(DEVICE_CATEGORIES.map(c => [c.value, c.label]));
+
+        // Maps a device category enum value (case-insensitive) to a machineIconSvg kind.
+        // Unknown/missing falls back to 'generic'.
+        function deviceCategoryIconKind(category) {
+            switch (String(category || '').toUpperCase()) {
+                case 'PHONE':   return 'phone';
+                case 'LAPTOP':  return 'laptop';
+                case 'DESKTOP': return 'desktop';
+                case 'SERVER':  return 'server';
+                case 'NAS':     return 'nas';
+                case 'PRINTER': return 'printer';
+                case 'ROUTER':  return 'router';
+                case 'GATEWAY': return 'gateway';
+                case 'IOT':     return 'iot';
+                case 'CAMERA':  return 'camera';
+                case 'MEDIA':   return 'media';
+                default:        return 'generic';
+            }
+        }
+
+        // Friendly label for an effective category, falling back to the raw value if unknown.
+        function deviceCategoryLabel(category) {
+            return DEVICE_CATEGORY_LABELS[String(category || '').toUpperCase()]
+                || (category || 'Generic');
+        }
+
+        // Builds the inner-edit "Device category" selector + handler for a machine card. `kind` is
+        // 'peer' or 'lan' (selects the PATCH endpoint), `idArg` is the value passed to the change
+        // handler (peer id or LAN-server name). Mirrors the description/LAN-address inline pattern.
+        function deviceCategorySelectHtml(domId, kind, idArg, effectiveCategory, overridden) {
+            const selected = overridden ? String(effectiveCategory || '').toUpperCase() : '';
+            const options = [{ value: '', label: 'Auto-detect' }].concat(DEVICE_CATEGORIES)
+                .map(o => `<option value="${o.value}"${o.value === selected ? ' selected' : ''}>${escapeHtml(o.label)}</option>`)
+                .join('');
+            const argEsc = String(idArg).replace(/'/g, "\\'");
+            // Auto-detect caption: when not overridden, effective == detected category.
+            const caption = overridden
+                ? ''
+                : `<span class="device-cat-auto" id="${domId}-auto">Auto-detected: ${escapeHtml(deviceCategoryLabel(effectiveCategory))}</span>`;
+            return `<span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <select id="${domId}" class="form-input" style="max-width:200px"
+                                onchange="onDeviceCategoryChange('${kind}', '${argEsc}', '${domId}')">${options}</select>
+                        ${caption}
+                    </span>`;
+        }
+
+        // PATCH the effective category for a machine; empty value clears the override (→ auto).
+        async function onDeviceCategoryChange(kind, idArg, domId) {
+            const select = document.getElementById(domId);
+            if (!select) return;
+            const deviceCategory = select.value; // '' clears the override
+            const endpoint = kind === 'lan'
+                ? `/lan-servers/${encodeURIComponent(idArg)}/device-category`
+                : `/vpn/peers/${encodeURIComponent(idArg)}/device-category`;
+            const label = kind === 'lan' ? idArg : peerDisplayName(idArg);
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deviceCategory })
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                displaySuccess(`Device category saved for "${label}"`);
+                if (kind === 'lan') fetchLanServers(); else fetchPeers();
+            } catch (error) {
+                displayError(`Failed to save device category: ${error.message}`);
             }
         }
 
@@ -1121,7 +1270,7 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml('lan', 'LAN server (no VPN; behind a relay or in the server\'s subnet) · ' + statusTooltip(statusClass, server.lastSeen), iconStatusClass(statusClass))}
+                        ${machineIconHtml(deviceCategoryIconKind(server.deviceCategory), 'LAN server (no VPN; behind a relay or in the server\'s subnet) · ' + statusTooltip(statusClass, server.lastSeen), iconStatusClass(statusClass))}
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${server.name}</span>
@@ -1159,6 +1308,10 @@
                                         style="flex-shrink:0" disabled
                                         onclick="saveLanServerDescription('${server.name.replace(/'/g, "\\'")}')">Save</button>
                             </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Device category</span>
+                            ${deviceCategorySelectHtml('lan-cat-' + id, 'lan', server.name, server.deviceCategory, server.deviceCategoryOverridden)}
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">LAN address</span>
@@ -1285,7 +1438,7 @@
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${peer.id}')">
                     <div class="peer-header-left">
-                        ${machineIconHtml(iconKind, typeTooltip + ' · ' + statusTooltip(statusClass, peer.latestHandshake), iconStatusClass(statusClass), 'hdr-icon-' + id)}
+                        ${machineIconHtml(deviceCategoryIconKind(peer.deviceCategory), typeTooltip + ' · ' + statusTooltip(statusClass, peer.latestHandshake), iconStatusClass(statusClass), 'hdr-icon-' + id)}
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${escapeHtml(peer.name)}</span>
@@ -1324,6 +1477,10 @@
                                         style="flex-shrink:0" disabled
                                         onclick="saveDescription('${peer.id}')">Save</button>
                             </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Device category</span>
+                            ${deviceCategorySelectHtml('peer-cat-' + id, 'peer', peer.id, peer.deviceCategory, peer.deviceCategoryOverridden)}
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">IP Address</span>
@@ -1439,9 +1596,10 @@
             document.getElementById('lanScanModalBtn').textContent = '⌕ Scan LAN for machines';
             document.getElementById('lanScanModalBtn').disabled = false;
             document.getElementById('lanScanModalStatus').textContent = '';
-            document.getElementById('lanScanModalSelect').style.display = 'none';
-            document.getElementById('lanScanModalSelect').innerHTML =
-                '<option value="">— pick a discovered machine —</option>';
+            document.getElementById('lanScanModalList').style.display = 'none';
+            document.getElementById('lanScanModalList').innerHTML = '';
+            _scanPickedCategory = null;
+            _scanPickedIp = null;
             onPeerTypeChange();
         }
 
@@ -1625,11 +1783,15 @@
                     // Keep the modal open during the request and close it only on success, so a
                     // rejection (e.g. a 409 name conflict, #284) leaves the operator's input in
                     // place to correct instead of vanishing. The busy overlay stacks on top.
+                    // Carry the scanned host's device category into the registration, but only if the
+                    // address still matches the picked host (a later manual edit drops the stale value).
+                    const deviceCategory = (_scanPickedIp && _scanPickedIp === lanAddress)
+                        ? _scanPickedCategory : null;
                     showBusy(`Adding "${name}"…`);
                     const response = await fetch('/lan-servers', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name, lanAddress, runsDocker, dockerPort, description })
+                        body: JSON.stringify({ name, lanAddress, runsDocker, dockerPort, description, deviceCategory })
                     });
                     if (response.status === 400) {
                         displayError(`${lanAddress} isn't routable — not inside any relay peer's lanCidr or the Vaier server's own subnet.`);
@@ -2315,7 +2477,7 @@
             peers.forEach(p => {
                 if (p.latitude == null || p.longitude == null) return;
                 const statusKey = statusKeyForPeer(p);
-                const iconKind = peerTypeIconKind(p.peerType);
+                const iconKind = deviceCategoryIconKind(p.deviceCategory);
                 const carrierPlace = [p.city, p.country].filter(Boolean).join(', ');
 
                 if (p.isClient) {
@@ -2371,7 +2533,7 @@
                     + `<span style="color:#888;font-size:0.85em">Behind ${escapeHtml(s.relayPeerName)}</span><br>`
                     + `<span style="font-family:monospace;font-size:0.85em">${escapeHtml(s.lanAddress)}</span>`
                     + (s.runsDocker ? `<br><span style="color:#888;font-size:0.78em">Docker on :${s.dockerPort}</span>` : '');
-                const firm = makeIconMarker([lat, lon], 'lan', statusKeyForLanServer(s));
+                const firm = makeIconMarker([lat, lon], deviceCategoryIconKind(s.deviceCategory), statusKeyForLanServer(s));
                 bindHoverPopup(firm, popup);
                 _markersClusterGroup.addLayer(firm);
                 allCoords.push([lat, lon]);
@@ -2412,17 +2574,21 @@
             svg.appendChild(line);
         }
 
-        function netAddNode(host, x, y, iconKind, statusKey, label, sub, isCenter, isRelay) {
+        function netAddNode(host, x, y, iconKind, statusKey, label, sub, isCenter, isRelay, isDocker) {
             const node = document.createElement('div');
             node.className = 'net-node' + (isCenter ? ' center' : '');
             node.style.left = x + 'px';
             node.style.top = y + 'px';
             node.title = sub ? `${label}\n${sub}` : label;
-            const cap = isRelay
+            // Relay badge bottom-right, Docker badge bottom-left — placed apart so they don't overlap.
+            const relayCap = isRelay
                 ? `<span class="net-cap" title="Relay — routes LAN traffic for machines behind it">${capabilityIconSvg('relay')}</span>`
                 : '';
+            const dockerCap = isDocker
+                ? `<span class="net-cap left" title="Runs Docker">${capabilityIconSvg('docker')}</span>`
+                : '';
             node.innerHTML =
-                `<div class="net-icon ${iconClassFromKey(statusKey)}">${machineIconSvg(iconKind)}${cap}</div>`
+                `<div class="net-icon ${iconClassFromKey(statusKey)}">${machineIconSvg(iconKind)}${relayCap}${dockerCap}</div>`
                 + `<div class="net-label">${escapeHtml(label)}</div>`
                 + (sub ? `<div class="net-sub">${escapeHtml(sub)}</div>` : '');
             host.appendChild(node);
@@ -2459,7 +2625,11 @@
                 const statusKey = statusKeyForPeer(p);
                 netAddEdge(edges, cx, cy, x, y, statusKey);
                 const sub = p.tunnelIp || p.endpointIp || '';
-                netAddNode(host, x, y, peerTypeIconKind(p.peerType), statusKey, p.name, sub, false, !!p.isRelay);
+                // Docker-host truth mirrors the List card: a discovered services entry (keyed by the
+                // peer's immutable id) with at least one container.
+                const svc = peerServices[p.id];
+                const isDocker = !!(svc && svc.containers && svc.containers.length > 0);
+                netAddNode(host, x, y, deviceCategoryIconKind(p.deviceCategory), statusKey, p.name, sub, false, !!p.isRelay, isDocker);
             });
 
             // Outer ring: LAN servers branch from the relay peer (or the Vaier server) they sit
@@ -2485,7 +2655,7 @@
                     const y = cy + ringLan * Math.sin(ang);
                     const statusKey = statusKeyForLanServer(s);
                     netAddEdge(edges, ax, ay, x, y, statusKey);
-                    netAddNode(host, x, y, 'lan', statusKey, s.name, s.lanAddress || '', false, false);
+                    netAddNode(host, x, y, deviceCategoryIconKind(s.deviceCategory), statusKey, s.name, s.lanAddress || '', false, false, s.runsDocker === true);
                 });
             });
 
@@ -2562,7 +2732,7 @@
             if (!document.getElementById('createPeerModal').classList.contains('active')) return;
             const btn = document.getElementById('lanScanModalBtn');
             const status = document.getElementById('lanScanModalStatus');
-            const select = document.getElementById('lanScanModalSelect');
+            const list = document.getElementById('lanScanModalList');
             let snap;
             try { snap = await (await fetch('/lan-scan', { cache: 'no-store' })).json(); }
             catch (e) { return; }
@@ -2575,12 +2745,12 @@
                 setTimeout(() => refreshModalScanResults(token), 3000);
                 return;
             }
-            if (!snap.lastScanCompleted) { status.textContent = ''; select.style.display = 'none'; return; }
+            if (!snap.lastScanCompleted) { status.textContent = ''; list.style.display = 'none'; return; }
             const machines = (snap.machines || []).slice().sort(compareByIp);
             status.textContent = machines.length
                 ? `${machines.length} machine${machines.length === 1 ? '' : 's'} found — pick one below`
                 : 'No unregistered machines found.';
-            populateScanSelect(select, machines);
+            populateScanList(list, machines);
         }
 
         function compareByIp(a, b) {
@@ -2590,32 +2760,46 @@
             return 0;
         }
 
-        function populateScanSelect(select, machines) {
-            if (!machines.length) { select.style.display = 'none'; return; }
+        // Remembers the device category (and the IP it belongs to) of the host the operator picked
+        // from a scan, so it can be carried into the POST /lan-servers body. The IP guard means a
+        // later manual edit of the address drops the stale category rather than mis-applying it.
+        let _scanPickedCategory = null;
+        let _scanPickedIp = null;
+
+        function populateScanList(list, machines) {
+            if (!machines.length) { list.style.display = 'none'; list.innerHTML = ''; return; }
             const groups = {};
             machines.forEach(m => { (groups[m.relayAnchor] = groups[m.relayAnchor] || []).push(m); });
-            let html = '<option value="">— pick a discovered machine —</option>';
+            let html = '';
             Object.keys(groups).forEach(anchor => {
-                html += `<optgroup label="${escapeHtml(anchor)}">`;
+                html += `<div class="scan-host-group">${escapeHtml(anchor)}</div>`;
                 groups[anchor].forEach(m => {
                     const role = LAN_MACHINE_ROLE_LABELS[m.role] || m.role;
                     const ports = (m.openPorts && m.openPorts.length) ? ' :' + m.openPorts.join(',') : '';
-                    html += `<option value="${escapeHtml(m.ipAddress)}" data-role="${escapeHtml(m.role)}">`
-                        + `${escapeHtml(m.ipAddress)} — ${escapeHtml(role)}${escapeHtml(ports)}</option>`;
+                    const icon = machineIconSvg(deviceCategoryIconKind(m.deviceCategory));
+                    const ipEsc   = m.ipAddress.replace(/'/g, "\\'");
+                    const roleEsc = String(m.role || '').replace(/'/g, "\\'");
+                    const catEsc  = String(m.deviceCategory || '').replace(/'/g, "\\'");
+                    html += `<div class="scan-host-row" title="${escapeHtml(deviceCategoryLabel(m.deviceCategory))}"
+                                  onclick="pickDiscoveredHost('${ipEsc}', '${roleEsc}', '${catEsc}')">
+                                <span class="scan-host-icon">${icon}</span>
+                                <span class="scan-host-ip">${escapeHtml(m.ipAddress)}</span>
+                                <span class="scan-host-meta">— ${escapeHtml(role)}${escapeHtml(ports)}</span>
+                            </div>`;
                 });
-                html += '</optgroup>';
             });
-            select.innerHTML = html;
-            select.style.display = '';
+            list.innerHTML = html;
+            list.style.display = '';
         }
 
-        // Picking a discovered host fills the address field (and toggles Runs Docker for a Docker host).
-        function pickDiscoveredHost() {
-            const select = document.getElementById('lanScanModalSelect');
-            const opt = select.options[select.selectedIndex];
-            if (!opt || !opt.value) return;
-            document.getElementById('lanAddress').value = opt.value;
-            if (opt.dataset.role === 'DOCKER_HOST'
+        // Picking a discovered host fills the address field, toggles Runs Docker for a Docker host,
+        // and remembers its device category to carry into the POST /lan-servers body.
+        function pickDiscoveredHost(ipAddress, role, deviceCategory) {
+            if (!ipAddress) return;
+            document.getElementById('lanAddress').value = ipAddress;
+            _scanPickedCategory = deviceCategory || null;
+            _scanPickedIp = ipAddress;
+            if (role === 'DOCKER_HOST'
                     && document.getElementById('peerType').value === 'LAN_SERVER') {
                 document.getElementById('runsDocker').checked = true;
                 onRunsDockerChange();

@@ -24,7 +24,8 @@ public record Machine(
     String lanCidr,
     String lanAddress,
     boolean runsDocker,
-    Integer dockerPort
+    Integer dockerPort,
+    DeviceCategory deviceCategory
 ) {
 
     /**
@@ -45,7 +46,8 @@ public record Machine(
             peer.lanCidr(),
             peer.lanAddress(),
             peer.peerType().isServerType(),
-            null
+            null,
+            peer.effectiveDeviceCategory()
         );
     }
 
@@ -61,7 +63,8 @@ public record Machine(
             anchorLanCidr,
             server.lanAddress(),
             server.runsDocker(),
-            server.dockerPort()
+            server.dockerPort(),
+            server.effectiveDeviceCategory()
         );
     }
 

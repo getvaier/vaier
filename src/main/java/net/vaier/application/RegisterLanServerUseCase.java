@@ -13,4 +13,12 @@ public interface RegisterLanServerUseCase {
     /** As above, with an optional free-text {@code description}. */
     void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                   String description);
+
+    /**
+     * As above, with an optional device-category override (the icon hint). A null override leaves
+     * the effective category to auto-detection; a non-null value is persisted as the override.
+     * Lets the Add Machine modal pre-fill the category from a scan pick.
+     */
+    void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                  String description, net.vaier.domain.DeviceCategory deviceCategory);
 }

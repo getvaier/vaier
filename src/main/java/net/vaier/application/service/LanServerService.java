@@ -8,6 +8,8 @@ import net.vaier.application.RegisterLanServerUseCase;
 import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
+import net.vaier.application.UpdateLanServerDeviceCategoryUseCase;
+import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
@@ -34,6 +36,7 @@ public class LanServerService implements
     DeleteLanServerUseCase,
     RenameLanServerUseCase,
     UpdateLanServerDescriptionUseCase,
+    UpdateLanServerDeviceCategoryUseCase,
     GetLanServersUseCase,
     ForGettingLanServers,
     GenerateLanServerSetupScriptUseCase,
@@ -56,12 +59,18 @@ public class LanServerService implements
 
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
-        register(name, lanAddress, runsDocker, dockerPort, null);
+        register(name, lanAddress, runsDocker, dockerPort, null, null);
     }
 
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                          String description) {
+        register(name, lanAddress, runsDocker, dockerPort, description, null);
+    }
+
+    @Override
+    public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                         String description, DeviceCategory deviceCategory) {
         // Normalise inputs up front so the persisted identity matches the (trimmed) uniqueness
         // comparison rule and stays a clean `/lan-servers/{name}` path segment — mirrors
         // LanServer.renamedTo, which also trims.
@@ -85,7 +94,22 @@ public class LanServerService implements
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             trimmedName, trimmedAddress, runsDocker, dockerPort);
-        forPersistingLanServers.save(new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description));
+        forPersistingLanServers.save(
+            new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description, deviceCategory));
+    }
+
+    @Override
+    public void updateDeviceCategory(String name, String deviceCategory) {
+        // Validate the override value first: a non-blank value must be a valid DeviceCategory
+        // (IllegalArgumentException -> 400). Null/blank parses to null = "clear the override".
+        // The domain owns the parse rule; withDeviceCategory owns carrying everything else over.
+        DeviceCategory parsed = DeviceCategory.fromString(deviceCategory);
+        LanServer existing = forPersistingLanServers.getAll().stream()
+            .filter(s -> s.hasName(name))
+            .findFirst()
+            .orElseThrow(() -> new NotFoundException("LAN server not found: " + name));
+        forPersistingLanServers.save(existing.withDeviceCategory(parsed));
+        log.info("Updated device category for LAN server {} to {}", name, parsed);
     }
 
     @Override

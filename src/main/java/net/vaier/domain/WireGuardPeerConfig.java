@@ -16,6 +16,15 @@ public final class WireGuardPeerConfig {
                                   String presharedKey, String serverEndpoint,
                                   MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
                                   String description, String name, String serverLanCidr) {
+        return generate(privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint,
+            peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr, null);
+    }
+
+    public static String generate(String privateKey, String ipAddress, String serverPublicKey,
+                                  String presharedKey, String serverEndpoint,
+                                  MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
+                                  String description, String name, String serverLanCidr,
+                                  String deviceCategory) {
         // lanCidr is intentionally NOT appended to the client-side AllowedIPs: doing so makes
         // wg-quick install a route for that CIDR via wg0 on the relay peer, which hijacks the
         // relay's own LAN. lanCidr is still recorded in the # VAIER metadata below so that
@@ -33,7 +42,7 @@ public final class WireGuardPeerConfig {
             allowedIps = allowedIps + "," + serverLanCidr.trim();
         }
 
-        String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description, name);
+        String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description, name, deviceCategory);
 
         String dnsLine = peerType.isServerType()
                 ? ""
@@ -69,13 +78,22 @@ public final class WireGuardPeerConfig {
                                  String lanAddress, String description, String name,
                                  String serverPublicKey, String serverEndpoint, String vpnSubnet,
                                  String serverLanCidr) {
+        return reissue(existingContent, peerType, lanCidr, lanAddress, description, name,
+                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, null);
+    }
+
+    public static String reissue(String existingContent, MachineType peerType, String lanCidr,
+                                 String lanAddress, String description, String name,
+                                 String serverPublicKey, String serverEndpoint, String vpnSubnet,
+                                 String serverLanCidr, String deviceCategory) {
         return generate(
                 readDirective(existingContent, "PrivateKey"),
                 readIpAddress(existingContent),
                 serverPublicKey,
                 readDirective(existingContent, "PresharedKey"),
                 serverEndpoint,
-                peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr);
+                peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr,
+                deviceCategory);
     }
 
     /**
@@ -87,12 +105,28 @@ public final class WireGuardPeerConfig {
                                       String lanAddress, String description, String name,
                                       String serverPublicKey, String serverEndpoint, String vpnSubnet,
                                       String serverLanCidr) {
-        return !existingContent.equals(reissue(existingContent, peerType, lanCidr, lanAddress,
-                description, name, serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr));
+        // The "# VAIER:" comment is pure Vaier-side metadata — never installed into the WireGuard
+        // tunnel — and is written by Jackson (different field order, may carry a deviceCategory key
+        // that generate() omits). Out-of-date must reflect divergence in the real tunnel directives
+        // only, so strip that comment line from both sides before comparing.
+        return !stripVaierMetadata(existingContent).equals(stripVaierMetadata(
+                reissue(existingContent, peerType, lanCidr, lanAddress, description, name,
+                        serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr)));
+    }
+
+    /** Removes the single {@code # VAIER:} metadata comment line from a config string. */
+    private static String stripVaierMetadata(String content) {
+        if (content == null) return "";
+        return content.replaceAll("(?m)^# VAIER:.*$\n?", "");
     }
 
     public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,
                                    String description, String name) {
+        return vaierJson(peerType, lanCidr, lanAddress, description, name, null);
+    }
+
+    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,
+                                   String description, String name, String deviceCategory) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
         // name is the operator's display label for the peer — free text, JSON-escaped, and (like
@@ -111,6 +145,13 @@ public final class WireGuardPeerConfig {
         // lanCidr/lanAddress it is not gated on server type. It is free text, hence JSON-escaped.
         if (description != null && !description.isBlank()) {
             sb.append(",\"description\":\"").append(escapeJson(description)).append("\"");
+        }
+        // deviceCategory is the operator's icon-only override (any peer type). Kept last in the
+        // hand-built JSON and only emitted when an override is pinned, so a non-overridden peer's
+        // metadata stays free of the key (preserving auto-detect). It is a fixed enum name, but
+        // escaped for symmetry with the other free-text fields.
+        if (deviceCategory != null && !deviceCategory.isBlank()) {
+            sb.append(",\"deviceCategory\":\"").append(escapeJson(deviceCategory)).append("\"");
         }
         sb.append("}");
         return sb.toString();

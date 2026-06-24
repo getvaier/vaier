@@ -89,8 +89,11 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
                     boolean runsDocker = runsDockerObj instanceof Boolean b ? b : false;
                     Integer dockerPort = m.get("dockerPort") instanceof Number n ? n.intValue() : null;
                     String description = asString(m.get("description"));
+                    net.vaier.domain.DeviceCategory deviceCategory =
+                        parseDeviceCategory(asString(m.get("deviceCategory")));
                     if (name != null && lanAddress != null) {
-                        result.add(new LanServer(name, lanAddress, runsDocker, dockerPort, description));
+                        result.add(new LanServer(name, lanAddress, runsDocker, dockerPort, description,
+                            deviceCategory));
                     }
                 }
             }
@@ -137,6 +140,9 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
             if (s.description() != null) {
                 entry.put("description", s.description());
             }
+            if (s.deviceCategory() != null) {
+                entry.put("deviceCategory", s.deviceCategory().name());
+            }
             serialized.add(entry);
         }
         Map<String, Object> root = new LinkedHashMap<>();
@@ -151,5 +157,18 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
 
     private static String asString(Object o) {
         return o == null ? null : o.toString();
+    }
+
+    /**
+     * The persisted device-category override, or null when absent. An unrecognised value reads as
+     * "no override" (logged) rather than failing the load — the category falls back to detection.
+     */
+    private static net.vaier.domain.DeviceCategory parseDeviceCategory(String value) {
+        try {
+            return net.vaier.domain.DeviceCategory.fromString(value);
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown device category '{}' in {}, treating as no override", value, FILE_NAME);
+            return null;
+        }
     }
 }
