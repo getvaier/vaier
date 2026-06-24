@@ -61,6 +61,14 @@ class LanServerTest {
     }
 
     @Test
+    void validate_nameWithControlCharacters_throws() {
+        // A name with CR/LF is never legitimate and would enable log forging if persisted.
+        assertThatThrownBy(() -> LanServer.validate("nas\ninjected", "192.168.3.50", false, null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("name");
+    }
+
+    @Test
     void validate_blankLanAddress_throws() {
         assertThatThrownBy(() -> LanServer.validate("nas", "", true, 2375))
             .isInstanceOf(IllegalArgumentException.class)
@@ -133,6 +141,14 @@ class LanServerTest {
         LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
 
         assertThatThrownBy(() -> nas.renamedTo("   "))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void renamedTo_rejectsNameWithControlCharacters() {
+        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
+
+        assertThatThrownBy(() -> nas.renamedTo("media\r\nnas"))
             .isInstanceOf(IllegalArgumentException.class);
     }
 

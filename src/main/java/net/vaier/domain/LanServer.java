@@ -46,6 +46,9 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (newName == null || newName.isBlank()) {
             throw new IllegalArgumentException("LAN server name must not be blank");
         }
+        if (hasControlCharacters(newName)) {
+            throw new IllegalArgumentException("LAN server name must not contain control characters");
+        }
         return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description, deviceCategory);
     }
 
@@ -86,6 +89,9 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("name must not be blank");
         }
+        if (hasControlCharacters(name)) {
+            throw new IllegalArgumentException("name must not contain control characters");
+        }
         if (lanAddress == null || lanAddress.isBlank()) {
             throw new IllegalArgumentException("lanAddress must not be blank");
         }
@@ -106,5 +112,14 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
                     "dockerPort must be between " + MIN_PORT + " and " + MAX_PORT + " (was " + dockerPort + ")");
             }
         }
+    }
+
+    /**
+     * True when {@code value} contains any ISO control character (e.g. CR/LF). Such characters are
+     * never legitimate in a machine name and, if persisted, would let an operator-controlled name
+     * forge multiline log entries — so names carrying them are rejected at the boundary.
+     */
+    private static boolean hasControlCharacters(String value) {
+        return value.chars().anyMatch(Character::isISOControl);
     }
 }

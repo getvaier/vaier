@@ -109,7 +109,7 @@ public class LanServerService implements
             .findFirst()
             .orElseThrow(() -> new NotFoundException("LAN server not found: " + name));
         forPersistingLanServers.save(existing.withDeviceCategory(parsed));
-        log.info("Updated device category for LAN server {} to {}", name, parsed);
+        log.info("Updated device category for LAN server {} to {}", forLog(existing.name()), parsed);
     }
 
     @Override
@@ -120,12 +120,12 @@ public class LanServerService implements
             .findFirst()
             .orElseThrow(() -> new NotFoundException("LAN server not found: " + name));
         forPersistingLanServers.save(existing.withDescription(description));
-        log.info("Updated description for LAN server {}", name);
+        log.info("Updated description for LAN server {}", forLog(existing.name()));
     }
 
     @Override
     public void delete(String name) {
-        log.info("Deleting LAN server: {}", name);
+        log.info("Deleting LAN server: {}", forLog(name));
         forPersistingLanServers.deleteByName(name);
     }
 
@@ -142,7 +142,7 @@ public class LanServerService implements
         LanServer renamed = existing.renamedTo(newName);
 
         if (renamed.hasName(currentName)) {
-            log.info("Rename no-op: LAN server {} already has that name", currentName);
+            log.info("Rename no-op: LAN server {} already has that name", forLog(existing.name()));
             return;
         }
         // #284: the new name must be free across every machine — other LAN servers and VPN peers.
@@ -156,7 +156,7 @@ public class LanServerService implements
         // save() upserts by name, so write the new entry then drop the old one.
         forPersistingLanServers.save(renamed);
         forPersistingLanServers.deleteByName(currentName);
-        log.info("Renamed LAN server {} to {}", currentName, renamed.name());
+        log.info("Renamed LAN server {} to {}", forLog(existing.name()), renamed.name());
     }
 
     @Override
@@ -201,5 +201,17 @@ public class LanServerService implements
             .filter(s -> excludeLanServerName == null || !s.hasName(excludeLanServerName))
             .map(LanServer::name);
         return Stream.concat(peerNames, lanServerNames).toList();
+    }
+
+    /**
+     * Renders an operator-supplied name safe for a single log line. The lookup that precedes these
+     * logs trims the request value, so a name like {@code "nas\n…"} can still reach a log statement;
+     * collapsing CR/LF (and other ISO control chars) to spaces prevents forged multiline log entries.
+     */
+    private static String forLog(String name) {
+        if (name == null) return "null";
+        StringBuilder sb = new StringBuilder(name.length());
+        name.codePoints().forEach(c -> sb.append(Character.isISOControl(c) ? ' ' : (char) c));
+        return sb.toString();
     }
 }
