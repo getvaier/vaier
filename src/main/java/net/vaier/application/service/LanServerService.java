@@ -211,7 +211,10 @@ public class LanServerService implements
     private static String forLog(String name) {
         if (name == null) return "null";
         StringBuilder sb = new StringBuilder(name.length());
-        name.codePoints().forEach(c -> sb.append(Character.isISOControl(c) ? ' ' : (char) c));
+        name.codePoints().forEach(c -> {
+            if (Character.isISOControl(c)) sb.append(' ');
+            else sb.appendCodePoint(c);
+        });
         return sb.toString();
     }
 }
