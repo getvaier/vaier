@@ -1153,22 +1153,25 @@
             const options = [{ value: '', label: 'Auto-detect' }].concat(DEVICE_CATEGORIES)
                 .map(o => `<option value="${o.value}"${o.value === selected ? ' selected' : ''}>${escapeHtml(o.label)}</option>`)
                 .join('');
-            const argEsc = String(idArg).replace(/'/g, "\\'");
             // Auto-detect caption: when not overridden, effective == detected category.
             const caption = overridden
                 ? ''
                 : `<span class="device-cat-auto" id="${domId}-auto">Auto-detected: ${escapeHtml(deviceCategoryLabel(effectiveCategory))}</span>`;
+            // kind/idArg ride along as data attributes (HTML-escaped) and are read back from the
+            // element in the handler — the operator-controlled name never enters an inline JS string.
             return `<span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                         <select id="${domId}" class="form-input" style="max-width:200px"
-                                onchange="onDeviceCategoryChange('${kind}', '${argEsc}', '${domId}')">${options}</select>
+                                data-cat-kind="${escapeHtml(kind)}" data-cat-arg="${escapeHtml(String(idArg))}"
+                                onchange="onDeviceCategoryChange(this)">${options}</select>
                         ${caption}
                     </span>`;
         }
 
         // PATCH the effective category for a machine; empty value clears the override (→ auto).
-        async function onDeviceCategoryChange(kind, idArg, domId) {
-            const select = document.getElementById(domId);
+        async function onDeviceCategoryChange(select) {
             if (!select) return;
+            const kind = select.dataset.catKind;
+            const idArg = select.dataset.catArg;
             const deviceCategory = select.value; // '' clears the override
             const endpoint = kind === 'lan'
                 ? `/lan-servers/${encodeURIComponent(idArg)}/device-category`
@@ -1249,8 +1252,8 @@
                 ? `${server.lanAddress}:${server.dockerPort}`
                 : server.lanAddress;
             const relayRow = server.relayPeerName
-                ? `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value">via ${server.relayPeerName}</span></div>`
-                : `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value" style="color:var(--red)">no relay covers ${server.lanAddress}</span></div>`;
+                ? `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value">via ${escapeHtml(server.relayPeerName)}</span></div>`
+                : `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value" style="color:var(--red)">no relay covers ${escapeHtml(server.lanAddress)}</span></div>`;
             const servicesHtml = (() => {
                 if (!server.runsDocker) return '';
                 if (!server.relayPeerName)
@@ -1263,17 +1266,17 @@
             // relay-anchored (so it has routes to install). Server-anchored / orphan hosts get none.
             const isRelayAnchored = server.relayPeerName && server.relayPeerName !== 'Vaier server';
             const scriptBtn = (server.runsDocker || isRelayAnchored)
-                ? `<button class="btn btn-small btn-secondary" onclick="showLanSetupScript('${server.name.replace(/'/g, "\\'")}')" title="Show this host's setup script — opens the Docker API if it runs Docker and installs routes via its relay peer">Setup script</button>`
+                ? `<button class="btn btn-small btn-secondary" onclick="showLanSetupScript('${jsArg(server.name)}')" title="Show this host's setup script — opens the Docker API if it runs Docker and installs routes via its relay peer">Setup script</button>`
                 : '';
 
             return `
             <div class="peer-card">
-                <div class="peer-header" onclick="togglePeer('${key.replace(/'/g, "\\'")}')">
+                <div class="peer-header" onclick="togglePeer('${jsArg(key)}')">
                     <div class="peer-header-left">
                         ${machineIconHtml(deviceCategoryIconKind(server.deviceCategory), 'LAN server (no VPN; behind a relay or in the server\'s subnet) · ' + statusTooltip(statusClass, server.lastSeen), iconStatusClass(statusClass))}
                         <div class="peer-name-block">
                             <div class="peer-name-row">
-                                <span class="peer-name">${server.name}</span>
+                                <span class="peer-name">${escapeHtml(server.name)}</span>
                                 ${capabilitySlotsHtml([null, dockerSlot])}
                             </div>
                             ${server.description ? `<div class="peer-desc" title="${escapeHtml(server.description)}">${escapeHtml(server.description)}</div>` : ''}
@@ -1289,10 +1292,10 @@
                                 <input type="text" id="lan-name-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
                                        value="${escapeHtml(server.name)}"
                                        data-original="${escapeHtml(server.name)}"
-                                       oninput="onLanServerNameInput('${server.name.replace(/'/g, "\\'")}')">
+                                       oninput="onLanServerNameInput('${jsArg(server.name)}')">
                                 <button class="btn btn-primary" id="lan-name-save-${id}"
                                         style="flex-shrink:0" disabled
-                                        onclick="saveLanServerName('${server.name.replace(/'/g, "\\'")}')">Save</button>
+                                        onclick="saveLanServerName('${jsArg(server.name)}')">Save</button>
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1303,10 +1306,10 @@
                                        value="${escapeHtml(server.description || '')}"
                                        data-original="${escapeHtml(server.description || '')}"
                                        placeholder="e.g. Synology NAS in the closet"
-                                       oninput="onLanServerDescriptionInput('${server.name.replace(/'/g, "\\'")}')">
+                                       oninput="onLanServerDescriptionInput('${jsArg(server.name)}')">
                                 <button class="btn btn-primary" id="lan-desc-save-${id}"
                                         style="flex-shrink:0" disabled
-                                        onclick="saveLanServerDescription('${server.name.replace(/'/g, "\\'")}')">Save</button>
+                                        onclick="saveLanServerDescription('${jsArg(server.name)}')">Save</button>
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1315,7 +1318,7 @@
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">LAN address</span>
-                            <span class="detail-value">${portText}</span>
+                            <span class="detail-value">${escapeHtml(portText)}</span>
                         </div>
                         ${relayRow}
                         <div class="detail-row">
@@ -1328,7 +1331,7 @@
                         <div class="peer-actions-left">
                             ${scriptBtn}
                         </div>
-                        <button class="btn btn-small btn-danger" onclick="deleteLanServer('${server.name.replace(/'/g, "\\'")}')">Delete</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteLanServer('${jsArg(server.name)}')">Delete</button>
                     </div>
                 </div>
             </div>`;
@@ -2420,6 +2423,18 @@
             }[c]));
         }
 
+        // Escapes a value for embedding in a single-quoted JS string inside a double-quoted HTML
+        // attribute, e.g. onclick="f('...')". First neutralises JS-string breakouts (backslash,
+        // quote, CR/LF), then HTML-escapes so it is also safe in the attribute context. Needed for
+        // operator-controlled values (LAN-server names) that aren't constrained to a safe charset.
+        function jsArg(s) {
+            return escapeHtml(String(s ?? '')
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/\r/g, '\\r')
+                .replace(/\n/g, '\\n'));
+        }
+
         function bindHoverPopup(marker, html) {
             marker.bindPopup(html, { closeButton: false, autoPan: false });
             marker.on('mouseover', e => e.target.openPopup());
@@ -2777,9 +2792,9 @@
                     const role = LAN_MACHINE_ROLE_LABELS[m.role] || m.role;
                     const ports = (m.openPorts && m.openPorts.length) ? ' :' + m.openPorts.join(',') : '';
                     const icon = machineIconSvg(deviceCategoryIconKind(m.deviceCategory));
-                    const ipEsc   = m.ipAddress.replace(/'/g, "\\'");
-                    const roleEsc = String(m.role || '').replace(/'/g, "\\'");
-                    const catEsc  = String(m.deviceCategory || '').replace(/'/g, "\\'");
+                    const ipEsc   = jsArg(m.ipAddress);
+                    const roleEsc = jsArg(m.role || '');
+                    const catEsc  = jsArg(m.deviceCategory || '');
                     html += `<div class="scan-host-row" title="${escapeHtml(deviceCategoryLabel(m.deviceCategory))}"
                                   onclick="pickDiscoveredHost('${ipEsc}', '${roleEsc}', '${catEsc}')">
                                 <span class="scan-host-icon">${icon}</span>
