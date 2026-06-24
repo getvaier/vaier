@@ -44,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
@@ -1138,6 +1139,22 @@ class VpnServiceTest {
         assertThat(view.lanAddress()).isEqualTo("192.168.1.10");
         assertThat(view.description()).isEqualTo("alice's box");
         assertThat(view.geoLocation()).contains(new GeoLocation(59.91, 10.74, "Oslo", "Norway"));
+    }
+
+    @Test
+    void getVpnPeers_readsEachPeerConfigOnlyOnce() {
+        // The peer view derives both its device category and its config fields from the same
+        // on-disk config — it must load that config once per peer, not twice (perf regression guard).
+        VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.2")).thenReturn("alice-1");
+        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.of(
+            new PeerConfiguration("alice-1", "Alice", "10.13.13.2", "[Interface]",
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10", "alice's box")));
+
+        service.getVpnPeers();
+
+        verify(peerConfigProvider, times(1)).getPeerConfigByIp("10.13.13.2");
     }
 
     @Test

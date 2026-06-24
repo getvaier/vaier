@@ -192,7 +192,11 @@ public class VpnService implements
         // category decision; the PeerConfigResult below is the existing view of the same config.
         Optional<ForGettingPeerConfigurations.PeerConfiguration> rawCfg =
             peerConfigProvider.getPeerConfigByIp(peerIp);
-        Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = getPeerConfigByIp(peerIp);
+        // Reuse the already-loaded raw config rather than re-reading it via getPeerConfigByIp —
+        // one filesystem scan/parse per peer per refresh, not two.
+        Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = rawCfg
+            .map(c -> new GetPeerConfigUseCase.PeerConfigResult(c.id(), c.name(), c.ipAddress(),
+                c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress(), c.description()));
         MachineType peerType = cfg.map(GetPeerConfigUseCase.PeerConfigResult::peerType)
             .orElse(MachineType.defaultType());
         String name = cfg.map(GetPeerConfigUseCase.PeerConfigResult::name)
