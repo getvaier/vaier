@@ -53,6 +53,7 @@ class VpnPeerRestControllerTest {
     @Mock RenamePeerUseCase renamePeerUseCase;
     @Mock ReissuePeerConfigUseCase reissuePeerConfigUseCase;
     @Mock net.vaier.application.UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
+    @Mock net.vaier.application.DesignateInternetGatewayUseCase designateInternetGatewayUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     @Mock ForPublishingEvents forPublishingEvents;
@@ -70,7 +71,7 @@ class VpnPeerRestControllerTest {
             type, type.isServerType(), type.isVpnPeer() && !type.isServerType(), false,
             net.vaier.domain.PeerArtifact.forPeerType(type),
             null, null, description, geo, false,
-            net.vaier.domain.DeviceCategory.detect(name, type, null), false);
+            net.vaier.domain.DeviceCategory.detect(name, type, null), false, false);
     }
 
     @Test
@@ -294,7 +295,7 @@ class VpnPeerRestControllerTest {
                 MachineType.UBUNTU_SERVER, true, false, false,
                 net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
                 null, null, null, Optional.empty(), true,
-                net.vaier.domain.DeviceCategory.SERVER, false)
+                net.vaier.domain.DeviceCategory.SERVER, false, false)
         ));
 
         assertThat(controller.listPeers().getBody().get(0).configOutOfDate()).isTrue();
@@ -364,7 +365,7 @@ class VpnPeerRestControllerTest {
                 MachineType.UBUNTU_SERVER, true, false, false,
                 net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
                 null, null, null, Optional.empty(), true,
-                net.vaier.domain.DeviceCategory.NAS, true)
+                net.vaier.domain.DeviceCategory.NAS, true, false)
         ));
 
         var peer = controller.listPeers().getBody().get(0);
@@ -401,6 +402,60 @@ class VpnPeerRestControllerTest {
         assertThatThrownBy(() -> controller.updateDeviceCategory("nas", request))
             .isInstanceOf(IllegalArgumentException.class);
         verify(forPublishingEvents, never()).publish(any(), any(), any());
+    }
+
+    // --- internet gateway (#174) ---
+
+    @Test
+    void setInternetGateway_designatesAndReturnsNoContent() {
+        var response = controller.setInternetGateway("usa-box");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(designateInternetGatewayUseCase).setInternetGateway("usa-box");
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void setInternetGateway_propagatesIneligiblePeer_withoutPublishing() {
+        doThrow(new IllegalArgumentException("cannot be an internet gateway"))
+            .when(designateInternetGatewayUseCase).setInternetGateway("phone");
+
+        assertThatThrownBy(() -> controller.setInternetGateway("phone"))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void setInternetGateway_propagatesMissingPeer_withoutPublishing() {
+        doThrow(new PeerNotFoundException("Peer not found: ghost"))
+            .when(designateInternetGatewayUseCase).setInternetGateway("ghost");
+
+        assertThatThrownBy(() -> controller.setInternetGateway("ghost"))
+            .isInstanceOf(PeerNotFoundException.class);
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void clearInternetGateway_clearsAndReturnsNoContent() {
+        var response = controller.clearInternetGateway("usa-box");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(designateInternetGatewayUseCase).clearInternetGateway();
+        verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
+    }
+
+    @Test
+    void listPeers_surfacesIsInternetGatewayFlag() {
+        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(
+            new VpnPeerView("usa-box", "usa-box", "pub", "10.13.13.6/32", "10.13.13.6",
+                "", "51820", "0", false, "0", "0",
+                MachineType.UBUNTU_SERVER, true, false, false,
+                net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
+                null, null, null, Optional.empty(), false,
+                net.vaier.domain.DeviceCategory.SERVER, false, true)
+        ));
+
+        assertThat(controller.listPeers().getBody().get(0).isInternetGateway()).isTrue();
     }
 
     @Test

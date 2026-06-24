@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.CreatePeerUseCase;
 import net.vaier.application.DeletePeerUseCase;
+import net.vaier.application.DesignateInternetGatewayUseCase;
 import net.vaier.application.GenerateDockerComposeUseCase;
 import net.vaier.application.GeneratePeerSetupScriptUseCase;
 import net.vaier.application.GetPeerConfigUseCase;
@@ -49,6 +50,7 @@ public class VpnPeerRestController {
     private final RenamePeerUseCase renamePeerUseCase;
     private final ReissuePeerConfigUseCase reissuePeerConfigUseCase;
     private final UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
+    private final DesignateInternetGatewayUseCase designateInternetGatewayUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     private final ForPublishingEvents forPublishingEvents;
@@ -98,7 +100,8 @@ public class VpnPeerRestController {
             v.geoLocation().map(GeoLocation::city).orElse(null),
             v.geoLocation().map(GeoLocation::country).orElse(null),
             v.configOutOfDate(),
-            v.deviceCategory().name(), v.deviceCategoryOverridden());
+            v.deviceCategory().name(), v.deviceCategoryOverridden(),
+            v.isInternetGateway());
     }
 
     @GetMapping("/server-location")
@@ -263,6 +266,33 @@ public class VpnPeerRestController {
         log.info("Updating device category for peer {} to {}",
             LogSafe.forLog(peerName), LogSafe.forLog(deviceCategory));
         updatePeerDeviceCategoryUseCase.updatePeerDeviceCategory(peerName, deviceCategory);
+        forPublishingEvents.publish("vpn-peers", "peers-updated", "");
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Designates this peer as Vaier's single internet gateway — the central internet egress for
+     * full-tunnel clients (#174). Any previously-designated peer is cleared (at most one gateway).
+     * An ineligible peer propagates as {@code IllegalArgumentException} -> 400; an unknown peer as
+     * {@code PeerNotFoundException} -> 404.
+     */
+    @PutMapping("/{peerName}/gateway")
+    public ResponseEntity<Void> setInternetGateway(@PathVariable String peerName) {
+        log.info("Designating peer {} as internet gateway", LogSafe.forLog(peerName));
+        designateInternetGatewayUseCase.setInternetGateway(peerName);
+        forPublishingEvents.publish("vpn-peers", "peers-updated", "");
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Clears the internet-gateway designation (#174). Reverts whichever peer is currently the
+     * gateway; a no-op when none is designated. The path peer is not validated — clearing is global
+     * because at most one gateway exists — so this is safe to call from any peer's toggle.
+     */
+    @DeleteMapping("/{peerName}/gateway")
+    public ResponseEntity<Void> clearInternetGateway(@PathVariable String peerName) {
+        log.info("Clearing internet-gateway designation (requested via peer {})", LogSafe.forLog(peerName));
+        designateInternetGatewayUseCase.clearInternetGateway();
         forPublishingEvents.publish("vpn-peers", "peers-updated", "");
         return ResponseEntity.noContent().build();
     }
@@ -479,7 +509,8 @@ public class VpnPeerRestController {
             String country,
             boolean configOutOfDate,
             String deviceCategory,
-            boolean deviceCategoryOverridden
+            boolean deviceCategoryOverridden,
+            boolean isInternetGateway
     ) {}
 
     public record CreatePeerRequest(

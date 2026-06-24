@@ -129,6 +129,12 @@ public final class WireGuardPeerConfig {
 
     public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,
                                    String description, String name, String deviceCategory) {
+        return vaierJson(peerType, lanCidr, lanAddress, description, name, deviceCategory, false);
+    }
+
+    public static String vaierJson(MachineType peerType, String lanCidr, String lanAddress,
+                                   String description, String name, String deviceCategory,
+                                   boolean isGateway) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"peerType\":\"").append(peerType.name()).append("\"");
         // name is the operator's display label for the peer — free text, JSON-escaped, and (like
@@ -154,6 +160,13 @@ public final class WireGuardPeerConfig {
         // escaped for symmetry with the other free-text fields.
         if (deviceCategory != null && !deviceCategory.isBlank()) {
             sb.append(",\"deviceCategory\":\"").append(escapeJson(deviceCategory)).append("\"");
+        }
+        // gateway marks the peer as Vaier's single internet gateway — the central internet egress
+        // for full-tunnel clients (#174). Server-side metadata only: it affects the peer's
+        // server-side AllowedIPs (serverAllowedIps), NEVER the client-side tunnel directives, so it
+        // is intentionally absent from generate()'s rendered config and emitted only when true.
+        if (isGateway) {
+            sb.append(",\"gateway\":true");
         }
         sb.append("}");
         return sb.toString();
@@ -190,11 +203,24 @@ public final class WireGuardPeerConfig {
      * ... allowed-ips} requires a single argv token and {@code wg-quick save} preserves it.
      */
     public static String serverAllowedIps(String ipAddress, String lanCidr) {
-        String allowedIps = ipAddress + "/32";
+        return serverAllowedIps(ipAddress, lanCidr, false);
+    }
+
+    /**
+     * As {@link #serverAllowedIps(String, String)}, but appends {@code 0.0.0.0/0} when
+     * {@code isGateway} — designating this peer as Vaier's single internet gateway (#174), so the
+     * server forwards all full-tunnel client internet traffic to it. The default route comes last
+     * so longest-prefix match keeps peer-to-peer ({@code /32}) and relay-LAN routing intact.
+     */
+    public static String serverAllowedIps(String ipAddress, String lanCidr, boolean isGateway) {
+        StringBuilder allowedIps = new StringBuilder(ipAddress).append("/32");
         if (lanCidr != null && !lanCidr.isBlank()) {
-            return allowedIps + "," + lanCidr.trim();
+            allowedIps.append(",").append(lanCidr.trim());
         }
-        return allowedIps;
+        if (isGateway) {
+            allowedIps.append(",0.0.0.0/0");
+        }
+        return allowedIps.toString();
     }
 
     private static String escapeJson(String s) {

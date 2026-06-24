@@ -381,16 +381,36 @@ class VpnServiceTest {
     }
 
     @Test
-    void generateSetupScript_lanCidrAbsent_omitsForwardingBlock() {
+    void generateSetupScript_serverPeerWithoutLanCidr_omitsRelayBlockButKeepsEgress() {
+        // #174: server-type peers now ALWAYS install internet-egress NAT, independent of lanCidr.
+        // A server peer with no lanCidr therefore has ip_forward + egress MASQUERADE but NO
+        // relay-specific (-d <lan>) rules and no relay systemd unit.
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
             Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
         );
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
 
+        // Egress is present.
+        assertThat(script).contains("net.ipv4.ip_forward=1");
+        assertThat(script).contains("-o \"$EGRESS_IF\" -j MASQUERADE");
+        // No relay block (the relay MASQUERADE is destination-filtered to a LAN CIDR).
+        assertThat(script).doesNotContain("vaier-wg-relay-iptables");
+    }
+
+    @Test
+    void generateSetupScript_clientPeer_omitsForwardingBlockEntirely() {
+        when(peerConfigProvider.getPeerConfigByName("phone")).thenReturn(
+            Optional.of(new PeerConfiguration("phone", "10.13.13.2", "wg-config",
+                MachineType.MOBILE_CLIENT, null, null))
+        );
+
+        String script = service.generateSetupScript("phone", "vpn.example.com", "51820").orElseThrow();
+
         assertThat(script).doesNotContain("net.ipv4.ip_forward=1");
         assertThat(script).doesNotContain("MASQUERADE");
-        assertThat(script).doesNotContain("FORWARD");
+        assertThat(script).doesNotContain("EGRESS_IF=");
     }
 
     // --- generateSetupScript: relay iptables survive reboot (#191) ---
@@ -448,7 +468,9 @@ class VpnServiceTest {
     }
 
     @Test
-    void generateSetupScript_lanCidrBlank_omitsForwardingBlock() {
+    void generateSetupScript_serverPeerWithBlankLanCidr_omitsRelayBlockButKeepsEgress() {
+        // Blank lanCidr means "not a relay", but a server peer still gets the #174 egress block.
+        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
             Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config",
                 MachineType.UBUNTU_SERVER, "   ", null))
@@ -456,8 +478,9 @@ class VpnServiceTest {
 
         String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
 
-        assertThat(script).doesNotContain("net.ipv4.ip_forward=1");
-        assertThat(script).doesNotContain("MASQUERADE");
+        assertThat(script).contains("net.ipv4.ip_forward=1");
+        assertThat(script).contains("-o \"$EGRESS_IF\" -j MASQUERADE");
+        assertThat(script).doesNotContain("vaier-wg-relay-iptables");
     }
 
     // --- generateSetupScript: wireguard image pinning (drift guard, #175) ---
@@ -927,6 +950,132 @@ class VpnServiceTest {
 
         verifyNoInteractions(forUpdatingServerAllowedIps);
         verifyNoInteractions(forUpdatingPeerConfigurations);
+    }
+
+    // --- designate internet gateway (#174) ---
+
+    @Test
+    void setInternetGateway_setsServerAllowedIpsWithDefaultRouteAndPersistsFlag() {
+        when(peerConfigProvider.getPeerConfigByName("usa-box"))
+            .thenReturn(Optional.of(new PeerConfiguration("usa-box", "10.13.13.6", "config",
+                MachineType.UBUNTU_SERVER, null, null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("usa-box", "10.13.13.6", "config", MachineType.UBUNTU_SERVER, null, null)));
+
+        service.setInternetGateway("usa-box");
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.6", "10.13.13.6/32,0.0.0.0/0");
+        verify(forUpdatingPeerConfigurations).updateInternetGateway("usa-box", true);
+    }
+
+    @Test
+    void setInternetGateway_preservesRelayLanCidrAlongsideDefaultRoute() {
+        when(peerConfigProvider.getPeerConfigByName("usa-relay"))
+            .thenReturn(Optional.of(new PeerConfiguration("usa-relay", "10.13.13.7", "config",
+                MachineType.UBUNTU_SERVER, "192.168.9.0/24", null)));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("usa-relay", "10.13.13.7", "config", MachineType.UBUNTU_SERVER, "192.168.9.0/24", null)));
+
+        service.setInternetGateway("usa-relay");
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.7", "10.13.13.7/32,192.168.9.0/24,0.0.0.0/0");
+        verify(forUpdatingPeerConfigurations).updateInternetGateway("usa-relay", true);
+    }
+
+    @Test
+    void setInternetGateway_revertsPreviouslyDesignatedPeer() {
+        PeerConfiguration current = new PeerConfiguration("old-gw", "old-gw", "10.13.13.4", "config",
+            MachineType.UBUNTU_SERVER, null, null, null, null, true);
+        PeerConfiguration target = new PeerConfiguration("new-gw", "10.13.13.5", "config",
+            MachineType.UBUNTU_SERVER, null, null);
+        when(peerConfigProvider.getPeerConfigByName("new-gw")).thenReturn(Optional.of(target));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(current, target));
+
+        service.setInternetGateway("new-gw");
+
+        // Old gateway reverts to plain /32; new one gains the default route. Both flags persisted.
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.4", "10.13.13.4/32");
+        verify(forUpdatingPeerConfigurations).updateInternetGateway("old-gw", false);
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.5", "10.13.13.5/32,0.0.0.0/0");
+        verify(forUpdatingPeerConfigurations).updateInternetGateway("new-gw", true);
+    }
+
+    @Test
+    void setInternetGateway_throwsWhenPeerDoesNotExist() {
+        when(peerConfigProvider.getPeerConfigByName("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.setInternetGateway("ghost"))
+            .isInstanceOf(PeerNotFoundException.class)
+            .hasMessageContaining("ghost");
+
+        verifyNoInteractions(forUpdatingServerAllowedIps);
+        verify(forUpdatingPeerConfigurations, never()).updateInternetGateway(any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void setInternetGateway_rejectsClientTypePeer() {
+        when(peerConfigProvider.getPeerConfigByName("phone"))
+            .thenReturn(Optional.of(new PeerConfiguration("phone", "10.13.13.2", "config",
+                MachineType.MOBILE_CLIENT, null, null)));
+
+        assertThatThrownBy(() -> service.setInternetGateway("phone"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(forUpdatingServerAllowedIps);
+        verify(forUpdatingPeerConfigurations, never()).updateInternetGateway(any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void setInternetGateway_rejectsWindowsServerPeer() {
+        // Windows servers don't run the bash setup script that installs the egress NAT rules.
+        when(peerConfigProvider.getPeerConfigByName("win"))
+            .thenReturn(Optional.of(new PeerConfiguration("win", "10.13.13.3", "config",
+                MachineType.WINDOWS_SERVER, null, null)));
+
+        assertThatThrownBy(() -> service.setInternetGateway("win"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(forUpdatingServerAllowedIps);
+    }
+
+    @Test
+    void setInternetGateway_leavesOtherPeersAtSlash32() {
+        // Regression: peer-to-peer routing is unaffected — only the designated peer's AllowedIPs
+        // changes; the others keep their /32 (no setPeerAllowedIps call for them).
+        PeerConfiguration target = new PeerConfiguration("usa-box", "10.13.13.6", "config",
+            MachineType.UBUNTU_SERVER, null, null);
+        PeerConfiguration other = new PeerConfiguration("phone", "10.13.13.2", "config",
+            MachineType.MOBILE_CLIENT, null, null);
+        when(peerConfigProvider.getPeerConfigByName("usa-box")).thenReturn(Optional.of(target));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(target, other));
+
+        service.setInternetGateway("usa-box");
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.6", "10.13.13.6/32,0.0.0.0/0");
+        verify(forUpdatingServerAllowedIps, never()).setPeerAllowedIps(eq("10.13.13.2"), any());
+    }
+
+    @Test
+    void clearInternetGateway_revertsCurrentGateway() {
+        PeerConfiguration current = new PeerConfiguration("usa-box", "usa-box", "10.13.13.6", "config",
+            MachineType.UBUNTU_SERVER, null, null, null, null, true);
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(current));
+
+        service.clearInternetGateway();
+
+        verify(forUpdatingServerAllowedIps).setPeerAllowedIps("10.13.13.6", "10.13.13.6/32");
+        verify(forUpdatingPeerConfigurations).updateInternetGateway("usa-box", false);
+    }
+
+    @Test
+    void clearInternetGateway_isNoOpWhenNoGatewayDesignated() {
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("usa-box", "10.13.13.6", "config", MachineType.UBUNTU_SERVER, null, null)));
+
+        service.clearInternetGateway();
+
+        verifyNoInteractions(forUpdatingServerAllowedIps);
+        verify(forUpdatingPeerConfigurations, never()).updateInternetGateway(any(), org.mockito.ArgumentMatchers.anyBoolean());
     }
 
     // --- updateLanCidr (#195) — reject shell-injection payloads at the boundary ---

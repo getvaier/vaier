@@ -12,6 +12,13 @@ public final class PeerSetupScript {
 
     public static String generate(String peerName, String vpnIp, String serverUrl, String serverPort,
                                   String wgConfig, String lanCidr, String vpnSubnet) {
+        return generate(peerName, vpnIp, serverUrl, serverPort, wgConfig, lanCidr, vpnSubnet,
+                MachineType.defaultType());
+    }
+
+    public static String generate(String peerName, String vpnIp, String serverUrl, String serverPort,
+                                  String wgConfig, String lanCidr, String vpnSubnet,
+                                  MachineType peerType) {
         var sb = new StringBuilder();
         sb.append("#!/bin/bash\n");
         sb.append("set -euo pipefail\n");
@@ -90,13 +97,24 @@ public final class PeerSetupScript {
         sb.append("sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1\n");
         sb.append("echo 'net.ipv4.conf.all.src_valid_mark=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
 
+        boolean serverType = peerType != null && peerType.isServerType();
+
+        // --- IP forwarding (server-type peers): enabled and persisted exactly once ---
+        // Both the relay block and the unconditional internet-egress block (#174) need
+        // net.ipv4.ip_forward; write the enable+persist here so it is not duplicated when a peer
+        // is both a relay and the internet gateway. Reuses the existing relay sysctl-persist pattern.
+        if (serverType) {
+            sb.append("\n");
+            sb.append("# --- Enable IP forwarding (required for relay and internet-egress NAT) ---\n");
+            sb.append("sudo sysctl -w net.ipv4.ip_forward=1\n");
+            sb.append("grep -qxF 'net.ipv4.ip_forward=1' /etc/sysctl.d/99-wireguard.conf 2>/dev/null \\\n");
+            sb.append("  || echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
+        }
+
         if (lanCidr != null && !lanCidr.isBlank()) {
             String lan = lanCidr.trim();
             sb.append("\n");
             sb.append("# --- Relay peer: forward VPN traffic to LAN ").append(lan).append(" ---\n");
-            sb.append("sudo sysctl -w net.ipv4.ip_forward=1\n");
-            sb.append("grep -qxF 'net.ipv4.ip_forward=1' /etc/sysctl.d/99-wireguard.conf 2>/dev/null \\\n");
-            sb.append("  || echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
             sb.append("sudo iptables -t nat -C POSTROUTING -s ").append(vpnSubnet).append(" -d ").append(lan)
                 .append(" -j MASQUERADE 2>/dev/null \\\n");
             sb.append("  || sudo iptables -t nat -A POSTROUTING -s ").append(vpnSubnet).append(" -d ").append(lan)
@@ -138,6 +156,65 @@ public final class PeerSetupScript {
             sb.append("UNIT_FILE\n");
             sb.append("sudo systemctl daemon-reload\n");
             sb.append("sudo systemctl enable --now vaier-wg-relay-iptables.service\n");
+        }
+
+        if (serverType) {
+            // --- Internet egress (#174): always installed on server-type peers ---
+            // Masquerades all VPN-sourced traffic out the host's default-route interface, so this
+            // peer can serve as Vaier's central internet gateway. DORMANT unless the Vaier server
+            // forwards 0.0.0.0/0 to this peer (only the single designated gateway gets that), so
+            // it is harmless on every server peer. No -d filter: NAT everything the server routes
+            // here for full-tunnel clients. Egress iface detected at runtime (not baked in) so it
+            // survives NIC renames.
+            sb.append("\n");
+            sb.append("# --- Internet egress NAT: masquerade VPN traffic out the default interface ---\n");
+            sb.append("EGRESS_IF=$(ip route show default | grep -oP '(?<=dev )\\S+' | head -1)\n");
+            sb.append("if [ -z \"$EGRESS_IF\" ]; then\n");
+            sb.append("  echo 'WARNING: could not detect default egress interface; skipping internet-egress NAT'\n");
+            sb.append("else\n");
+            sb.append("  sudo iptables -t nat -C POSTROUTING -s ").append(vpnSubnet)
+                .append(" -o \"$EGRESS_IF\" -j MASQUERADE 2>/dev/null \\\n");
+            sb.append("    || sudo iptables -t nat -A POSTROUTING -s ").append(vpnSubnet)
+                .append(" -o \"$EGRESS_IF\" -j MASQUERADE\n");
+            sb.append("  sudo iptables -C FORWARD -s ").append(vpnSubnet)
+                .append(" -o \"$EGRESS_IF\" -j ACCEPT 2>/dev/null \\\n");
+            sb.append("    || sudo iptables -A FORWARD -s ").append(vpnSubnet)
+                .append(" -o \"$EGRESS_IF\" -j ACCEPT\n");
+            sb.append("  sudo iptables -C FORWARD -d ").append(vpnSubnet)
+                .append(" -i \"$EGRESS_IF\" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\\n");
+            sb.append("    || sudo iptables -A FORWARD -d ").append(vpnSubnet)
+                .append(" -i \"$EGRESS_IF\" -m state --state RELATED,ESTABLISHED -j ACCEPT\n");
+            sb.append("fi\n");
+
+            // Persist egress rules across reboots via a sibling systemd oneshot. The ExecStart lines
+            // re-detect $EGRESS_IF at boot rather than baking a possibly-stale iface name into the
+            // unit. Idempotent (-C ... || -A ...), distro-agnostic (no iptables-persistent).
+            sb.append("\n");
+            sb.append("# --- Persist internet-egress iptables rules across reboot via systemd oneshot ---\n");
+            sb.append("sudo tee /etc/systemd/system/vaier-wg-egress-iptables.service > /dev/null << 'EGRESS_UNIT'\n");
+            sb.append("[Unit]\n");
+            sb.append("Description=Vaier WireGuard internet-egress iptables rules\n");
+            sb.append("After=network-online.target\n");
+            sb.append("Wants=network-online.target\n");
+            sb.append("\n");
+            sb.append("[Service]\n");
+            sb.append("Type=oneshot\n");
+            sb.append("RemainAfterExit=yes\n");
+            sb.append("ExecStart=/bin/sh -c 'EGRESS_IF=$(ip route show default | grep -oP \"(?<=dev )\\S+\" | head -1); [ -z \"$EGRESS_IF\" ] && exit 0; iptables -t nat -C POSTROUTING -s ")
+                .append(vpnSubnet).append(" -o \"$EGRESS_IF\" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ")
+                .append(vpnSubnet).append(" -o \"$EGRESS_IF\" -j MASQUERADE'\n");
+            sb.append("ExecStart=/bin/sh -c 'EGRESS_IF=$(ip route show default | grep -oP \"(?<=dev )\\S+\" | head -1); [ -z \"$EGRESS_IF\" ] && exit 0; iptables -C FORWARD -s ")
+                .append(vpnSubnet).append(" -o \"$EGRESS_IF\" -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ")
+                .append(vpnSubnet).append(" -o \"$EGRESS_IF\" -j ACCEPT'\n");
+            sb.append("ExecStart=/bin/sh -c 'EGRESS_IF=$(ip route show default | grep -oP \"(?<=dev )\\S+\" | head -1); [ -z \"$EGRESS_IF\" ] && exit 0; iptables -C FORWARD -d ")
+                .append(vpnSubnet).append(" -i \"$EGRESS_IF\" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -d ")
+                .append(vpnSubnet).append(" -i \"$EGRESS_IF\" -m state --state RELATED,ESTABLISHED -j ACCEPT'\n");
+            sb.append("\n");
+            sb.append("[Install]\n");
+            sb.append("WantedBy=multi-user.target\n");
+            sb.append("EGRESS_UNIT\n");
+            sb.append("sudo systemctl daemon-reload\n");
+            sb.append("sudo systemctl enable --now vaier-wg-egress-iptables.service\n");
         }
 
         sb.append("\n");

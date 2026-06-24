@@ -37,7 +37,7 @@ class VpnPeerControllerIT extends VaierWebMvcIntegrationBase {
                 "1.2.3.4", "51820", "2024-01-01", true, "100", "200",
                 MachineType.UBUNTU_SERVER, true, false, false, Set.of(),
                 null, null, null, Optional.empty(), false,
-                net.vaier.domain.DeviceCategory.SERVER, false);
+                net.vaier.domain.DeviceCategory.SERVER, false, false);
         when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(view));
 
         mockMvc.perform(get("/vpn/peers"))

@@ -15,6 +15,16 @@ public enum MachineType {
         return this != LAN_SERVER;
     }
 
+    /**
+     * Whether this peer type may be designated Vaier's internet gateway (#174). Only Linux server
+     * peers ({@code UBUNTU_SERVER}) qualify: they run the bash setup script that installs the
+     * internet-egress NAT rules the gateway role depends on. Windows servers and LAN servers don't
+     * run that script; client types full-tunnel through the server, never out.
+     */
+    public boolean canBeInternetGateway() {
+        return this == UBUNTU_SERVER;
+    }
+
     public String defaultAllowedIps(String vpnSubnet) {
         return isServerType() ? vpnSubnet : "0.0.0.0/0";
     }
