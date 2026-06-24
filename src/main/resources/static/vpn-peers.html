@@ -2628,7 +2628,7 @@
 
             // Centre: the Vaier hub. Always shown, even with no peers and no geoip data.
             const hubSub = (_serverLocation && _serverLocation.publicHost) ? _serverLocation.publicHost : '';
-            netAddNode(host, cx, cy, 'vaier', 'up', 'Vaier server', hubSub, true, false);
+            netAddNode(host, cx, cy, 'vaier', 'up', 'Vaier server', hubSub, true, false, false);
 
             // Inner ring: every VPN peer, spread evenly, an edge back to the hub.
             const n = peers.length;
