@@ -1,6 +1,13 @@
 // Map view for the Machines page (#273 slice 3): Leaflet setup + marker rendering.
-// Classic script loaded before vpn-peers.js (its init calls setupPeerMap at load).
-// Reads shared state (peers, lanServers, _serverLocation, _peerMap) declared in vpn-peers.js.
+// Classic script loaded before vpn-peers.js (its init calls setupPeerMap at load) and after
+// vpn-peers-helpers.js, whose escapeHtml / machineIconSvg / deviceCategoryIconKind it uses.
+// Owns the Leaflet map state below; reads peers / lanServers / _serverLocation, declared in
+// vpn-peers.js, via the shared classic-script global scope.
+
+// Map state lives here (this file assigns it) so the assignment isn't an implicit global; switchTab
+// and the refresh triggers in vpn-peers.js read _peerMap from the shared scope.
+let _peerMap = null;
+let _markersClusterGroup = null;
 
 function setupPeerMap() {
     if (typeof L === 'undefined') return;

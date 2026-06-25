@@ -1355,8 +1355,8 @@
             }
         };
 
-        let _peerMap = null;
-        let _markersClusterGroup = null;
+        // _peerMap and _markersClusterGroup are declared in vpn-peers-map.js (which owns and assigns
+        // them); this file only reads _peerMap. _serverLocation is shared with the map + diagram.
         let _serverLocation = null;
         let _activeTab = 'list';
 
