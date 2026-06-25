@@ -11,13 +11,19 @@
     <link rel="stylesheet" href="vpn-peers.css">
     <script src="vendor/leaflet/leaflet.js"></script>
     <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
+    <!-- Topology force graph (Cytoscape + cola). Load order matters: cytoscape defines the global,
+         webcola defines `cola`, then cytoscape-cola registers the continuous 'cola' layout. cola is
+         a live physics simulation, so dragging a node makes its neighbours reflow. -->
+    <script src="vendor/cytoscape/cytoscape.min.js"></script>
+    <script src="vendor/cytoscape/cola.min.js"></script>
+    <script src="vendor/cytoscape/cytoscape-cola.js"></script>
 </head>
 <body>
     <div class="container">
         <div class="tab-nav">
             <button class="tab-button active" data-tab="list"    onclick="switchTab('list')">List</button>
             <button class="tab-button"        data-tab="map"     onclick="switchTab('map')">Map</button>
-            <button class="tab-button"        data-tab="diagram" onclick="switchTab('diagram')">Network</button>
+            <button class="tab-button"        data-tab="topology" onclick="switchTab('topology')">Topology</button>
         </div>
         <div class="tab-panel active" id="tab-panel-list">
             <div id="peers-container">
@@ -28,7 +34,7 @@
             <div id="peer-map"></div>
             <div class="map-attribution">IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a></div>
         </div>
-        <div class="tab-panel" id="tab-panel-diagram">
+        <div class="tab-panel" id="tab-panel-topology">
             <div id="network-diagram"></div>
         </div>
     </div>
