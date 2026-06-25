@@ -1151,8 +1151,50 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         // Do NOT remove middlewares as they are typically shared (e.g., auth-middleware)
 
         removeLanServiceMarker(deriveDnsNameFromRouter(routeName));
+        removeRouterSidecarMetadata(routeName);
 
         saveConfig();
+    }
+
+    /**
+     * Strip every per-router sidecar metadata entry for a deleted router. The launchpad-alias
+     * (display name), hidden-from-launchpad, direct-url-disabled and version-endpoint collections
+     * are keyed by router name, which is deterministic from the FQDN — so without this a service
+     * re-published on the same FQDN would silently inherit the deleted route's display name, hidden
+     * flag, direct-URL-disabled flag or version endpoint.
+     */
+    private void removeRouterSidecarMetadata(String routerName) {
+        if (config == null) return;
+        removeFromMapSidecar(LAUNCHPAD_ALIAS_KEY, routerName);
+        removeFromMapSidecar(VERSION_ENDPOINT_KEY, routerName);
+        removeFromListSidecar(HIDDEN_FROM_LAUNCHPAD_KEY, routerName);
+        // direct-url-disabled may also carry a legacy bare-FQDN entry for host-only routes.
+        removeFromListSidecar(DIRECT_URL_DISABLED_KEY, routerName, deriveDnsNameFromRouter(routerName));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void removeFromMapSidecar(String key, String entryKey) {
+        Object raw = config.get(key);
+        if (!(raw instanceof Map<?, ?> m)) return;
+        Map<String, Object> map = new LinkedHashMap<>((Map<String, Object>) m);
+        if (map.remove(entryKey) != null) {
+            if (map.isEmpty()) config.remove(key);
+            else config.put(key, map);
+        }
+    }
+
+    private void removeFromListSidecar(String key, String... entries) {
+        Object raw = config.get(key);
+        if (!(raw instanceof List<?> l)) return;
+        List<String> list = new ArrayList<>(l.stream().map(Object::toString).toList());
+        boolean changed = false;
+        for (String e : entries) {
+            if (e != null) changed |= list.remove(e);
+        }
+        if (changed) {
+            if (list.isEmpty()) config.remove(key);
+            else config.put(key, list);
+        }
     }
 
     @SuppressWarnings("unchecked")

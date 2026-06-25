@@ -76,6 +76,37 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
+    void deleteRoute_clearsLaunchpadAlias_soRepublishDoesNotResurrectIt() {
+        // Bug: set a display name (launchpad alias), delete the machine/service, then re-publish the
+        // same FQDN — the alias must not come back. Sidecar metadata is keyed by router name, which
+        // is deterministic from the FQDN, so a leftover entry re-applies to the new route.
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteLaunchpadAlias("asd.example.com", null, "HUE");
+        assertThat(adapter.getReverseProxyRoutes().getFirst().getLaunchpadAlias()).isEqualTo("HUE");
+
+        adapter.deleteReverseProxyRouteByDnsName("asd.example.com");
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+
+        assertThat(adapter.getReverseProxyRoutes().getFirst().getLaunchpadAlias()).isNull();
+    }
+
+    @Test
+    void deleteRoute_clearsHiddenDirectUrlAndVersionSidecars() {
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteHiddenFromLaunchpad("asd.example.com", null, true);
+        adapter.setRouteDirectUrlDisabled("asd.example.com", null, true);
+        adapter.setRouteVersionEndpoint("asd.example.com", null, "/version", "value");
+
+        adapter.deleteReverseProxyRouteByDnsName("asd.example.com");
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute r = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(r.isHiddenFromLaunchpad()).isFalse();
+        assertThat(r.isDirectUrlDisabled()).isFalse();
+        assertThat(r.getVersionEndpoint()).isNull();
+    }
+
+    @Test
     void deleteRoute_throwsWhenRouterNotFound() {
         assertThatThrownBy(() -> adapter.deleteReverseProxyRouteByDnsName("nonexistent.example.com"))
                 .isInstanceOf(RuntimeException.class);
