@@ -2002,10 +2002,7 @@
             if (show) refreshModalScanResults(++_modalScanToken);
         }
 
-        function escapeHtml(s) {
-            return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
-                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-        }
+        // (escapeHtml is defined once, near jsArg above — the duplicate here was removed in #273.)
 
         setupPeerMap();
         fetchPeers();
