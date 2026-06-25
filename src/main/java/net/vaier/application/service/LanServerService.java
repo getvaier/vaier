@@ -24,6 +24,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -58,7 +59,11 @@ public class LanServerService implements
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
                             ForResolvingServerLanCidr forResolvingServerLanCidr,
                             ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
-                            DeletePublishedServiceUseCase deletePublishedServiceUseCase) {
+                            // @Lazy breaks the construction-time bean cycle
+                            // PublishingService -> ContainerService -> LanServerService (ForGettingLanServers)
+                            // -> PublishingService (this cascade port). The cascade only invokes it at
+                            // delete() time, so a lazy proxy is semantically safe.
+                            @Lazy DeletePublishedServiceUseCase deletePublishedServiceUseCase) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
