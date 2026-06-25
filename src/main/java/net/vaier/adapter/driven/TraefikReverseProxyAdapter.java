@@ -1111,9 +1111,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
-     * Delete a reverse proxy route from the Traefik configuration.
-     * Only removes the router and its associated service.
-     * Middlewares are NOT removed as they may be shared between multiple routers.
+     * Delete a reverse proxy route from the Traefik configuration: the router, its associated
+     * service, and all Vaier sidecar metadata for that router (launchpad alias, hidden-from-launchpad,
+     * direct-url-disabled, version-endpoint) plus the LAN-service marker. Middlewares are NOT removed
+     * as they may be shared between multiple routers.
      */
     @Override
     public void deleteReverseProxyRoute(String routeName) {
@@ -1156,7 +1157,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         // Do NOT remove middlewares as they are typically shared (e.g., auth-middleware)
 
-        removeLanServiceMarker(deriveDnsNameFromRouter(routeName));
+        // The LAN-service marker is FQDN-keyed, so key its removal off the real FQDN (host-only
+        // deletes), not an FQDN derived from the router name — that derivation is wrong for
+        // path-scoped names and could clear an unintended marker.
+        removeLanServiceMarker(legacyHostOnlyFqdn);
         removeRouterSidecarMetadata(routeName);
         // The legacy bare-FQDN direct-url-disabled entry only ever existed for host-only routes, and
         // a router name can't distinguish host-only from path-scoped (a host route for "a.b.auth" and
@@ -1219,10 +1223,6 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             if (markers.isEmpty()) config.remove(LAN_SERVICE_KEY);
             else config.put(LAN_SERVICE_KEY, markers);
         }
-    }
-
-    private String deriveDnsNameFromRouter(String routerName) {
-        return ReverseProxyRoute.dnsNameFromRouterName(routerName);
     }
 
     /**
