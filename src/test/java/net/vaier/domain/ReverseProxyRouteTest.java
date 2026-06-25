@@ -127,6 +127,30 @@ class ReverseProxyRouteTest {
         assertThat(route.getPathPrefix()).isNull();
     }
 
+    // --- isVaierManaged ---
+
+    @Test
+    void isVaierManaged_trueForPlainFileRouterName() {
+        ReverseProxyRoute route = new ReverseProxyRoute("pump-router", "pump.example.com", "10.0.0.1", 80, "svc", null);
+
+        assertThat(route.isVaierManaged()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"whoami@docker", "dashboard@internal", "app-router@file"})
+    void isVaierManaged_falseForTraefikProviderSuffixedName(String apiRouterName) {
+        ReverseProxyRoute route = new ReverseProxyRoute(apiRouterName, "x.example.com", "10.0.0.1", 80, "svc", null);
+
+        assertThat(route.isVaierManaged()).isFalse();
+    }
+
+    @Test
+    void isVaierManaged_falseForNullName() {
+        ReverseProxyRoute route = new ReverseProxyRoute(null, "x.example.com", "10.0.0.1", 80, "svc", null);
+
+        assertThat(route.isVaierManaged()).isFalse();
+    }
+
     // --- hiddenFromLaunchpad ---
 
     @Test

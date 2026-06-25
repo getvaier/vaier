@@ -602,6 +602,22 @@ class VpnServiceTest {
     }
 
     @Test
+    void deletePeer_doesNotCascadeIntoApiOnlyDockerRouteOnSamePeerIp() {
+        // An API-only Traefik route (name@provider) has no file entry; deleting it would throw
+        // "Router not found" and abort the peer deletion. The cascade must skip it even when it
+        // shares the peer's IP — only Vaier-managed file routes cascade.
+        when(peerConfigProvider.getPeerConfigByName("alice"))
+            .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
+        ReverseProxyRoute dockerRoute = new ReverseProxyRoute("app@docker", "app.example.com", "10.13.13.2", 8080, "app-service", null);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(dockerRoute));
+
+        service.deletePeer("alice");
+
+        verify(vpnPeerDeleter).deletePeer("alice");
+        verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
+    }
+
+    @Test
     void deletePeer_noPublishedServicesForPeer_stillDeletesPeer() {
         when(peerConfigProvider.getPeerConfigByName("alice"))
             .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));

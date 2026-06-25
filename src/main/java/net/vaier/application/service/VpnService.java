@@ -398,6 +398,7 @@ public class VpnService implements
 
             List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
             routes.stream()
+                .filter(ReverseProxyRoute::isVaierManaged)
                 .filter(route -> peerIp.equals(route.getAddress()))
                 .forEach(route -> {
                     log.info("Deleting published service {} (path: {}) pointing to peer {}",
