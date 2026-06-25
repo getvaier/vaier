@@ -1189,7 +1189,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         Object raw = config.get(key);
         if (!(raw instanceof Map<?, ?> m)) return;
         Map<String, Object> map = new LinkedHashMap<>((Map<String, Object>) m);
-        if (map.remove(entryKey) != null) {
+        // Decide on containsKey, not the remove() return value: an entry with an explicit null value
+        // (manual edits / partial writes) would otherwise be left behind, since remove() returns null.
+        if (map.containsKey(entryKey)) {
+            map.remove(entryKey);
             if (map.isEmpty()) config.remove(key);
             else config.put(key, map);
         }

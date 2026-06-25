@@ -144,6 +144,22 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
+    void deleteRoute_removesSidecarEntryEvenWithExplicitNullValue() throws IOException {
+        // A sidecar entry with an explicit null value (manual edits / partial writes) must still be
+        // removed on delete. Map.remove returns null for an explicit-null value, so a naive
+        // remove()-non-null check would leave the stale key behind.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        String routerName = ReverseProxyRoute.routerName("app.example.com", null);
+        Path cfg = tempDir.resolve("remote-apps.yml");
+        Files.writeString(cfg, Files.readString(cfg)
+                + "\nx-vaier-launchpad-alias:\n  " + routerName + ": null\n");
+
+        adapter.deleteReverseProxyRoute(routerName);
+
+        assertThat(Files.readString(cfg)).doesNotContain("x-vaier-launchpad-alias");
+    }
+
+    @Test
     void deleteRoute_throwsWhenRouterNotFound() {
         assertThatThrownBy(() -> adapter.deleteReverseProxyRouteByDnsName("nonexistent.example.com"))
                 .isInstanceOf(RuntimeException.class);
