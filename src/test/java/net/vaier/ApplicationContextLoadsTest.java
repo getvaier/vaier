@@ -1,7 +1,9 @@
 package net.vaier;
 
+import net.vaier.domain.port.ForExecutingInContainer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -20,6 +22,13 @@ import org.springframework.test.context.ActiveProfiles;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("integration")
 class ApplicationContextLoadsTest {
+
+    // DockerExecAdapter's @PostConstruct pings the Docker daemon and rethrows if it can't connect,
+    // which would make this purely-wiring guard fail wherever Docker is absent (CI, contributors).
+    // Mock its port so the real adapter isn't created; the bean cycle this test guards is entirely
+    // among the service beans, so they stay real and the guard is unaffected.
+    @MockBean
+    private ForExecutingInContainer forExecutingInContainer;
 
     @Test
     void contextLoads() {
