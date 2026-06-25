@@ -297,6 +297,22 @@ class LanServerServiceTest {
     }
 
     @Test
+    void delete_doesNotCascadeIntoApiOnlyDockerRouteOnSameLanAddress() {
+        // A Traefik API-only route (name@provider, e.g. @docker) has no file entry, so deleting it
+        // would throw "Router not found" and abort the LAN-server deletion. Even when it happens to
+        // share the LAN server's address, the cascade must skip it — only Vaier-managed file routes cascade.
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("pump", "192.168.1.101", false, null)));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            lanRoute("pump@docker", "pump.eilertsen.family", "192.168.1.101", 80, null)));
+
+        service.delete("pump");
+
+        verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
+        verify(forPersistingLanServers).deleteByName("pump");
+    }
+
+    @Test
     void delete_cascadesIntoEveryRouteOnTheSameLanAddress() {
         when(forPersistingLanServers.getAll()).thenReturn(List.of(
             new LanServer("pump", "192.168.1.101", false, null)));

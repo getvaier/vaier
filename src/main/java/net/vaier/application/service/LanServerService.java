@@ -17,6 +17,7 @@ import net.vaier.domain.Machine;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.LanServerSetupScript;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -146,6 +147,7 @@ public class LanServerService implements
             String lanAddress = server.lanAddress();
             if (lanAddress == null || lanAddress.isBlank()) return;
             forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+                .filter(ReverseProxyRoute::isVaierManaged)
                 .filter(route -> lanAddress.equals(route.getAddress()))
                 .forEach(route -> {
                     log.info("Deleting published service {} (path: {}) pointing to LAN server {}",
