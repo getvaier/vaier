@@ -130,6 +130,20 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
+    void deleteHostOnlyRouteByRouterName_clearsFqdnKeyedLanMarker() {
+        // Rollback paths delete host-only routes via deleteReverseProxyRoute(routerName), not by
+        // DNS name. The FQDN-keyed LAN-service marker must still be cleared — derived from the
+        // route's own rule, not from the caller.
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.1.50", 80, "http", false, false, null);
+        assertThat(adapter.getReverseProxyRoutes().getFirst().isLanService()).isTrue();
+
+        adapter.deleteReverseProxyRoute(ReverseProxyRoute.routerName("nas.example.com", null));
+        adapter.addReverseProxyRoute("nas.example.com", "10.13.13.2", 8080, false, null);
+
+        assertThat(adapter.getReverseProxyRoutes().getFirst().isLanService()).isFalse();
+    }
+
+    @Test
     void deleteRoute_throwsWhenRouterNotFound() {
         assertThatThrownBy(() -> adapter.deleteReverseProxyRouteByDnsName("nonexistent.example.com"))
                 .isInstanceOf(RuntimeException.class);

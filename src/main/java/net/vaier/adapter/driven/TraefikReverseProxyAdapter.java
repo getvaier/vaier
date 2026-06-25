@@ -1118,12 +1118,6 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void deleteReverseProxyRoute(String routeName) {
-        // Path-scoped deletes arrive with only the router name and never had a legacy bare-FQDN
-        // sidecar entry (that format predates path routing), so there is none to strip.
-        deleteRouteInternal(routeName, null);
-    }
-
-    private void deleteRouteInternal(String routeName, String legacyHostOnlyFqdn) {
         loadConfig();
 
         if (config == null) {
@@ -1142,9 +1136,14 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             throw new RuntimeException("Router not found: " + routeName);
         }
 
-        // Get service name before removing router
+        // Read the FQDN and whether the route is path-scoped from its own rule. This is authoritative
+        // and correct for every caller — deleteReverseProxyRouteByDnsName, path-based deletes, and the
+        // rollback paths that delete host-only routes by router name — whereas the router name alone
+        // can't tell host-only from path-scoped apart.
         Map<String, Object> routerConfig = castToMap(routers.get(routeName));
         String serviceName = routerConfig != null ? (String) routerConfig.get("service") : null;
+        String fqdn = routerConfig != null ? extractDomainFromRule(routerConfig) : null;
+        boolean hostOnly = routerConfig != null && extractPathPrefixFromRule(routerConfig) == null;
 
         // Remove router
         routers.remove(routeName);
@@ -1157,17 +1156,14 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         // Do NOT remove middlewares as they are typically shared (e.g., auth-middleware)
 
-        // The LAN-service marker is FQDN-keyed, so key its removal off the real FQDN (host-only
-        // deletes), not an FQDN derived from the router name — that derivation is wrong for
-        // path-scoped names and could clear an unintended marker.
-        removeLanServiceMarker(legacyHostOnlyFqdn);
+        // Router-name-keyed sidecars are this route's own — strip them on every delete.
         removeRouterSidecarMetadata(routeName);
-        // The legacy bare-FQDN direct-url-disabled entry only ever existed for host-only routes, and
-        // a router name can't distinguish host-only from path-scoped (a host route for "a.b.auth" and
-        // a "/auth" path route on "a.b" share a name). So strip it only on the host-only delete path,
-        // which hands us the real FQDN.
-        if (legacyHostOnlyFqdn != null) {
-            removeFromListSidecar(DIRECT_URL_DISABLED_KEY, legacyHostOnlyFqdn);
+        // FQDN-keyed state (the LAN-service marker and the legacy bare-FQDN direct-url-disabled entry)
+        // is shared by every route on the host, so only clear it for a host-only route — a path-scoped
+        // delete must leave its siblings' host-level state intact.
+        if (hostOnly && fqdn != null) {
+            removeLanServiceMarker(fqdn);
+            removeFromListSidecar(DIRECT_URL_DISABLED_KEY, fqdn);
         }
 
         saveConfig();
@@ -1233,9 +1229,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void deleteReverseProxyRouteByDnsName(String dnsName) {
-        // Host-only delete: pass the real FQDN so the legacy bare-FQDN direct-url-disabled entry
-        // (which only exists for host-only routes) can be stripped unambiguously.
-        deleteRouteInternal(generateRouterName(dnsName), dnsName);
+        deleteReverseProxyRoute(generateRouterName(dnsName));
     }
 
     @Override
