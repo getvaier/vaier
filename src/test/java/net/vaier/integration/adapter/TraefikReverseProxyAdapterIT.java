@@ -160,6 +160,22 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
+    void deleteRoute_removesAllDuplicateListEntries_andToleratesNullElements() throws IOException {
+        // Hand-edited YAML may contain duplicate or null list entries. Delete must not throw on a
+        // null element and must remove every occurrence, not just the first.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        String routerName = ReverseProxyRoute.routerName("app.example.com", null);
+        Path cfg = tempDir.resolve("remote-apps.yml");
+        Files.writeString(cfg, Files.readString(cfg)
+                + "\nx-vaier-hidden-from-launchpad:\n  - " + routerName + "\n  - " + routerName + "\n  - null\n");
+
+        adapter.deleteReverseProxyRoute(routerName);
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        assertThat(adapter.getReverseProxyRoutes().getFirst().isHiddenFromLaunchpad()).isFalse();
+    }
+
+    @Test
     void deleteRoute_throwsWhenRouterNotFound() {
         assertThatThrownBy(() -> adapter.deleteReverseProxyRouteByDnsName("nonexistent.example.com"))
                 .isInstanceOf(RuntimeException.class);

@@ -1201,10 +1201,15 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     private void removeFromListSidecar(String key, String... entries) {
         Object raw = config.get(key);
         if (!(raw instanceof List<?> l)) return;
-        List<String> list = new ArrayList<>(l.stream().map(Object::toString).toList());
+        // Tolerate hand-edited YAML: skip null elements (Object::toString would NPE) and remove every
+        // occurrence of each entry, not just the first, so duplicates can't leave stale metadata.
+        List<String> list = l.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         boolean changed = false;
         for (String e : entries) {
-            if (e != null) changed |= list.remove(e);
+            if (e != null) changed |= list.removeIf(e::equals);
         }
         if (changed) {
             if (list.isEmpty()) config.remove(key);
