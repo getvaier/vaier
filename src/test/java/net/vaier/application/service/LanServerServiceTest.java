@@ -1,13 +1,16 @@
 package net.vaier.application.service;
 
+import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
+import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,8 +37,16 @@ class LanServerServiceTest {
     @Mock private ForPersistingLanServers forPersistingLanServers;
     @Mock private ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock private ForResolvingServerLanCidr forResolvingServerLanCidr;
+    @Mock private ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+    @Mock private DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @InjectMocks private LanServerService service;
+
+    private static ReverseProxyRoute lanRoute(String name, String fqdn, String address, int port,
+                                              String pathPrefix) {
+        return new ReverseProxyRoute(name, fqdn, address, port, name + "-service", null, null, null,
+            null, null, false, true, "http", pathPrefix);
+    }
 
     @BeforeEach
     void setUp() {
@@ -238,9 +249,82 @@ class LanServerServiceTest {
 
     @Test
     void delete_callsAdapterWithName() {
+        // Unknown server (no matching LanServer): no cascade, but still deletes the record.
+        when(forPersistingLanServers.getAll()).thenReturn(List.of());
+
         service.delete("nas");
 
         verify(forPersistingLanServers).deleteByName("nas");
+        verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
+    }
+
+    @Test
+    void delete_cascadesIntoPublishedServiceOnMatchingLanAddress() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("pump", "192.168.1.101", false, null)));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            lanRoute("pump-router", "pump.eilertsen.family", "192.168.1.101", 80, null)));
+
+        service.delete("pump");
+
+        verify(deletePublishedServiceUseCase).deleteService("pump.eilertsen.family", null);
+        verify(forPersistingLanServers).deleteByName("pump");
+    }
+
+    @Test
+    void delete_doesNotDeleteRouteBelongingToADifferentMachine() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("pump", "192.168.1.101", false, null)));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            lanRoute("nas-router", "nas.eilertsen.family", "192.168.1.50", 80, null)));
+
+        service.delete("pump");
+
+        verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
+        verify(forPersistingLanServers).deleteByName("pump");
+    }
+
+    @Test
+    void delete_noMatchingRoutes_deletesRecordAndNeverCascades() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("pump", "192.168.1.101", false, null)));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+
+        service.delete("pump");
+
+        verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
+        verify(forPersistingLanServers).deleteByName("pump");
+    }
+
+    @Test
+    void delete_doesNotCascadeIntoApiOnlyDockerRouteOnSameLanAddress() {
+        // A Traefik API-only route (name@provider, e.g. @docker) has no file entry, so deleting it
+        // would throw "Router not found" and abort the LAN-server deletion. Even when it happens to
+        // share the LAN server's address, the cascade must skip it — only Vaier-managed file routes cascade.
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("pump", "192.168.1.101", false, null)));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            lanRoute("pump@docker", "pump.eilertsen.family", "192.168.1.101", 80, null)));
+
+        service.delete("pump");
+
+        verify(deletePublishedServiceUseCase, never()).deleteService(any(), any());
+        verify(forPersistingLanServers).deleteByName("pump");
+    }
+
+    @Test
+    void delete_cascadesIntoEveryRouteOnTheSameLanAddress() {
+        when(forPersistingLanServers.getAll()).thenReturn(List.of(
+            new LanServer("pump", "192.168.1.101", false, null)));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            lanRoute("pump-router", "pump.eilertsen.family", "192.168.1.101", 80, null),
+            lanRoute("pump-ui-router", "pump.eilertsen.family", "192.168.1.101", 8080, "/ui")));
+
+        service.delete("pump");
+
+        verify(deletePublishedServiceUseCase).deleteService("pump.eilertsen.family", null);
+        verify(deletePublishedServiceUseCase).deleteService("pump.eilertsen.family", "/ui");
+        verify(forPersistingLanServers).deleteByName("pump");
     }
 
     // --- getAll ---

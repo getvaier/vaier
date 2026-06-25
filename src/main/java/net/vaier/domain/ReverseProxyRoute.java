@@ -220,6 +220,18 @@ public class ReverseProxyRoute {
             .findFirst();
     }
 
+    /**
+     * True iff this route is one Vaier persists in its own Traefik dynamic-config file and can
+     * therefore delete. File-backed router names are plain slugs (e.g. {@code pump-router}); routes
+     * surfaced only from the Traefik API carry a {@code name@provider} suffix (e.g. {@code whoami@docker},
+     * {@code dashboard@internal}) and have no file entry — deleting one throws "Router not found".
+     * Cascade cleanup (peer / LAN-server deletion) filters on this so an unrelated Docker-label route
+     * that happens to share a backend address can't abort the deletion.
+     */
+    public boolean isVaierManaged() {
+        return name != null && !name.contains("@");
+    }
+
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service, AuthInfo authInfo) {
         this(name, domainName, address, port, service, authInfo, null, null, null, null, false);
     }

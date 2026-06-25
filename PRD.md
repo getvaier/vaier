@@ -179,7 +179,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 - Check publish status (DNS propagated, Traefik active)
 - Delete published service (removes DNS + Traefik route)
 - Edit root path redirect on published services
-- Auto-delete published services when a VPN peer is deleted
+- Auto-delete published services when a VPN peer or LAN server is deleted
 
 **Publish flow (confirmed UX):**
 
@@ -198,6 +198,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 **Also implemented:**
 - **Root redirect path UI** — collapsible "Advanced" section in the publish modal with an optional root path redirect input, wired to the `rootRedirectPath` API field. Redirect path is also editable on published services via a modal.
 - **Service cleanup on peer deletion** — when a VPN peer is deleted, all published services routing to that peer's IP are automatically removed (DNS + Traefik routes)
+- **Service cleanup on LAN-server deletion** — when a LAN server is deleted, all published services whose backend address equals that LAN server's `lanAddress` are automatically removed (DNS + Traefik routes). Mirrors the peer cascade: `LanServerService.delete` finds the matching reverse-proxy routes and removes each via `DeletePublishedServiceUseCase` before deleting the LAN-server record
 - **Published services page cleanup** — consolidated host/status rows, hide discovered section when empty, replaced fragile optimistic auth toggle with server-side refresh
 - **Publish rollback on failure** — if DNS propagation times out, Traefik route creation throws, or Traefik never picks up the new route, Vaier removes the CNAME (and, where applicable, the Traefik route) so no orphan records remain in Route53. Emits `publish-rolled-back` on the `published-services` SSE topic.
 - **Contextual help + error explanations in the publish flow** ✅ (closes [#56](https://github.com/getvaier/vaier/issues/56)) — UX/observability pass over the existing publish flow; no new endpoints or concepts.
