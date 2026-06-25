@@ -1220,9 +1220,11 @@
          */
         function inlineDownloadButton(label, filename, mimeType, content, primary) {
             if (!content) return '';
-            const cssEscapedFilename = filename.replace(/'/g, "\\'");
             const cls = primary ? 'btn btn-primary' : 'btn btn-secondary';
-            return `<button class="${cls}" onclick="downloadInline('${cssEscapedFilename}', '${mimeType}', this)" data-content-ref="${filename}">${label}</button>`;
+            // filename and label derive from the operator-controlled peer name. jsArg neutralises
+            // JS-string + HTML-attribute breakouts for the onclick args; escapeHtml guards the label.
+            // (downloadInline keys off _showOncePayloads by filename, so no data attribute is needed.)
+            return `<button class="${cls}" onclick="downloadInline('${jsArg(filename)}', '${jsArg(mimeType)}', this)">${escapeHtml(label)}</button>`;
         }
 
         // Map of filename → content for the most recent show-once render. Cleared when the
@@ -1348,7 +1350,7 @@
                         <strong>Client Configuration</strong>
                         <button class="btn-copy" id="copyBtn" onclick="copyConfig()">copy</button>
                     </div>
-                    <pre id="configPre">${peer.configFile}</pre>
+                    <pre id="configPre">${escapeHtml(peer.configFile)}</pre>
                 </div>
                 <div style="margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                     ${showOnceDownloadButtons(peer)}
