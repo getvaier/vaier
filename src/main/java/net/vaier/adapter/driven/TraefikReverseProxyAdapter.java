@@ -1111,9 +1111,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
-     * Delete a reverse proxy route from the Traefik configuration.
-     * Only removes the router and its associated service.
-     * Middlewares are NOT removed as they may be shared between multiple routers.
+     * Delete a reverse proxy route from the Traefik configuration: the router, its associated
+     * service, and all Vaier sidecar metadata for that router (launchpad alias, hidden-from-launchpad,
+     * direct-url-disabled, version-endpoint) plus the LAN-service marker. Middlewares are NOT removed
+     * as they may be shared between multiple routers.
      */
     @Override
     public void deleteReverseProxyRoute(String routeName) {
@@ -1135,9 +1136,14 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             throw new RuntimeException("Router not found: " + routeName);
         }
 
-        // Get service name before removing router
+        // Read the FQDN and whether the route is path-scoped from its own rule. This is authoritative
+        // and correct for every caller — deleteReverseProxyRouteByDnsName, path-based deletes, and the
+        // rollback paths that delete host-only routes by router name — whereas the router name alone
+        // can't tell host-only from path-scoped apart.
         Map<String, Object> routerConfig = castToMap(routers.get(routeName));
         String serviceName = routerConfig != null ? (String) routerConfig.get("service") : null;
+        String fqdn = routerConfig != null ? extractDomainFromRule(routerConfig) : null;
+        boolean hostOnly = routerConfig != null && extractPathPrefixFromRule(routerConfig) == null;
 
         // Remove router
         routers.remove(routeName);
@@ -1150,9 +1156,65 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         // Do NOT remove middlewares as they are typically shared (e.g., auth-middleware)
 
-        removeLanServiceMarker(deriveDnsNameFromRouter(routeName));
+        // Router-name-keyed sidecars are this route's own — strip them on every delete.
+        removeRouterSidecarMetadata(routeName);
+        // FQDN-keyed state (the LAN-service marker and the legacy bare-FQDN direct-url-disabled entry)
+        // is shared by every route on the host, so only clear it for a host-only route — a path-scoped
+        // delete must leave its siblings' host-level state intact.
+        if (hostOnly && fqdn != null) {
+            removeLanServiceMarker(fqdn);
+            removeFromListSidecar(DIRECT_URL_DISABLED_KEY, fqdn);
+        }
 
         saveConfig();
+    }
+
+    /**
+     * Strip every per-router sidecar metadata entry for a deleted router. The launchpad-alias
+     * (display name), hidden-from-launchpad, direct-url-disabled and version-endpoint collections
+     * are keyed by router name, which is deterministic from the FQDN — so without this a service
+     * re-published on the same FQDN would silently inherit the deleted route's display name, hidden
+     * flag, direct-URL-disabled flag or version endpoint.
+     */
+    private void removeRouterSidecarMetadata(String routerName) {
+        if (config == null) return;
+        removeFromMapSidecar(LAUNCHPAD_ALIAS_KEY, routerName);
+        removeFromMapSidecar(VERSION_ENDPOINT_KEY, routerName);
+        removeFromListSidecar(HIDDEN_FROM_LAUNCHPAD_KEY, routerName);
+        removeFromListSidecar(DIRECT_URL_DISABLED_KEY, routerName);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void removeFromMapSidecar(String key, String entryKey) {
+        Object raw = config.get(key);
+        if (!(raw instanceof Map<?, ?> m)) return;
+        Map<String, Object> map = new LinkedHashMap<>((Map<String, Object>) m);
+        // Decide on containsKey, not the remove() return value: an entry with an explicit null value
+        // (manual edits / partial writes) would otherwise be left behind, since remove() returns null.
+        if (map.containsKey(entryKey)) {
+            map.remove(entryKey);
+            if (map.isEmpty()) config.remove(key);
+            else config.put(key, map);
+        }
+    }
+
+    private void removeFromListSidecar(String key, String... entries) {
+        Object raw = config.get(key);
+        if (!(raw instanceof List<?> l)) return;
+        // Tolerate hand-edited YAML: skip null elements (Object::toString would NPE) and remove every
+        // occurrence of each entry, not just the first, so duplicates can't leave stale metadata.
+        List<String> list = l.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(Object::toString)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        boolean changed = false;
+        for (String e : entries) {
+            if (e != null) changed |= list.removeIf(e::equals);
+        }
+        if (changed) {
+            if (list.isEmpty()) config.remove(key);
+            else config.put(key, list);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -1167,10 +1229,6 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         }
     }
 
-    private String deriveDnsNameFromRouter(String routerName) {
-        return ReverseProxyRoute.dnsNameFromRouterName(routerName);
-    }
-
     /**
      * Delete a reverse proxy route by DNS name.
      * Generates the router name from the DNS name and deletes it.
@@ -1179,8 +1237,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void deleteReverseProxyRouteByDnsName(String dnsName) {
-        String routerName = generateRouterName(dnsName);
-        deleteReverseProxyRoute(routerName);
+        deleteReverseProxyRoute(generateRouterName(dnsName));
     }
 
     @Override

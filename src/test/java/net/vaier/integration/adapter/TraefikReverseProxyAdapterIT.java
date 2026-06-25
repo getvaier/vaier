@@ -76,6 +76,106 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
+    void deleteRoute_clearsLaunchpadAlias_soRepublishDoesNotResurrectIt() {
+        // Bug: set a display name (launchpad alias), delete the machine/service, then re-publish the
+        // same FQDN — the alias must not come back. Sidecar metadata is keyed by router name, which
+        // is deterministic from the FQDN, so a leftover entry re-applies to the new route.
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteLaunchpadAlias("asd.example.com", null, "HUE");
+        assertThat(adapter.getReverseProxyRoutes().getFirst().getLaunchpadAlias()).isEqualTo("HUE");
+
+        adapter.deleteReverseProxyRouteByDnsName("asd.example.com");
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+
+        assertThat(adapter.getReverseProxyRoutes().getFirst().getLaunchpadAlias()).isNull();
+    }
+
+    @Test
+    void deleteRoute_clearsHiddenDirectUrlAndVersionSidecars() {
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+        adapter.setRouteHiddenFromLaunchpad("asd.example.com", null, true);
+        adapter.setRouteDirectUrlDisabled("asd.example.com", null, true);
+        adapter.setRouteVersionEndpoint("asd.example.com", null, "/version", "value");
+
+        adapter.deleteReverseProxyRouteByDnsName("asd.example.com");
+        adapter.addReverseProxyRoute("asd.example.com", "10.13.13.2", 8080, false, null);
+
+        ReverseProxyRoute r = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(r.isHiddenFromLaunchpad()).isFalse();
+        assertThat(r.isDirectUrlDisabled()).isFalse();
+        assertThat(r.getVersionEndpoint()).isNull();
+    }
+
+    @Test
+    void deletePathScopedRoute_clearsOwnAliasButNotSiblings_andNoResurrectOnRepublish() {
+        // Path-based delete goes through deleteReverseProxyRoute(routerName) directly. It must clear
+        // only the deleted route's sidecar metadata, leave path-siblings on the same FQDN untouched,
+        // and not resurrect on re-publish.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, "/a");
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, "/b");
+        adapter.setRouteLaunchpadAlias("app.example.com", "/a", "Alpha");
+        adapter.setRouteLaunchpadAlias("app.example.com", "/b", "Bravo");
+
+        adapter.deleteReverseProxyRoute(ReverseProxyRoute.routerName("app.example.com", "/a"));
+
+        assertThat(adapter.getReverseProxyRoutes())
+                .filteredOn(r -> "/b".equals(r.getPathPrefix()))
+                .singleElement()
+                .satisfies(r -> assertThat(r.getLaunchpadAlias()).isEqualTo("Bravo"));
+
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, "/a");
+        assertThat(adapter.getReverseProxyRoutes())
+                .filteredOn(r -> "/a".equals(r.getPathPrefix()))
+                .allSatisfy(r -> assertThat(r.getLaunchpadAlias()).isNull());
+    }
+
+    @Test
+    void deleteHostOnlyRouteByRouterName_clearsFqdnKeyedLanMarker() {
+        // Rollback paths delete host-only routes via deleteReverseProxyRoute(routerName), not by
+        // DNS name. The FQDN-keyed LAN-service marker must still be cleared — derived from the
+        // route's own rule, not from the caller.
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.1.50", 80, "http", false, false, null);
+        assertThat(adapter.getReverseProxyRoutes().getFirst().isLanService()).isTrue();
+
+        adapter.deleteReverseProxyRoute(ReverseProxyRoute.routerName("nas.example.com", null));
+        adapter.addReverseProxyRoute("nas.example.com", "10.13.13.2", 8080, false, null);
+
+        assertThat(adapter.getReverseProxyRoutes().getFirst().isLanService()).isFalse();
+    }
+
+    @Test
+    void deleteRoute_removesSidecarEntryEvenWithExplicitNullValue() throws IOException {
+        // A sidecar entry with an explicit null value (manual edits / partial writes) must still be
+        // removed on delete. Map.remove returns null for an explicit-null value, so a naive
+        // remove()-non-null check would leave the stale key behind.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        String routerName = ReverseProxyRoute.routerName("app.example.com", null);
+        Path cfg = tempDir.resolve("remote-apps.yml");
+        Files.writeString(cfg, Files.readString(cfg)
+                + "\nx-vaier-launchpad-alias:\n  " + routerName + ": null\n");
+
+        adapter.deleteReverseProxyRoute(routerName);
+
+        assertThat(Files.readString(cfg)).doesNotContain("x-vaier-launchpad-alias");
+    }
+
+    @Test
+    void deleteRoute_removesAllDuplicateListEntries_andToleratesNullElements() throws IOException {
+        // Hand-edited YAML may contain duplicate or null list entries. Delete must not throw on a
+        // null element and must remove every occurrence, not just the first.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        String routerName = ReverseProxyRoute.routerName("app.example.com", null);
+        Path cfg = tempDir.resolve("remote-apps.yml");
+        Files.writeString(cfg, Files.readString(cfg)
+                + "\nx-vaier-hidden-from-launchpad:\n  - " + routerName + "\n  - " + routerName + "\n  - null\n");
+
+        adapter.deleteReverseProxyRoute(routerName);
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+
+        assertThat(adapter.getReverseProxyRoutes().getFirst().isHiddenFromLaunchpad()).isFalse();
+    }
+
+    @Test
     void deleteRoute_throwsWhenRouterNotFound() {
         assertThatThrownBy(() -> adapter.deleteReverseProxyRouteByDnsName("nonexistent.example.com"))
                 .isInstanceOf(RuntimeException.class);
