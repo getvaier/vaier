@@ -1117,6 +1117,12 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void deleteReverseProxyRoute(String routeName) {
+        // Path-scoped deletes arrive with only the router name and never had a legacy bare-FQDN
+        // sidecar entry (that format predates path routing), so there is none to strip.
+        deleteRouteInternal(routeName, null);
+    }
+
+    private void deleteRouteInternal(String routeName, String legacyHostOnlyFqdn) {
         loadConfig();
 
         if (config == null) {
@@ -1152,6 +1158,13 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         removeLanServiceMarker(deriveDnsNameFromRouter(routeName));
         removeRouterSidecarMetadata(routeName);
+        // The legacy bare-FQDN direct-url-disabled entry only ever existed for host-only routes, and
+        // a router name can't distinguish host-only from path-scoped (a host route for "a.b.auth" and
+        // a "/auth" path route on "a.b" share a name). So strip it only on the host-only delete path,
+        // which hands us the real FQDN.
+        if (legacyHostOnlyFqdn != null) {
+            removeFromListSidecar(DIRECT_URL_DISABLED_KEY, legacyHostOnlyFqdn);
+        }
 
         saveConfig();
     }
@@ -1168,8 +1181,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         removeFromMapSidecar(LAUNCHPAD_ALIAS_KEY, routerName);
         removeFromMapSidecar(VERSION_ENDPOINT_KEY, routerName);
         removeFromListSidecar(HIDDEN_FROM_LAUNCHPAD_KEY, routerName);
-        // direct-url-disabled may also carry a legacy bare-FQDN entry for host-only routes.
-        removeFromListSidecar(DIRECT_URL_DISABLED_KEY, routerName, deriveDnsNameFromRouter(routerName));
+        removeFromListSidecar(DIRECT_URL_DISABLED_KEY, routerName);
     }
 
     @SuppressWarnings("unchecked")
@@ -1221,8 +1233,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void deleteReverseProxyRouteByDnsName(String dnsName) {
-        String routerName = generateRouterName(dnsName);
-        deleteReverseProxyRoute(routerName);
+        // Host-only delete: pass the real FQDN so the legacy bare-FQDN direct-url-disabled entry
+        // (which only exists for host-only routes) can be stripped unambiguously.
+        deleteRouteInternal(generateRouterName(dnsName), dnsName);
     }
 
     @Override

@@ -107,6 +107,29 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
+    void deletePathScopedRoute_clearsOwnAliasButNotSiblings_andNoResurrectOnRepublish() {
+        // Path-based delete goes through deleteReverseProxyRoute(routerName) directly. It must clear
+        // only the deleted route's sidecar metadata, leave path-siblings on the same FQDN untouched,
+        // and not resurrect on re-publish.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, "/a");
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, "/b");
+        adapter.setRouteLaunchpadAlias("app.example.com", "/a", "Alpha");
+        adapter.setRouteLaunchpadAlias("app.example.com", "/b", "Bravo");
+
+        adapter.deleteReverseProxyRoute(ReverseProxyRoute.routerName("app.example.com", "/a"));
+
+        assertThat(adapter.getReverseProxyRoutes())
+                .filteredOn(r -> "/b".equals(r.getPathPrefix()))
+                .singleElement()
+                .satisfies(r -> assertThat(r.getLaunchpadAlias()).isEqualTo("Bravo"));
+
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null, "/a");
+        assertThat(adapter.getReverseProxyRoutes())
+                .filteredOn(r -> "/a".equals(r.getPathPrefix()))
+                .allSatisfy(r -> assertThat(r.getLaunchpadAlias()).isNull());
+    }
+
+    @Test
     void deleteRoute_throwsWhenRouterNotFound() {
         assertThatThrownBy(() -> adapter.deleteReverseProxyRouteByDnsName("nonexistent.example.com"))
                 .isInstanceOf(RuntimeException.class);
