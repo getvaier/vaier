@@ -909,7 +909,10 @@
         }
 
         async function deleteLanServer(name) {
-            if (!confirm(`Remove LAN server "${name}"? Published services routing through it will keep working — only discovery stops.`)) return;
+            if (!confirm(`Remove LAN server "${name}"? Any published services routing to it will also be removed (their DNS records and reverse-proxy routes).`)) return;
+            // The delete cascades into published-service cleanup (Traefik route + DNS), which can
+            // take a few seconds — show the busy overlay so the operator isn't tempted to click again.
+            showBusy(`Removing "${name}"…`);
             try {
                 const response = await fetch(`/lan-servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -917,6 +920,8 @@
                 fetchLanServers();
             } catch (error) {
                 displayError(`Failed to remove LAN server: ${error.message}`);
+            } finally {
+                hideBusy();
             }
         }
 
@@ -1426,15 +1431,23 @@
 
         async function deletePeer() {
             if (!peerToDelete) return;
-            const peerName = peerDisplayName(peerToDelete);
+            // Capture the id and clear it immediately so a second click can't fire a duplicate
+            // delete while the first request is in flight.
+            const peerId = peerToDelete;
+            const peerName = peerDisplayName(peerId);
+            hideDeleteConfirmModal();
+            // Deleting a peer cascades into published-service cleanup (Traefik + DNS), a multi-second
+            // operation — show the busy overlay so the page clearly looks like it's working.
+            showBusy(`Deleting "${peerName}"…`);
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerToDelete)}`, { method: 'DELETE' });
+                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}`, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                hideDeleteConfirmModal();
                 displaySuccess(`Peer "${peerName}" deleted`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to delete peer: ${error.message}`);
+            } finally {
+                hideBusy();
             }
         }
 
