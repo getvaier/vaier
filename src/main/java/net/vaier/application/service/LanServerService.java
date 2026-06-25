@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GenerateLanServerSetupScriptUseCase;
 import net.vaier.application.GetLanServersUseCase;
@@ -20,6 +21,7 @@ import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
+import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -45,16 +47,22 @@ public class LanServerService implements
     private final ForPersistingLanServers forPersistingLanServers;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
+    private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+    private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
 
     public LanServerService(ForPersistingLanServers forPersistingLanServers,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
-                            ForResolvingServerLanCidr forResolvingServerLanCidr) {
+                            ForResolvingServerLanCidr forResolvingServerLanCidr,
+                            ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
+                            DeletePublishedServiceUseCase deletePublishedServiceUseCase) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
+        this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
+        this.deletePublishedServiceUseCase = deletePublishedServiceUseCase;
     }
 
     @Override
@@ -126,7 +134,25 @@ public class LanServerService implements
     @Override
     public void delete(String name) {
         log.info("Deleting LAN server: {}", forLog(name));
+        // Cascade first: a LAN server's published services are keyed on its lanAddress (LAN routes
+        // are published via host.lanAddress()), so without this they'd be orphaned. Mirrors
+        // VpnService.deletePeer cascading into published-service deletion via the *UseCase port.
+        deletePublishedServicesForLanServer(name);
         forPersistingLanServers.deleteByName(name);
+    }
+
+    private void deletePublishedServicesForLanServer(String name) {
+        LanServer.findByName(name, forPersistingLanServers.getAll()).ifPresent(server -> {
+            String lanAddress = server.lanAddress();
+            if (lanAddress == null || lanAddress.isBlank()) return;
+            forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+                .filter(route -> lanAddress.equals(route.getAddress()))
+                .forEach(route -> {
+                    log.info("Deleting published service {} (path: {}) pointing to LAN server {}",
+                        route.getDomainName(), route.getPathPrefix(), forLog(name));
+                    deletePublishedServiceUseCase.deleteService(route.getDomainName(), route.getPathPrefix());
+                });
+        });
     }
 
     @Override
