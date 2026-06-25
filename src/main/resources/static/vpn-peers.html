@@ -129,10 +129,11 @@
             <p style="font-size:0.85rem;color:var(--text-muted)">
                 Remove <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="deletePeerName"></code>?
             </p>
-            <p style="font-size:0.78rem;color:var(--red);margin-top:0.5rem;">This action cannot be undone.</p>
+            <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;">Any published services routing to it are removed too.</p>
+            <p style="font-size:0.78rem;color:var(--red);margin-top:0.25rem;">This action cannot be undone.</p>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="hideDeleteConfirmModal()">Cancel</button>
-                <button class="btn btn-danger"    onclick="deletePeer()">Delete</button>
+                <button class="btn btn-danger"    onclick="confirmDeleteMachine()">Delete</button>
             </div>
         </div>
     </div>
