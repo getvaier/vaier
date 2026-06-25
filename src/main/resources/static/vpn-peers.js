@@ -502,7 +502,7 @@
                         <div class="peer-actions-left">
                             ${scriptBtn}
                         </div>
-                        <button class="btn btn-small btn-danger" onclick="deleteLanServer('${jsArg(server.name)}')">Delete</button>
+                        <button class="btn btn-small btn-danger" onclick="confirmDeleteLanServer('${jsArg(server.name)}')">Delete</button>
                     </div>
                 </div>
             </div>`;
@@ -908,22 +908,8 @@
             }, 250);
         }
 
-        async function deleteLanServer(name) {
-            if (!confirm(`Remove LAN server "${name}"? Any published services routing to it will also be removed (their DNS records and reverse-proxy routes).`)) return;
-            // The delete cascades into published-service cleanup (Traefik route + DNS), which can
-            // take a few seconds — show the busy overlay so the operator isn't tempted to click again.
-            showBusy(`Removing "${name}"…`);
-            try {
-                const response = await fetch(`/lan-servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                displaySuccess(`LAN server "${name}" removed`);
-                fetchLanServers();
-            } catch (error) {
-                displayError(`Failed to remove LAN server: ${error.message}`);
-            } finally {
-                hideBusy();
-            }
-        }
+        // LAN-server deletion goes through the shared "Delete Machine" modal (confirmDeleteLanServer
+        // → confirmDeleteMachine), same as peers — see the delete-machine block further down.
 
         // Busy indicator (#202) — create + regenerate hit WireGuard / keygen / config writes and
         // can take a few seconds on slow hosts. Without immediate feedback the user assumes
@@ -1418,36 +1404,48 @@
         }
 
 
-        let peerToDelete = null;
+        // Pending machine deletion, routed through the shared "Delete Machine" modal.
+        // { kind: 'peer' | 'lan', key, name } — peers are keyed by id, LAN servers by name.
+        let _pendingMachineDelete = null;
 
         function confirmDeletePeer(peerId) {
-            peerToDelete = peerId;
-            document.getElementById('deletePeerName').textContent = peerDisplayName(peerId);
+            openDeleteMachineModal({ kind: 'peer', key: peerId, name: peerDisplayName(peerId) });
+        }
+
+        function confirmDeleteLanServer(name) {
+            openDeleteMachineModal({ kind: 'lan', key: name, name });
+        }
+
+        function openDeleteMachineModal(pending) {
+            _pendingMachineDelete = pending;
+            document.getElementById('deletePeerName').textContent = pending.name;
             document.getElementById('deleteConfirmModal').classList.add('active');
         }
 
         function hideDeleteConfirmModal() {
             document.getElementById('deleteConfirmModal').classList.remove('active');
-            peerToDelete = null;
+            _pendingMachineDelete = null;
         }
 
-        async function deletePeer() {
-            if (!peerToDelete) return;
-            // Capture the id and clear it immediately so a second click can't fire a duplicate
+        async function confirmDeleteMachine() {
+            if (!_pendingMachineDelete) return;
+            // Capture the target and clear it immediately so a second click can't fire a duplicate
             // delete while the first request is in flight.
-            const peerId = peerToDelete;
-            const peerName = peerDisplayName(peerId);
+            const { kind, key, name } = _pendingMachineDelete;
             hideDeleteConfirmModal();
-            // Deleting a peer cascades into published-service cleanup (Traefik + DNS), a multi-second
-            // operation — show the busy overlay so the page clearly looks like it's working.
-            showBusy(`Deleting "${peerName}"…`);
+            // Deleting a machine cascades into published-service cleanup (Traefik + DNS), a
+            // multi-second operation — show the busy overlay so the page clearly looks like it's working.
+            showBusy(`Deleting "${name}"…`);
+            const url = kind === 'lan'
+                ? `/lan-servers/${encodeURIComponent(key)}`
+                : `/vpn/peers/${encodeURIComponent(key)}`;
             try {
-                const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}`, { method: 'DELETE' });
+                const response = await fetch(url, { method: 'DELETE' });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                displaySuccess(`Peer "${peerName}" deleted`);
-                fetchPeers();
+                displaySuccess(`${kind === 'lan' ? 'LAN server' : 'Peer'} "${name}" removed`);
+                if (kind === 'lan') fetchLanServers(); else fetchPeers();
             } catch (error) {
-                displayError(`Failed to delete peer: ${error.message}`);
+                displayError(`Failed to delete: ${error.message}`);
             } finally {
                 hideBusy();
             }
