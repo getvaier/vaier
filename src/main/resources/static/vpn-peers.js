@@ -839,11 +839,14 @@
 
             // Rebuild the "+ Publish" candidate index (slice 2c): discoverable containers grouped by
             // machine, dropping ones the operator ignored and ones already published (matched on the
-            // backend address+port a published route points at).
+            // backend address+port a published route points at). Precompute the published address|port
+            // pairs into a Set so the membership test is O(1) — the whole pass is linear, not
+            // O(publishable×published).
+            const publishedHostPorts = new Set(publishedServices.map(p => p.hostAddress + '|' + p.hostPort));
             _candidatesByHost = {};
             publishableServices.forEach(c => {
                 if (c.ignored) return;
-                if (publishedServices.some(p => p.hostAddress === c.address && p.hostPort === c.port)) return;
+                if (publishedHostPorts.has(c.address + '|' + c.port)) return;
                 const key = publishableHostKey(c);
                 if (!key) return;
                 (_candidatesByHost[key] = _candidatesByHost[key] || []).push(c);
