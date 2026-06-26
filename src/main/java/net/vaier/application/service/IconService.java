@@ -1,9 +1,11 @@
 package net.vaier.application.service;
 
 import net.vaier.application.GetIconUseCase;
+import net.vaier.domain.Icon;
 import net.vaier.domain.IconResolution;
 import net.vaier.domain.port.ForFetchingIcons;
 import net.vaier.domain.port.ForFetchingIcons.FetchedBytes;
+import net.vaier.domain.port.ForStoringIcons;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -14,18 +16,28 @@ import java.util.concurrent.ConcurrentHashMap;
 public class IconService implements GetIconUseCase {
 
     private final ForFetchingIcons forFetchingIcons;
+    private final ForStoringIcons forStoringIcons;
     final Map<String, Optional<Icon>> cache = new ConcurrentHashMap<>();
 
-    public IconService(ForFetchingIcons forFetchingIcons) {
+    public IconService(ForFetchingIcons forFetchingIcons, ForStoringIcons forStoringIcons) {
         this.forFetchingIcons = forFetchingIcons;
+        this.forStoringIcons = forStoringIcons;
     }
 
     @Override
     public Optional<Icon> getIcon(String host, String pathPrefix) {
         String prefix = (pathPrefix == null) ? "" : pathPrefix;
-        String cacheKey = host + prefix;
+        String cacheKey = IconResolution.cacheKey(host, prefix);
+
         Optional<Icon> cached = cache.get(cacheKey);
         if (cached != null) return cached;
+
+        // Resolved icons survive restarts on disk — a disk hit skips both the fetch and resolution.
+        Optional<Icon> onDisk = forStoringIcons.load(cacheKey);
+        if (onDisk.isPresent()) {
+            cache.put(cacheKey, onDisk);
+            return onDisk;
+        }
 
         String hostUrl = "https://" + host;
         String prefixedUrl = hostUrl + prefix;
@@ -43,6 +55,8 @@ public class IconService implements GetIconUseCase {
             }
         }
         cache.put(cacheKey, result);
+        // Persist positives only — an absent result is not written so a once-dead host can recover.
+        result.ifPresent(icon -> forStoringIcons.store(cacheKey, icon));
         return result;
     }
 

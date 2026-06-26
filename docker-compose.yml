@@ -433,7 +433,7 @@ services:
         set -e
         # Vaier container runs as UID 1000 (Dockerfile USER directive). Bind mounts inherit
         # host ownership, so we chown the config dirs once on every start.
-        for d in /vaier/config /traefik/config /authelia/config /wireguard/config; do
+        for d in /vaier/config /traefik/config /authelia/config /wireguard/config /icons; do
           [ -d "$$d" ] && chown -R 1000:1000 "$$d"
         done
     # authelia-init and redis-init both write files into ./authelia/config as root
@@ -450,6 +450,7 @@ services:
       - ./traefik/config:/traefik/config
       - ./authelia/config:/authelia/config
       - ./wireguard/config:/wireguard/config
+      - ./icons:/icons
     restart: "no"
 
   vaier:
@@ -502,6 +503,9 @@ services:
       - ./authelia/config:/authelia/config
       - ./vaier/config:/vaier/config
       - ./geoip:/geoip:ro
+      # Resolved service icons — read-write so a resolved icon is fetched online once then served
+      # from disk across restarts (icon.cache.path).
+      - ./icons:/icons
       # Host root, read-only — lets Vaier monitor real host disk free space (VAIER_HOST_ROOT_PATH)
       - /:/host:ro
     restart: unless-stopped

@@ -26,6 +26,15 @@ public final class IconResolution {
     private IconResolution() {}
 
     /**
+     * The canonical identity under which a resolved icon is cached — both in memory and on disk —
+     * so the two never drift. Path-routed services that share a hostname get distinct keys via
+     * their {@code pathPrefix}; a null and an empty prefix collapse to the host alone.
+     */
+    public static String cacheKey(String host, String pathPrefix) {
+        return host + (pathPrefix == null ? "" : pathPrefix);
+    }
+
+    /**
      * Parse {@code <link rel="...icon...">} entries out of {@code html} and pick the best
      * candidate URL — preferring entries whose {@code type} declares PNG/SVG/WebP over .ico
      * (smaller and crisper on the launchpad tiles). Resolves relative, absolute, and

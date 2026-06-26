@@ -1,7 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.application.GetIconUseCase;
-import net.vaier.application.GetIconUseCase.Icon;
+import net.vaier.domain.Icon;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

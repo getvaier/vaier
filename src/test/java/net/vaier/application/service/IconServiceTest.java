@@ -1,8 +1,9 @@
 package net.vaier.application.service;
 
-import net.vaier.application.GetIconUseCase.Icon;
+import net.vaier.domain.Icon;
 import net.vaier.domain.port.ForFetchingIcons;
 import net.vaier.domain.port.ForFetchingIcons.FetchedBytes;
+import net.vaier.domain.port.ForStoringIcons;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -12,6 +13,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,6 +23,8 @@ import static org.mockito.Mockito.when;
 class IconServiceTest {
 
     @Mock ForFetchingIcons forFetchingIcons;
+
+    @Mock ForStoringIcons forStoringIcons;
 
     @InjectMocks IconService service;
 
@@ -111,6 +116,48 @@ class IconServiceTest {
             .thenReturn(Optional.of(new FetchedBytes("not-an-image".getBytes(), "text/html")));
 
         assertThat(service.getIcon("app.example.com", null)).isEmpty();
+    }
+
+    @Test
+    void getIcon_returnsDiskCachedWithoutFetchingOrResolving() {
+        Icon onDisk = new Icon(png(), "image/png");
+        when(forStoringIcons.load("disk.example.com")).thenReturn(Optional.of(onDisk));
+
+        Optional<Icon> result = service.getIcon("disk.example.com", null);
+
+        assertThat(result).contains(onDisk);
+        verify(forFetchingIcons, never()).fetchHtml(org.mockito.ArgumentMatchers.anyString());
+        verify(forFetchingIcons, never()).fetchBytes(org.mockito.ArgumentMatchers.anyString());
+        // A disk hit is promoted into the in-memory cache so the next call skips disk too.
+        assertThat(service.cache).containsEntry("disk.example.com", Optional.of(onDisk));
+    }
+
+    @Test
+    void getIcon_persistsResolvedIconToDisk() {
+        when(forFetchingIcons.fetchHtml(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(Optional.empty());
+        byte[] ico = {0, 0, 1, 0, 1, 0};
+        when(forFetchingIcons.fetchBytes("https://app.example.com/favicon.ico"))
+            .thenReturn(Optional.of(new FetchedBytes(ico, null)));
+
+        Optional<Icon> result = service.getIcon("app.example.com", null);
+
+        assertThat(result).isPresent();
+        verify(forStoringIcons).store(eq("app.example.com"), eq(result.get()));
+    }
+
+    @Test
+    void getIcon_doesNotPersistNegativeResults() {
+        when(forFetchingIcons.fetchHtml(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(Optional.empty());
+        when(forFetchingIcons.fetchBytes(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(Optional.empty());
+
+        assertThat(service.getIcon("dead.example.com", null)).isEmpty();
+
+        verify(forStoringIcons, never()).store(any(), any());
+        // The negative is still remembered in memory to avoid hammering a dead host.
+        assertThat(service.cache).containsKey("dead.example.com");
     }
 
     @Test

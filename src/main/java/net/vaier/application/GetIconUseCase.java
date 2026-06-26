@@ -1,5 +1,7 @@
 package net.vaier.application;
 
+import net.vaier.domain.Icon;
+
 import java.util.Optional;
 
 public interface GetIconUseCase {
@@ -12,11 +14,4 @@ public interface GetIconUseCase {
      * Result includes the bytes and the deduced content-type the controller should report.
      */
     Optional<Icon> getIcon(String host, String pathPrefix);
-
-    /**
-     * @param body        the icon's bytes.
-     * @param contentType the MIME type the bytes represent, deduced from the magic bytes rather
-     *                    than the upstream server's header (CDN responses are often mis-typed).
-     */
-    record Icon(byte[] body, String contentType) {}
 }

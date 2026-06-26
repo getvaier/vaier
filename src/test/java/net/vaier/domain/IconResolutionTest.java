@@ -98,6 +98,24 @@ class IconResolutionTest {
                 .isEqualTo("pihole");
     }
 
+    // --- cacheKey ---
+
+    @Test
+    void cacheKeyCombinesHostAndPathPrefix() {
+        assertThat(IconResolution.cacheKey("services.example.com", "/grafana"))
+                .isEqualTo("services.example.com/grafana");
+    }
+
+    @Test
+    void cacheKeyTreatsNullAndEmptyPathPrefixAsHostOnly() {
+        assertThat(IconResolution.cacheKey("solo.example.com", null))
+                .isEqualTo("solo.example.com");
+        assertThat(IconResolution.cacheKey("solo.example.com", ""))
+                .isEqualTo("solo.example.com");
+        assertThat(IconResolution.cacheKey("solo.example.com", null))
+                .isEqualTo(IconResolution.cacheKey("solo.example.com", ""));
+    }
+
     // --- internetIconUrls ---
 
     @Test
