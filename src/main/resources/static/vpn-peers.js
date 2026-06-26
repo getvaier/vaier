@@ -13,9 +13,13 @@
         let _publishedByHost = {};
         // Discoverable-but-unpublished containers, the "+ Publish" candidates folded into the same
         // Services list (slice 2c). publishableServices is the raw /publishable feed; _candidatesByHost
-        // is the per-machine index built in displayPeers (ignored + already-published entries dropped).
+        // is the per-machine index built in displayPeers (already-published entries dropped). Operator-
+        // ignored candidates are split into _ignoredCandidatesByHost so a card can reveal them on demand
+        // (slice 3 ignore/unignore parity); expandedIgnored tracks which host keys are showing them.
         let publishableServices = [];
         let _candidatesByHost = {};
+        let _ignoredCandidatesByHost = {};
+        const expandedIgnored = new Set();
         let lastFetchSuccessful = false;
 
         const expandedPeers = new Set();
@@ -331,6 +335,7 @@
 
         // A discoverable container that isn't published yet — a "+ Publish" row in the Services list
         // (slice 2c). Not expandable; the button opens the publish modal pre-filled from its dataset.
+        // The Ignore button hides it from the candidate list (slice 3 ignore/unignore parity).
         function renderCandidateRow(c) {
             return `<div class="published-item candidate" title="Discovered container — not published yet">
                 <span class="pub-status icon-unknown"></span>
@@ -341,24 +346,86 @@
                         data-subdomain="${escapeHtml(c.suggestedSubdomain || '')}"
                         data-redirect="${escapeHtml(c.rootRedirectPath || '')}"
                         onclick="showPublishModalForCandidate(this)">+ Publish</button>
+                <button class="cand-ignore" title="Hide this container from the candidate list"
+                        onclick="ignoreCandidate('${jsArg(c.ignoreKey)}')">Ignore</button>
             </div>`;
         }
 
-        // One Services section per machine (slice 2c): published routes (editable) first, then the
-        // host's discoverable-but-unpublished containers as "+ Publish" rows. Replaces both the old
-        // discovered-containers list and the published-only subsection.
+        // An operator-ignored candidate, shown dimmed only when its host's hidden section is expanded
+        // (slice 3). Unignore restores it to the "+ Publish" list.
+        function renderIgnoredCandidateRow(c) {
+            return `<div class="published-item candidate ignored" title="Hidden from the candidate list">
+                <span class="pub-status icon-unknown"></span>
+                <span class="pub-name">${escapeHtml(c.containerName)}<span class="cand-port">:${c.port}</span></span>
+                <button class="cand-unignore" title="Show this container in the candidate list again"
+                        onclick="unignoreCandidate('${jsArg(c.ignoreKey)}')">Unignore</button>
+            </div>`;
+        }
+
+        // One Services section per machine (slice 2c/3): published routes (editable) first, then the
+        // host's discoverable-but-unpublished containers as "+ Publish" rows, then a collapsible
+        // "N hidden" line revealing operator-ignored candidates. Replaces both the old discovered-
+        // containers list and the published-only subsection.
         function renderServicesSubsection(hostKey) {
             const published  = (_publishedByHost[hostKey] || []).slice()
                 .sort((a, b) => (a.launchpadAlias || a.shortName || a.name || '')
                     .localeCompare(b.launchpadAlias || b.shortName || b.name || ''));
-            const candidates = (_candidatesByHost[hostKey] || []).slice()
-                .sort((a, b) => a.containerName.localeCompare(b.containerName) || a.port - b.port);
-            if (published.length === 0 && candidates.length === 0) return '';
-            const rows = published.map(renderPublishedRow).join('') + candidates.map(renderCandidateRow).join('');
+            const byContainer = (a, b) => a.containerName.localeCompare(b.containerName) || a.port - b.port;
+            const candidates = (_candidatesByHost[hostKey] || []).slice().sort(byContainer);
+            const ignored    = (_ignoredCandidatesByHost[hostKey] || []).slice().sort(byContainer);
+            if (published.length === 0 && candidates.length === 0 && ignored.length === 0) return '';
+            let rows = published.map(renderPublishedRow).join('') + candidates.map(renderCandidateRow).join('');
+            if (ignored.length > 0) {
+                const open = expandedIgnored.has(hostKey);
+                rows += `<div class="cand-ignored-toggle" role="button" tabindex="0"
+                              aria-expanded="${open ? 'true' : 'false'}"
+                              onclick="toggleIgnoredCandidates('${jsArg(hostKey)}')"
+                              onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===this){event.preventDefault();toggleIgnoredCandidates('${jsArg(hostKey)}')}">${open ? '▾' : '▸'} ${ignored.length} hidden</div>`;
+                if (open) rows += ignored.map(renderIgnoredCandidateRow).join('');
+            }
             return `<div class="detail-row">
                 <span class="detail-label">Services</span>
                 <div class="published-list">${rows}</div>
             </div>`;
+        }
+
+        // Ignore/unignore a discovered candidate (slice 3 parity). The flip is applied optimistically
+        // because fetchPublishable rescrapes every host and takes seconds; the refetch reconciles.
+        async function ignoreCandidate(key) {
+            applyCandidateIgnored(key, true);
+            try {
+                const r = await fetch('/published-services/publishable/ignore', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key }),
+                });
+                if (!r.ok) throw new Error(await apiErrorMessage(r));
+            } catch (e) { displayError(`Failed to hide service: ${e.message}`); }
+            fetchPublishable();
+        }
+
+        async function unignoreCandidate(key) {
+            applyCandidateIgnored(key, false);
+            try {
+                const r = await fetch('/published-services/publishable/unignore', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key }),
+                });
+                if (!r.ok) throw new Error(await apiErrorMessage(r));
+            } catch (e) { displayError(`Failed to restore service: ${e.message}`); }
+            fetchPublishable();
+        }
+
+        function applyCandidateIgnored(key, ignored) {
+            const c = publishableServices.find(s => s.ignoreKey === key);
+            if (!c) return;
+            c.ignored = ignored;
+            if (!isEditingMachineCard()) displayPeers(peers);
+        }
+
+        function toggleIgnoredCandidates(hostKey) {
+            if (expandedIgnored.has(hostKey)) expandedIgnored.delete(hostKey);
+            else expandedIgnored.add(hostKey);
+            if (!isEditingMachineCard()) displayPeers(peers);
         }
 
         // Pull the backend's ApiError { message } out of a failed response so toasts are actionable
@@ -857,19 +924,20 @@
             // Rebuild the published-services-by-host index (slice 2) so each card shows its routes.
             _publishedByHost = topologyServicesByHost(publishedServices);
 
-            // Rebuild the "+ Publish" candidate index (slice 2c): discoverable containers grouped by
-            // machine, dropping ones the operator ignored and ones already published (matched on the
-            // backend address+port a published route points at). Precompute the published address|port
-            // pairs into a Set so the membership test is O(1) — the whole pass is linear, not
-            // O(publishable×published).
+            // Rebuild the "+ Publish" candidate index (slice 2c/3): discoverable containers grouped by
+            // machine, dropping ones already published (matched on the backend address+port a published
+            // route points at). Ignored candidates go into a separate index so each card can reveal them
+            // on demand (slice 3 — ignore/unignore parity). Precompute the published address|port pairs
+            // into a Set so the membership test is O(1) — the whole pass is linear, not O(publishable×published).
             const publishedHostPorts = new Set(publishedServices.map(p => p.hostAddress + '|' + p.hostPort));
             _candidatesByHost = {};
+            _ignoredCandidatesByHost = {};
             publishableServices.forEach(c => {
-                if (c.ignored) return;
                 if (publishedHostPorts.has(c.address + '|' + c.port)) return;
                 const key = publishableHostKey(c);
                 if (!key) return;
-                (_candidatesByHost[key] = _candidatesByHost[key] || []).push(c);
+                const index = c.ignored ? _ignoredCandidatesByHost : _candidatesByHost;
+                (index[key] = index[key] || []).push(c);
             });
 
             const byName = (a, b) => a.name.localeCompare(b.name);

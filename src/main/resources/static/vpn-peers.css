@@ -462,6 +462,31 @@
             white-space: nowrap;
         }
 
+        /* Ignore / unignore controls for candidate rows (#infrastructure slice 3). */
+        .cand-ignore, .cand-unignore {
+            flex-shrink: 0;
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 0 0.3rem;
+            font-size: 0.7rem;
+            white-space: nowrap;
+        }
+        .cand-ignore { margin-left: 0.2rem; }
+        .cand-ignore:hover { color: var(--yellow); }
+        .cand-unignore { margin-left: auto; }
+        .cand-unignore:hover { color: var(--green); }
+        .published-item.candidate.ignored { opacity: 0.55; }
+        .cand-ignored-toggle {
+            cursor: pointer;
+            color: var(--text-dim);
+            font-size: 0.7rem;
+            padding: 0.2rem 0.15rem;
+            user-select: none;
+        }
+        .cand-ignored-toggle:hover { color: var(--text-muted); }
+
         /* QR modal */
         .qr-canvas-container {
             display: flex;
