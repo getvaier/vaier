@@ -98,7 +98,9 @@
                     // up the change, and the diagram if it's the visible tab. Skip the list re-render
                     // while an input inside a card is focused, so an SSE-driven refresh can't wipe an
                     // in-progress edit out from under the operator (a later event reconciles).
-                    if (peers && peers.length && !isEditingMachineCard()) displayPeers(peers);
+                    // Gate only on editing, not peer count — a hub/LAN-only deployment (zero peers)
+                    // still has machine cards whose Services sections must pick up the change.
+                    if (!isEditingMachineCard()) displayPeers(peers);
                     if (_activeTab === 'topology') renderNetworkDiagram();
                 }
             } catch (error) {
@@ -113,7 +115,9 @@
                 const response = await fetch('/published-services/publishable', { cache: 'no-store' });
                 if (response.ok) {
                     publishableServices = await response.json();
-                    if (peers && peers.length && !isEditingMachineCard()) displayPeers(peers);
+                    // Gate only on editing, not peer count (see fetchPublishedServices) so candidates
+                    // surface on hub/LAN-only deployments too.
+                    if (!isEditingMachineCard()) displayPeers(peers);
                 }
             } catch (error) {
                 console.error('Failed to load publishable services:', error);
@@ -366,7 +370,15 @@
 
         async function deletePublishedService(dnsAddress, pathPrefix) {
             const label = pathPrefix ? `${dnsAddress}${pathPrefix}` : dnsAddress;
-            if (!confirm(`Delete published service "${label}"?\n\nThis removes its reverse-proxy route and DNS record.`)) return;
+            // The backend keeps the DNS CNAME if any sibling route still uses this host
+            // (PublishingService.deleteService -> hasSiblingOnHost), so only promise DNS removal when
+            // this is the last route on dnsAddress. A sibling is another route on the same host.
+            const hasSibling = publishedServices.some(p =>
+                p.dnsAddress === dnsAddress && (p.pathPrefix || '') !== (pathPrefix || ''));
+            const dnsLine = hasSibling
+                ? `This removes its reverse-proxy route. The DNS record stays — other routes still use ${dnsAddress}.`
+                : 'This removes its reverse-proxy route and DNS record.';
+            if (!confirm(`Delete published service "${label}"?\n\n${dnsLine}`)) return;
             try {
                 const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
                 const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
@@ -2027,9 +2039,10 @@
                 if (!res.ok) return;
                 _serverLocation = await res.json();
                 if (_peerMap) refreshPeerMap();
-                // Re-render the Machines list so the Vaier server card picks up the LAN CIDR.
-                if (peers && peers.length) displayPeers(peers);
-                // Keep the diagram's hub label in sync even on an empty net (no peers => no displayPeers).
+                // Re-render the Machines list so the Vaier server card picks up the LAN CIDR — even
+                // on an empty net (zero peers), where the hub/LAN cards still need the update.
+                displayPeers(peers);
+                // Keep the diagram's hub label in sync too.
                 renderNetworkDiagram();
             } catch (e) {
                 console.error('Failed to load server location:', e);
