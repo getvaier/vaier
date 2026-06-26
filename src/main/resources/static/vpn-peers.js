@@ -2,10 +2,8 @@
 // inline on* handlers keep resolving. Modularisation tracked as follow-up slices of #273.
         let peers = [];
         let peerServices = {};
-        let vaierServerServices = [];
         let vaierServerStatus = 'UNKNOWN'; // domain MachineStatus enum value
         let lanServers = [];
-        let lanServerServices = {};
         // Published services (Topology tab, #infrastructure slice 1; machine cards, slice 2). Same
         // DTO the Services page discovers; we client-side join each one onto its host machine.
         let publishedServices = [];
@@ -64,7 +62,6 @@
                 const response = await fetch('/docker-services/vaier-server');
                 if (response.ok) {
                     const body = await response.json();
-                    vaierServerServices = body.containers;
                     vaierServerStatus = body.status;
                 } else {
                     vaierServerStatus = 'DOWN';
@@ -85,16 +82,6 @@
                 }
             } catch (error) {
                 console.error('Failed to load LAN servers:', error);
-            }
-            try {
-                const response = await fetch('/docker-services/lan-servers');
-                if (response.ok) {
-                    const services = await response.json();
-                    lanServerServices = Object.fromEntries(services.map(s => [s.name, s]));
-                    displayPeers(peers);
-                }
-            } catch (error) {
-                console.error('Failed to load LAN server services:', error);
             }
         }
 
