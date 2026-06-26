@@ -435,17 +435,37 @@
             return `HTTP ${response.status}`;
         }
 
-        async function deletePublishedService(dnsAddress, pathPrefix) {
+        // The published-service pending a delete-modal confirmation: { dnsAddress, pathPrefix, label }.
+        let _pendingPublishedDelete = null;
+
+        function deletePublishedService(dnsAddress, pathPrefix) {
             const label = pathPrefix ? `${dnsAddress}${pathPrefix}` : dnsAddress;
             // The backend keeps the DNS CNAME if any sibling route still uses this host
             // (PublishingService.deleteService -> hasSiblingOnHost), so only promise DNS removal when
             // this is the last route on dnsAddress. A sibling is another route on the same host.
             const hasSibling = publishedServices.some(p =>
                 p.dnsAddress === dnsAddress && (p.pathPrefix || '') !== (pathPrefix || ''));
-            const dnsLine = hasSibling
+            _pendingPublishedDelete = { dnsAddress, pathPrefix, label };
+            document.getElementById('deletePublishedLabel').textContent = label;
+            document.getElementById('deletePublishedDnsNote').textContent = hasSibling
                 ? `This removes its reverse-proxy route. The DNS record stays — other routes still use ${dnsAddress}.`
                 : 'This removes its reverse-proxy route and DNS record.';
-            if (!confirm(`Delete published service "${label}"?\n\n${dnsLine}`)) return;
+            document.getElementById('deletePublishedModal').classList.add('active');
+        }
+
+        function hideDeletePublishedModal() {
+            document.getElementById('deletePublishedModal').classList.remove('active');
+            _pendingPublishedDelete = null;
+        }
+
+        async function confirmDeletePublishedService() {
+            if (!_pendingPublishedDelete) return;
+            // Capture and clear immediately so a double-click can't fire two deletes.
+            const { dnsAddress, pathPrefix, label } = _pendingPublishedDelete;
+            hideDeletePublishedModal();
+            // Deleting tears down the Traefik route (and the DNS record when it's the last on the host),
+            // a multi-second operation — show the busy overlay so the page clearly looks like it's working.
+            showBusy(`Deleting "${label}"…`, 'Tearing down the reverse-proxy route, and the DNS record when this was the last route on the host.');
             try {
                 const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
                 const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
@@ -455,6 +475,8 @@
                 await fetchPublishedServices();
             } catch (e) {
                 displayError(`Failed to delete ${label}: ${e.message}`);
+            } finally {
+                hideBusy();
             }
         }
 
@@ -540,20 +562,48 @@
             } catch (e) { displayError(`Failed to save version endpoint: ${e.message}`); }
         }
 
+        // Reset the publish modal's shared (mode-independent) fields to defaults.
+        function resetPublishFormCommon() {
+            document.getElementById('publishSubdomain').value        = '';
+            document.getElementById('publishPathPrefix').value       = '';
+            document.getElementById('publishRequiresAuth').checked   = false;
+            document.getElementById('publishDirectUrlEnabled').checked = true;
+            document.getElementById('publishRootRedirectPath').value = '';
+            document.getElementById('publishAdvanced').open = false;
+        }
+
         // Publish a discovered container as a reverse-proxy route (slice 2c) — the container-mode
         // half of the old Services-page publish modal, opened from a "+ Publish" candidate row.
         function showPublishModalForCandidate(btn) {
+            const modal = document.getElementById('publishModal');
+            modal.dataset.mode = 'container';
+            document.getElementById('publishModalHeader').textContent = 'Publish service';
+            resetPublishFormCommon();
             document.getElementById('publishAddress').value         = btn.dataset.address;
             document.getElementById('publishPort').value            = btn.dataset.port;
             document.getElementById('publishSubdomain').value       = btn.dataset.subdomain || '';
-            document.getElementById('publishPathPrefix').value      = '';
-            document.getElementById('publishRequiresAuth').checked  = false;
-            document.getElementById('publishDirectUrlEnabled').checked = true;
             document.getElementById('publishRootRedirectPath').value = btn.dataset.redirect || '';
             document.getElementById('publishAdvanced').open = !!btn.dataset.redirect;
             document.getElementById('publishServiceLabel').textContent =
                 `${btn.dataset.container} (${btn.dataset.address}:${btn.dataset.port})`;
-            document.getElementById('publishModal').classList.add('active');
+            modal.classList.add('active');
+            document.getElementById('publishSubdomain').focus();
+        }
+
+        // Manually publish a bare host:port on a LAN host as a reverse-proxy route (slice 3b) — the
+        // LAN-mode half of the old Services-page publish modal. The host (machineName) and its relay
+        // come from the LAN-server card; the operator supplies port, protocol and subdomain.
+        function showPublishLanModal(machineName, relayPeerName, lanAddress) {
+            const modal = document.getElementById('publishModal');
+            modal.dataset.mode = 'lan';
+            document.getElementById('publishModalHeader').textContent = 'Publish LAN service';
+            resetPublishFormCommon();
+            document.getElementById('publishLanMachine').value  = machineName;
+            document.getElementById('publishLanPort').value     = '';
+            document.getElementById('publishLanProtocol').value = 'http';
+            document.getElementById('publishLanLabel').textContent =
+                `${machineName} (${lanAddress}) via ${relayPeerName}`;
+            modal.classList.add('active');
             document.getElementById('publishSubdomain').focus();
         }
 
@@ -573,38 +623,52 @@
         }
 
         async function submitPublish() {
+            const mode = document.getElementById('publishModal').dataset.mode || 'container';
             const subdomain = document.getElementById('publishSubdomain').value.trim();
             if (!subdomain) { alert('Please enter a subdomain'); return; }
-            // The port comes from a hidden field populated when the modal opens; validate it explicitly
-            // so a missing/tampered value fails here with a clear message instead of serialising to a
-            // null port and surfacing as a confusing backend validation error.
-            const port = parseInt(document.getElementById('publishPort').value, 10);
-            if (!Number.isInteger(port) || port < 1 || port > 65535) {
-                alert('Invalid service port — reopen the publish dialog and try again.');
-                return;
-            }
-            const body = {
-                address:          document.getElementById('publishAddress').value,
-                port,
+            // Fields shared by both publish flows. The mode only changes which endpoint we hit and which
+            // host/port fields it carries (a discovered container's address vs a manual LAN host:port).
+            const common = {
                 subdomain,
-                pathPrefix:       document.getElementById('publishPathPrefix').value.trim() || null,
-                requiresAuth:     document.getElementById('publishRequiresAuth').checked,
+                pathPrefix:        document.getElementById('publishPathPrefix').value.trim() || null,
                 directUrlDisabled: !document.getElementById('publishDirectUrlEnabled').checked,
-                rootRedirectPath: document.getElementById('publishRootRedirectPath').value.trim() || null,
+                rootRedirectPath:  document.getElementById('publishRootRedirectPath').value.trim() || null,
             };
+            const requiresAuth = document.getElementById('publishRequiresAuth').checked;
+            let endpoint, body;
+            if (mode === 'lan') {
+                const port = parseInt(document.getElementById('publishLanPort').value, 10);
+                if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                    alert('Enter a valid port (1–65535).'); return;
+                }
+                endpoint = '/published-services/lan';
+                // The LAN API field is requireAuth (singular), not requiresAuth — quirk preserved.
+                body = { ...common, machineName: document.getElementById('publishLanMachine').value,
+                         port, protocol: document.getElementById('publishLanProtocol').value, requireAuth: requiresAuth };
+            } else {
+                // The port comes from a hidden field populated when the modal opens; validate it
+                // explicitly so a missing/tampered value fails here with a clear message instead of
+                // serialising to a null port and surfacing as a confusing backend validation error.
+                const port = parseInt(document.getElementById('publishPort').value, 10);
+                if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                    alert('Invalid service port — reopen the publish dialog and try again.'); return;
+                }
+                endpoint = '/published-services/publish';
+                body = { ...common, address: document.getElementById('publishAddress').value, port, requiresAuth };
+            }
             const submitBtn = document.getElementById('publishSubmitBtn');
             const cancelBtn = document.getElementById('publishCancelBtn');
             submitBtn.disabled = cancelBtn.disabled = true;
             submitBtn.textContent = 'Publishing…';
             try {
-                const r = await fetch('/published-services/publish', {
+                const r = await fetch(endpoint, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
                 });
                 if (!r.ok) { alert(`Failed to publish.\n\n${await explainPublishError(r)}`); return; }
                 hidePublishModal();
-                // The publish is async (DNS propagation + Traefik). Surface progress as a toast; the
-                // published-services SSE (publish-traefik-active / -rolled-back / -dns-timeout) reconciles.
-                displaySuccess(`Publishing ${subdomain}… DNS can take up to a minute to propagate.`);
+                // The publish is async (DNS create -> propagation -> Traefik). Show a live progress
+                // card that the published-services SSE steps advance to success or failure.
+                addPublishProgress(subdomain);
                 fetchPublishable();
             } catch (e) {
                 alert(`Failed to publish. Vaier could not be reached (${e.message}).`);
@@ -612,6 +676,97 @@
                 submitBtn.disabled = cancelBtn.disabled = false;
                 submitBtn.textContent = 'Publish';
             }
+        }
+
+        // Publish progress cards (#infrastructure slice 3 — parity with the old Services page's
+        // processing section). A publish runs async server-side and reports via the published-services
+        // SSE: publish-dns-created -> publish-dns-propagated -> publish-traefik-active (success), or
+        // publish-dns-timeout / publish-rolled-back (failure). Each in-flight publish gets a floating,
+        // non-blocking card keyed by subdomain that advances through three steps.
+        const PUB_PROG_ICONS = { pending: '·', active: '⏳', done: '✓', failed: '✕' };
+
+        function addPublishProgress(subdomain) {
+            const host = document.getElementById('publishProgress');
+            if (!host) return;
+            const id = cardId(subdomain);
+            if (document.getElementById('pubprog-' + id)) return; // already tracking this one
+            const card = document.createElement('div');
+            card.className = 'pub-prog-card';
+            card.id = 'pubprog-' + id;
+            card.innerHTML = `
+                <div class="pub-prog-head">
+                    <span class="pub-prog-title"></span>
+                    <button class="pub-prog-close" title="Dismiss" onclick="removePublishProgress('${jsArg(subdomain)}')">✕</button>
+                </div>
+                <div class="pub-prog-steps">
+                    <div class="pub-prog-step active" data-step="dns-create"><span class="pp-icon">⏳</span><span>DNS record created</span></div>
+                    <div class="pub-prog-step" data-step="dns-propagate"><span class="pp-icon">·</span><span>DNS propagation</span></div>
+                    <div class="pub-prog-step" data-step="traefik"><span class="pp-icon">·</span><span>Reverse-proxy route</span></div>
+                </div>
+                <div class="pub-prog-msg"></div>`;
+            card.querySelector('.pub-prog-title').textContent = subdomain; // textContent — never inject
+            host.appendChild(card);
+        }
+
+        function setPublishStep(subdomain, stepKey, state) {
+            const card = document.getElementById('pubprog-' + cardId(subdomain));
+            if (!card) return;
+            const step = card.querySelector('.pub-prog-step[data-step="' + stepKey + '"]');
+            if (!step) return;
+            step.classList.remove('active', 'done', 'failed');
+            if (state !== 'pending') step.classList.add(state);
+            step.querySelector('.pp-icon').textContent = PUB_PROG_ICONS[state] || '·';
+        }
+
+        function completePublishProgress(subdomain) {
+            setPublishStep(subdomain, 'traefik', 'done');
+            const card = document.getElementById('pubprog-' + cardId(subdomain));
+            if (!card) return;
+            card.classList.add('done');
+            const msg = card.querySelector('.pub-prog-msg');
+            if (msg) msg.textContent = 'Published — live now.';
+            setTimeout(() => removePublishProgress(subdomain), 3500);
+        }
+
+        function failPublishProgress(subdomain, message) {
+            const card = document.getElementById('pubprog-' + cardId(subdomain));
+            if (!card) return;
+            card.classList.add('failed');
+            // Mark whichever step was in flight as the one that failed.
+            const step = card.querySelector('.pub-prog-step.active')
+                || card.querySelector('.pub-prog-step:not(.done)');
+            if (step) {
+                step.classList.remove('active');
+                step.classList.add('failed');
+                step.querySelector('.pp-icon').textContent = PUB_PROG_ICONS.failed;
+            }
+            const msg = card.querySelector('.pub-prog-msg');
+            if (msg) msg.textContent = message;
+            setTimeout(() => removePublishProgress(subdomain), 12000);
+        }
+
+        function removePublishProgress(subdomain) {
+            const card = document.getElementById('pubprog-' + cardId(subdomain));
+            if (card) card.remove();
+        }
+
+        // Rebuild progress cards for any publish already in flight when the page (re)loads, so a
+        // refresh mid-publish doesn't lose the indicator. Mirrors the old page's fetchPending.
+        async function fetchPublishProgress() {
+            try {
+                const r = await fetch('/published-services/pending');
+                if (!r.ok) return;
+                (await r.json()).forEach(p => {
+                    addPublishProgress(p.subdomain);
+                    setPublishStep(p.subdomain, 'dns-create', 'done');
+                    if (p.dnsPropagated) {
+                        setPublishStep(p.subdomain, 'dns-propagate', 'done');
+                        setPublishStep(p.subdomain, 'traefik', 'active');
+                    } else {
+                        setPublishStep(p.subdomain, 'dns-propagate', 'active');
+                    }
+                });
+            } catch (e) { /* ignore — progress is best-effort */ }
         }
 
         // Maps the domain's MachineStatus enum to a CSS status class. The combination logic
@@ -643,6 +798,12 @@
             const isRelayAnchored = server.relayPeerName && server.relayPeerName !== 'Vaier server';
             const scriptBtn = (server.runsDocker || isRelayAnchored)
                 ? `<button class="btn btn-small btn-secondary" onclick="showLanSetupScript('${jsArg(server.name)}')" title="Show this host's setup script — opens the Docker API if it runs Docker and installs routes via its relay peer">Setup script</button>`
+                : '';
+            // Manual LAN publish (#infrastructure slice 3b): publish a bare host:port on this LAN host
+            // as a reverse-proxy route. Only offered when a relay covers it — without one the route
+            // can't be reached, and the publish would fail backend validation.
+            const publishLanBtn = server.relayPeerName
+                ? `<button class="btn btn-small btn-secondary" onclick="showPublishLanModal('${jsArg(server.name)}','${jsArg(server.relayPeerName)}','${jsArg(server.lanAddress)}')" title="Publish a port on this LAN host as a reverse-proxy route">+ Publish LAN port</button>`
                 : '';
 
             return `
@@ -706,6 +867,7 @@
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
                             ${scriptBtn}
+                            ${publishLanBtn}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeleteLanServer('${jsArg(server.name)}')">Delete</button>
                     </div>
@@ -1127,8 +1289,12 @@
         // Busy indicator (#202) — create + regenerate hit WireGuard / keygen / config writes and
         // can take a few seconds on slow hosts. Without immediate feedback the user assumes
         // the page is dead.
-        function showBusy(message) {
+        // sub defaults to the peer-creation detail (create/regenerate/reissue); delete flows pass their
+        // own so the overlay never claims to be "generating keypair…" while it's tearing something down.
+        const BUSY_SUB_DEFAULT = 'This can take a few seconds — generating keypair, writing config, and reloading WireGuard.';
+        function showBusy(message, sub) {
             document.getElementById('busyMessage').textContent = message;
+            document.getElementById('busySub').textContent = sub || BUSY_SUB_DEFAULT;
             document.getElementById('busyModal').classList.add('active');
         }
         function hideBusy() {
@@ -1648,7 +1814,7 @@
             hideDeleteConfirmModal();
             // Deleting a machine cascades into published-service cleanup (Traefik + DNS), a
             // multi-second operation — show the busy overlay so the page clearly looks like it's working.
-            showBusy(`Deleting "${name}"…`);
+            showBusy(`Deleting "${name}"…`, 'Removing the machine and any published services routing to it (Traefik + DNS).');
             const url = kind === 'lan'
                 ? `/lan-servers/${encodeURIComponent(key)}`
                 : `/vpn/peers/${encodeURIComponent(key)}`;
@@ -2260,6 +2426,7 @@
         fetchServerLocation();
         fetchPublishedServices();
         fetchPublishable();
+        fetchPublishProgress();
         detectEdition();
 
         const _sse = new EventSource('/vpn/peers/events');
@@ -2271,18 +2438,29 @@
         // independent of the peers stream — same DTO the Services page consumes.
         const _servicesSse = new EventSource('/published-services/events');
         _servicesSse.addEventListener('service-updated', () => { fetchPublishedServices(); fetchPublishable(); });
-        // Publish progress (slice 2c): a publish is async (DNS propagation + Traefik). React to its
-        // terminal events so the new route appears, or a failure is surfaced, without a manual refresh.
+        // Publish progress (slice 3): a publish is async (DNS create -> propagation -> Traefik). Advance
+        // the floating progress card through each step so the operator sees what's happening, and
+        // reconcile the list/diagram on the terminal events. addPublishProgress is idempotent, so an
+        // event arriving before submitPublish created the card (or after a reload) still shows progress.
+        _servicesSse.addEventListener('publish-dns-created', e => {
+            addPublishProgress(e.data);
+            setPublishStep(e.data, 'dns-create', 'done');
+            setPublishStep(e.data, 'dns-propagate', 'active');
+        });
+        _servicesSse.addEventListener('publish-dns-propagated', e => {
+            setPublishStep(e.data, 'dns-propagate', 'done');
+            setPublishStep(e.data, 'traefik', 'active');
+        });
         _servicesSse.addEventListener('publish-traefik-active', e => {
-            displaySuccess(`Published ${e.data}`);
+            completePublishProgress(e.data);
             fetchPublishedServices(); fetchPublishable();
         });
         _servicesSse.addEventListener('publish-rolled-back', e => {
-            displayError(`Publishing "${e.data}" was rolled back — nothing was left half-configured. You can try again.`);
+            failPublishProgress(e.data, 'Rolled back — nothing was left half-configured. You can try again.');
             fetchPublishable();
         });
         _servicesSse.addEventListener('publish-dns-timeout', e => {
-            displayError(`DNS propagation timed out for "${e.data}". The record was created but didn't resolve in time; try again.`);
+            failPublishProgress(e.data, "DNS didn't resolve in time. The record was created but didn't propagate; try again.");
             fetchPublishable();
         });
         _sse.addEventListener('peers-stats', e => {

@@ -478,6 +478,46 @@
         .cand-unignore { margin-left: auto; }
         .cand-unignore:hover { color: var(--green); }
         .published-item.candidate.ignored { opacity: 0.55; }
+
+        /* Publish modal: show only the fields for the active mode (#infrastructure slice 3b). */
+        #publishModal:not([data-mode="lan"]) .publish-lan-only { display: none; }
+        #publishModal[data-mode="lan"] .publish-container-only { display: none; }
+
+        /* Floating publish-progress cards (#infrastructure slice 3). */
+        .publish-progress {
+            position: fixed;
+            right: 1rem;
+            bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 1200;
+            max-width: 320px;
+        }
+        .pub-prog-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: 3px;
+            padding: 0.6rem 0.75rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+            font-size: 0.78rem;
+        }
+        .pub-prog-card.done   { border-left-color: var(--green); }
+        .pub-prog-card.failed { border-left-color: var(--red); }
+        .pub-prog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+        .pub-prog-title { font-weight: 600; color: var(--text); }
+        .pub-prog-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 0.8rem; line-height: 1; }
+        .pub-prog-close:hover { color: var(--text); }
+        .pub-prog-steps { display: flex; flex-direction: column; gap: 0.2rem; }
+        .pub-prog-step { display: flex; align-items: center; gap: 0.4rem; color: var(--text-dim); }
+        .pub-prog-step.active { color: var(--text-muted); }
+        .pub-prog-step.done   { color: var(--green); }
+        .pub-prog-step.failed { color: var(--red); }
+        .pub-prog-step .pp-icon { width: 1rem; text-align: center; flex-shrink: 0; }
+        .pub-prog-msg:empty { display: none; }
+        .pub-prog-msg { margin-top: 0.35rem; color: var(--text-muted); font-size: 0.72rem; }
+        .pub-prog-card.failed .pub-prog-msg { color: var(--red); }
         .cand-ignored-toggle {
             cursor: pointer;
             color: var(--text-dim);

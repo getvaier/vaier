@@ -144,6 +144,23 @@
         </div>
     </div>
 
+    <!-- Delete Published Service Modal (#infrastructure slice 3) — replaces the browser confirm() so
+         deleting a reverse-proxy route matches the rest of the app's modal confirmations. -->
+    <div id="deletePublishedModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Delete published service</div>
+            <p style="font-size:0.85rem;color:var(--text-muted)">
+                Delete <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="deletePublishedLabel"></code>?
+            </p>
+            <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;" id="deletePublishedDnsNote"></p>
+            <p style="font-size:0.78rem;color:var(--red);margin-top:0.25rem;">This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideDeletePublishedModal()">Cancel</button>
+                <button class="btn btn-danger"    onclick="confirmDeletePublishedService()">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Regenerate Confirm Modal (#202) -->
     <div id="regenerateConfirmModal" class="modal">
         <div class="modal-content">
@@ -170,7 +187,7 @@
             <div class="busy-body">
                 <div class="busy-spinner"></div>
                 <div id="busyMessage">Working…</div>
-                <div class="busy-sub">This can take a few seconds — generating keypair, writing config, and reloading WireGuard.</div>
+                <div class="busy-sub" id="busySub">This can take a few seconds — generating keypair, writing config, and reloading WireGuard.</div>
             </div>
         </div>
     </div>
@@ -195,16 +212,38 @@
         </div>
     </div>
 
-    <!-- Publish Service Modal (#infrastructure slice 2c) — container mode: publish a discovered
-         container on a machine as a reverse-proxy route. Opened from a card's "+ Publish" row. -->
-    <div id="publishModal" class="modal">
+    <!-- Publish Service Modal (#infrastructure slice 2c/3b). data-mode switches between container mode
+         (publish a discovered container, opened from a card's "+ Publish" row) and LAN mode (publish a
+         bare host:port on a LAN host, opened from a LAN-server card's "+ Publish LAN port" button). -->
+    <div id="publishModal" class="modal" data-mode="container">
         <div class="modal-content">
-            <div class="modal-header">Publish Service</div>
-            <div class="form-group" style="margin-bottom:0.5rem">
+            <div class="modal-header" id="publishModalHeader">Publish service</div>
+            <!-- container mode: which discovered container is being published -->
+            <div class="form-group publish-container-only" style="margin-bottom:0.5rem">
                 <span style="color:var(--text-muted);font-size:0.8rem" id="publishServiceLabel"></span>
             </div>
             <input type="hidden" id="publishAddress">
             <input type="hidden" id="publishPort">
+            <input type="hidden" id="publishLanMachine">
+            <!-- LAN mode: the host comes from the card; the operator supplies port + protocol -->
+            <div class="publish-lan-only">
+                <div class="form-group" style="margin-bottom:0.5rem">
+                    <span style="color:var(--text-muted);font-size:0.8rem" id="publishLanLabel"></span>
+                </div>
+                <div style="display:flex;gap:0.5rem;align-items:flex-end">
+                    <div class="form-group" style="flex:1;margin-bottom:1rem">
+                        <label class="form-label" for="publishLanPort">Port</label>
+                        <input type="number" id="publishLanPort" class="form-input" placeholder="e.g. 8080" min="1" max="65535">
+                    </div>
+                    <div class="form-group" style="flex:1;margin-bottom:1rem">
+                        <label class="form-label" for="publishLanProtocol">Protocol</label>
+                        <select id="publishLanProtocol" class="form-input">
+                            <option value="http">http</option>
+                            <option value="https">https</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
             <div style="display:flex;gap:0.5rem;align-items:flex-end">
                 <div class="form-group" style="flex:1;margin-bottom:1rem">
                     <label class="form-label" for="publishSubdomain">Subdomain</label>
@@ -236,6 +275,10 @@
             </div>
         </div>
     </div>
+
+    <!-- Floating, non-blocking publish-progress cards (#infrastructure slice 3) — one per in-flight
+         publish, advanced through DNS create -> propagation -> reverse-proxy route by the SSE stream. -->
+    <div id="publishProgress" class="publish-progress"></div>
 
     <script src="vpn-peers-helpers.js"></script>
     <script src="vpn-peers-map.js"></script>
