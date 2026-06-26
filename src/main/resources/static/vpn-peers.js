@@ -264,7 +264,10 @@
                 ? `<span class="pub-badge pub-auth" title="Authelia authentication required">auth</span>`
                 : `<span class="pub-badge pub-noauth" title="Public — no authentication required">no auth</span>`;
             return `<div class="published-entry">
-                <div class="published-item" onclick="togglePublished('${jsArg(uniqueName)}')">
+                <div class="published-item" role="button" tabindex="0"
+                     aria-expanded="${isOpen ? 'true' : 'false'}"
+                     onclick="togglePublished('${jsArg(uniqueName)}')"
+                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePublished('${jsArg(uniqueName)}')}">
                     <span class="pub-status icon-${statusKey}" title="${statusKey}"></span>
                     <span class="pub-name" title="${escapeHtml(display)}">${escapeHtml(label)}</span>
                     ${authBadge}
@@ -367,6 +370,13 @@
             </div>`;
         }
 
+        // Pull the backend's ApiError { message } out of a failed response so toasts are actionable
+        // ("Subdomain already in use") instead of bare "HTTP 400"; falls back to the status code.
+        async function apiErrorMessage(response) {
+            try { const p = await response.json(); if (p && p.message) return p.message; } catch (e) { /* no/!json body */ }
+            return `HTTP ${response.status}`;
+        }
+
         async function deletePublishedService(dnsAddress, pathPrefix) {
             const label = pathPrefix ? `${dnsAddress}${pathPrefix}` : dnsAddress;
             if (!confirm(`Delete published service "${label}"?\n\nThis removes its reverse-proxy route and DNS record.`)) return;
@@ -374,7 +384,7 @@
                 const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
                 const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
                 const response = await fetch(url, { method: 'DELETE' });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) throw new Error(await apiErrorMessage(response));
                 displaySuccess(`Deleted ${label}`);
                 await fetchPublishedServices();
             } catch (e) {
@@ -396,10 +406,13 @@
             const id = cardId('pub:' + uniqueName);
             const body = document.getElementById('pub-body-' + id);
             if (!body) return;
-            body.classList.toggle('open');
-            const chevron = body.previousElementSibling
-                && body.previousElementSibling.querySelector('.pub-chevron');
-            if (chevron) chevron.classList.toggle('open');
+            const open = body.classList.toggle('open');
+            const header = body.previousElementSibling;
+            if (header) {
+                header.setAttribute('aria-expanded', open ? 'true' : 'false');
+                const chevron = header.querySelector('.pub-chevron');
+                if (chevron) chevron.classList.toggle('open', open);
+            }
         }
 
         async function patchPublishedService(dnsAddress, pathPrefix, patch) {
@@ -410,7 +423,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patch),
             });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            if (!r.ok) throw new Error(await apiErrorMessage(r));
         }
 
         function pubFlashOk(input) {
@@ -1814,8 +1827,11 @@
             const hasNode = id => els.some(e => e.data.id === id && !e.data.source);
 
             const hubSub = (_serverLocation && _serverLocation.publicHost) ? _serverLocation.publicHost : '';
-            els.push({ data: { id: '__hub__', label: 'Vaier server', type: 'hub', status: 'up',
-                               icon: topoIconUri('vaier', pal.up), sub: hubSub } });
+            // The hub mirrors the rest of the page's vaierServerStatus rather than always reading green,
+            // so a DOWN/DEGRADED/UNKNOWN server is represented honestly in the Topology view.
+            const hubSk = MAP_MARKER_STATUS_KEY[vaierServerStatus] || 'unknown';
+            els.push({ data: { id: '__hub__', label: 'Vaier server', type: 'hub', status: hubSk,
+                               icon: topoIconUri('vaier', topoStatusColour(pal, hubSk)), sub: hubSub } });
 
             peers.forEach(p => {
                 const sk = statusKeyForPeer(p);
@@ -1885,7 +1901,7 @@
                     'text-wrap': 'ellipsis',
                     'min-zoomed-font-size': 7,
                 } },
-                { selector: 'node[type="hub"]',     style: { 'width': 66, 'height': 66, 'font-size': 12, 'border-color': pal.up, 'border-width': 3 } },
+                { selector: 'node[type="hub"]',     style: { 'width': 66, 'height': 66, 'font-size': 12, 'border-width': 3 } },
                 { selector: 'node[type="service"]', style: { 'width': 28, 'height': 28, 'font-size': 9, 'border-width': 2 } },
                 nodeBorder('up'), nodeBorder('down'), nodeBorder('degraded'), nodeBorder('unknown'),
                 { selector: 'edge', style: {
