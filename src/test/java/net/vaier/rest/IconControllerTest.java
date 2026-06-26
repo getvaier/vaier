@@ -1,7 +1,7 @@
 package net.vaier.rest;
 
-import net.vaier.application.GetFaviconUseCase;
-import net.vaier.application.GetFaviconUseCase.Favicon;
+import net.vaier.application.GetIconUseCase;
+import net.vaier.application.GetIconUseCase.Icon;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -16,19 +16,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class FaviconControllerTest {
+class IconControllerTest {
 
-    @Mock GetFaviconUseCase getFaviconUseCase;
+    @Mock GetIconUseCase getIconUseCase;
 
-    @InjectMocks FaviconController controller;
+    @InjectMocks IconController controller;
 
     @Test
     void returns200WithBytesAndDeclaredContentType() {
         byte[] icon = {0, 0, 1, 0};
-        when(getFaviconUseCase.getFavicon("sonarr.example.com", null))
-            .thenReturn(Optional.of(new Favicon(icon, "image/x-icon")));
+        when(getIconUseCase.getIcon("sonarr.example.com", null))
+            .thenReturn(Optional.of(new Icon(icon, "image/x-icon")));
 
-        ResponseEntity<byte[]> response = controller.getFavicon("sonarr.example.com", null);
+        ResponseEntity<byte[]> response = controller.getIcon("sonarr.example.com", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isEqualTo(icon);
@@ -37,9 +37,9 @@ class FaviconControllerTest {
 
     @Test
     void returns404WhenUseCaseReturnsEmpty() {
-        when(getFaviconUseCase.getFavicon("unknown.example.com", null)).thenReturn(Optional.empty());
+        when(getIconUseCase.getIcon("unknown.example.com", null)).thenReturn(Optional.empty());
 
-        ResponseEntity<byte[]> response = controller.getFavicon("unknown.example.com", null);
+        ResponseEntity<byte[]> response = controller.getIcon("unknown.example.com", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(404);
     }
@@ -47,10 +47,10 @@ class FaviconControllerTest {
     @Test
     void passesPathPrefixThroughToUseCase() {
         byte[] icon = {(byte) 0x89, 'P', 'N', 'G'};
-        when(getFaviconUseCase.getFavicon("services.example.com", "/grafana"))
-            .thenReturn(Optional.of(new Favicon(icon, "image/png")));
+        when(getIconUseCase.getIcon("services.example.com", "/grafana"))
+            .thenReturn(Optional.of(new Icon(icon, "image/png")));
 
-        ResponseEntity<byte[]> response = controller.getFavicon("services.example.com", "/grafana");
+        ResponseEntity<byte[]> response = controller.getIcon("services.example.com", "/grafana");
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_PNG);

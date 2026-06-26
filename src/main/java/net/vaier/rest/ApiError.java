@@ -12,7 +12,7 @@ import net.vaier.domain.ConflictException;
  * {@link NotFoundException}) and conflict ({@code 409}, via
  * {@link ConflictException}) failures all render in this envelope. The
  * only error responses that aren't an {@code ApiError} are the enterprise-gate {@code 402}
- * and the body-less {@code 404}s for missing optional GET artifacts (favicon, an
+ * and the body-less {@code 404}s for missing optional GET artifacts (icon, an
  * already-retrieved one-shot config). {@code code} is a stable, machine-readable token
  * (e.g. {@code BAD_REQUEST}); {@code message} is a human-readable, operator-safe
  * explanation; {@code detail} is optional extra context and is {@code null} when there

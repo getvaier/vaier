@@ -283,12 +283,12 @@ public class ReverseProxyRoute {
     }
 
     /**
-     * The query string the launchpad should send to {@code /favicon} for this route. The domain
+     * The query string the launchpad should send to {@code /icon} for this route. The domain
      * owns the lookup identity: host-only routes resolve a single icon per FQDN, while path-based
-     * routes use (FQDN, pathPrefix) so siblings under one host don't collide on the favicon cache
+     * routes use (FQDN, pathPrefix) so siblings under one host don't collide on the icon cache
      * (and the CDN-by-name fallback uses the path segment, not the shared subdomain).
      */
-    public String launchpadFaviconQuery() {
+    public String launchpadIconQuery() {
         String q = "host=" + URLEncoder.encode(domainName, StandardCharsets.UTF_8);
         if (pathPrefix != null) {
             q += "&pathPrefix=" + URLEncoder.encode(pathPrefix, StandardCharsets.UTF_8);

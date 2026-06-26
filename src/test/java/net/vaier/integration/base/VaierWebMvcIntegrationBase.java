@@ -42,7 +42,7 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ForSubscribingToEvents forSubscribingToEvents;
 
     @MockBean
-    protected GetFaviconUseCase getFaviconUseCase;
+    protected GetIconUseCase getIconUseCase;
 
     // Required by WebConfig -> EnterpriseLicenseInterceptor, which every @WebMvcTest
     // context loads; without it the whole controller IT suite fails to start.

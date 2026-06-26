@@ -32,8 +32,8 @@ public interface GetLaunchpadServicesUseCase {
      *       {@code pathPrefix}.</li>
      *   <li>{@code visibility} — tri-state outcome (NOT_VISIBLE entries are filtered out by the
      *       use case and never appear in this list).</li>
-     *   <li>{@code faviconQuery} — pre-built query string the client appends to {@code /favicon}.
-     *       Path-based siblings get distinct queries so they don't collide on the favicon cache.</li>
+     *   <li>{@code iconQuery} — pre-built query string the client appends to {@code /icon}.
+     *       Path-based siblings get distinct queries so they don't collide on the icon cache.</li>
      *   <li>{@code peerName} — the display name of the machine hosting the service: a VPN peer's
      *       editable name, the relay peer's name for a LAN service, or "Vaier server". The
      *       launchpad groups and labels tiles by this; it never re-derives the host from DNS.</li>
@@ -46,7 +46,7 @@ public interface GetLaunchpadServicesUseCase {
      */
     record LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                LaunchpadVisibility visibility, String url, String displayName,
-                               String subdomain, String faviconQuery, String peerName,
+                               String subdomain, String iconQuery, String peerName,
                                String image, String version) {
 
         /**
@@ -55,9 +55,9 @@ public interface GetLaunchpadServicesUseCase {
          */
         public LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
                                    LaunchpadVisibility visibility, String url, String displayName,
-                                   String subdomain, String faviconQuery, String peerName) {
+                                   String subdomain, String iconQuery, String peerName) {
             this(dnsAddress, pathPrefix, hostAddress, visibility, url, displayName, subdomain,
-                faviconQuery, peerName, null, null);
+                iconQuery, peerName, null, null);
         }
     }
 }

@@ -310,10 +310,10 @@
             const iconDiv = document.createElement('div');
             iconDiv.className = 'tile-icon';
 
-            // faviconQuery is computed by the domain (host + pathPrefix when path-based) so the
-            // launchpad never has to decide what the favicon lookup identity is.
-            const FAVICON_PATHS = [
-                `/favicon?${service.faviconQuery}`,
+            // iconQuery is computed by the domain (host + pathPrefix when path-based) so the
+            // launchpad never has to decide what the icon lookup identity is.
+            const ICON_PATHS = [
+                `/icon?${service.iconQuery}`,
             ];
 
             const img = document.createElement('img');
@@ -321,15 +321,15 @@
             let attempt = 0;
             img.onerror = () => {
                 attempt++;
-                if (attempt < FAVICON_PATHS.length) {
-                    img.src = FAVICON_PATHS[attempt];
+                if (attempt < ICON_PATHS.length) {
+                    img.src = ICON_PATHS[attempt];
                 } else {
                     img.remove();
                     iconDiv.style.background = color;
                     iconDiv.textContent = letter;
                 }
             };
-            img.src = FAVICON_PATHS[0];
+            img.src = ICON_PATHS[0];
             iconDiv.appendChild(img);
 
             const infoDiv = document.createElement('div');

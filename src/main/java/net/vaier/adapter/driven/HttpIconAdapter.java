@@ -1,6 +1,6 @@
 package net.vaier.adapter.driven;
 
-import net.vaier.domain.port.ForFetchingFavicons;
+import net.vaier.domain.port.ForFetchingIcons;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -11,12 +11,12 @@ import java.time.Duration;
 import java.util.Optional;
 
 @Component
-public class HttpFaviconAdapter implements ForFetchingFavicons {
+public class HttpIconAdapter implements ForFetchingIcons {
 
     private final HttpClient htmlClient;
     private final HttpClient bytesClient;
 
-    public HttpFaviconAdapter() {
+    public HttpIconAdapter() {
         // HTML hints often live behind a redirect (root → /login etc) we don't want to follow
         // — we want the page that actually carries the <link rel="icon">. The bytes client does
         // follow redirects because CDNs often 302 to a versioned URL.

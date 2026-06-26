@@ -8,11 +8,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Pure rules for resolving a service's favicon: parse the HTML, rank link candidates, pick
+ * Pure rules for resolving a service's icon: parse the HTML, rank link candidates, pick
  * fallback CDN URLs, and classify what bytes are (and aren't) an image. Has no I/O; an adapter
  * is responsible for the actual HTTP fetches.
  */
-public final class FaviconResolution {
+public final class IconResolution {
 
     private static final Pattern LINK_TAG =
         Pattern.compile("<link([^>]+)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
@@ -23,7 +23,7 @@ public final class FaviconResolution {
     private static final Pattern TYPE_ATTR =
         Pattern.compile("type=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE);
 
-    private FaviconResolution() {}
+    private IconResolution() {}
 
     /**
      * Parse {@code <link rel="...icon...">} entries out of {@code html} and pick the best
@@ -31,7 +31,7 @@ public final class FaviconResolution {
      * (smaller and crisper on the launchpad tiles). Resolves relative, absolute, and
      * protocol-relative hrefs against {@code baseUrl}.
      */
-    public static Optional<String> extractFaviconUrl(String html, String baseUrl) {
+    public static Optional<String> extractIconUrl(String html, String baseUrl) {
         List<String> candidates = new ArrayList<>();
 
         Matcher linkMatcher = LINK_TAG.matcher(html);

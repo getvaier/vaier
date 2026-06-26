@@ -3,11 +3,11 @@ package net.vaier.domain.port;
 import java.util.Optional;
 
 /**
- * Driven port for the I/O side of favicon resolution: fetching HTML pages and image bytes from
+ * Driven port for the I/O side of icon resolution: fetching HTML pages and image bytes from
  * remote servers. The application service uses this port plus the pure rules in
- * {@link net.vaier.domain.FaviconResolution} to assemble a full favicon lookup.
+ * {@link net.vaier.domain.IconResolution} to assemble a full icon lookup.
  */
-public interface ForFetchingFavicons {
+public interface ForFetchingIcons {
 
     /** Fetch a page's HTML body. Empty on any non-200, network error, or timeout. */
     Optional<String> fetchHtml(String url);

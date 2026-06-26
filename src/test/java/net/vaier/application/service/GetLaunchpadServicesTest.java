@@ -373,7 +373,7 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
-    void getLaunchpadServices_pathBasedRoute_faviconQueryCarriesPathPrefix() {
+    void getLaunchpadServices_pathBasedRoute_iconQueryCarriesPathPrefix() {
         ReverseProxyRoute pathBased = new ReverseProxyRoute(
             "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
             null, null, null, null, null, false, false, null, "/grafana"
@@ -385,7 +385,7 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
-        assertThat(result.get(0).faviconQuery()).isEqualTo("host=svc.example.com&pathPrefix=%2Fgrafana");
+        assertThat(result.get(0).iconQuery()).isEqualTo("host=svc.example.com&pathPrefix=%2Fgrafana");
     }
 
     @Test

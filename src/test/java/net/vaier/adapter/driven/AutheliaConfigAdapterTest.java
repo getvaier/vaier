@@ -170,7 +170,7 @@ class AutheliaConfigAdapterTest {
     }
 
     @Test
-    void initialiseConfiguration_faviconPathsBypassAuthForAllSubdomains() throws IOException {
+    void initialiseConfiguration_iconPathsBypassAuthForAllSubdomains() throws IOException {
         AutheliaConfigAdapter init = new AutheliaConfigAdapter(tempDir.toString(), "example.com");
 
         init.initialiseConfiguration();
@@ -178,7 +178,11 @@ class AutheliaConfigAdapterTest {
         String content = Files.readString(tempDir.resolve("configuration.yml"));
         assertThat(content).contains("domain_regex");
         assertThat(content).contains("example\\.com");  // dots escaped for regex
+        // The icon-resolution endpoint is bypassed so launchpad tiles can load icons.
+        assertThat(content).contains("^/icon$");
+        // The browser's automatic requests for Vaier's own site favicon files stay bypassed too.
         assertThat(content).contains("favicon\\.ico");
+        assertThat(content).contains("favicon\\.png");
         assertThat(content).contains("apple-touch-icon");
     }
 
