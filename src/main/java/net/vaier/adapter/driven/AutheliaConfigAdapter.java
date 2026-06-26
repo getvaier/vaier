@@ -211,7 +211,7 @@ public class AutheliaConfigAdapter implements ForInitialisingUserService, ForCon
                         - "^/styles.css$"
                         - "^/published-services/discover$"
                         - "^/users/me$"
-                        - "^/icon$"
+                        - '^/icon(\\?.*)?$'
                         - "^/launchpad/services$"
                         - '^/lan-servers/[^/]+/setup\\.sh$'
                     - domain: "%s"

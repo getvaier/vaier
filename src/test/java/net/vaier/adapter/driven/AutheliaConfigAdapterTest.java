@@ -178,8 +178,14 @@ class AutheliaConfigAdapterTest {
         String content = Files.readString(tempDir.resolve("configuration.yml"));
         assertThat(content).contains("domain_regex");
         assertThat(content).contains("example\\.com");  // dots escaped for regex
-        // The icon-resolution endpoint is bypassed so launchpad tiles can load icons.
-        assertThat(content).contains("^/icon$");
+        // The icon-resolution endpoint is bypassed so launchpad tiles can load icons. The launchpad
+        // calls /icon?host=...&pathPrefix=..., and Authelia matches the query string too, so the
+        // bypass regex must tolerate a query — a bare ^/icon$ only matched the query-less path and
+        // left anonymous tiles hitting the auth wall.
+        assertThat(content).contains("^/icon(\\?.*)?$");
+        java.util.regex.Pattern iconRule = java.util.regex.Pattern.compile("^/icon(\\?.*)?$");
+        assertThat(iconRule.matcher("/icon?host=grafana.example.com&pathPrefix=/x").matches()).isTrue();
+        assertThat(iconRule.matcher("/icon").matches()).isTrue();
         // The browser's automatic requests for Vaier's own site favicon files stay bypassed too.
         assertThat(content).contains("favicon\\.ico");
         assertThat(content).contains("favicon\\.png");
