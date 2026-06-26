@@ -20,7 +20,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | Feature | Description |
 |---------|-------------|
 | **VPN peer management** | Create, delete, and monitor WireGuard peers with downloadable configs (QR code, `.conf`, docker-compose, or setup script). |
-| **Service publishing** | Publish any container on a peer as a public HTTPS subdomain in one click — or share one subdomain across several services via path prefixes (`host/auth/*`, `host/api/*`, …). Automatic rollback if the flow fails. |
+| **Service publishing** | Publish any container on a peer — or a bare host:port on a LAN server — as a public HTTPS subdomain in one click, managed from the machine's card on the Infrastructure page. Share one subdomain across several services via path prefixes (`host/auth/*`, `host/api/*`, …), ignore discovered containers you don't want to publish, and watch each publish progress live. Automatic rollback if the flow fails. |
 | **Smart launchpad** | A dashboard that links to every published service, switching to direct LAN URLs when you're on the same network. Tiles show the path segment (for path-based routes) or the subdomain, with an optional operator-supplied display name. Hover a tile to see the Docker image and version behind the service — or point a service at a version endpoint so one running natively on a LAN machine reports its version too. Hide internal-only services per route, mark tiles whose hosting machine is unreachable with a red "host offline" dot (VPN handshake age or LAN reachability probe), and hide auth-protected tiles from anonymous viewers so internal URLs don't leak. |
 | **Reverse proxy** | Traefik dynamic config generated automatically, with per-service Authelia toggle and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
@@ -184,9 +184,9 @@ Each machine also has a **device category** — phone, laptop, desktop, server, 
 
 Every machine card carries a **status colour** on its type icon — green (reachable / connected), amber (reachable but the Docker scrape failed), red (unreachable), or grey (not yet probed). Hovering a machine's icon shows the state in plain language with the evidence behind it (e.g. "Green — connected, last handshake 12s ago").
 
-The Machines page offers three views via a tab switcher: a **List** of machine cards, a **Map** plotting each machine at its geographic location on a world map, and a **Topology** diagram — an interactive, force-directed bird's-eye view of the whole Vaier network. In the Topology view the Vaier server, every VPN peer, each LAN server, and every published service are nodes in a live physics simulation: the graph lays itself out automatically, and you can drag a node (its neighbours follow), zoom, and pan. **Published services** attach to the machine that hosts them (a VPN peer, a LAN server, or the central Vaier hub for server-side services), each coloured green/red/grey by its own health, with its authentication state in the tooltip. Edges are coloured and dashed by connectivity status (green for connected, red for down, yellow for degraded, grey for unknown), reusing the same machine icons and status colours as the other tabs, and the whole diagram updates live as machines and services come and go.
+The Infrastructure page offers three views via a tab switcher: a **List** of machine cards, a **Map** plotting each machine at its geographic location on a world map, and a **Topology** diagram — an interactive, force-directed bird's-eye view of the whole Vaier network. In the Topology view the Vaier server, every VPN peer, each LAN server, and every published service are nodes in a live physics simulation: the graph lays itself out automatically, and you can drag a node (its neighbours follow), zoom, and pan. **Published services** attach to the machine that hosts them (a VPN peer, a LAN server, or the central Vaier hub for server-side services), each coloured green/red/grey by its own health, with its authentication state in the tooltip. Edges are coloured and dashed by connectivity status (green for connected, red for down, yellow for degraded, grey for unknown), reusing the same machine icons and status colours as the other tabs, and the whole diagram updates live as machines and services come and go.
 
-On the **List** tab, expanding a machine card reveals a **Services** section that fuses what's published with what could be: the reverse-proxy routes hosted on that machine appear first — each expandable to edit its authentication, display name, and advanced options inline, or to delete it — followed by the host's discovered-but-unpublished containers as **+ Publish** rows that open the publish flow pre-filled. This makes each machine card the single place to see and manage everything running on a host, without leaving the page.
+On the **List** tab, expanding a machine card reveals a **Services** section that fuses what's published with what could be: the reverse-proxy routes hosted on that machine appear first — each expandable to edit its authentication, display name, and advanced options inline, or to delete it — followed by the host's discovered-but-unpublished containers as **+ Publish** rows that open the publish flow pre-filled. Each candidate row also offers an **Ignore** button to hide it from the list; a machine with ignored candidates shows a collapsible "N hidden" line to reveal and **Unignore** them. LAN-server cards that sit behind a relay add a **+ Publish LAN port** button for publishing a bare host:port (port + protocol + subdomain). Every publish runs as a floating, non-blocking **progress card** that advances through DNS creation, DNS propagation, and reverse-proxy routing — turning green on success or red on rollback / DNS timeout — and is rebuilt from the server on reload so a refresh never loses an in-flight publish. Deleting a service asks for confirmation in an in-app modal and shows a busy overlay while Traefik and DNS teardown runs. This makes each machine card the single place to see and manage everything running on a host, without leaving the page.
 
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 
@@ -206,8 +206,8 @@ Why show-once: WireGuard has no session concept, no server-side revocation, and 
 ## Publishing a service
 
 1. Start a Docker container on any connected peer.
-2. In Vaier → Services → Publishable, the container appears automatically.
-3. Select it, enter a subdomain, optionally enable Authelia authentication.
+2. In Vaier → Infrastructure → List, expand the peer's card; the container appears as a **+ Publish** row in its **Services** section.
+3. Click it, enter a subdomain, optionally enable Authelia authentication.
 4. Vaier creates the DNS CNAME, the Traefik route, and (optionally) Authelia middleware.
 
 The service is live at `https://subdomain.yourdomain.com`.
@@ -290,7 +290,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 ## Attribution
 
-IP geolocation on the Machines page is provided by [DB-IP](https://db-ip.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `geoip-init` container downloads the latest DB-IP City Lite database to a local volume on first boot and refreshes it monthly.
+IP geolocation on the Infrastructure page is provided by [DB-IP](https://db-ip.com), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `geoip-init` container downloads the latest DB-IP City Lite database to a local volume on first boot and refreshes it monthly.
 
 ---
 

@@ -2004,8 +2004,8 @@
         // server name for LAN services, or the peer name for peer-hosted services. The caller
         // drops any hostKey it can't resolve to a node, so a service on an absent machine is
         // simply not drawn (no crash).
-        // serviceLocation -> machine-icon kind. Defined locally because the Machines page does
-        // not load published-services.js (which has its own copy); the slice-3 page merge dedupes.
+        // serviceLocation -> machine-icon kind. Lives here on the (now sole) Infrastructure page;
+        // the old published-services.js copy was retired with that page in slice 3.
         function serviceTypeIcon(service) {
             switch (service.serviceLocation) {
                 case 'LAN_SERVICE':  return 'lan';
