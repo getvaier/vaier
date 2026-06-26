@@ -2208,7 +2208,10 @@
                 const stats = JSON.parse(e.data);
                 let mapNeedsRefresh = false;
                 stats.forEach(s => {
-                    const id = s.name.replace(/[^a-zA-Z0-9]/g, '_');
+                    // s.name is the peer's id (the WireGuard dir name, e.g. "Colina-27") — the stats
+                    // payload field is misnamed; resolvePeerNameByIp returns the dir name. Build the
+                    // DOM id through the same cardId the cards use (cardId(peer.id)) so they agree.
+                    const id = cardId(s.name);
                     const iconCls = s.connected ? 'icon-up' : 'icon-down';
 
                     const hdrIcon        = document.getElementById('hdr-icon-'         + id);
