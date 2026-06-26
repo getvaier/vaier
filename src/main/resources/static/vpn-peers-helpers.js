@@ -2,16 +2,6 @@
 // device-category and HTML/JS-escaping utilities. Loaded as a classic script before
 // vpn-peers.js so these stay globally available to it and to inline on* handlers.
 
-function parseImageTag(image) {
-    if (!image) return '';
-    const slashIdx = image.lastIndexOf('/');
-    const nameAndTag = slashIdx >= 0 ? image.slice(slashIdx + 1) : image;
-    const colonIdx = nameAndTag.indexOf(':');
-    if (colonIdx < 0) return 'latest';
-    const tag = nameAndTag.slice(colonIdx + 1);
-    return tag.length > 20 ? tag.slice(0, 12) + '…' : tag;
-}
-
 function cardId(peerName) {
     return peerName.replace(/[^a-zA-Z0-9]/g, '_');
 }

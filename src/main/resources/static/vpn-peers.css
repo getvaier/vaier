@@ -458,34 +458,101 @@
         }
 
         /* Service list */
-        .service-list {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            column-gap: 0.75rem;
-            row-gap: 0.2rem;
-            align-items: center;
+
+        /* Published-services subsection on a machine card (#infrastructure slice 2). */
+        .published-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
             width: 100%;
-            font-family: var(--mono);
-            font-size: 0.75rem;
         }
-
-        .service-list-header { display: contents; }
-        .service-list-header > span {
+        .published-entry { display: flex; flex-direction: column; }
+        .published-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .pub-chevron {
+            flex-shrink: 0;
             color: var(--text-dim);
-            font-size: 0.68rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            padding-bottom: 0.25rem;
-            border-bottom: 1px solid var(--border);
+            font-size: 0.55rem;
+            transition: transform 0.15s ease;
         }
-
-        .service-row { display: contents; color: var(--text); }
-
-        .service-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-
-        .service-tag {
+        .pub-chevron.open { transform: rotate(180deg); }
+        .published-editor {
+            display: none;
+            flex-direction: column;
+            gap: 0.3rem;
+            padding: 0.45rem 0 0.3rem 1.1rem;
+        }
+        .published-editor.open { display: flex; }
+        .published-advanced > summary {
+            cursor: pointer;
             color: var(--text-muted);
-            text-align: right;
+            font-size: 0.75rem;
+            user-select: none;
+            margin-top: 0.2rem;
+        }
+        .form-input.save-ok { border-color: var(--green) !important; }
+        .pub-status {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: var(--text-dim);
+        }
+        .pub-status.icon-up       { background: var(--green); }
+        .pub-status.icon-down     { background: var(--red); }
+        .pub-status.icon-degraded { background: var(--yellow); }
+        .pub-status.icon-unknown  { background: var(--text-dim); }
+        .pub-name {
+            flex: 1 1 auto;
+            min-width: 0;
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pub-badge {
+            flex-shrink: 0;
+            font-size: 0.6rem;
+            padding: 0.05rem 0.32rem;
+            border-radius: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+        }
+        .pub-auth   { background: rgba(78, 201, 176, 0.15); color: var(--green); }
+        .pub-noauth { background: rgba(244, 135, 113, 0.15); color: var(--red); }
+        .pub-open {
+            flex-shrink: 0;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.9rem;
+            line-height: 1;
+        }
+        .pub-del {
+            flex-shrink: 0;
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 0 0.15rem;
+            font-size: 0.85rem;
+            line-height: 1;
+        }
+        .pub-del:hover { color: var(--red); }
+
+        /* "+ Publish" candidate rows in the merged Services list (#infrastructure slice 2c). */
+        .published-item.candidate { cursor: default; }
+        .published-item.candidate .pub-name { color: var(--text-muted); }
+        .cand-port { color: var(--text-dim); font-family: var(--mono); font-size: 0.72rem; margin-left: 0.15rem; }
+        .pub-publish {
+            flex-shrink: 0;
+            margin-left: auto;
+            padding: 0.1rem 0.5rem;
+            font-size: 0.7rem;
             white-space: nowrap;
         }
 

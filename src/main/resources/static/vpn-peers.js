@@ -6,12 +6,24 @@
         let vaierServerStatus = 'UNKNOWN'; // domain MachineStatus enum value
         let lanServers = [];
         let lanServerServices = {};
-        // Published services (Topology tab, #infrastructure slice 1). Same DTO the Services page
-        // discovers; we client-side join each one onto its host machine node in the diagram.
+        // Published services (Topology tab, #infrastructure slice 1; machine cards, slice 2). Same
+        // DTO the Services page discovers; we client-side join each one onto its host machine.
         let publishedServices = [];
+        // hostKey -> [service] index (slice 2), rebuilt from publishedServices on each list render so
+        // every machine card can show the published routes it hosts. Keyed like topologyServicesByHost
+        // ('__hub__', a peer name, or a LAN-server name).
+        let _publishedByHost = {};
+        // Discoverable-but-unpublished containers, the "+ Publish" candidates folded into the same
+        // Services list (slice 2c). publishableServices is the raw /publishable feed; _candidatesByHost
+        // is the per-machine index built in displayPeers (ignored + already-published entries dropped).
+        let publishableServices = [];
+        let _candidatesByHost = {};
         let lastFetchSuccessful = false;
 
         const expandedPeers = new Set();
+        // Which published-service rows are expanded into their inline editor (slice 2b). Keyed by the
+        // service's unique name (dnsAddress + pathPrefix); persists across re-renders like expandedPeers.
+        const expandedPublished = new Set();
 
         // A peer has an immutable id (slug — drives DOM keys + REST paths) and a separate
         // editable display name. This resolves the display name from the id for toasts and
@@ -95,11 +107,42 @@
                 const response = await fetch('/published-services/discover', { cache: 'no-store' });
                 if (response.ok) {
                     publishedServices = await response.json();
+                    // Re-render the list so each machine card's Services subsection (slice 2) picks
+                    // up the change, and the diagram if it's the visible tab. Skip the list re-render
+                    // while an input inside a card is focused, so an SSE-driven refresh can't wipe an
+                    // in-progress edit out from under the operator (a later event reconciles).
+                    if (peers && peers.length && !isEditingMachineCard()) displayPeers(peers);
                     if (_activeTab === 'topology') renderNetworkDiagram();
                 }
             } catch (error) {
                 console.error('Failed to load published services:', error);
             }
+        }
+
+        // The discoverable "+ Publish" candidates (slice 2c). Loaded alongside published services and
+        // refreshed on the same triggers; displayPeers indexes them per machine.
+        async function fetchPublishable() {
+            try {
+                const response = await fetch('/published-services/publishable', { cache: 'no-store' });
+                if (response.ok) {
+                    publishableServices = await response.json();
+                    if (peers && peers.length && !isEditingMachineCard()) displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load publishable services:', error);
+            }
+        }
+
+        // Map a publishable candidate to the machine card that should host it. The candidate's peerName
+        // is the sanitized WireGuard name, not the display name, so we match on address instead:
+        // VAIER_SERVER -> hub; a peer by tunnel IP; else a LAN server by lanAddress.
+        function publishableHostKey(c) {
+            if (c.source === 'VAIER_SERVER') return '__hub__';
+            const peer = peers.find(p => p.tunnelIp === c.address);
+            if (peer) return peer.name;
+            const lan = lanServers.find(s => s.lanAddress === c.address);
+            if (lan) return lan.name;
+            return null;
         }
 
         function displayError(message) {
@@ -199,25 +242,289 @@
             }
         }
 
-        function renderServiceList(containers) {
-            if (!containers || containers.length === 0)
-                return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">none discovered</span></div>`;
-            const rows = containers.map(c => {
-                const version = c.version || parseImageTag(c.image);
-                return `<div class="service-row">
-                    <span class="service-name">${c.containerName}</span>
-                    <span class="service-tag">${version}</span>
-                </div>`;
-            }).join('');
-            return `<div class="detail-row">
-                <span class="detail-label">Services</span>
-                <div class="service-list">
-                    <div class="service-list-header">
-                        <span>name</span><span>version</span>
-                    </div>
-                    ${rows}
+        // The published reverse-proxy routes and "+ Publish" candidates are rendered per machine by
+        // renderServicesSubsection (slice 2c); the old discovered-containers renderServiceList was
+        // folded into it. Published routes come from the _publishedByHost index keyed by machine name.
+        function renderPublishedRow(s) {
+            const statusKey  = statusKeyForService(s);                // up | down | unknown
+            const display    = `${s.dnsAddress}${s.pathPrefix || ''}`;
+            const label      = s.launchpadAlias || s.shortName || s.name || display;
+            const url        = `https://${display}`;
+            const isSelf     = s.dnsAddress.startsWith('vaier.');
+            const dnsOk      = s.dnsState === 'OK';
+            const uniqueName = display;
+            const id         = cardId('pub:' + uniqueName);
+            const isOpen     = expandedPublished.has(uniqueName);
+            // The ↗ link and ✕ button live inside the clickable header, so they stop propagation to
+            // avoid also toggling the editor.
+            const linkOpen   = (dnsOk && !isSelf)
+                ? `<a class="pub-open" href="${encodeURI(url)}" target="_blank" rel="noopener" title="Open ${escapeHtml(display)}" onclick="event.stopPropagation()">↗</a>`
+                : '';
+            const authBadge  = s.authenticated
+                ? `<span class="pub-badge pub-auth" title="Authelia authentication required">auth</span>`
+                : `<span class="pub-badge pub-noauth" title="Public — no authentication required">no auth</span>`;
+            return `<div class="published-entry">
+                <div class="published-item" onclick="togglePublished('${jsArg(uniqueName)}')">
+                    <span class="pub-status icon-${statusKey}" title="${statusKey}"></span>
+                    <span class="pub-name" title="${escapeHtml(display)}">${escapeHtml(label)}</span>
+                    ${authBadge}
+                    ${linkOpen}
+                    <button class="pub-del" title="Delete this published service"
+                            onclick="event.stopPropagation(); deletePublishedService('${jsArg(s.dnsAddress)}','${jsArg(s.pathPrefix || '')}')">✕</button>
+                    <span class="pub-chevron ${isOpen ? 'open' : ''}">▼</span>
+                </div>
+                <div class="published-editor ${isOpen ? 'open' : ''}" id="pub-body-${id}">
+                    ${renderPublishedEditor(s, id)}
                 </div>
             </div>`;
+        }
+
+        // The inline editor for one published service (slice 2b) — the services-page card body folded
+        // onto the machine card. Read-only context rows (URL/DNS/Host/Version) plus the editable
+        // controls. Checkboxes apply immediately; text fields auto-save on blur (Enter blurs).
+        function renderPublishedEditor(s, id) {
+            const display = `${s.dnsAddress}${s.pathPrefix || ''}`;
+            const url     = `https://${display}`;
+            const isSelf  = s.dnsAddress.startsWith('vaier.');
+            const dnsOk   = s.dnsState === 'OK';
+            const dns = jsArg(s.dnsAddress), path = jsArg(s.pathPrefix || '');
+            const urlVal = (dnsOk && !isSelf)
+                ? `<a class="pub-open" href="${encodeURI(url)}" target="_blank" rel="noopener">${escapeHtml(display)}</a>`
+                : `<span style="color:var(--text-dim);font-family:var(--mono)">${escapeHtml(display)}</span>`;
+            const versionRow = (s.image || s.version)
+                ? `<div class="detail-row"><span class="detail-label">Version</span><span class="detail-value" style="font-family:var(--mono)">${[s.image && escapeHtml(s.image), s.version && escapeHtml(s.version)].filter(Boolean).join(' · ')}</span></div>`
+                : '';
+            return `
+                <div class="detail-row"><span class="detail-label">URL</span><span class="detail-value">${urlVal}</span></div>
+                <div class="detail-row"><span class="detail-label">DNS</span><span class="detail-value">${escapeHtml(s.dnsState)}</span></div>
+                <div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${escapeHtml(s.hostAddress)}:${s.hostPort}</span></div>
+                ${versionRow}
+                <div class="detail-row"><span class="detail-label">Auth</span><span class="detail-value">
+                    <input type="checkbox" id="pub-auth-${id}" ${s.authenticated ? 'checked' : ''}
+                        style="accent-color:var(--accent);cursor:pointer" title="Require Authelia authentication to reach this service."
+                        onchange="setPublishedAuth('${dns}','${path}',this.checked)"></span></div>
+                <div class="detail-row"><span class="detail-label">Display name</span><span class="detail-value">
+                    <input type="text" id="pub-alias-${id}" class="form-input" style="width:100%;max-width:240px"
+                        value="${escapeHtml(s.launchpadAlias || '')}" data-original="${escapeHtml(s.launchpadAlias || '')}" placeholder="(default)"
+                        onkeydown="if(event.key==='Enter')this.blur()"
+                        onblur="savePublishedField('${dns}','${path}','pub-alias-${id}','launchpadAlias')"></span></div>
+                <details class="published-advanced">
+                    <summary>Advanced</summary>
+                    <div class="detail-row"><span class="detail-label">Redirect</span><span class="detail-value">
+                        <input type="text" id="pub-redir-${id}" class="form-input" style="width:100%;max-width:240px"
+                            value="${escapeHtml(s.rootRedirectPath || '')}" data-original="${escapeHtml(s.rootRedirectPath || '')}" placeholder="e.g. /dashboard"
+                            onkeydown="if(event.key==='Enter')this.blur()"
+                            onblur="savePublishedField('${dns}','${path}','pub-redir-${id}','rootRedirectPath')"></span></div>
+                    <div class="detail-row"><span class="detail-label">Version endpoint</span><span class="detail-value" style="display:flex;gap:6px">
+                        <input type="text" id="pub-ve-${id}" class="form-input" style="flex:2;min-width:0;max-width:170px"
+                            value="${escapeHtml(s.versionEndpoint || '')}" data-original="${escapeHtml(s.versionEndpoint || '')}" placeholder="/sys/metrics"
+                            onkeydown="if(event.key==='Enter')this.blur()"
+                            onblur="savePublishedVersionEndpoint('${dns}','${path}','${id}')">
+                        <input type="text" id="pub-vp-${id}" class="form-input" style="flex:1;min-width:0;max-width:100px"
+                            value="${escapeHtml(s.versionProperty || '')}" data-original="${escapeHtml(s.versionProperty || '')}" placeholder="property"
+                            onkeydown="if(event.key==='Enter')this.blur()"
+                            onblur="savePublishedVersionEndpoint('${dns}','${path}','${id}')"></span></div>
+                    <div class="detail-row"><span class="detail-label">Direct LAN URL</span><span class="detail-value">
+                        <input type="checkbox" id="pub-dul-${id}" ${s.directUrlDisabled ? '' : 'checked'}
+                            style="accent-color:var(--accent);cursor:pointer" title="Link the launchpad directly to the LAN URL when the caller shares the peer's NAT."
+                            onchange="setPublishedDirectUrlDisabled('${dns}','${path}',!this.checked)"></span></div>
+                    <div class="detail-row"><span class="detail-label">Launchpad</span><span class="detail-value">
+                        <input type="checkbox" id="pub-lp-${id}" ${s.hiddenFromLaunchpad ? '' : 'checked'}
+                            style="accent-color:var(--accent);cursor:pointer" title="Show a tile for this service on the launchpad."
+                            onchange="setPublishedHidden('${dns}','${path}',!this.checked)"></span></div>
+                </details>`;
+        }
+
+        // A discoverable container that isn't published yet — a "+ Publish" row in the Services list
+        // (slice 2c). Not expandable; the button opens the publish modal pre-filled from its dataset.
+        function renderCandidateRow(c) {
+            return `<div class="published-item candidate" title="Discovered container — not published yet">
+                <span class="pub-status icon-unknown"></span>
+                <span class="pub-name">${escapeHtml(c.containerName)}<span class="cand-port">:${c.port}</span></span>
+                <button class="btn btn-small btn-primary pub-publish"
+                        data-address="${escapeHtml(c.address)}" data-port="${c.port}"
+                        data-container="${escapeHtml(c.containerName)}"
+                        data-subdomain="${escapeHtml(c.suggestedSubdomain || '')}"
+                        data-redirect="${escapeHtml(c.rootRedirectPath || '')}"
+                        onclick="showPublishModalForCandidate(this)">+ Publish</button>
+            </div>`;
+        }
+
+        // One Services section per machine (slice 2c): published routes (editable) first, then the
+        // host's discoverable-but-unpublished containers as "+ Publish" rows. Replaces both the old
+        // discovered-containers list and the published-only subsection.
+        function renderServicesSubsection(hostKey) {
+            const published  = (_publishedByHost[hostKey] || []).slice()
+                .sort((a, b) => (a.launchpadAlias || a.shortName || a.name || '')
+                    .localeCompare(b.launchpadAlias || b.shortName || b.name || ''));
+            const candidates = (_candidatesByHost[hostKey] || []).slice()
+                .sort((a, b) => a.containerName.localeCompare(b.containerName) || a.port - b.port);
+            if (published.length === 0 && candidates.length === 0) return '';
+            const rows = published.map(renderPublishedRow).join('') + candidates.map(renderCandidateRow).join('');
+            return `<div class="detail-row">
+                <span class="detail-label">Services</span>
+                <div class="published-list">${rows}</div>
+            </div>`;
+        }
+
+        async function deletePublishedService(dnsAddress, pathPrefix) {
+            const label = pathPrefix ? `${dnsAddress}${pathPrefix}` : dnsAddress;
+            if (!confirm(`Delete published service "${label}"?\n\nThis removes its reverse-proxy route and DNS record.`)) return;
+            try {
+                const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
+                const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
+                const response = await fetch(url, { method: 'DELETE' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                displaySuccess(`Deleted ${label}`);
+                await fetchPublishedServices();
+            } catch (e) {
+                displayError(`Failed to delete ${label}: ${e.message}`);
+            }
+        }
+
+        // True when an input/textarea inside a machine card holds focus — used to defer SSE/poll
+        // re-renders so they can't wipe an in-progress edit (slice 2b).
+        function isEditingMachineCard() {
+            const a = document.activeElement;
+            const c = document.getElementById('peers-container');
+            return !!a && !!c && c.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA');
+        }
+
+        function togglePublished(uniqueName) {
+            if (expandedPublished.has(uniqueName)) expandedPublished.delete(uniqueName);
+            else expandedPublished.add(uniqueName);
+            const id = cardId('pub:' + uniqueName);
+            const body = document.getElementById('pub-body-' + id);
+            if (!body) return;
+            body.classList.toggle('open');
+            const chevron = body.previousElementSibling
+                && body.previousElementSibling.querySelector('.pub-chevron');
+            if (chevron) chevron.classList.toggle('open');
+        }
+
+        async function patchPublishedService(dnsAddress, pathPrefix, patch) {
+            const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
+            const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
+            const r = await fetch(url, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        }
+
+        function pubFlashOk(input) {
+            input.classList.add('save-ok');
+            setTimeout(() => input.classList.remove('save-ok'), 900);
+        }
+
+        async function setPublishedAuth(dnsAddress, pathPrefix, requiresAuth) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { requiresAuth }); await fetchPublishedServices(); }
+            catch (e) { displayError(`Failed to update authentication: ${e.message}`); }
+        }
+
+        async function setPublishedDirectUrlDisabled(dnsAddress, pathPrefix, directUrlDisabled) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { directUrlDisabled }); await fetchPublishedServices(); }
+            catch (e) { displayError(`Failed to update direct LAN URL setting: ${e.message}`); }
+        }
+
+        async function setPublishedHidden(dnsAddress, pathPrefix, hiddenFromLaunchpad) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { hiddenFromLaunchpad }); await fetchPublishedServices(); }
+            catch (e) { displayError(`Failed to update launchpad visibility: ${e.message}`); }
+        }
+
+        // Auto-save a single text field (display name / redirect) on blur, no-op when unchanged.
+        async function savePublishedField(dnsAddress, pathPrefix, inputId, field) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            const value = input.value.trim();
+            if (value === (input.dataset.original || '')) return;
+            try {
+                await patchPublishedService(dnsAddress, pathPrefix, { [field]: value });
+                input.dataset.original = value;
+                pubFlashOk(input);
+                await fetchPublishedServices();
+            } catch (e) { displayError(`Failed to save: ${e.message}`); }
+        }
+
+        async function savePublishedVersionEndpoint(dnsAddress, pathPrefix, id) {
+            const ep = document.getElementById('pub-ve-' + id);
+            const pr = document.getElementById('pub-vp-' + id);
+            if (!ep || !pr) return;
+            const endpoint = ep.value.trim(), property = pr.value.trim();
+            if (endpoint === (ep.dataset.original || '') && property === (pr.dataset.original || '')) return;
+            try {
+                await patchPublishedService(dnsAddress, pathPrefix, { versionEndpoint: endpoint, versionProperty: property });
+                ep.dataset.original = endpoint; pr.dataset.original = property;
+                pubFlashOk(ep); pubFlashOk(pr);
+                await fetchPublishedServices();
+            } catch (e) { displayError(`Failed to save version endpoint: ${e.message}`); }
+        }
+
+        // Publish a discovered container as a reverse-proxy route (slice 2c) — the container-mode
+        // half of the old Services-page publish modal, opened from a "+ Publish" candidate row.
+        function showPublishModalForCandidate(btn) {
+            document.getElementById('publishAddress').value         = btn.dataset.address;
+            document.getElementById('publishPort').value            = btn.dataset.port;
+            document.getElementById('publishSubdomain').value       = btn.dataset.subdomain || '';
+            document.getElementById('publishPathPrefix').value      = '';
+            document.getElementById('publishRequiresAuth').checked  = false;
+            document.getElementById('publishDirectUrlEnabled').checked = true;
+            document.getElementById('publishRootRedirectPath').value = btn.dataset.redirect || '';
+            document.getElementById('publishAdvanced').open = !!btn.dataset.redirect;
+            document.getElementById('publishServiceLabel').textContent =
+                `${btn.dataset.container} (${btn.dataset.address}:${btn.dataset.port})`;
+            document.getElementById('publishModal').classList.add('active');
+            document.getElementById('publishSubdomain').focus();
+        }
+
+        function hidePublishModal() {
+            document.getElementById('publishModal').classList.remove('active');
+        }
+
+        // Turn a failed publish response into a one-line explanation. On a 400/409 the backend sends
+        // an ApiError envelope { message }; otherwise fall back to status-keyed guidance.
+        async function explainPublishError(response) {
+            let reason = '';
+            try { const p = await response.json(); if (p && p.message) reason = p.message; } catch (e) { /* no/!json body */ }
+            if (response.status === 400) return reason || 'The request was rejected — check the subdomain and path prefix.';
+            if (response.status === 409) return reason || 'That subdomain or path is already in use. Pick a different one.';
+            if (response.status >= 500) return 'Something went wrong on the server while publishing. Check the Vaier logs.';
+            return reason || `Unexpected response (HTTP ${response.status}).`;
+        }
+
+        async function submitPublish() {
+            const subdomain = document.getElementById('publishSubdomain').value.trim();
+            if (!subdomain) { alert('Please enter a subdomain'); return; }
+            const body = {
+                address:          document.getElementById('publishAddress').value,
+                port:             parseInt(document.getElementById('publishPort').value),
+                subdomain,
+                pathPrefix:       document.getElementById('publishPathPrefix').value.trim() || null,
+                requiresAuth:     document.getElementById('publishRequiresAuth').checked,
+                directUrlDisabled: !document.getElementById('publishDirectUrlEnabled').checked,
+                rootRedirectPath: document.getElementById('publishRootRedirectPath').value.trim() || null,
+            };
+            const submitBtn = document.getElementById('publishSubmitBtn');
+            const cancelBtn = document.getElementById('publishCancelBtn');
+            submitBtn.disabled = cancelBtn.disabled = true;
+            submitBtn.textContent = 'Publishing…';
+            try {
+                const r = await fetch('/published-services/publish', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+                });
+                if (!r.ok) { alert(`Failed to publish.\n\n${await explainPublishError(r)}`); return; }
+                hidePublishModal();
+                // The publish is async (DNS propagation + Traefik). Surface progress as a toast; the
+                // published-services SSE (publish-traefik-active / -rolled-back / -dns-timeout) reconciles.
+                displaySuccess(`Publishing ${subdomain}… DNS can take up to a minute to propagate.`);
+                fetchPublishable();
+            } catch (e) {
+                alert(`Failed to publish. Vaier could not be reached (${e.message}).`);
+            } finally {
+                submitBtn.disabled = cancelBtn.disabled = false;
+                submitBtn.textContent = 'Publish';
+            }
         }
 
         // Maps the domain's MachineStatus enum to a CSS status class. The combination logic
@@ -234,7 +541,6 @@
             const key = 'lan-server:' + server.name;
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
-            const services = lanServerServices[server.name];
             const statusClass = MACHINE_STATUS_CLASS[server.status] || 'status-neutral';
             const dockerSlot = server.runsDocker
                 ? { kind: 'docker', title: 'Docker auto-discovery enabled', label: 'Docker' }
@@ -245,14 +551,6 @@
             const relayRow = server.relayPeerName
                 ? `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value">via ${escapeHtml(server.relayPeerName)}</span></div>`
                 : `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value" style="color:var(--red)">no relay covers ${escapeHtml(server.lanAddress)}</span></div>`;
-            const servicesHtml = (() => {
-                if (!server.runsDocker) return '';
-                if (!server.relayPeerName)
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">no relay peer covers this server's lanAddress</span></div>`;
-                if (!services || services.status === 'UNREACHABLE')
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
-                return renderServiceList(services.containers);
-            })();
             // One adaptive setup script per host (#249): shown when the host runs Docker or is
             // relay-anchored (so it has routes to install). Server-anchored / orphan hosts get none.
             const isRelayAnchored = server.relayPeerName && server.relayPeerName !== 'Vaier server';
@@ -316,7 +614,7 @@
                             <span class="detail-label">Last Seen</span>
                             <span class="detail-value" id="last-seen-detail-${id}">${lastSeenAbsolute(server.lastSeen)}</span>
                         </div>
-                        ${servicesHtml}
+                        ${renderServicesSubsection(server.name)}
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
@@ -334,9 +632,6 @@
             const isExpanded = expandedPeers.has(key);
             // The Vaier-server endpoint returns a MachineStatus already computed in the domain.
             const statusClass = MACHINE_STATUS_CLASS[vaierServerStatus] || 'status-neutral';
-            const servicesHtml = vaierServerStatus === 'DOWN'
-                ? `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">Docker engine unreachable</span></div>`
-                : renderServiceList(vaierServerServices);
             // The server's LAN/VPC CIDR comes from VAIER_SERVER_LAN_CIDR or EC2 IMDS (#204). Show
             // it as a read-only row so the operator can see the subnet the server is publishing
             // and registering LAN servers in. Omitted when unresolved (no env, no IMDS).
@@ -373,7 +668,7 @@
                         ${hostHtml}
                         ${lanCidrHtml}
                         ${placeHtml}
-                        ${servicesHtml}
+                        ${renderServicesSubsection('__hub__')}
                     </div>
                 </div>
             </div>`;
@@ -393,14 +688,6 @@
             const artifacts  = new Set(peer.availableArtifacts || []);
 
             const services = peerServices[peer.id];
-            const servicesHtml = (() => {
-                if (!isServer) return '';
-                if (!isConnected)
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">not connected</span></div>`;
-                if (!services || services.status === 'UNREACHABLE')
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
-                return renderServiceList(services.containers);
-            })();
             const outdated = !!(services && services.wireguardOutdated);
             const expectedImage = services && services.wireguardExpectedImage;
             const outdatedRow = outdated
@@ -529,7 +816,7 @@
                                         onclick="saveLanAddress('${peer.id}')">Save</button>
                             </span>
                         </div>` : ''}
-                        ${servicesHtml}
+                        ${renderServicesSubsection(peer.name)}
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
@@ -546,6 +833,21 @@
 
         function displayPeers(peers) {
             const container = document.getElementById('peers-container');
+
+            // Rebuild the published-services-by-host index (slice 2) so each card shows its routes.
+            _publishedByHost = topologyServicesByHost(publishedServices);
+
+            // Rebuild the "+ Publish" candidate index (slice 2c): discoverable containers grouped by
+            // machine, dropping ones the operator ignored and ones already published (matched on the
+            // backend address+port a published route points at).
+            _candidatesByHost = {};
+            publishableServices.forEach(c => {
+                if (c.ignored) return;
+                if (publishedServices.some(p => p.hostAddress === c.address && p.hostPort === c.port)) return;
+                const key = publishableHostKey(c);
+                if (!key) return;
+                (_candidatesByHost[key] = _candidatesByHost[key] || []).push(c);
+            });
 
             const byName = (a, b) => a.name.localeCompare(b.name);
 
@@ -1842,6 +2144,7 @@
         fetchLanServers();
         fetchServerLocation();
         fetchPublishedServices();
+        fetchPublishable();
         detectEdition();
 
         const _sse = new EventSource('/vpn/peers/events');
@@ -1852,7 +2155,21 @@
         // their own SSE stream (#infrastructure slice 1). A separate EventSource keeps this seam
         // independent of the peers stream — same DTO the Services page consumes.
         const _servicesSse = new EventSource('/published-services/events');
-        _servicesSse.addEventListener('service-updated', () => fetchPublishedServices());
+        _servicesSse.addEventListener('service-updated', () => { fetchPublishedServices(); fetchPublishable(); });
+        // Publish progress (slice 2c): a publish is async (DNS propagation + Traefik). React to its
+        // terminal events so the new route appears, or a failure is surfaced, without a manual refresh.
+        _servicesSse.addEventListener('publish-traefik-active', e => {
+            displaySuccess(`Published ${e.data}`);
+            fetchPublishedServices(); fetchPublishable();
+        });
+        _servicesSse.addEventListener('publish-rolled-back', e => {
+            displayError(`Publishing "${e.data}" was rolled back — nothing was left half-configured. You can try again.`);
+            fetchPublishable();
+        });
+        _servicesSse.addEventListener('publish-dns-timeout', e => {
+            displayError(`DNS propagation timed out for "${e.data}". The record was created but didn't resolve in time; try again.`);
+            fetchPublishable();
+        });
         _sse.addEventListener('peers-stats', e => {
             try {
                 const stats = JSON.parse(e.data);

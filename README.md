@@ -186,6 +186,8 @@ Every machine card carries a **status colour** on its type icon — green (reach
 
 The Machines page offers three views via a tab switcher: a **List** of machine cards, a **Map** plotting each machine at its geographic location on a world map, and a **Topology** diagram — an interactive, force-directed bird's-eye view of the whole Vaier network. In the Topology view the Vaier server, every VPN peer, each LAN server, and every published service are nodes in a live physics simulation: the graph lays itself out automatically, and you can drag a node (its neighbours follow), zoom, and pan. **Published services** attach to the machine that hosts them (a VPN peer, a LAN server, or the central Vaier hub for server-side services), each coloured green/red/grey by its own health, with its authentication state in the tooltip. Edges are coloured and dashed by connectivity status (green for connected, red for down, yellow for degraded, grey for unknown), reusing the same machine icons and status colours as the other tabs, and the whole diagram updates live as machines and services come and go.
 
+On the **List** tab, expanding a machine card reveals a **Services** section that fuses what's published with what could be: the reverse-proxy routes hosted on that machine appear first — each expandable to edit its authentication, display name, and advanced options inline, or to delete it — followed by the host's discovered-but-unpublished containers as **+ Publish** rows that open the publish flow pre-filled. This makes each machine card the single place to see and manage everything running on a host, without leaving the page.
+
 After creating a peer, download its config and connect. Vaier shows the peer's handshake status.
 
 ### Show-once peer config
