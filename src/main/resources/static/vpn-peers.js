@@ -2,13 +2,26 @@
 // inline on* handlers keep resolving. Modularisation tracked as follow-up slices of #273.
         let peers = [];
         let peerServices = {};
-        let vaierServerServices = [];
         let vaierServerStatus = 'UNKNOWN'; // domain MachineStatus enum value
         let lanServers = [];
-        let lanServerServices = {};
+        // Published services (Topology tab, #infrastructure slice 1; machine cards, slice 2). Same
+        // DTO the Services page discovers; we client-side join each one onto its host machine.
+        let publishedServices = [];
+        // hostKey -> [service] index (slice 2), rebuilt from publishedServices on each list render so
+        // every machine card can show the published routes it hosts. Keyed like topologyServicesByHost
+        // ('__hub__', a peer name, or a LAN-server name).
+        let _publishedByHost = {};
+        // Discoverable-but-unpublished containers, the "+ Publish" candidates folded into the same
+        // Services list (slice 2c). publishableServices is the raw /publishable feed; _candidatesByHost
+        // is the per-machine index built in displayPeers (ignored + already-published entries dropped).
+        let publishableServices = [];
+        let _candidatesByHost = {};
         let lastFetchSuccessful = false;
 
         const expandedPeers = new Set();
+        // Which published-service rows are expanded into their inline editor (slice 2b). Keyed by the
+        // service's unique name (dnsAddress + pathPrefix); persists across re-renders like expandedPeers.
+        const expandedPublished = new Set();
 
         // A peer has an immutable id (slug — drives DOM keys + REST paths) and a separate
         // editable display name. This resolves the display name from the id for toasts and
@@ -49,7 +62,6 @@
                 const response = await fetch('/docker-services/vaier-server');
                 if (response.ok) {
                     const body = await response.json();
-                    vaierServerServices = body.containers;
                     vaierServerStatus = body.status;
                 } else {
                     vaierServerStatus = 'DOWN';
@@ -71,16 +83,57 @@
             } catch (error) {
                 console.error('Failed to load LAN servers:', error);
             }
+        }
+
+        // Published services for the Topology tab (#infrastructure slice 1). Loaded alongside
+        // peers/lanServers and refreshed on the same triggers; the diagram joins each service
+        // onto its host machine node (see topologyServicesByHost). Failures are non-fatal — the
+        // diagram simply renders without service nodes.
+        async function fetchPublishedServices() {
             try {
-                const response = await fetch('/docker-services/lan-servers');
+                const response = await fetch('/published-services/discover', { cache: 'no-store' });
                 if (response.ok) {
-                    const services = await response.json();
-                    lanServerServices = Object.fromEntries(services.map(s => [s.name, s]));
-                    displayPeers(peers);
+                    publishedServices = await response.json();
+                    // Re-render the list so each machine card's Services subsection (slice 2) picks
+                    // up the change, and the diagram if it's the visible tab. Skip the list re-render
+                    // while an input inside a card is focused, so an SSE-driven refresh can't wipe an
+                    // in-progress edit out from under the operator (a later event reconciles).
+                    // Gate only on editing, not peer count — a hub/LAN-only deployment (zero peers)
+                    // still has machine cards whose Services sections must pick up the change.
+                    if (!isEditingMachineCard()) displayPeers(peers);
+                    if (_activeTab === 'topology') renderNetworkDiagram();
                 }
             } catch (error) {
-                console.error('Failed to load LAN server services:', error);
+                console.error('Failed to load published services:', error);
             }
+        }
+
+        // The discoverable "+ Publish" candidates (slice 2c). Loaded alongside published services and
+        // refreshed on the same triggers; displayPeers indexes them per machine.
+        async function fetchPublishable() {
+            try {
+                const response = await fetch('/published-services/publishable', { cache: 'no-store' });
+                if (response.ok) {
+                    publishableServices = await response.json();
+                    // Gate only on editing, not peer count (see fetchPublishedServices) so candidates
+                    // surface on hub/LAN-only deployments too.
+                    if (!isEditingMachineCard()) displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load publishable services:', error);
+            }
+        }
+
+        // Map a publishable candidate to the machine card that should host it. The candidate's peerName
+        // is the sanitized WireGuard name, not the display name, so we match on address instead:
+        // VAIER_SERVER -> hub; a peer by tunnel IP; else a LAN server by lanAddress.
+        function publishableHostKey(c) {
+            if (c.source === 'VAIER_SERVER') return '__hub__';
+            const peer = peers.find(p => p.tunnelIp === c.address);
+            if (peer) return peer.name;
+            const lan = lanServers.find(s => s.lanAddress === c.address);
+            if (lan) return lan.name;
+            return null;
         }
 
         function displayError(message) {
@@ -180,25 +233,318 @@
             }
         }
 
-        function renderServiceList(containers) {
-            if (!containers || containers.length === 0)
-                return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">none discovered</span></div>`;
-            const rows = containers.map(c => {
-                const version = c.version || parseImageTag(c.image);
-                return `<div class="service-row">
-                    <span class="service-name">${c.containerName}</span>
-                    <span class="service-tag">${version}</span>
-                </div>`;
-            }).join('');
-            return `<div class="detail-row">
-                <span class="detail-label">Services</span>
-                <div class="service-list">
-                    <div class="service-list-header">
-                        <span>name</span><span>version</span>
-                    </div>
-                    ${rows}
+        // The published reverse-proxy routes and "+ Publish" candidates are rendered per machine by
+        // renderServicesSubsection (slice 2c); the old discovered-containers renderServiceList was
+        // folded into it. Published routes come from the _publishedByHost index keyed by machine name.
+        function renderPublishedRow(s) {
+            const statusKey  = statusKeyForService(s);                // up | down | unknown
+            const display    = `${s.dnsAddress}${s.pathPrefix || ''}`;
+            const label      = s.launchpadAlias || s.shortName || s.name || display;
+            const url        = `https://${display}`;
+            const isSelf     = s.dnsAddress.startsWith('vaier.');
+            const dnsOk      = s.dnsState === 'OK';
+            const uniqueName = display;
+            const id         = cardId('pub:' + uniqueName);
+            const isOpen     = expandedPublished.has(uniqueName);
+            // The ↗ link and ✕ button live inside the clickable header, so they stop propagation to
+            // avoid also toggling the editor.
+            const linkOpen   = (dnsOk && !isSelf)
+                ? `<a class="pub-open" href="${encodeURI(url)}" target="_blank" rel="noopener" title="Open ${escapeHtml(display)}" onclick="event.stopPropagation()">↗</a>`
+                : '';
+            const authBadge  = s.authenticated
+                ? `<span class="pub-badge pub-auth" title="Authelia authentication required">auth</span>`
+                : `<span class="pub-badge pub-noauth" title="Public — no authentication required">no auth</span>`;
+            return `<div class="published-entry">
+                <div class="published-item" role="button" tabindex="0"
+                     aria-expanded="${isOpen ? 'true' : 'false'}"
+                     onclick="togglePublished('${jsArg(uniqueName)}')"
+                     onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===this){event.preventDefault();togglePublished('${jsArg(uniqueName)}')}">
+                    <span class="pub-status icon-${statusKey}" title="${statusKey}"></span>
+                    <span class="pub-name" title="${escapeHtml(display)}">${escapeHtml(label)}</span>
+                    ${authBadge}
+                    ${linkOpen}
+                    <button class="pub-del" title="Delete this published service"
+                            onclick="event.stopPropagation(); deletePublishedService('${jsArg(s.dnsAddress)}','${jsArg(s.pathPrefix || '')}')">✕</button>
+                    <span class="pub-chevron ${isOpen ? 'open' : ''}">▼</span>
+                </div>
+                <div class="published-editor ${isOpen ? 'open' : ''}" id="pub-body-${id}">
+                    ${renderPublishedEditor(s, id)}
                 </div>
             </div>`;
+        }
+
+        // The inline editor for one published service (slice 2b) — the services-page card body folded
+        // onto the machine card. Read-only context rows (URL/DNS/Host/Version) plus the editable
+        // controls. Checkboxes apply immediately; text fields auto-save on blur (Enter blurs).
+        function renderPublishedEditor(s, id) {
+            const display = `${s.dnsAddress}${s.pathPrefix || ''}`;
+            const url     = `https://${display}`;
+            const isSelf  = s.dnsAddress.startsWith('vaier.');
+            const dnsOk   = s.dnsState === 'OK';
+            const dns = jsArg(s.dnsAddress), path = jsArg(s.pathPrefix || '');
+            const urlVal = (dnsOk && !isSelf)
+                ? `<a class="pub-open" href="${encodeURI(url)}" target="_blank" rel="noopener">${escapeHtml(display)}</a>`
+                : `<span style="color:var(--text-dim);font-family:var(--mono)">${escapeHtml(display)}</span>`;
+            const versionRow = (s.image || s.version)
+                ? `<div class="detail-row"><span class="detail-label">Version</span><span class="detail-value" style="font-family:var(--mono)">${[s.image && escapeHtml(s.image), s.version && escapeHtml(s.version)].filter(Boolean).join(' · ')}</span></div>`
+                : '';
+            return `
+                <div class="detail-row"><span class="detail-label">URL</span><span class="detail-value">${urlVal}</span></div>
+                <div class="detail-row"><span class="detail-label">DNS</span><span class="detail-value">${escapeHtml(s.dnsState)}</span></div>
+                <div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${escapeHtml(s.hostAddress)}:${s.hostPort}</span></div>
+                ${versionRow}
+                <div class="detail-row"><span class="detail-label">Auth</span><span class="detail-value">
+                    <input type="checkbox" id="pub-auth-${id}" ${s.authenticated ? 'checked' : ''}
+                        style="accent-color:var(--accent);cursor:pointer" title="Require Authelia authentication to reach this service."
+                        onchange="setPublishedAuth('${dns}','${path}',this.checked)"></span></div>
+                <div class="detail-row"><span class="detail-label">Display name</span><span class="detail-value">
+                    <input type="text" id="pub-alias-${id}" class="form-input" style="width:100%;max-width:240px"
+                        value="${escapeHtml(s.launchpadAlias || '')}" data-original="${escapeHtml(s.launchpadAlias || '')}" placeholder="(default)"
+                        onkeydown="if(event.key==='Enter')this.blur()"
+                        onblur="savePublishedField('${dns}','${path}','pub-alias-${id}','launchpadAlias')"></span></div>
+                <details class="published-advanced">
+                    <summary>Advanced</summary>
+                    <div class="detail-row"><span class="detail-label">Redirect</span><span class="detail-value">
+                        <input type="text" id="pub-redir-${id}" class="form-input" style="width:100%;max-width:240px"
+                            value="${escapeHtml(s.rootRedirectPath || '')}" data-original="${escapeHtml(s.rootRedirectPath || '')}" placeholder="e.g. /dashboard"
+                            onkeydown="if(event.key==='Enter')this.blur()"
+                            onblur="savePublishedField('${dns}','${path}','pub-redir-${id}','rootRedirectPath')"></span></div>
+                    <div class="detail-row"><span class="detail-label">Version endpoint</span><span class="detail-value" style="display:flex;gap:6px">
+                        <input type="text" id="pub-ve-${id}" class="form-input" style="flex:2;min-width:0;max-width:170px"
+                            value="${escapeHtml(s.versionEndpoint || '')}" data-original="${escapeHtml(s.versionEndpoint || '')}" placeholder="/sys/metrics"
+                            onkeydown="if(event.key==='Enter')this.blur()"
+                            onblur="savePublishedVersionEndpoint('${dns}','${path}','${id}')">
+                        <input type="text" id="pub-vp-${id}" class="form-input" style="flex:1;min-width:0;max-width:100px"
+                            value="${escapeHtml(s.versionProperty || '')}" data-original="${escapeHtml(s.versionProperty || '')}" placeholder="property"
+                            onkeydown="if(event.key==='Enter')this.blur()"
+                            onblur="savePublishedVersionEndpoint('${dns}','${path}','${id}')"></span></div>
+                    <div class="detail-row"><span class="detail-label">Direct LAN URL</span><span class="detail-value">
+                        <input type="checkbox" id="pub-dul-${id}" ${s.directUrlDisabled ? '' : 'checked'}
+                            style="accent-color:var(--accent);cursor:pointer" title="Link the launchpad directly to the LAN URL when the caller shares the peer's NAT."
+                            onchange="setPublishedDirectUrlDisabled('${dns}','${path}',!this.checked)"></span></div>
+                    <div class="detail-row"><span class="detail-label">Launchpad</span><span class="detail-value">
+                        <input type="checkbox" id="pub-lp-${id}" ${s.hiddenFromLaunchpad ? '' : 'checked'}
+                            style="accent-color:var(--accent);cursor:pointer" title="Show a tile for this service on the launchpad."
+                            onchange="setPublishedHidden('${dns}','${path}',!this.checked)"></span></div>
+                </details>`;
+        }
+
+        // A discoverable container that isn't published yet — a "+ Publish" row in the Services list
+        // (slice 2c). Not expandable; the button opens the publish modal pre-filled from its dataset.
+        function renderCandidateRow(c) {
+            return `<div class="published-item candidate" title="Discovered container — not published yet">
+                <span class="pub-status icon-unknown"></span>
+                <span class="pub-name">${escapeHtml(c.containerName)}<span class="cand-port">:${c.port}</span></span>
+                <button class="btn btn-small btn-primary pub-publish"
+                        data-address="${escapeHtml(c.address)}" data-port="${c.port}"
+                        data-container="${escapeHtml(c.containerName)}"
+                        data-subdomain="${escapeHtml(c.suggestedSubdomain || '')}"
+                        data-redirect="${escapeHtml(c.rootRedirectPath || '')}"
+                        onclick="showPublishModalForCandidate(this)">+ Publish</button>
+            </div>`;
+        }
+
+        // One Services section per machine (slice 2c): published routes (editable) first, then the
+        // host's discoverable-but-unpublished containers as "+ Publish" rows. Replaces both the old
+        // discovered-containers list and the published-only subsection.
+        function renderServicesSubsection(hostKey) {
+            const published  = (_publishedByHost[hostKey] || []).slice()
+                .sort((a, b) => (a.launchpadAlias || a.shortName || a.name || '')
+                    .localeCompare(b.launchpadAlias || b.shortName || b.name || ''));
+            const candidates = (_candidatesByHost[hostKey] || []).slice()
+                .sort((a, b) => a.containerName.localeCompare(b.containerName) || a.port - b.port);
+            if (published.length === 0 && candidates.length === 0) return '';
+            const rows = published.map(renderPublishedRow).join('') + candidates.map(renderCandidateRow).join('');
+            return `<div class="detail-row">
+                <span class="detail-label">Services</span>
+                <div class="published-list">${rows}</div>
+            </div>`;
+        }
+
+        // Pull the backend's ApiError { message } out of a failed response so toasts are actionable
+        // ("Subdomain already in use") instead of bare "HTTP 400"; falls back to the status code.
+        async function apiErrorMessage(response) {
+            try { const p = await response.json(); if (p && p.message) return p.message; } catch (e) { /* no/!json body */ }
+            return `HTTP ${response.status}`;
+        }
+
+        async function deletePublishedService(dnsAddress, pathPrefix) {
+            const label = pathPrefix ? `${dnsAddress}${pathPrefix}` : dnsAddress;
+            // The backend keeps the DNS CNAME if any sibling route still uses this host
+            // (PublishingService.deleteService -> hasSiblingOnHost), so only promise DNS removal when
+            // this is the last route on dnsAddress. A sibling is another route on the same host.
+            const hasSibling = publishedServices.some(p =>
+                p.dnsAddress === dnsAddress && (p.pathPrefix || '') !== (pathPrefix || ''));
+            const dnsLine = hasSibling
+                ? `This removes its reverse-proxy route. The DNS record stays — other routes still use ${dnsAddress}.`
+                : 'This removes its reverse-proxy route and DNS record.';
+            if (!confirm(`Delete published service "${label}"?\n\n${dnsLine}`)) return;
+            try {
+                const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
+                const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
+                const response = await fetch(url, { method: 'DELETE' });
+                if (!response.ok) throw new Error(await apiErrorMessage(response));
+                displaySuccess(`Deleted ${label}`);
+                await fetchPublishedServices();
+            } catch (e) {
+                displayError(`Failed to delete ${label}: ${e.message}`);
+            }
+        }
+
+        // True when an input/textarea inside a machine card holds focus — used to defer SSE/poll
+        // re-renders so they can't wipe an in-progress edit (slice 2b).
+        function isEditingMachineCard() {
+            const a = document.activeElement;
+            const c = document.getElementById('peers-container');
+            return !!a && !!c && c.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA');
+        }
+
+        function togglePublished(uniqueName) {
+            if (expandedPublished.has(uniqueName)) expandedPublished.delete(uniqueName);
+            else expandedPublished.add(uniqueName);
+            const id = cardId('pub:' + uniqueName);
+            const body = document.getElementById('pub-body-' + id);
+            if (!body) return;
+            const open = body.classList.toggle('open');
+            const header = body.previousElementSibling;
+            if (header) {
+                header.setAttribute('aria-expanded', open ? 'true' : 'false');
+                const chevron = header.querySelector('.pub-chevron');
+                if (chevron) chevron.classList.toggle('open', open);
+            }
+        }
+
+        async function patchPublishedService(dnsAddress, pathPrefix, patch) {
+            const base = `/published-services/${encodeURIComponent(dnsAddress)}`;
+            const url  = pathPrefix ? `${base}?pathPrefix=${encodeURIComponent(pathPrefix)}` : base;
+            const r = await fetch(url, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch),
+            });
+            if (!r.ok) throw new Error(await apiErrorMessage(r));
+        }
+
+        function pubFlashOk(input) {
+            input.classList.add('save-ok');
+            setTimeout(() => input.classList.remove('save-ok'), 900);
+        }
+
+        async function setPublishedAuth(dnsAddress, pathPrefix, requiresAuth) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { requiresAuth }); await fetchPublishedServices(); }
+            catch (e) { displayError(`Failed to update authentication: ${e.message}`); }
+        }
+
+        async function setPublishedDirectUrlDisabled(dnsAddress, pathPrefix, directUrlDisabled) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { directUrlDisabled }); await fetchPublishedServices(); }
+            catch (e) { displayError(`Failed to update direct LAN URL setting: ${e.message}`); }
+        }
+
+        async function setPublishedHidden(dnsAddress, pathPrefix, hiddenFromLaunchpad) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { hiddenFromLaunchpad }); await fetchPublishedServices(); }
+            catch (e) { displayError(`Failed to update launchpad visibility: ${e.message}`); }
+        }
+
+        // Auto-save a single text field (display name / redirect) on blur, no-op when unchanged.
+        async function savePublishedField(dnsAddress, pathPrefix, inputId, field) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            const value = input.value.trim();
+            if (value === (input.dataset.original || '')) return;
+            try {
+                await patchPublishedService(dnsAddress, pathPrefix, { [field]: value });
+                input.dataset.original = value;
+                pubFlashOk(input);
+                await fetchPublishedServices();
+            } catch (e) { displayError(`Failed to save: ${e.message}`); }
+        }
+
+        async function savePublishedVersionEndpoint(dnsAddress, pathPrefix, id) {
+            const ep = document.getElementById('pub-ve-' + id);
+            const pr = document.getElementById('pub-vp-' + id);
+            if (!ep || !pr) return;
+            const endpoint = ep.value.trim(), property = pr.value.trim();
+            if (endpoint === (ep.dataset.original || '') && property === (pr.dataset.original || '')) return;
+            try {
+                await patchPublishedService(dnsAddress, pathPrefix, { versionEndpoint: endpoint, versionProperty: property });
+                ep.dataset.original = endpoint; pr.dataset.original = property;
+                pubFlashOk(ep); pubFlashOk(pr);
+                await fetchPublishedServices();
+            } catch (e) { displayError(`Failed to save version endpoint: ${e.message}`); }
+        }
+
+        // Publish a discovered container as a reverse-proxy route (slice 2c) — the container-mode
+        // half of the old Services-page publish modal, opened from a "+ Publish" candidate row.
+        function showPublishModalForCandidate(btn) {
+            document.getElementById('publishAddress').value         = btn.dataset.address;
+            document.getElementById('publishPort').value            = btn.dataset.port;
+            document.getElementById('publishSubdomain').value       = btn.dataset.subdomain || '';
+            document.getElementById('publishPathPrefix').value      = '';
+            document.getElementById('publishRequiresAuth').checked  = false;
+            document.getElementById('publishDirectUrlEnabled').checked = true;
+            document.getElementById('publishRootRedirectPath').value = btn.dataset.redirect || '';
+            document.getElementById('publishAdvanced').open = !!btn.dataset.redirect;
+            document.getElementById('publishServiceLabel').textContent =
+                `${btn.dataset.container} (${btn.dataset.address}:${btn.dataset.port})`;
+            document.getElementById('publishModal').classList.add('active');
+            document.getElementById('publishSubdomain').focus();
+        }
+
+        function hidePublishModal() {
+            document.getElementById('publishModal').classList.remove('active');
+        }
+
+        // Turn a failed publish response into a one-line explanation. On a 400/409 the backend sends
+        // an ApiError envelope { message }; otherwise fall back to status-keyed guidance.
+        async function explainPublishError(response) {
+            let reason = '';
+            try { const p = await response.json(); if (p && p.message) reason = p.message; } catch (e) { /* no/!json body */ }
+            if (response.status === 400) return reason || 'The request was rejected — check the subdomain and path prefix.';
+            if (response.status === 409) return reason || 'That subdomain or path is already in use. Pick a different one.';
+            if (response.status >= 500) return 'Something went wrong on the server while publishing. Check the Vaier logs.';
+            return reason || `Unexpected response (HTTP ${response.status}).`;
+        }
+
+        async function submitPublish() {
+            const subdomain = document.getElementById('publishSubdomain').value.trim();
+            if (!subdomain) { alert('Please enter a subdomain'); return; }
+            // The port comes from a hidden field populated when the modal opens; validate it explicitly
+            // so a missing/tampered value fails here with a clear message instead of serialising to a
+            // null port and surfacing as a confusing backend validation error.
+            const port = parseInt(document.getElementById('publishPort').value, 10);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                alert('Invalid service port — reopen the publish dialog and try again.');
+                return;
+            }
+            const body = {
+                address:          document.getElementById('publishAddress').value,
+                port,
+                subdomain,
+                pathPrefix:       document.getElementById('publishPathPrefix').value.trim() || null,
+                requiresAuth:     document.getElementById('publishRequiresAuth').checked,
+                directUrlDisabled: !document.getElementById('publishDirectUrlEnabled').checked,
+                rootRedirectPath: document.getElementById('publishRootRedirectPath').value.trim() || null,
+            };
+            const submitBtn = document.getElementById('publishSubmitBtn');
+            const cancelBtn = document.getElementById('publishCancelBtn');
+            submitBtn.disabled = cancelBtn.disabled = true;
+            submitBtn.textContent = 'Publishing…';
+            try {
+                const r = await fetch('/published-services/publish', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+                });
+                if (!r.ok) { alert(`Failed to publish.\n\n${await explainPublishError(r)}`); return; }
+                hidePublishModal();
+                // The publish is async (DNS propagation + Traefik). Surface progress as a toast; the
+                // published-services SSE (publish-traefik-active / -rolled-back / -dns-timeout) reconciles.
+                displaySuccess(`Publishing ${subdomain}… DNS can take up to a minute to propagate.`);
+                fetchPublishable();
+            } catch (e) {
+                alert(`Failed to publish. Vaier could not be reached (${e.message}).`);
+            } finally {
+                submitBtn.disabled = cancelBtn.disabled = false;
+                submitBtn.textContent = 'Publish';
+            }
         }
 
         // Maps the domain's MachineStatus enum to a CSS status class. The combination logic
@@ -215,7 +561,6 @@
             const key = 'lan-server:' + server.name;
             const id  = cardId(key);
             const isExpanded = expandedPeers.has(key);
-            const services = lanServerServices[server.name];
             const statusClass = MACHINE_STATUS_CLASS[server.status] || 'status-neutral';
             const dockerSlot = server.runsDocker
                 ? { kind: 'docker', title: 'Docker auto-discovery enabled', label: 'Docker' }
@@ -226,14 +571,6 @@
             const relayRow = server.relayPeerName
                 ? `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value">via ${escapeHtml(server.relayPeerName)}</span></div>`
                 : `<div class="detail-row"><span class="detail-label">Relay</span><span class="detail-value" style="color:var(--red)">no relay covers ${escapeHtml(server.lanAddress)}</span></div>`;
-            const servicesHtml = (() => {
-                if (!server.runsDocker) return '';
-                if (!server.relayPeerName)
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">no relay peer covers this server's lanAddress</span></div>`;
-                if (!services || services.status === 'UNREACHABLE')
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
-                return renderServiceList(services.containers);
-            })();
             // One adaptive setup script per host (#249): shown when the host runs Docker or is
             // relay-anchored (so it has routes to install). Server-anchored / orphan hosts get none.
             const isRelayAnchored = server.relayPeerName && server.relayPeerName !== 'Vaier server';
@@ -297,7 +634,7 @@
                             <span class="detail-label">Last Seen</span>
                             <span class="detail-value" id="last-seen-detail-${id}">${lastSeenAbsolute(server.lastSeen)}</span>
                         </div>
-                        ${servicesHtml}
+                        ${renderServicesSubsection(server.name)}
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
@@ -315,9 +652,6 @@
             const isExpanded = expandedPeers.has(key);
             // The Vaier-server endpoint returns a MachineStatus already computed in the domain.
             const statusClass = MACHINE_STATUS_CLASS[vaierServerStatus] || 'status-neutral';
-            const servicesHtml = vaierServerStatus === 'DOWN'
-                ? `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">Docker engine unreachable</span></div>`
-                : renderServiceList(vaierServerServices);
             // The server's LAN/VPC CIDR comes from VAIER_SERVER_LAN_CIDR or EC2 IMDS (#204). Show
             // it as a read-only row so the operator can see the subnet the server is publishing
             // and registering LAN servers in. Omitted when unresolved (no env, no IMDS).
@@ -354,7 +688,7 @@
                         ${hostHtml}
                         ${lanCidrHtml}
                         ${placeHtml}
-                        ${servicesHtml}
+                        ${renderServicesSubsection('__hub__')}
                     </div>
                 </div>
             </div>`;
@@ -374,14 +708,6 @@
             const artifacts  = new Set(peer.availableArtifacts || []);
 
             const services = peerServices[peer.id];
-            const servicesHtml = (() => {
-                if (!isServer) return '';
-                if (!isConnected)
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">not connected</span></div>`;
-                if (!services || services.status === 'UNREACHABLE')
-                    return `<div class="detail-row"><span class="detail-label">Services</span><span class="detail-value" style="color:var(--text-dim)">unreachable</span></div>`;
-                return renderServiceList(services.containers);
-            })();
             const outdated = !!(services && services.wireguardOutdated);
             const expectedImage = services && services.wireguardExpectedImage;
             const outdatedRow = outdated
@@ -510,7 +836,7 @@
                                         onclick="saveLanAddress('${peer.id}')">Save</button>
                             </span>
                         </div>` : ''}
-                        ${servicesHtml}
+                        ${renderServicesSubsection(peer.name)}
                     </div>
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
@@ -527,6 +853,24 @@
 
         function displayPeers(peers) {
             const container = document.getElementById('peers-container');
+
+            // Rebuild the published-services-by-host index (slice 2) so each card shows its routes.
+            _publishedByHost = topologyServicesByHost(publishedServices);
+
+            // Rebuild the "+ Publish" candidate index (slice 2c): discoverable containers grouped by
+            // machine, dropping ones the operator ignored and ones already published (matched on the
+            // backend address+port a published route points at). Precompute the published address|port
+            // pairs into a Set so the membership test is O(1) — the whole pass is linear, not
+            // O(publishable×published).
+            const publishedHostPorts = new Set(publishedServices.map(p => p.hostAddress + '|' + p.hostPort));
+            _candidatesByHost = {};
+            publishableServices.forEach(c => {
+                if (c.ignored) return;
+                if (publishedHostPorts.has(c.address + '|' + c.port)) return;
+                const key = publishableHostKey(c);
+                if (!key) return;
+                (_candidatesByHost[key] = _candidatesByHost[key] || []).push(c);
+            });
 
             const byName = (a, b) => a.name.localeCompare(b.name);
 
@@ -1374,127 +1718,324 @@
             if (tab === 'map' && _peerMap) {
                 setTimeout(() => { _peerMap.invalidateSize(); refreshPeerMap(); }, 0);
             }
-            // The SVG diagram lays out against its container's pixel size, which is only
-            // known once the panel is visible (display:none reports clientWidth 0).
-            if (tab === 'diagram') {
-                setTimeout(renderNetworkDiagram, 0);
+            // Cytoscape lays out against its container's pixel size, only known once the panel is
+            // visible (display:none reports clientWidth 0). Resize + fit in case it was built while
+            // hidden or the viewport changed since it last showed.
+            if (tab === 'topology') {
+                setTimeout(() => {
+                    renderNetworkDiagram();
+                    if (_cy) { _cy.resize(); _cy.fit(undefined, 40); }
+                    // renderNetworkDiagram only (re)starts the layout when it rebuilds; if it took the
+                    // fast path on an unchanged graph, resume the simulation we stopped on tab-away so
+                    // drag-to-reflow keeps working (randomize=false — resume from current positions).
+                    if (_cy && !_topoRunning) startTopoLayout(false);
+                }, 0);
+            } else {
+                // cola runs infinite:true — a continuous physics loop. Stop it (and hide any tooltip)
+                // when the panel is hidden so we don't burn CPU/battery simulating an invisible graph.
+                if (_topoLayout) { try { _topoLayout.stop(); } catch (e) { /* already stopped */ } }
+                _topoRunning = false;
+                if (_topoTip) _topoTip.style.display = 'none';
             }
         }
 
-        // Hub-and-spoke network diagram: the Vaier server sits at the centre, every VPN peer
-        // radiates from it on an inner ring, and each LAN server branches outward from the relay
-        // peer (or the Vaier server) it sits behind. Reuses the same icons, status colours and
-        // data (`peers`, `lanServers`, `_serverLocation`) as the List and Map tabs.
-        const SVG_NS = 'http://www.w3.org/2000/svg';
+        // Topology force graph (Cytoscape + cola). The Vaier hub, every VPN peer, each LAN server,
+        // and every published service are nodes; cola runs a continuous physics simulation (nodes
+        // repel, edges pull) so the graph self-spaces, reflows live as you drag, and re-settles when
+        // the fleet changes — replacing the old fixed-radius SVG fan that crowded badly. Reuses the
+        // same icons, status colours and data
+        // (`peers`, `lanServers`, `publishedServices`, `_serverLocation`) as the List/Map tabs.
+        // See buildTopologyElements / renderNetworkDiagram below.
+        let _cy = null;          // the Cytoscape instance (created lazily once the panel is visible)
+        let _topoSig = null;     // signature of the current node set; re-layout only when it changes
+        let _topoTip = null;     // floating hover-tooltip element
+        let _topoLayout = null;  // the running cola layout handle (continuous physics)
+        let _topoRunning = false; // whether the cola simulation is currently iterating
 
-        function iconClassFromKey(statusKey) {
-            return 'icon-' + statusKey; // 'up'|'down'|'degraded'|'unknown' -> existing colour classes
+        // A published service's health colour mirrors the Services page: state OK -> green,
+        // UNKNOWN -> grey (host not yet probed), anything else (UNREACHABLE) -> red. Same
+        // 'up'|'down'|'unknown' status-key convention as the peer/LAN nodes.
+        function statusKeyForService(s) {
+            if (s.state === 'OK') return 'up';
+            if (s.state === 'UNKNOWN') return 'unknown';
+            return 'down';
         }
 
-        function netAddEdge(svg, x1, y1, x2, y2, statusKey) {
-            const line = document.createElementNS(SVG_NS, 'line');
-            line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-            line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-            line.setAttribute('class', 'net-edge ' + statusKey);
-            svg.appendChild(line);
+        // Pure join: each published service hangs off exactly one host machine node in the
+        // diagram (#infrastructure slice 1). Mirrors the nesting rule the List/launchpad use —
+        //   isLanService           -> the LAN server named lanServerName
+        //   empty/blank hostName    -> the Vaier hub (centre node, key '__hub__')
+        //   otherwise               -> the VPN peer whose name === hostName
+        // Returns a map of hostKey -> [services]. hostKey is '__hub__' for the centre, the LAN
+        // server name for LAN services, or the peer name for peer-hosted services. The caller
+        // drops any hostKey it can't resolve to a node, so a service on an absent machine is
+        // simply not drawn (no crash).
+        // serviceLocation -> machine-icon kind. Defined locally because the Machines page does
+        // not load published-services.js (which has its own copy); the slice-3 page merge dedupes.
+        function serviceTypeIcon(service) {
+            switch (service.serviceLocation) {
+                case 'LAN_SERVICE':  return 'lan';
+                case 'VAIER_SERVER': return 'vaier';
+                default:             return 'server';
+            }
         }
 
-        function netAddNode(host, x, y, iconKind, statusKey, label, sub, isCenter, isRelay, isDocker) {
-            const node = document.createElement('div');
-            node.className = 'net-node' + (isCenter ? ' center' : '');
-            node.style.left = x + 'px';
-            node.style.top = y + 'px';
-            node.title = sub ? `${label}\n${sub}` : label;
-            // Relay badge bottom-right, Docker badge bottom-left — placed apart so they don't overlap.
-            const relayCap = isRelay
-                ? `<span class="net-cap" title="Relay — routes LAN traffic for machines behind it">${capabilityIconSvg('relay')}</span>`
-                : '';
-            const dockerCap = isDocker
-                ? `<span class="net-cap left" title="Runs Docker">${capabilityIconSvg('docker')}</span>`
-                : '';
-            node.innerHTML =
-                `<div class="net-icon ${iconClassFromKey(statusKey)}">${machineIconSvg(iconKind)}${relayCap}${dockerCap}</div>`
-                + `<div class="net-label">${escapeHtml(label)}</div>`
-                + (sub ? `<div class="net-sub">${escapeHtml(sub)}</div>` : '');
-            host.appendChild(node);
+        function topologyServicesByHost(services) {
+            const byHost = {};
+            (services || []).forEach(s => {
+                let key;
+                if (s.isLanService) {
+                    // lanServerName can be null when no registered LAN server matches the address
+                    // (see GetPublishedServicesUseCase); fall back to the relay peer (hostName) so the
+                    // route stays visible instead of vanishing from the graph and the card section.
+                    key = s.lanServerName || s.hostName;
+                } else if (!s.hostName || !String(s.hostName).trim() || s.hostName === 'Vaier server') {
+                    // Blank or the hub's display name both anchor on the centre node ('__hub__').
+                    key = '__hub__';
+                } else {
+                    key = s.hostName;
+                }
+                if (!key) return;
+                (byHost[key] = byHost[key] || []).push(s);
+            });
+            return byHost;
         }
 
+        // Resolve the theme palette from CSS custom properties so the graph tracks the stylesheet
+        // (Cytoscape's own stylesheet can't read var()). Concrete fallbacks mirror styles.css.
+        function topoPalette() {
+            const cs = getComputedStyle(document.documentElement);
+            const v = (name, fb) => (cs.getPropertyValue(name).trim() || fb);
+            return {
+                up:       v('--green',     '#4ec9b0'),
+                down:     v('--red',       '#f48771'),
+                degraded: v('--yellow',    '#dcdcaa'),
+                unknown:  v('--text-dim',  '#5a5a5a'),
+                node:     v('--bg-panel',  '#252526'),
+                edge:     v('--text-muted','#858585'),
+                text:     v('--text',      '#d4d4d4'),
+                accent:   v('--accent',    '#4fc3f7'),
+            };
+        }
+
+        function topoStatusColour(pal, statusKey) {
+            return pal[statusKey] || pal.unknown;
+        }
+
+        // machineIconSvg(kind) paints with currentColor; bake a concrete colour in and encode it as
+        // a data URI Cytoscape can use as a node background-image. machineIconSvg omits the xmlns
+        // (fine for inline SVG, but a data-URI image won't render without it), so inject it here.
+        function topoIconUri(kind, colour) {
+            const svg = machineIconSvg(kind)
+                .replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
+                .replace(/currentColor/g, colour);
+            return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        }
+
+        // Build the Cytoscape element list from peers / lanServers / publishedServices. An edge is
+        // only added when both endpoints exist as nodes, so a service (or LAN server) whose host
+        // isn't drawn is simply skipped rather than producing a dangling edge.
+        function buildTopologyElements(pal) {
+            const els = [];
+            const hasNode = id => els.some(e => e.data.id === id && !e.data.source);
+
+            const hubSub = (_serverLocation && _serverLocation.publicHost) ? _serverLocation.publicHost : '';
+            // The hub mirrors the rest of the page's vaierServerStatus rather than always reading green,
+            // so a DOWN/DEGRADED/UNKNOWN server is represented honestly in the Topology view.
+            const hubSk = MAP_MARKER_STATUS_KEY[vaierServerStatus] || 'unknown';
+            els.push({ data: { id: '__hub__', label: 'Vaier server', type: 'hub', status: hubSk,
+                               icon: topoIconUri('vaier', topoStatusColour(pal, hubSk)), sub: hubSub } });
+
+            peers.forEach(p => {
+                const sk = statusKeyForPeer(p);
+                const id = 'peer:' + p.name;
+                els.push({ data: { id, label: p.name, type: 'machine', status: sk,
+                                   icon: topoIconUri(deviceCategoryIconKind(p.deviceCategory), topoStatusColour(pal, sk)),
+                                   sub: p.tunnelIp || p.endpointIp || '' } });
+                els.push({ data: { id: 'e:hub>' + id, source: '__hub__', target: id, status: sk } });
+            });
+
+            lanServers.forEach(s => {
+                if (!s.relayPeerName) return;
+                const srcId = s.relayPeerName === 'Vaier server' ? '__hub__' : 'peer:' + s.relayPeerName;
+                if (!hasNode(srcId)) return; // relay peer not drawn — nothing to anchor to
+                const sk = statusKeyForLanServer(s);
+                const id = 'lan:' + s.name;
+                els.push({ data: { id, label: s.name, type: 'machine', status: sk,
+                                   icon: topoIconUri(deviceCategoryIconKind(s.deviceCategory), topoStatusColour(pal, sk)),
+                                   sub: s.lanAddress || '' } });
+                els.push({ data: { id: 'e:' + srcId + '>' + id, source: srcId, target: id, status: sk } });
+            });
+
+            // Each published service hangs off the machine that hosts it. hostKey is '__hub__', a
+            // peer name, or a LAN-server name (see topologyServicesByHost); resolve it to a node id.
+            const byHost = topologyServicesByHost(publishedServices);
+            Object.keys(byHost).forEach(hostKey => {
+                let hostId = null;
+                if (hostKey === '__hub__') hostId = '__hub__';
+                else if (hasNode('peer:' + hostKey)) hostId = 'peer:' + hostKey;
+                else if (hasNode('lan:' + hostKey)) hostId = 'lan:' + hostKey;
+                if (!hostId) return; // host machine not in the diagram — skip its services
+                byHost[hostKey].forEach(s => {
+                    const sk = statusKeyForService(s);
+                    // Stable per-service id (dns + path prefix uniquely identify a published route,
+                    // same key used by patch/delete) so the fast-path data update never re-labels the
+                    // wrong node when service ordering shifts but the node set is unchanged.
+                    const id = 'svc:' + (s.dnsAddress || s.name || '') + ':' + (s.pathPrefix || '/');
+                    els.push({ data: { id, type: 'service', status: sk,
+                                       label: s.launchpadAlias || s.shortName || s.name || '',
+                                       icon: topoIconUri(serviceTypeIcon(s), topoStatusColour(pal, sk)),
+                                       sub: s.authenticated ? 'Auth required' : 'Public (no auth)' } });
+                    els.push({ data: { id: 'e:' + hostId + '>' + id, source: hostId, target: id, status: sk } });
+                });
+            });
+            return els;
+        }
+
+        function topoStyle(pal) {
+            const nodeBorder = st => ({ selector: `node[status="${st}"]`, style: { 'border-color': topoStatusColour(pal, st) } });
+            const edgeColour = st => ({ selector: `edge[status="${st}"]`, style: { 'line-color': topoStatusColour(pal, st) } });
+            return [
+                { selector: 'node', style: {
+                    'background-color': pal.node,
+                    'background-image': 'data(icon)',
+                    'background-fit': 'none',
+                    'background-width': '55%',
+                    'background-height': '55%',
+                    'border-width': 2.5,
+                    'width': 44, 'height': 44,
+                    'label': 'data(label)',
+                    'color': pal.text,
+                    'font-size': 10,
+                    'text-valign': 'bottom',
+                    'text-halign': 'center',
+                    'text-margin-y': 4,
+                    'text-max-width': 92,
+                    'text-wrap': 'ellipsis',
+                    'min-zoomed-font-size': 7,
+                } },
+                { selector: 'node[type="hub"]',     style: { 'width': 66, 'height': 66, 'font-size': 12, 'border-width': 3 } },
+                { selector: 'node[type="service"]', style: { 'width': 28, 'height': 28, 'font-size': 9, 'border-width': 2 } },
+                nodeBorder('up'), nodeBorder('down'), nodeBorder('degraded'), nodeBorder('unknown'),
+                { selector: 'edge', style: {
+                    'width': 1.6,
+                    'curve-style': 'bezier',
+                    'line-color': pal.edge,
+                    'opacity': 0.55,
+                    'target-arrow-shape': 'none',
+                } },
+                edgeColour('up'), edgeColour('degraded'),
+                { selector: 'edge[status="down"]',    style: { 'line-color': pal.down, 'line-style': 'dashed' } },
+                { selector: 'edge[status="unknown"]', style: { 'line-style': 'dashed', 'opacity': 0.4 } },
+                { selector: 'node:selected', style: { 'border-color': pal.accent, 'border-width': 3 } },
+            ];
+        }
+
+        // cola is a continuous force simulation: it keeps iterating (infinite:true), so dragging a
+        // node tugs its neighbours through the springs in real time. Services hug their host (short
+        // edges) while peers sit further from the hub. randomize is only used for a fresh layout —
+        // resumes continue from current positions so the graph doesn't teleport. fit is handled
+        // manually (an infinite layout never emits layoutstop).
+        function topoLayout(randomize) {
+            return {
+                name: 'cola',
+                animate: true,
+                infinite: true,
+                fit: false,
+                randomize: randomize === true,
+                handleDisconnected: true,
+                nodeSpacing: 14,
+                edgeLength: e => (e.target().data('type') === 'service' ? 60 : 130),
+            };
+        }
+
+        // (Re)start the continuous cola simulation. Stops any prior run first so we never stack two
+        // infinite layouts. Fits once after a short settle (infinite layouts never self-fit).
+        function startTopoLayout(randomize) {
+            if (!_cy) return;
+            if (_topoLayout) { try { _topoLayout.stop(); } catch (e) { /* already stopped */ } }
+            _topoLayout = _cy.layout(topoLayout(randomize));
+            _topoLayout.run();
+            _topoRunning = true;
+            setTimeout(() => { if (_cy && _activeTab === 'topology') _cy.fit(undefined, 40); }, 700);
+        }
+
+        function ensureTopoTip() {
+            if (_topoTip) return _topoTip;
+            _topoTip = document.createElement('div');
+            _topoTip.className = 'topo-tip';
+            _topoTip.style.display = 'none';
+            document.body.appendChild(_topoTip);
+            return _topoTip;
+        }
+
+        // Lightweight hover tooltip — Cytoscape has no built-in one. Follows the cursor; carries the
+        // node label and its sub-line (tunnel/LAN address, or a service's auth state).
+        function wireTopoTips() {
+            const tip = ensureTopoTip();
+            const place = evt => {
+                const oe = evt.originalEvent;
+                if (!oe) return;
+                tip.style.left = (oe.clientX + 14) + 'px';
+                tip.style.top  = (oe.clientY + 14) + 'px';
+            };
+            _cy.on('mouseover', 'node', evt => {
+                const d = evt.target.data();
+                tip.innerHTML = `<strong>${escapeHtml(d.label || '')}</strong>`
+                    + (d.sub ? `<br><span>${escapeHtml(d.sub)}</span>` : '');
+                tip.style.display = 'block';
+                place(evt);
+            });
+            _cy.on('mousemove', 'node', place);
+            _cy.on('mouseout', 'node', () => { tip.style.display = 'none'; });
+            _cy.on('tapstart pan zoom', () => { tip.style.display = 'none'; });
+        }
+
+        // Build (or refresh) the Cytoscape topology graph. A status-only refresh (same node set)
+        // updates node/edge data in place — no re-layout — so the periodic poll and SSE updates
+        // recolour the graph without teleporting it. A changed node set rebuilds and re-runs cola.
         function renderNetworkDiagram() {
             const host = document.getElementById('network-diagram');
             if (!host) return;
-            const W = host.clientWidth, H = host.clientHeight;
-            if (W === 0 || H === 0) return; // panel not visible yet — switchTab re-renders on show
+            if (host.clientWidth === 0 || host.clientHeight === 0) return; // panel not visible yet
+            if (typeof cytoscape === 'undefined') return;                  // vendor lib missing
 
-            host.innerHTML = '';
-            const edges = document.createElementNS(SVG_NS, 'svg');
-            edges.setAttribute('class', 'net-edges');
-            host.appendChild(edges);
+            const pal = topoPalette();
+            const elements = buildTopologyElements(pal);
+            // Signature covers nodes AND edges: edge ids encode source>target, so a relay/host change
+            // that rewires an edge without changing the node set still forces a rebuild (no stale edges).
+            const sig = elements.map(e => e.data.id).sort().join('|');
 
-            const cx = W / 2, cy = H / 2;
-            const minDim = Math.min(W, H);
-            const ringPeers = minDim * 0.30;
-            const ringLan = minDim * 0.44;
-            const peerAngles = {}; // peer name -> { x, y, ang }
-
-            // Centre: the Vaier hub. Always shown, even with no peers and no geoip data.
-            const hubSub = (_serverLocation && _serverLocation.publicHost) ? _serverLocation.publicHost : '';
-            netAddNode(host, cx, cy, 'vaier', 'up', 'Vaier server', hubSub, true, false, false);
-
-            // Inner ring: every VPN peer, spread evenly, an edge back to the hub.
-            const n = peers.length;
-            peers.forEach((p, i) => {
-                const ang = (i / Math.max(n, 1)) * 2 * Math.PI - Math.PI / 2;
-                const x = cx + ringPeers * Math.cos(ang);
-                const y = cy + ringPeers * Math.sin(ang);
-                peerAngles[p.name] = { x, y, ang };
-                const statusKey = statusKeyForPeer(p);
-                netAddEdge(edges, cx, cy, x, y, statusKey);
-                const sub = p.tunnelIp || p.endpointIp || '';
-                // Docker-host truth mirrors the List card: a discovered services entry (keyed by the
-                // peer's immutable id) with at least one container.
-                const svc = peerServices[p.id];
-                const isDocker = !!(svc && svc.containers && svc.containers.length > 0);
-                netAddNode(host, x, y, deviceCategoryIconKind(p.deviceCategory), statusKey, p.name, sub, false, !!p.isRelay, isDocker);
-            });
-
-            // Outer ring: LAN servers branch from the relay peer (or the Vaier server) they sit
-            // behind. Multiple machines behind one relay fan out around that relay's direction.
-            const behind = {};
-            lanServers.forEach(s => {
-                if (!s.relayPeerName) return;
-                (behind[s.relayPeerName] = behind[s.relayPeerName] || []).push(s);
-            });
-            Object.keys(behind).forEach(relayName => {
-                const servers = behind[relayName];
-                let ax, ay, baseAng;
-                if (relayName === 'Vaier server') {
-                    ax = cx; ay = cy; baseAng = -Math.PI / 2;
-                } else if (peerAngles[relayName]) {
-                    ax = peerAngles[relayName].x; ay = peerAngles[relayName].y; baseAng = peerAngles[relayName].ang;
-                } else {
-                    return; // relay peer not in the list — nothing to anchor to
-                }
-                servers.forEach((s, k) => {
-                    const ang = baseAng + (k - (servers.length - 1) / 2) * 0.30;
-                    const x = cx + ringLan * Math.cos(ang);
-                    const y = cy + ringLan * Math.sin(ang);
-                    const statusKey = statusKeyForLanServer(s);
-                    netAddEdge(edges, ax, ay, x, y, statusKey);
-                    netAddNode(host, x, y, deviceCategoryIconKind(s.deviceCategory), statusKey, s.name, s.lanAddress || '', false, false, s.runsDocker === true);
+            if (_cy && sig === _topoSig) {
+                _cy.batch(() => {
+                    elements.forEach(e => {
+                        const el = _cy.getElementById(e.data.id);
+                        if (el && el.nonempty()) el.data(e.data);
+                    });
                 });
-            });
-
-            if (peers.length === 0 && lanServers.length === 0) {
-                const empty = document.createElement('div');
-                empty.className = 'net-empty';
-                empty.textContent = 'No machines yet — add a VPN peer or LAN server to see the network.';
-                host.appendChild(empty);
+                return;
             }
+
+            _topoSig = sig;
+            if (!_cy) {
+                _cy = cytoscape({
+                    container: host,
+                    elements,
+                    style: topoStyle(pal),
+                    minZoom: 0.25, maxZoom: 3, wheelSensitivity: 0.2,
+                });
+                wireTopoTips();
+            } else {
+                _cy.elements().remove();
+                _cy.add(elements);
+                _cy.style(topoStyle(pal));
+            }
+            startTopoLayout(true);
         }
 
-        // Re-lay-out when the iframe/window resizes while the diagram tab is showing.
+        // Keep Cytoscape sized to its container when the window/iframe resizes while showing.
         window.addEventListener('resize', () => {
-            if (_activeTab === 'diagram') renderNetworkDiagram();
+            if (_activeTab === 'topology' && _cy) { _cy.resize(); _cy.fit(undefined, 40); }
         });
 
         async function fetchServerLocation() {
@@ -1506,9 +2047,10 @@
                 if (!res.ok) return;
                 _serverLocation = await res.json();
                 if (_peerMap) refreshPeerMap();
-                // Re-render the Machines list so the Vaier server card picks up the LAN CIDR.
-                if (peers && peers.length) displayPeers(peers);
-                // Keep the diagram's hub label in sync even on an empty net (no peers => no displayPeers).
+                // Re-render the Machines list so the Vaier server card picks up the LAN CIDR — even
+                // on an empty net (zero peers), where the hub/LAN cards still need the update.
+                displayPeers(peers);
+                // Keep the diagram's hub label in sync too.
                 renderNetworkDiagram();
             } catch (e) {
                 console.error('Failed to load server location:', e);
@@ -1648,17 +2190,42 @@
         fetchVaierServerServices();
         fetchLanServers();
         fetchServerLocation();
+        fetchPublishedServices();
+        fetchPublishable();
         detectEdition();
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());
         _sse.addEventListener('lan-servers-updated', () => fetchLanServers());
+
+        // Keep the Topology tab's service layer fresh: published-services health/changes arrive on
+        // their own SSE stream (#infrastructure slice 1). A separate EventSource keeps this seam
+        // independent of the peers stream — same DTO the Services page consumes.
+        const _servicesSse = new EventSource('/published-services/events');
+        _servicesSse.addEventListener('service-updated', () => { fetchPublishedServices(); fetchPublishable(); });
+        // Publish progress (slice 2c): a publish is async (DNS propagation + Traefik). React to its
+        // terminal events so the new route appears, or a failure is surfaced, without a manual refresh.
+        _servicesSse.addEventListener('publish-traefik-active', e => {
+            displaySuccess(`Published ${e.data}`);
+            fetchPublishedServices(); fetchPublishable();
+        });
+        _servicesSse.addEventListener('publish-rolled-back', e => {
+            displayError(`Publishing "${e.data}" was rolled back — nothing was left half-configured. You can try again.`);
+            fetchPublishable();
+        });
+        _servicesSse.addEventListener('publish-dns-timeout', e => {
+            displayError(`DNS propagation timed out for "${e.data}". The record was created but didn't resolve in time; try again.`);
+            fetchPublishable();
+        });
         _sse.addEventListener('peers-stats', e => {
             try {
                 const stats = JSON.parse(e.data);
                 let mapNeedsRefresh = false;
                 stats.forEach(s => {
-                    const id = s.name.replace(/[^a-zA-Z0-9]/g, '_');
+                    // s.name is the peer's id (the WireGuard dir name, e.g. "Colina-27") — the stats
+                    // payload field is misnamed; resolvePeerNameByIp returns the dir name. Build the
+                    // DOM id through the same cardId the cards use (cardId(peer.id)) so they agree.
+                    const id = cardId(s.name);
                     const iconCls = s.connected ? 'icon-up' : 'icon-down';
 
                     const hdrIcon        = document.getElementById('hdr-icon-'         + id);

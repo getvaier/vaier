@@ -2,18 +2,13 @@
 // device-category and HTML/JS-escaping utilities. Loaded as a classic script before
 // vpn-peers.js so these stay globally available to it and to inline on* handlers.
 
-function parseImageTag(image) {
-    if (!image) return '';
-    const slashIdx = image.lastIndexOf('/');
-    const nameAndTag = slashIdx >= 0 ? image.slice(slashIdx + 1) : image;
-    const colonIdx = nameAndTag.indexOf(':');
-    if (colonIdx < 0) return 'latest';
-    const tag = nameAndTag.slice(colonIdx + 1);
-    return tag.length > 20 ? tag.slice(0, 12) + '…' : tag;
-}
-
+// Turn an arbitrary key (peer name/id, LAN-server name, or a published service's
+// dnsAddress+pathPrefix) into a DOM-id-safe token. Each non-alphanumeric char is encoded as
+// `_<charCode>_` rather than collapsed to a single `_`, so distinct keys can never map to the
+// same id — published services full of dots and slashes (e.g. "a.example.com/api" vs
+// "a.example.com/a/pi") stay distinct, keeping expand/collapse and field targeting correct.
 function cardId(peerName) {
-    return peerName.replace(/[^a-zA-Z0-9]/g, '_');
+    return String(peerName).replace(/[^a-zA-Z0-9]/g, c => '_' + c.charCodeAt(0) + '_');
 }
 
 function formatBytes(bytes) {

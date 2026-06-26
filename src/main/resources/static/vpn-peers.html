@@ -11,13 +11,19 @@
     <link rel="stylesheet" href="vpn-peers.css">
     <script src="vendor/leaflet/leaflet.js"></script>
     <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
+    <!-- Topology force graph (Cytoscape + cola). Load order matters: cytoscape defines the global,
+         webcola defines `cola`, then cytoscape-cola registers the continuous 'cola' layout. cola is
+         a live physics simulation, so dragging a node makes its neighbours reflow. -->
+    <script src="vendor/cytoscape/cytoscape.min.js"></script>
+    <script src="vendor/cytoscape/cola.min.js"></script>
+    <script src="vendor/cytoscape/cytoscape-cola.js"></script>
 </head>
 <body>
     <div class="container">
         <div class="tab-nav">
             <button class="tab-button active" data-tab="list"    onclick="switchTab('list')">List</button>
             <button class="tab-button"        data-tab="map"     onclick="switchTab('map')">Map</button>
-            <button class="tab-button"        data-tab="diagram" onclick="switchTab('diagram')">Network</button>
+            <button class="tab-button"        data-tab="topology" onclick="switchTab('topology')">Topology</button>
         </div>
         <div class="tab-panel active" id="tab-panel-list">
             <div id="peers-container">
@@ -28,7 +34,7 @@
             <div id="peer-map"></div>
             <div class="map-attribution">IP geolocation by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a></div>
         </div>
-        <div class="tab-panel" id="tab-panel-diagram">
+        <div class="tab-panel" id="tab-panel-topology">
             <div id="network-diagram"></div>
         </div>
     </div>
@@ -189,6 +195,47 @@
         </div>
     </div>
 
+    <!-- Publish Service Modal (#infrastructure slice 2c) — container mode: publish a discovered
+         container on a machine as a reverse-proxy route. Opened from a card's "+ Publish" row. -->
+    <div id="publishModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Publish Service</div>
+            <div class="form-group" style="margin-bottom:0.5rem">
+                <span style="color:var(--text-muted);font-size:0.8rem" id="publishServiceLabel"></span>
+            </div>
+            <input type="hidden" id="publishAddress">
+            <input type="hidden" id="publishPort">
+            <div style="display:flex;gap:0.5rem;align-items:flex-end">
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="publishSubdomain">Subdomain</label>
+                    <input type="text" id="publishSubdomain" class="form-input" placeholder="e.g. pihole">
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="publishPathPrefix">Path prefix (optional)</label>
+                    <input type="text" id="publishPathPrefix" class="form-input" placeholder="e.g. /auth">
+                </div>
+            </div>
+            <div class="form-checkbox" style="display:flex;align-items:center;gap:0.5rem">
+                <input type="checkbox" id="publishRequiresAuth">
+                <label for="publishRequiresAuth">Require Authelia authentication</label>
+            </div>
+            <div class="form-checkbox" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem">
+                <input type="checkbox" id="publishDirectUrlEnabled" checked>
+                <label for="publishDirectUrlEnabled">Link directly to LAN URL when on the same network</label>
+            </div>
+            <details id="publishAdvanced" style="margin-top:0.7rem">
+                <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);user-select:none">Advanced</summary>
+                <div class="form-group" style="margin-top:0.5rem">
+                    <label class="form-label" for="publishRootRedirectPath">Root path redirect</label>
+                    <input type="text" id="publishRootRedirectPath" class="form-input" placeholder="e.g. /dashboard">
+                </div>
+            </details>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="publishCancelBtn" onclick="hidePublishModal()">Cancel</button>
+                <button class="btn btn-primary"   id="publishSubmitBtn" onclick="submitPublish()">Publish</button>
+            </div>
+        </div>
+    </div>
 
     <script src="vpn-peers-helpers.js"></script>
     <script src="vpn-peers-map.js"></script>
