@@ -267,7 +267,7 @@
                 <div class="published-item" role="button" tabindex="0"
                      aria-expanded="${isOpen ? 'true' : 'false'}"
                      onclick="togglePublished('${jsArg(uniqueName)}')"
-                     onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePublished('${jsArg(uniqueName)}')}">
+                     onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===this){event.preventDefault();togglePublished('${jsArg(uniqueName)}')}">
                     <span class="pub-status icon-${statusKey}" title="${statusKey}"></span>
                     <span class="pub-name" title="${escapeHtml(display)}">${escapeHtml(label)}</span>
                     ${authBadge}
@@ -1775,7 +1775,10 @@
             (services || []).forEach(s => {
                 let key;
                 if (s.isLanService) {
-                    key = s.lanServerName;
+                    // lanServerName can be null when no registered LAN server matches the address
+                    // (see GetPublishedServicesUseCase); fall back to the relay peer (hostName) so the
+                    // route stays visible instead of vanishing from the graph and the card section.
+                    key = s.lanServerName || s.hostName;
                 } else if (!s.hostName || !String(s.hostName).trim() || s.hostName === 'Vaier server') {
                     // Blank or the hub's display name both anchor on the centre node ('__hub__').
                     key = '__hub__';
