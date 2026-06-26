@@ -508,9 +508,17 @@
         async function submitPublish() {
             const subdomain = document.getElementById('publishSubdomain').value.trim();
             if (!subdomain) { alert('Please enter a subdomain'); return; }
+            // The port comes from a hidden field populated when the modal opens; validate it explicitly
+            // so a missing/tampered value fails here with a clear message instead of serialising to a
+            // null port and surfacing as a confusing backend validation error.
+            const port = parseInt(document.getElementById('publishPort').value, 10);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                alert('Invalid service port — reopen the publish dialog and try again.');
+                return;
+            }
             const body = {
                 address:          document.getElementById('publishAddress').value,
-                port:             parseInt(document.getElementById('publishPort').value),
+                port,
                 subdomain,
                 pathPrefix:       document.getElementById('publishPathPrefix').value.trim() || null,
                 requiresAuth:     document.getElementById('publishRequiresAuth').checked,
