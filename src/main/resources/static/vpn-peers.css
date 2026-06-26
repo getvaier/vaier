@@ -16,9 +16,9 @@
         .map-attribution a { color: var(--text-muted); text-decoration: none; }
         .map-attribution a:hover { color: var(--text); }
 
-        /* Topology diagram: hub-and-spoke bird's-eye view of the whole Vaier net, with published
-           services hanging off their host machines. Nodes are absolutely-positioned divs; edges
-           are drawn in an SVG layer behind them. */
+        /* Topology diagram: force-directed bird's-eye view of the whole Vaier net, with published
+           services hanging off their host machines. Rendered by Cytoscape + cola into this container
+           (canvas/SVG managed by the library); this rule just sizes and frames the viewport. */
         #network-diagram {
             position: relative;
             height: calc(100vh - 14rem);

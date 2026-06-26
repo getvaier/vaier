@@ -1702,7 +1702,17 @@
                 setTimeout(() => {
                     renderNetworkDiagram();
                     if (_cy) { _cy.resize(); _cy.fit(undefined, 40); }
+                    // renderNetworkDiagram only (re)starts the layout when it rebuilds; if it took the
+                    // fast path on an unchanged graph, resume the simulation we stopped on tab-away so
+                    // drag-to-reflow keeps working (randomize=false — resume from current positions).
+                    if (_cy && !_topoRunning) startTopoLayout(false);
                 }, 0);
+            } else {
+                // cola runs infinite:true — a continuous physics loop. Stop it (and hide any tooltip)
+                // when the panel is hidden so we don't burn CPU/battery simulating an invisible graph.
+                if (_topoLayout) { try { _topoLayout.stop(); } catch (e) { /* already stopped */ } }
+                _topoRunning = false;
+                if (_topoTip) _topoTip.style.display = 'none';
             }
         }
 
@@ -1717,6 +1727,7 @@
         let _topoSig = null;     // signature of the current node set; re-layout only when it changes
         let _topoTip = null;     // floating hover-tooltip element
         let _topoLayout = null;  // the running cola layout handle (continuous physics)
+        let _topoRunning = false; // whether the cola simulation is currently iterating
 
         // A published service's health colour mirrors the Services page: state OK -> green,
         // UNKNOWN -> grey (host not yet probed), anything else (UNREACHABLE) -> red. Same
@@ -1836,9 +1847,12 @@
                 else if (hasNode('peer:' + hostKey)) hostId = 'peer:' + hostKey;
                 else if (hasNode('lan:' + hostKey)) hostId = 'lan:' + hostKey;
                 if (!hostId) return; // host machine not in the diagram — skip its services
-                byHost[hostKey].forEach((s, i) => {
+                byHost[hostKey].forEach(s => {
                     const sk = statusKeyForService(s);
-                    const id = 'svc:' + hostKey + ':' + i;
+                    // Stable per-service id (dns + path prefix uniquely identify a published route,
+                    // same key used by patch/delete) so the fast-path data update never re-labels the
+                    // wrong node when service ordering shifts but the node set is unchanged.
+                    const id = 'svc:' + (s.dnsAddress || s.name || '') + ':' + (s.pathPrefix || '/');
                     els.push({ data: { id, type: 'service', status: sk,
                                        label: s.launchpadAlias || s.shortName || s.name || '',
                                        icon: topoIconUri(serviceTypeIcon(s), topoStatusColour(pal, sk)),
@@ -1913,6 +1927,7 @@
             if (_topoLayout) { try { _topoLayout.stop(); } catch (e) { /* already stopped */ } }
             _topoLayout = _cy.layout(topoLayout(randomize));
             _topoLayout.run();
+            _topoRunning = true;
             setTimeout(() => { if (_cy && _activeTab === 'topology') _cy.fit(undefined, 40); }, 700);
         }
 
@@ -1958,7 +1973,9 @@
 
             const pal = topoPalette();
             const elements = buildTopologyElements(pal);
-            const sig = elements.filter(e => !e.data.source).map(e => e.data.id).sort().join('|');
+            // Signature covers nodes AND edges: edge ids encode source>target, so a relay/host change
+            // that rewires an edge without changing the node set still forces a rebuild (no stale edges).
+            const sig = elements.map(e => e.data.id).sort().join('|');
 
             if (_cy && sig === _topoSig) {
                 _cy.batch(() => {
