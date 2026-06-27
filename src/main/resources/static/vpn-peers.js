@@ -1511,7 +1511,13 @@
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 displaySuccess(`Renamed "${serverName}"`);
+                // Published services are joined onto machine cards client-side by the resolved
+                // LAN-server name (topologyServicesByHost keys on lanServerName, computed server-side).
+                // A rename shifts that key, so refetch the service layer too — otherwise the stale
+                // publishedServices still carry the old name and the renamed card shows no services (#300).
                 fetchLanServers();
+                fetchPublishedServices();
+                fetchPublishable();
             } catch (error) {
                 displayError(`Failed to rename LAN server: ${error.message}`);
                 onLanServerNameInput(serverName);
@@ -2431,7 +2437,10 @@
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());
-        _sse.addEventListener('lan-servers-updated', () => fetchLanServers());
+        // A LAN-server change (rename/register/delete) can shift the name-based join that hangs
+        // published services off machine cards, so refresh the service layer alongside the servers
+        // (#300) — same reason saveLanServerName refetches both.
+        _sse.addEventListener('lan-servers-updated', () => { fetchLanServers(); fetchPublishedServices(); fetchPublishable(); });
 
         // Keep the Topology tab's service layer fresh: published-services health/changes arrive on
         // their own SSE stream (#infrastructure slice 1). A separate EventSource keeps this seam
