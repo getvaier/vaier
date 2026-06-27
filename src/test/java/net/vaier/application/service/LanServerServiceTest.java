@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.ReverseProxyRoute;
@@ -39,6 +40,7 @@ class LanServerServiceTest {
     @Mock private ForResolvingServerLanCidr forResolvingServerLanCidr;
     @Mock private ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     @Mock private DeletePublishedServiceUseCase deletePublishedServiceUseCase;
+    @Mock private PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
 
     @InjectMocks private LanServerService service;
 
@@ -85,6 +87,20 @@ class LanServerServiceTest {
         ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
         verify(forPersistingLanServers).save(captor.capture());
         assertThat(captor.getValue()).isEqualTo(new LanServer("printer", "192.168.3.20", false, null));
+    }
+
+    @Test
+    void register_invalidatesPublishedServicesCacheSoLanServerNameResolvesAfresh() {
+        // #300: a route already pointing at this address resolves its lanServerName to null until a
+        // matching LAN server exists. Registering one changes that derived field, so the cached
+        // published-services view must be invalidated or the new machine card stays serviceless.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        service.register("nas", "192.168.3.50", true, 2375);
+
+        verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
     }
 
     @Test
@@ -401,6 +417,32 @@ class LanServerServiceTest {
         assertThat(saved.getValue().runsDocker()).isTrue();
         assertThat(saved.getValue().dockerPort()).isEqualTo(2375);
         verify(forPersistingLanServers).deleteByName("nas");
+    }
+
+    @Test
+    void rename_invalidatesPublishedServicesCacheSoLanServerNameResolvesAfresh() {
+        // #300: a published LAN service's lanServerName is a derived field cached in the
+        // published-services view. It's resolved by matching the route's address to a LAN server,
+        // so a rename changes it — but without invalidating the cache the discover endpoint keeps
+        // serving the old name and the renamed machine card shows no services. Renaming back made
+        // the stale key match again, which is exactly how the bug surfaced.
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
+
+        service.rename("nas", "media-nas");
+
+        verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
+    }
+
+    @Test
+    void rename_noOp_doesNotInvalidatePublishedServicesCache() {
+        // No name change means no derived-field change, so don't churn the cache.
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", false, null)));
+
+        service.rename("nas", "nas");
+
+        verify(publishedServicesCacheInvalidator, never()).invalidatePublishedServicesCache();
     }
 
     @Test

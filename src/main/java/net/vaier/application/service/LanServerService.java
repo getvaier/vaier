@@ -5,6 +5,7 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GenerateLanServerSetupScriptUseCase;
 import net.vaier.application.GetLanServersUseCase;
+import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.RegisterLanServerUseCase;
 import net.vaier.application.RenameLanServerUseCase;
 import net.vaier.application.ResolveLanAnchorUseCase;
@@ -51,6 +52,7 @@ public class LanServerService implements
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
+    private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
 
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
@@ -63,12 +65,19 @@ public class LanServerService implements
                             // PublishingService -> ContainerService -> LanServerService (ForGettingLanServers)
                             // -> PublishingService (this cascade port). The cascade only invokes it at
                             // delete() time, so a lazy proxy is semantically safe.
-                            @Lazy DeletePublishedServiceUseCase deletePublishedServiceUseCase) {
+                            @Lazy DeletePublishedServiceUseCase deletePublishedServiceUseCase,
+                            // A published LAN service's lanServerName is a derived field cached in the
+                            // published-services view, resolved by matching the route's address to a
+                            // registered LAN server. Registering or renaming a server changes that
+                            // mapping, so the cache must be dropped (#300). Same port the reachability
+                            // service uses; @Lazy keeps it consistent with the cascade dependency above.
+                            @Lazy PublishedServicesCacheInvalidator publishedServicesCacheInvalidator) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.deletePublishedServiceUseCase = deletePublishedServiceUseCase;
+        this.publishedServicesCacheInvalidator = publishedServicesCacheInvalidator;
     }
 
     @Override
@@ -110,6 +119,9 @@ public class LanServerService implements
             trimmedName, trimmedAddress, runsDocker, dockerPort);
         forPersistingLanServers.save(
             new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description, deviceCategory));
+        // A route already pointing at this address now resolves to a named LAN server; drop the
+        // cached published-services view so the new name surfaces (#300).
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
     }
 
     @Override
@@ -189,6 +201,10 @@ public class LanServerService implements
         // save() upserts by name, so write the new entry then drop the old one.
         forPersistingLanServers.save(renamed);
         forPersistingLanServers.deleteByName(currentName);
+        // The published-services view caches each LAN route's resolved lanServerName; the rename
+        // changed it, so drop the cache or the renamed machine card serves stale (old-name) data
+        // and appears to lose its services until the name is changed back (#300).
+        publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
         log.info("Renamed LAN server {} to {}", forLog(existing.name()), renamed.name());
     }
 
