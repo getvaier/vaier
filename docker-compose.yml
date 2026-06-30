@@ -546,28 +546,84 @@ services:
   # not offered in the UI and no social routes are generated, so nothing depends on this container.
   # Per-service routes still gate via Authelia (or stay public) exactly as before.
   # VAIER_OAUTH2_COOKIE_SECRET is auto-generated into .env (not operator-authored).
+  #
+  # oauth2-proxy-init renders oauth2-proxy's alpha config into the shared ./oauth2/config volume so
+  # the repo ships a generic, secret-free compose: (1) the Google client secret is written to a
+  # mode-0600 client-secret file (referenced via clientSecretFile, never inlined), and (2) alpha.yaml
+  # is rendered with only the client id substituted in. Both files are chowned to oauth2-proxy's
+  # uid:gid (65532:65532 — the image's nonroot USER) so the non-root proxy can read them.
+  # Mirrors authelia-init / redis-init.
+  # Re-rendered on every start so a rotated client id/secret is picked up.
+  oauth2-proxy-init:
+    image: alpine:3.20
+    container_name: oauth2-proxy-init
+    profiles: ["social"]
+    environment:
+      - VAIER_OIDC_GOOGLE_CLIENT_ID=${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
+      - VAIER_OIDC_GOOGLE_CLIENT_SECRET=${VAIER_OIDC_GOOGLE_CLIENT_SECRET:-}
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        umask 077
+        printf '%s' "$$VAIER_OIDC_GOOGLE_CLIENT_SECRET" > /oauth2/config/client-secret
+        # Unquoted heredoc: the shell substitutes only $${VAIER_OIDC_GOOGLE_CLIENT_ID}; the alpha
+        # body contains no other $$ so nothing else is interpolated.
+        cat > /oauth2/config/alpha.yaml <<EOF
+        injectRequestHeaders:
+        - {name: X-Forwarded-Groups, values: [{claim: groups}]}
+        - {name: X-Forwarded-User, values: [{claim: user}]}
+        - {name: X-Forwarded-Email, values: [{claim: email}]}
+        - {name: X-Forwarded-Preferred-Username, values: [{claim: preferred_username}]}
+        - {name: X-Forwarded-Name, values: [{claim: name}]}
+        injectResponseHeaders:
+        - {name: X-Auth-Request-User, values: [{claim: user}]}
+        - {name: X-Auth-Request-Email, values: [{claim: email}]}
+        - {name: X-Auth-Request-Preferred-Username, values: [{claim: preferred_username}]}
+        - {name: X-Auth-Request-Groups, values: [{claim: groups}]}
+        - {name: X-Auth-Request-Name, values: [{claim: name}]}
+        providers:
+        - id: google
+          provider: google
+          clientID: $${VAIER_OIDC_GOOGLE_CLIENT_ID}
+          clientSecretFile: /oauth2/config/client-secret
+          loginURLParameters: [{name: approval_prompt, default: [force]}]
+          oidcConfig: {audienceClaims: [aud], emailClaim: email, groupsClaim: groups, insecureSkipNonce: true, userIDClaim: email}
+        server:
+          BindAddress: 0.0.0.0:4180
+        upstreamConfig:
+          upstreams: [{id: static://202, path: /, static: true, staticCode: 202}]
+        EOF
+        chown 65532:65532 /oauth2/config/client-secret /oauth2/config/alpha.yaml
+    volumes:
+      - ./oauth2/config:/oauth2/config
+    restart: "no"
+
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
     container_name: oauth2-proxy
     profiles: ["social"]
     command:
-      - --provider=google
-      - --client-id=${VAIER_OIDC_GOOGLE_CLIENT_ID}
-      - --client-secret=${VAIER_OIDC_GOOGLE_CLIENT_SECRET}
+      # Flags kept as flags — not covered by alpha config, or conflicting with it.
       - --cookie-secret=${VAIER_OAUTH2_COOKIE_SECRET}
       - --cookie-domain=.${VAIER_DOMAIN}
       - --cookie-secure=true
       - --whitelist-domain=.${VAIER_DOMAIN}
       - --email-domain=*
-      - --upstream=static://202
       - --reverse-proxy=true
-      - --set-xauthrequest=true
       - --redirect-url=https://oauth2.${VAIER_DOMAIN}/oauth2/callback
-      - --http-address=0.0.0.0:4180
       # Brand the sign-in page in Vaier's dark theme (overrides only sign_in.html).
       - --custom-templates-dir=/templates
+      # Provider, client id/secret, upstream, header injection (incl. the Google name claim) and the
+      # bind address now come from the rendered alpha config — see oauth2-proxy-init.
+      - --alpha-config=/oauth2/config/alpha.yaml
     volumes:
       - ./oauth2/templates:/templates:ro
+      - ./oauth2/config:/oauth2/config:ro
+    depends_on:
+      oauth2-proxy-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     labels:
       - traefik.enable=true

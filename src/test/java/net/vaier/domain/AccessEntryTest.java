@@ -86,6 +86,36 @@ class AccessEntryTest {
         assertThat(entry(Role.PENDING, List.of()).mayAccessService(requiredGroup)).isFalse();
     }
 
+    // --- resolvedName — the display-name capture decision (never wipes a known name) ---
+
+    @Test
+    void resolvedName_usesTrimmedHeaderWhenPresent() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
+        assertThat(e.resolvedName("  Alice Smith  ")).isEqualTo("Alice Smith");
+    }
+
+    @Test
+    void resolvedName_headerRefreshesAnExistingName() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).name("Old").build();
+        assertThat(e.resolvedName("New")).isEqualTo("New");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void resolvedName_keepsExistingNameWhenHeaderBlank(String header) {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).name("Alice").build();
+        assertThat(e.resolvedName(header)).isEqualTo("Alice");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void resolvedName_nullWhenNoExistingNameAndBlankHeader(String header) {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
+        assertThat(e.resolvedName(header)).isNull();
+    }
+
     // --- Role.fromString — file values are lowercase, hand-edits may vary case ---
 
     @Test

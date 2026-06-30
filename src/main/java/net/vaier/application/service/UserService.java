@@ -21,9 +21,12 @@ import net.vaier.domain.Role;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForGettingUsers;
+import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForResolvingServiceGroup;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
@@ -32,6 +35,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 @Service
+@Slf4j
 public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePasswordUseCase,
         UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase, GetUsersUseCase, ForGettingUsers,
         GetGroupsUseCase, UpdateUserGroupsUseCase, DeleteGroupUseCase,
@@ -41,15 +45,22 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
     private final ForPersistingUsers forPersistingUsers;
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
+    private final ForNotifyingAdmins forNotifyingAdmins;
     private final ConfigResolver configResolver;
 
     public UserService(ForPersistingUsers forPersistingUsers,
                        ForPersistingAccessEntries forPersistingAccessEntries,
                        ForResolvingServiceGroup forResolvingServiceGroup,
+                       // @Lazy breaks the construction-time cycle: NotificationService resolves admin
+                       // recipients via ForGettingUsers (this service), and this service notifies via
+                       // ForNotifyingAdmins (NotificationService). The lazy proxy is resolved on first
+                       // notification, never on the forward-auth hot path's critical timing.
+                       @Lazy ForNotifyingAdmins forNotifyingAdmins,
                        ConfigResolver configResolver) {
         this.forPersistingUsers = forPersistingUsers;
         this.forPersistingAccessEntries = forPersistingAccessEntries;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
+        this.forNotifyingAdmins = forNotifyingAdmins;
         this.configResolver = configResolver;
     }
 
@@ -130,7 +141,7 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
     // === Social-login authorization (AccessEntry domain) ===
 
     @Override
-    public AccessDecision verify(String email, String host) {
+    public AccessDecision verify(String email, String host, String name) {
         if (email == null || email.isBlank()) {
             return AccessDecision.deny();
         }
@@ -139,13 +150,16 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
         Optional<AccessEntry> existing = forPersistingAccessEntries.findByEmail(normalised);
         if (existing.isEmpty()) {
             // First sighting of a Google identity: record it as pending so it surfaces for the
-            // admin to action, then deny ("awaiting approval").
-            forPersistingAccessEntries.upsert(AccessEntry.builder()
-                    .email(normalised).role(Role.PENDING).groups(List.of()).build());
+            // admin to action — capturing the display name it presented — then deny ("awaiting
+            // approval").
+            AccessEntry pending = AccessEntry.builder()
+                    .email(normalised).role(Role.PENDING).groups(List.of()).build();
+            forPersistingAccessEntries.upsert(pending.toBuilder().name(pending.resolvedName(name)).build());
+            notifyAdminsOfNewPendingIdentity(normalised);
             return AccessDecision.deny();
         }
 
-        AccessEntry entry = existing.get();
+        AccessEntry entry = refreshName(existing.get(), name);
         if (entry.isPending()) {
             return AccessDecision.deny();
         }
@@ -158,6 +172,36 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
             allowed = entry.mayAccessService(requiredGroup);
         }
         return allowed ? AccessDecision.allow(entry) : AccessDecision.deny();
+    }
+
+    /**
+     * Fire-and-forget admin notification for a brand-new pending identity. {@code verify} runs on
+     * the Traefik forward-auth path for every request to a social-gated service, so this must never
+     * add latency to or throw into the access decision: the notifier send is {@code @Async}, and we
+     * additionally swallow (log) any failure so a misbehaving notifier cannot break authorization.
+     */
+    /**
+     * Persist a refreshed display name when this sign-in brought a new one. The "what name should
+     * this entry carry" decision lives on {@link AccessEntry#resolvedName}; the service only writes
+     * the result through the port when it actually changed — so a blank/absent header never causes
+     * a wiping write.
+     */
+    private AccessEntry refreshName(AccessEntry entry, String incomingName) {
+        String resolved = entry.resolvedName(incomingName);
+        if (java.util.Objects.equals(resolved, entry.getName())) {
+            return entry;
+        }
+        AccessEntry updated = entry.toBuilder().name(resolved).build();
+        forPersistingAccessEntries.upsert(updated);
+        return updated;
+    }
+
+    private void notifyAdminsOfNewPendingIdentity(String email) {
+        try {
+            forNotifyingAdmins.notifyNewPendingIdentity(email);
+        } catch (Exception e) {
+            log.warn("Failed to notify admins of new pending identity {}: {}", email, e.getMessage());
+        }
     }
 
     private boolean isConsoleHost(String host) {
@@ -180,20 +224,22 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
             throw new IllegalArgumentException("role must not be null");
         }
         String normalised = normaliseEmail(email);
-        List<String> groups = forPersistingAccessEntries.findByEmail(normalised)
-                .map(AccessEntry::getGroups).orElse(List.of());
+        Optional<AccessEntry> current = forPersistingAccessEntries.findByEmail(normalised);
+        List<String> groups = current.map(AccessEntry::getGroups).orElse(List.of());
         forPersistingAccessEntries.upsert(AccessEntry.builder()
-                .email(normalised).role(role).groups(groups != null ? groups : List.of()).build());
+                .email(normalised).role(role).groups(groups != null ? groups : List.of())
+                .name(current.map(AccessEntry::getName).orElse(null)).build());
     }
 
     @Override
     public void assignGroups(String email, List<String> groups) {
         validateEmail(email);
         String normalised = normaliseEmail(email);
-        Role role = forPersistingAccessEntries.findByEmail(normalised)
-                .map(AccessEntry::getRole).orElse(Role.PENDING);
+        Optional<AccessEntry> current = forPersistingAccessEntries.findByEmail(normalised);
+        Role role = current.map(AccessEntry::getRole).orElse(Role.PENDING);
         forPersistingAccessEntries.upsert(AccessEntry.builder()
-                .email(normalised).role(role).groups(normaliseGroups(groups)).build());
+                .email(normalised).role(role).groups(normaliseGroups(groups))
+                .name(current.map(AccessEntry::getName).orElse(null)).build());
     }
 
     @Override

@@ -5,6 +5,7 @@ import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.Role;
 import net.vaier.domain.User;
+import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForResolvingServiceGroup;
@@ -37,6 +38,9 @@ class UserServiceTest {
 
     @Mock
     ForResolvingServiceGroup forResolvingServiceGroup;
+
+    @Mock
+    ForNotifyingAdmins forNotifyingAdmins;
 
     @Mock
     ConfigResolver configResolver;
@@ -481,7 +485,7 @@ class UserServiceTest {
     void verify_unknownEmail_autoCreatesPendingEntryAndDenies() {
         when(forPersistingAccessEntries.findByEmail("newcomer@example.com")).thenReturn(Optional.empty());
 
-        AccessDecision decision = service.verify("newcomer@example.com", "plex.example.com");
+        AccessDecision decision = service.verify("newcomer@example.com", "plex.example.com", null);
 
         assertThat(decision.isAllowed()).isFalse();
         verify(forPersistingAccessEntries).upsert(argThat(e ->
@@ -494,7 +498,7 @@ class UserServiceTest {
     void verify_normalisesEmailToLowercaseTrimmed() {
         when(forPersistingAccessEntries.findByEmail("newcomer@example.com")).thenReturn(Optional.empty());
 
-        service.verify("  Newcomer@Example.com  ", "plex.example.com");
+        service.verify("  Newcomer@Example.com  ", "plex.example.com", null);
 
         verify(forPersistingAccessEntries).findByEmail("newcomer@example.com");
         verify(forPersistingAccessEntries).upsert(argThat(e -> e.getEmail().equals("newcomer@example.com")));
@@ -504,10 +508,63 @@ class UserServiceTest {
     @NullAndEmptySource
     @ValueSource(strings = {"   "})
     void verify_blankEmail_deniesWithoutTouchingTheStore(String email) {
-        AccessDecision decision = service.verify(email, "plex.example.com");
+        AccessDecision decision = service.verify(email, "plex.example.com", null);
 
         assertThat(decision.isAllowed()).isFalse();
         verifyNoInteractions(forPersistingAccessEntries);
+    }
+
+    // --- verify: a brand-new identity notifies admins exactly once ---
+
+    @Test
+    void verify_unknownEmail_notifiesAdminsOfNewPendingIdentityExactlyOnce() {
+        when(forPersistingAccessEntries.findByEmail("newcomer@example.com")).thenReturn(Optional.empty());
+
+        service.verify("newcomer@example.com", "plex.example.com", null);
+
+        verify(forNotifyingAdmins, times(1)).notifyNewPendingIdentity("newcomer@example.com");
+    }
+
+    @Test
+    void verify_unknownEmail_notifiesWithTheNormalisedEmail() {
+        when(forPersistingAccessEntries.findByEmail("newcomer@example.com")).thenReturn(Optional.empty());
+
+        service.verify("  Newcomer@Example.com  ", "plex.example.com", null);
+
+        verify(forNotifyingAdmins).notifyNewPendingIdentity("newcomer@example.com");
+    }
+
+    @Test
+    void verify_knownPendingEmail_doesNotNotify() {
+        when(forPersistingAccessEntries.findByEmail("p@example.com"))
+                .thenReturn(Optional.of(accessEntry("p@example.com", Role.PENDING, List.of())));
+
+        service.verify("p@example.com", "plex.example.com", null);
+
+        verify(forNotifyingAdmins, never()).notifyNewPendingIdentity(any());
+    }
+
+    @Test
+    void verify_allowedDecision_doesNotNotify() {
+        when(forPersistingAccessEntries.findByEmail("friend@example.com"))
+                .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("family"))));
+        when(forResolvingServiceGroup.requiredGroupForHost("plex.example.com")).thenReturn(Optional.of("family"));
+
+        service.verify("friend@example.com", "plex.example.com", null);
+
+        verify(forNotifyingAdmins, never()).notifyNewPendingIdentity(any());
+    }
+
+    @Test
+    void verify_stillDeniesNewIdentityEvenWhenNotifierThrows() {
+        when(forPersistingAccessEntries.findByEmail("newcomer@example.com")).thenReturn(Optional.empty());
+        doThrow(new RuntimeException("notifier blew up"))
+                .when(forNotifyingAdmins).notifyNewPendingIdentity(any());
+
+        AccessDecision decision = service.verify("newcomer@example.com", "plex.example.com", null);
+
+        assertThat(decision.isAllowed()).isFalse();
+        verify(forPersistingAccessEntries).upsert(any());
     }
 
     // --- verify: known pending is denied ---
@@ -517,7 +574,7 @@ class UserServiceTest {
         when(forPersistingAccessEntries.findByEmail("p@example.com"))
                 .thenReturn(Optional.of(accessEntry("p@example.com", Role.PENDING, List.of())));
 
-        AccessDecision decision = service.verify("p@example.com", "plex.example.com");
+        AccessDecision decision = service.verify("p@example.com", "plex.example.com", null);
 
         assertThat(decision.isAllowed()).isFalse();
         verify(forPersistingAccessEntries, never()).upsert(any());
@@ -531,7 +588,7 @@ class UserServiceTest {
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("family"))));
         when(forResolvingServiceGroup.requiredGroupForHost("plex.example.com")).thenReturn(Optional.of("family"));
 
-        AccessDecision decision = service.verify("friend@example.com", "plex.example.com");
+        AccessDecision decision = service.verify("friend@example.com", "plex.example.com", null);
 
         assertThat(decision.isAllowed()).isTrue();
         assertThat(decision.getEmail()).isEqualTo("friend@example.com");
@@ -544,7 +601,7 @@ class UserServiceTest {
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("media"))));
         when(forResolvingServiceGroup.requiredGroupForHost("plex.example.com")).thenReturn(Optional.of("family"));
 
-        AccessDecision decision = service.verify("friend@example.com", "plex.example.com");
+        AccessDecision decision = service.verify("friend@example.com", "plex.example.com", null);
 
         assertThat(decision.isAllowed()).isFalse();
     }
@@ -555,7 +612,7 @@ class UserServiceTest {
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of())));
         when(forResolvingServiceGroup.requiredGroupForHost("open.example.com")).thenReturn(Optional.empty());
 
-        AccessDecision decision = service.verify("friend@example.com", "open.example.com");
+        AccessDecision decision = service.verify("friend@example.com", "open.example.com", null);
 
         assertThat(decision.isAllowed()).isTrue();
     }
@@ -568,7 +625,7 @@ class UserServiceTest {
         when(forPersistingAccessEntries.findByEmail("boss@example.com"))
                 .thenReturn(Optional.of(accessEntry("boss@example.com", Role.ADMIN, List.of("admins"))));
 
-        AccessDecision decision = service.verify("boss@example.com", "vaier.example.com");
+        AccessDecision decision = service.verify("boss@example.com", "vaier.example.com", null);
 
         assertThat(decision.isAllowed()).isTrue();
         // The console host is decided by the admin-only predicate, not by the service-group port.
@@ -581,9 +638,72 @@ class UserServiceTest {
         when(forPersistingAccessEntries.findByEmail("friend@example.com"))
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("admins"))));
 
-        AccessDecision decision = service.verify("friend@example.com", "vaier.example.com");
+        AccessDecision decision = service.verify("friend@example.com", "vaier.example.com", null);
 
         assertThat(decision.isAllowed()).isFalse();
+    }
+
+    // --- verify: display-name capture ---
+
+    @Test
+    void verify_unknownEmail_capturesDisplayNameFromHeaderOnThePendingEntry() {
+        when(forPersistingAccessEntries.findByEmail("newcomer@example.com")).thenReturn(Optional.empty());
+
+        service.verify("newcomer@example.com", "plex.example.com", "  Alice Smith  ");
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getEmail().equals("newcomer@example.com")
+                        && e.getRole() == Role.PENDING
+                        && "Alice Smith".equals(e.getName())));
+    }
+
+    @Test
+    void verify_knownEmail_refreshesDisplayNameFromHeader() {
+        when(forPersistingAccessEntries.findByEmail("friend@example.com"))
+                .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of())));
+        when(forResolvingServiceGroup.requiredGroupForHost("open.example.com")).thenReturn(Optional.empty());
+
+        service.verify("friend@example.com", "open.example.com", "Alice Smith");
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getEmail().equals("friend@example.com") && "Alice Smith".equals(e.getName())));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void verify_knownEmailWithName_isNotWipedWhenHeaderAbsent(String header) {
+        when(forPersistingAccessEntries.findByEmail("friend@example.com")).thenReturn(Optional.of(
+                AccessEntry.builder().email("friend@example.com").role(Role.USER).groups(List.of()).name("Alice").build()));
+        when(forResolvingServiceGroup.requiredGroupForHost("open.example.com")).thenReturn(Optional.empty());
+
+        AccessDecision decision = service.verify("friend@example.com", "open.example.com", header);
+
+        // The name is unchanged, so no wiping write happens.
+        assertThat(decision.isAllowed()).isTrue();
+        verify(forPersistingAccessEntries, never()).upsert(any());
+    }
+
+    @Test
+    void grantRole_preservesDisplayName() {
+        when(forPersistingAccessEntries.findByEmail("p@example.com")).thenReturn(Optional.of(
+                AccessEntry.builder().email("p@example.com").role(Role.PENDING).groups(List.of("family")).name("Alice").build()));
+
+        service.grantRole("p@example.com", Role.USER);
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getRole() == Role.USER && "Alice".equals(e.getName())));
+    }
+
+    @Test
+    void assignGroups_preservesDisplayName() {
+        when(forPersistingAccessEntries.findByEmail("u@example.com")).thenReturn(Optional.of(
+                AccessEntry.builder().email("u@example.com").role(Role.USER).groups(List.of()).name("Alice").build()));
+
+        service.assignGroups("u@example.com", List.of("family"));
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getGroups().equals(List.of("family")) && "Alice".equals(e.getName())));
     }
 
     // --- listAccessEntries ---

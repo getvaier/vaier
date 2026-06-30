@@ -266,6 +266,27 @@
             border-color: var(--accent);
         }
 
+        .access-preapprove {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .access-preapprove .preapprove-label {
+            width: 100%;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 0.1rem;
+        }
+        .access-preapprove .preapprove-email {
+            flex: 1;
+            min-width: 200px;
+        }
+        .access-preapprove .preapprove-role {
+            flex: 0 0 auto;
+        }
+
         .access-group-title {
             font-size: 0.7rem;
             font-weight: 700;
@@ -305,6 +326,34 @@
             font-size: 0.85rem;
             color: var(--text);
             word-break: break-all;
+        }
+
+        /* Identity block: display name on top, email beneath. When the provider has no name yet,
+           the email takes the primary line and the secondary line is omitted. */
+        .access-identity {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            min-width: 0;
+        }
+
+        .access-identity-head {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .access-name {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            word-break: break-word;
+        }
+
+        /* The email demoted to a caption when a display name leads. */
+        .access-email.secondary {
+            font-size: 0.74rem;
+            color: var(--text-muted);
         }
 
         .role-badge {
@@ -361,6 +410,16 @@
                 <em>user</em> (reaches approved services) or <em>admin</em> (also administers Vaier),
                 assign access groups, or revoke access entirely.
             </p>
+            <form class="access-preapprove" id="preApproveForm">
+                <span class="preapprove-label">Grant access before the first sign-in — they'll be approved the moment they sign in with Google.</span>
+                <input type="email" class="form-input preapprove-email" id="preApproveEmail"
+                       placeholder="name@email.com" autocomplete="off" aria-label="Email to pre-approve">
+                <select class="form-input preapprove-role" id="preApproveRole" aria-label="Role to grant">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                </select>
+                <button type="submit" class="btn" id="preApproveBtn">Pre-approve</button>
+            </form>
             <div class="access-filters" id="accessFilters">
                 <button class="access-filter active" data-filter="all">All</button>
                 <button class="access-filter" data-filter="pending">Pending</button>
@@ -965,12 +1024,22 @@
                 } else if (entry.role === 'admin') {
                     roleActions = '<button class="btn btn-small btn-secondary js-role" data-role="user">Make user</button>';
                 }
+                const hasName = entry.name && entry.name.trim();
+                const primary = hasName
+                    ? `<span class="access-name">${escapeHtml(entry.name)}</span>`
+                    : `<span class="access-email">${escapeHtml(entry.email)}</span>`;
+                const secondary = hasName
+                    ? `<span class="access-email secondary">${escapeHtml(entry.email)}</span>`
+                    : '';
                 html += `
                 <div class="access-row ${entry.role === 'pending' ? 'pending' : ''}" data-id="${id}">
                     <div class="access-row-top">
-                        <div>
-                            <span class="access-email">${escapeHtml(entry.email)}</span>
-                            <span class="role-badge ${entry.role}">${entry.role}</span>
+                        <div class="access-identity">
+                            <div class="access-identity-head">
+                                ${primary}
+                                <span class="role-badge ${entry.role}">${entry.role}</span>
+                            </div>
+                            ${secondary}
                         </div>
                         <div class="access-actions">
                             ${roleActions}
@@ -1060,6 +1129,38 @@
             accessFilter = btn.getAttribute('data-filter');
             document.querySelectorAll('.access-filter').forEach(b => b.classList.toggle('active', b === btn));
             renderAccess();
+        });
+
+        // Pre-approve an email before its first sign-in. /access/{email}/role upserts, so this
+        // creates the entry as user/admin; on first Google sign-in they skip pending. Groups can
+        // be added afterwards on the resulting row.
+        document.getElementById('preApproveForm').addEventListener('submit', async e => {
+            e.preventDefault();
+            const emailEl = document.getElementById('preApproveEmail');
+            const email = emailEl.value.trim().toLowerCase();
+            const role = document.getElementById('preApproveRole').value;
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+                displayMessage('Enter a valid email address to pre-approve.', 'error');
+                return;
+            }
+            const btn = document.getElementById('preApproveBtn');
+            btn.disabled = true;
+            displayMessage('Pre-approving ' + email + '…', '');
+            try {
+                const r = await fetch('/access/' + encodeURIComponent(email) + '/role', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role })
+                });
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'HTTP ' + r.status);
+                displayMessage(email + ' pre-approved as ' + role + ' — access starts at first sign-in.', 'success');
+                emailEl.value = '';
+                loadAccess();
+            } catch (err) {
+                displayMessage(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
         });
 
         // Load groups first so the chip pickers' suggestions are ready, then users + access.

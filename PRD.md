@@ -353,6 +353,7 @@ Vaier ships an SMTP notifier that powers Authelia password-reset emails today an
 - **Reachability debounce for LAN servers**: a probe result must hold for 3 consecutive 30s cycles (≈60s of consistency) before the published cache flips and an email goes out. Dampens both the WireGuard tunnel warmup window after a Vaier restart (no false-down email when it takes one cycle for the relay handshake to complete) and ordinary network flapping (a single transient timeout never propagates). The UI shows the icon as grey ("warming up") until the first state confirms.
 - **Last-seen timestamp inside the card** ([#173](https://github.com/getvaier/vaier/issues/173)): every machine's expanded card has a "Last Seen" detail row derived from the latest handshake (or the latest successful LAN reachability probe), updated live by the `peers-stats` SSE stream so the value stays current without a manual refresh. The header row itself signals liveness through the machine-icon colour rather than a separate widget.
 - **Host disk-pressure alerts** ✅ — Vaier monitors free space on its own host root filesystem and emails the `admins` group when it fills past a configurable threshold, reusing the same SMTP path as the machine up/down alerts. A `DiskUsageWatcher` (`@Scheduled(fixedDelay = 60000)`) reads host disk usage through the `ForReadingDiskUsage` driven port (`HostDiskUsageAdapter`, backed by `Files.getFileStore`), which reads the host root bind-mounted read-only into the Vaier container at `VAIER_HOST_ROOT_PATH` (default `/host`; `docker-compose.yml`'s `vaier` service mounts `- /:/host:ro` and passes the env var). All fullness decisions live on the `domain.DiskUsage` entity (`usedPercent`, `isAbove`, and its own email subject/body rendering); `HostMonitoringService` (`GetHostDiskUsageUseCase`) only orchestrates the read. An in-memory `domain.DiskPressureTracker` (mirroring `PeerConnectivityTracker`) emits a transition only on a boundary crossing — `CROSSED_ABOVE` sends the pressure email, `CROSSED_BELOW` the recovery email — so a poll that doesn't change state stays quiet, and the first reading after startup is a silent baseline. The emails go out via `NotifyAdminsOfDiskPressureUseCase` on `NotificationService`. The threshold is `diskMonitorThresholdPercent` in `vaier-config.yml` (default 85, valid 1–99, validated in `domain.VaierConfig`), exposed via `ConfigResolver.getDiskMonitorThresholdPercent()` and editable through `PUT /settings/disk-monitor` (`UpdateDiskMonitorSettingsUseCase` on `SettingsService`). With SMTP unconfigured or the host root not mounted the watcher is inert; the latter case is swallowed and logged at debug.
+- **New pending access-request alert** ✅ — when `UserService.verify()` sees a Google identity for the first time, it auto-creates a `PENDING` `AccessEntry` and, only in that new-pending branch, notifies admins via the `ForNotifyingAdmins` driven port (`notifyNewPendingIdentity(email)`), implemented by `NotificationService`. The email content is rendered by the `domain.PendingIdentity` value object (subject `[Vaier] New access request awaiting approval`; body names the email and links to `vaier.<domain>/admin.html#users`), mirroring `PeerSnapshot`. Recipients are the Authelia `admins`, reusing the same SMTP path as the other alerts, so it stays silent when SMTP is unconfigured or there are no admins. Because `verify()` runs on the Traefik forward-auth hot path for every request to a social-gated service, the send is non-blocking and exception-safe: the notifier method is `@Async` (`@EnableAsync` on `VaierApplication`) and the call site in `UserService` swallows/logs any failure, so a misbehaving notifier can never add latency to or throw into the access decision. It does not fire for existing entries, repeat sign-ins by the same pending user, or allowed decisions. The cross-service cycle (NotificationService reads admins via `ForGettingUsers`, UserService notifies via `ForNotifyingAdmins`) is broken with `@Lazy` on the UserService dependency. Recipients are Authelia admins for now; once the console moves to social login this could also include `AccessEntry` ADMINs ([#305](https://github.com/getvaier/vaier/issues/305) step 3b).
 
 **Known gotcha:** Gmail requires an **App Password** (not the account password) when 2FA is on. The pre-save verification catches this cleanly — save is rejected with the Gmail `534 5.7.9 Application-specific password required` message.
 
@@ -471,6 +472,25 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - UI: a per-service **auth-mode picker** (Public / Authelia / Social) on the service card replaces the
   on/off auth toggle; the Social option appears only when configured, and a distinct badge names the
   gateway in front of each service.
+
+**Delivered (display name capture, TDD-first):**
+- oauth2-proxy is migrated from CLI flags to an env-driven, secret-safe **alpha config** so it can
+  forward Google's `name` claim. An `oauth2-proxy-init` container (mirroring `authelia-init`/`redis-init`)
+  renders `alpha.yaml` into a shared `./oauth2/config` volume — substituting only the client id, writing
+  `$VAIER_OIDC_GOOGLE_CLIENT_SECRET` to a mode-0600 `client-secret` file referenced via `clientSecretFile`
+  (never inlined) — and adds `X-Forwarded-Name` / `X-Auth-Request-Name` (claim `name`) to the header
+  injection. oauth2-proxy keeps the flags alpha doesn't cover (cookie, whitelist, email-domain,
+  reverse-proxy, redirect-url, custom-templates-dir) and adds `--alpha-config`.
+- Traefik (`TraefikReverseProxyAdapter`): the `oauth2-authn` middleware's `authResponseHeaders` gains
+  `X-Auth-Request-Name` so the name reaches `/authz/verify`.
+- Domain: `AccessEntry` gains a nullable `name` and owns the capture decision — `resolvedName(incoming)`:
+  a present, non-blank header (trimmed) refreshes the name; a blank/absent one never wipes a known one.
+- Web/app: `AuthzRestController.verify` reads an optional `X-Auth-Request-Name` header and passes it to
+  `VerifyAccessUseCase.verify`; `UserService` stores/refreshes the name on the entry (preserving it across
+  `grantRole`/`assignGroups`). `AccessFileAdapter` persists `name` in `access.yml` (back-compat: entries
+  with no `name` read as null). `GET /access` returns `name`.
+- UI: the **Users → Access** rows lead with the display name and demote the email to a caption, falling
+  back to email-only when there's no name yet.
 
 **Backlog (not in this slice):** moving the Vaier console itself to social login and decommissioning
 Authelia (3b), the unauthenticated "awaiting approval" page, migration off Authelia for existing

@@ -39,6 +39,8 @@ traefik/
 /vaier/
 /geoip/
 /icons/
+# oauth2-proxy: templates/ are committed sources; config/ is the rendered alpha + client-secret.
+oauth2/config/
 
 # WireGuard
 wireguard-config/

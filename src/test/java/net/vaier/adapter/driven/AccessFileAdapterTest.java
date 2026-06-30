@@ -24,6 +24,10 @@ class AccessFileAdapterTest {
         return AccessEntry.builder().email(email).role(role).groups(groups).build();
     }
 
+    private static AccessEntry entry(String email, Role role, List<String> groups, String name) {
+        return AccessEntry.builder().email(email).role(role).groups(groups).name(name).build();
+    }
+
     // --- entries: empty / upsert / find / delete ---
 
     @Test
@@ -112,6 +116,42 @@ class AccessFileAdapterTest {
                 entry("you@gmail.com", Role.ADMIN, List.of("admins")),
                 entry("friend@gmail.com", Role.USER, List.of("family")),
                 entry("new@gmail.com", Role.PENDING, List.of()));
+    }
+
+    // --- display name persistence (back-compat: entries with no name read as null) ---
+
+    @Test
+    void upsert_persistsTheDisplayName() throws Exception {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins"), "You Name"));
+
+        String contents = Files.readString(tempDir.resolve("access.yml"));
+        assertThat(contents).contains("name: You Name");
+    }
+
+    @Test
+    void getEntries_roundTripsTheDisplayName() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins"), "You Name"));
+
+        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
+
+        assertThat(fresh.findByEmail("you@gmail.com"))
+                .map(AccessEntry::getName).contains("You Name");
+    }
+
+    @Test
+    void getEntries_entryWithoutNameReadsAsNullName() throws Exception {
+        // Back-compat: an entry written before display names existed has no `name` key.
+        Files.writeString(tempDir.resolve("access.yml"), """
+            entries:
+              old@gmail.com:
+                role: user
+                groups: [family]
+            """);
+
+        assertThat(adapter().findByEmail("old@gmail.com"))
+                .hasValueSatisfying(e -> assertThat(e.getName()).isNull());
     }
 
     @Test

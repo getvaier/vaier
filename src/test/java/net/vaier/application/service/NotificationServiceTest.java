@@ -242,6 +242,53 @@ class NotificationServiceTest {
                 .doesNotThrowAnyException();
     }
 
+    // --- new pending identity (access-request alert) ---
+
+    @Test
+    void notifyNewPendingIdentity_sendsAccessRequestEmailToEveryAdmin() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(forGettingUsers.getUsers()).thenReturn(List.of(
+                admin("alice", "alice@example.com"),
+                new User("carol", "carol", "carol@example.com", List.of("users"))));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyNewPendingIdentity("newcomer@example.com");
+
+        ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                recipients.capture(), subject.capture(), body.capture());
+        assertThat(recipients.getValue()).containsExactly("alice@example.com");
+        assertThat(subject.getValue()).isEqualTo("[Vaier] New access request awaiting approval");
+        assertThat(body.getValue()).contains("newcomer@example.com");
+        assertThat(body.getValue()).contains("vaier.example.com/admin.html#users");
+    }
+
+    @Test
+    void notifyNewPendingIdentity_skipsWhenSmtpNotConfigured() {
+        when(configPersistence.load()).thenReturn(Optional.of(VaierConfig.builder().build()));
+
+        service.notifyNewPendingIdentity("newcomer@example.com");
+
+        verify(emailSender, never()).sendEmail(any(), anyInt(), any(), any(), any(),
+                anyList(), any(), any());
+    }
+
+    @Test
+    void notifyNewPendingIdentity_skipsWhenNoAdminUsers() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(forGettingUsers.getUsers()).thenReturn(List.of(
+                new User("carol", "carol", "carol@example.com", List.of("users"))));
+
+        service.notifyNewPendingIdentity("newcomer@example.com");
+
+        verify(emailSender, never()).sendEmail(any(), anyInt(), any(), any(), any(),
+                anyList(), any(), any());
+    }
+
     @Test
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));

@@ -37,10 +37,10 @@ class AuthzRestControllerTest {
     void verify_allowed_returns200WithIdentityHeaders() {
         AccessEntry entry = AccessEntry.builder()
                 .email("friend@example.com").role(Role.USER).groups(List.of("family", "media")).build();
-        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com"))
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com");
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getFirst("Remote-User")).isEqualTo("friend@example.com");
@@ -50,16 +50,26 @@ class AuthzRestControllerTest {
 
     @Test
     void verify_denied_returns403WithBrandedHtmlPage() {
-        when(verifyAccessUseCase.verify("p@example.com", "plex.example.com"))
+        when(verifyAccessUseCase.verify("p@example.com", "plex.example.com", null))
                 .thenReturn(AccessDecision.deny());
 
-        ResponseEntity<String> response = controller.verify("p@example.com", "plex.example.com");
+        ResponseEntity<String> response = controller.verify("p@example.com", "plex.example.com", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         // Forward-auth returns this body to the browser, so it must be the branded Vaier page.
         assertThat(response.getHeaders().getContentType().toString()).startsWith("text/html");
         assertThat(response.getBody()).contains("Vaier");
         assertThat(response.getBody().toLowerCase()).contains("approval");
+    }
+
+    @Test
+    void verify_passesTheDisplayNameHeaderThroughToTheUseCase() {
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith"))
+                .thenReturn(AccessDecision.deny());
+
+        controller.verify("friend@example.com", "plex.example.com", "Alice Smith");
+
+        verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith");
     }
 
     // --- GET /access (admin) ---
@@ -77,6 +87,18 @@ class AuthzRestControllerTest {
         assertThat(result.get(0).role()).isEqualTo("admin");
         assertThat(result.get(0).groups()).containsExactly("admins");
         assertThat(result.get(1).role()).isEqualTo("pending");
+    }
+
+    @Test
+    void listAccess_includesTheDisplayName() {
+        when(listAccessEntriesUseCase.listAccessEntries()).thenReturn(List.of(
+                AccessEntry.builder().email("a@example.com").role(Role.ADMIN).groups(List.of("admins")).name("Alice Smith").build(),
+                AccessEntry.builder().email("b@example.com").role(Role.PENDING).groups(List.of()).build()));
+
+        List<AuthzRestController.AccessEntryResponse> result = controller.listAccess();
+
+        assertThat(result.get(0).name()).isEqualTo("Alice Smith");
+        assertThat(result.get(1).name()).isNull();
     }
 
     // --- PATCH /access/{email}/role ---

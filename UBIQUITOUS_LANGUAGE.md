@@ -178,6 +178,7 @@ Avoid: "vhost", "site", "auth provider".
 | **Test email** | A full AUTH + roundtrip Jakarta Mail send triggered from Settings, used to verify SMTP config independently of the auth layer. |
 | **Machine transition** / **up/down alert** | Email sent to every user in the `admins` group when a server-type machine (VPN server peer or LAN server) flips connected/disconnected. Mobile/Windows clients are excluded — their disconnects are routine. The first observation after Vaier startup is treated as a baseline so restarts don't generate noise. |
 | **Disk-pressure alert** | Email sent to every user in the `admins` group when host **disk usage** crosses into **disk pressure** (above the **disk alert threshold**), with a paired **disk-recovery** email when it drops back below. Only a boundary crossing notifies — not every poll — and the first observation after Vaier startup is a baseline, mirroring the **up/down alert**. |
+| **Access-request alert** | Email sent to every **admin** when a new **pending** **access entry** is created — i.e. when an identity signs in for the first time and lands awaiting approval. The mail names the email and points the admin to the access overview to approve or deny it. Fires only on the first sighting, never on repeat sign-ins by the same pending identity. |
 | **Update available** | (Planned, #57) Indicator on a container when its image has a newer digest on Docker Hub. UI-only in V1; no auto-update. |
 | **Wireguard out of date** | Badge on a peer card whose running wireguard image differs from `WireguardClientImage.EXPECTED`. Operator action: re-download the client compose and redeploy. |
 
@@ -280,7 +281,8 @@ external **identity provider**; Vaier owns **authorization** through a file-base
 |------|------------|
 | **Social login** | Signing in with an external identity provider (Google first) instead of a Vaier-local password. Vaier no longer authenticates the user itself; it authorizes an already-authenticated identity. |
 | **Identity provider** | The external service that authenticates a user and asserts their email to Vaier (Google via oauth2-proxy in the first cut). Abbreviated IdP. |
-| **Access entry** | One known identity in the access store: its email, its **role**, and its **access groups** (`domain.AccessEntry`). The unit the access overview lists and an admin actions. |
+| **Access entry** | One known identity in the access store: its email, its **role**, its **access groups**, and its **display name** (`domain.AccessEntry`). The unit the access overview lists and an admin actions. |
+| **Display name** (access entry) | The identity's human name as reported by the **identity provider** (Google's `name` claim), stored on the **access entry** and shown beside the email in the access overview. Null until a sign-in fills it in (e.g. a pre-approved entry); a sign-in without one never clears it. Distinct from the *launchpad display name* (a service tile's label). |
 | **Role** | The access level granted to an **access entry** (`domain.Role`): **pending**, **user**, or **admin**. Exactly one role per entry. |
 | **Pending** | The role a freshly seen identity lands in: authenticated by the identity provider but not yet approved, so blocked from everything until an admin promotes it. "Awaiting approval." |
 | **User** (role) | An approved, non-administrative identity. Reaches the services whose required **access group** it holds; cannot administer Vaier. Distinct from an Authelia *user* (see §11). |

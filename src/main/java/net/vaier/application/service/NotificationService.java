@@ -6,12 +6,15 @@ import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DiskUsage;
 import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.PendingIdentity;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForGettingUsers;
+import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForSendingNotificationEmail;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -21,7 +24,8 @@ import java.util.Optional;
 @Slf4j
 public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
-        NotifyAdminsOfDiskPressureUseCase {
+        NotifyAdminsOfDiskPressureUseCase,
+        ForNotifyingAdmins {
 
     private static final int DEFAULT_SMTP_PORT = 587;
 
@@ -62,6 +66,26 @@ public class NotificationService implements
         sendToAdmins(usage.recoverySubject(),
                 usage.pressureBody(thresholdPercent, configResolver.getDomain()),
                 "disk recovery on " + usage.path());
+    }
+
+    /**
+     * Notify admins of a brand-new pending access entry. Runs asynchronously so it never adds
+     * latency to the forward-auth path that triggers it, and is wrapped so any failure is logged
+     * rather than propagated. Recipients are the Authelia admins, consistent with the other alerts;
+     * once the console moves to social login this could also include AccessEntry ADMINs
+     * (#305 step 3b).
+     */
+    @Async
+    @Override
+    public void notifyNewPendingIdentity(String email) {
+        try {
+            PendingIdentity identity = new PendingIdentity(email);
+            sendToAdmins(identity.notificationSubject(),
+                    identity.notificationBody(configResolver.getDomain()),
+                    "new pending identity " + email);
+        } catch (Exception e) {
+            log.warn("Failed to notify admins of new pending identity {}: {}", email, e.getMessage());
+        }
     }
 
     /** Send {@code subject}/{@code body} to every admin with an email, if SMTP is fully configured. */

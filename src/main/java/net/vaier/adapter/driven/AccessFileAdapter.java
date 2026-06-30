@@ -46,6 +46,7 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
     private static final String SERVICE_GROUPS_KEY = "serviceGroups";
     private static final String ROLE_KEY = "role";
     private static final String GROUPS_KEY = "groups";
+    private static final String NAME_KEY = "name";
 
     private final String filePath;
     private final Yaml dumper;
@@ -99,7 +100,10 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
             String email = String.valueOf(e.getKey());
             Map<?, ?> body = e.getValue() instanceof Map<?, ?> m ? m : Map.of();
             Role role = Role.fromString(asString(body.get(ROLE_KEY)));
-            result.add(AccessEntry.builder().email(email).role(role).groups(readGroups(body.get(GROUPS_KEY))).build());
+            result.add(AccessEntry.builder().email(email).role(role)
+                    .groups(readGroups(body.get(GROUPS_KEY)))
+                    .name(asString(body.get(NAME_KEY)))
+                    .build());
         }
         return result;
     }
@@ -116,6 +120,11 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
         Map<String, Object> body = new LinkedHashMap<>();
         body.put(ROLE_KEY, entry.getRole().wireValue());
         body.put(GROUPS_KEY, entry.getGroups() != null ? new ArrayList<>(entry.getGroups()) : new ArrayList<>());
+        // Only write the display name once we actually have one — pre-approved entries stay nameless
+        // in the file until their first sign-in fills it in.
+        if (entry.getName() != null && !entry.getName().isBlank()) {
+            body.put(NAME_KEY, entry.getName());
+        }
         entries.put(entry.getEmail(), body);
         write(root);
     }

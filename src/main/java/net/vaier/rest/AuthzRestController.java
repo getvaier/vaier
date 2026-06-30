@@ -58,8 +58,9 @@ public class AuthzRestController {
     @GetMapping("/authz/verify")
     public ResponseEntity<String> verify(
             @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
-            @RequestHeader(value = "X-Forwarded-Host", required = false) String host) {
-        AccessDecision decision = verifyAccessUseCase.verify(email, host);
+            @RequestHeader(value = "X-Forwarded-Host", required = false) String host,
+            @RequestHeader(value = "X-Auth-Request-Name", required = false) String name) {
+        AccessDecision decision = verifyAccessUseCase.verify(email, host, name);
         if (!decision.isAllowed()) {
             // Traefik forward-auth returns this body to the browser on a non-2xx, so a denied
             // (pending or not-in-group) identity sees the branded "awaiting approval" page.
@@ -94,7 +95,7 @@ public class AuthzRestController {
     public List<AccessEntryResponse> listAccess() {
         return listAccessEntriesUseCase.listAccessEntries().stream()
                 .map(e -> new AccessEntryResponse(e.getEmail(), e.getRole().wireValue(),
-                        e.getGroups() != null ? e.getGroups() : List.of()))
+                        e.getGroups() != null ? e.getGroups() : List.of(), e.getName()))
                 .toList();
     }
 
@@ -116,7 +117,7 @@ public class AuthzRestController {
         return ResponseEntity.ok("Access revoked successfully");
     }
 
-    public record AccessEntryResponse(String email, String role, List<String> groups) {}
+    public record AccessEntryResponse(String email, String role, List<String> groups, String name) {}
     public record GrantRoleRequest(String role) {}
     public record AssignGroupsRequest(List<String> groups) {}
 }
