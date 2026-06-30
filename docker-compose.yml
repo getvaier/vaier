@@ -564,6 +564,10 @@ services:
       - --set-xauthrequest=true
       - --redirect-url=https://oauth2.${VAIER_DOMAIN}/oauth2/callback
       - --http-address=0.0.0.0:4180
+      # Brand the sign-in page in Vaier's dark theme (overrides only sign_in.html).
+      - --custom-templates-dir=/templates
+    volumes:
+      - ./oauth2/templates:/templates:ro
     restart: unless-stopped
     labels:
       - traefik.enable=true

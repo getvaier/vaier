@@ -7,9 +7,13 @@ import net.vaier.application.RevokeAccessUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.Role;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -52,18 +56,36 @@ public class AuthzRestController {
     // --- Forward-auth (data path) ---
 
     @GetMapping("/authz/verify")
-    public ResponseEntity<Void> verify(
+    public ResponseEntity<String> verify(
             @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
             @RequestHeader(value = "X-Forwarded-Host", required = false) String host) {
         AccessDecision decision = verifyAccessUseCase.verify(email, host);
         if (!decision.isAllowed()) {
-            return ResponseEntity.status(403).build();
+            // Traefik forward-auth returns this body to the browser on a non-2xx, so a denied
+            // (pending or not-in-group) identity sees the branded "awaiting approval" page.
+            return ResponseEntity.status(403).contentType(MediaType.TEXT_HTML).body(DENIED_PAGE);
         }
         return ResponseEntity.ok()
                 .header("Remote-User", decision.getUser())
                 .header("Remote-Email", decision.getEmail())
                 .header("Remote-Groups", decision.groupsHeader())
-                .build();
+                .body(null);
+    }
+
+    /** The branded "awaiting approval" page, loaded once from the classpath. */
+    private static final String DENIED_PAGE = loadDeniedPage();
+
+    private static String loadDeniedPage() {
+        try (InputStream in = AuthzRestController.class.getResourceAsStream("/authz-denied.html")) {
+            if (in == null) {
+                return "<!DOCTYPE html><title>Awaiting approval · Vaier</title>"
+                        + "<h1>Awaiting approval</h1><p>Ask an administrator to grant you access.</p>";
+            }
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return "<!DOCTYPE html><title>Awaiting approval · Vaier</title>"
+                    + "<h1>Awaiting approval</h1><p>Ask an administrator to grant you access.</p>";
+        }
     }
 
     // --- Admin management (behind the console's existing auth) ---

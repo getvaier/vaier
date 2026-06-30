@@ -40,7 +40,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com"))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<Void> response = controller.verify("friend@example.com", "plex.example.com");
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com");
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getFirst("Remote-User")).isEqualTo("friend@example.com");
@@ -49,13 +49,17 @@ class AuthzRestControllerTest {
     }
 
     @Test
-    void verify_denied_returns403() {
+    void verify_denied_returns403WithBrandedHtmlPage() {
         when(verifyAccessUseCase.verify("p@example.com", "plex.example.com"))
                 .thenReturn(AccessDecision.deny());
 
-        ResponseEntity<Void> response = controller.verify("p@example.com", "plex.example.com");
+        ResponseEntity<String> response = controller.verify("p@example.com", "plex.example.com");
 
         assertThat(response.getStatusCode().value()).isEqualTo(403);
+        // Forward-auth returns this body to the browser, so it must be the branded Vaier page.
+        assertThat(response.getHeaders().getContentType().toString()).startsWith("text/html");
+        assertThat(response.getBody()).contains("Vaier");
+        assertThat(response.getBody().toLowerCase()).contains("approval");
     }
 
     // --- GET /access (admin) ---

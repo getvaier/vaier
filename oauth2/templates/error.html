@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.StatusCode}} · Vaier</title>
+  <style>
+    :root{
+      --bg:#1e1e1e; --bg-card:#252526; --border:#3c3c3c;
+      --text:#d4d4d4; --text-muted:#858585; --text-dim:#5a5a5a;
+      --accent:#4fc3f7; --accent-hover:#81d4fa; --red:#f48771;
+      --mono:'SF Mono','Cascadia Code',Consolas,'Courier New',monospace;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+      background:var(--bg); color:var(--text); padding:1.5rem;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+      -webkit-font-smoothing:antialiased;
+    }
+    .card{
+      width:100%; max-width:400px; background:var(--bg-card); border:1px solid var(--border);
+      border-radius:10px; padding:2.6rem 2rem 2rem; text-align:center;
+      box-shadow:0 14px 44px rgba(0,0,0,.45);
+    }
+    .code{font-family:var(--mono); font-size:3.2rem; font-weight:600; line-height:1;
+      color:var(--accent); margin:0 0 .4rem; filter:drop-shadow(0 0 12px rgba(79,195,247,.3));}
+    .title{font-size:1.05rem; font-weight:600; margin:0 0 .5rem; color:var(--text);}
+    .msg{color:var(--text-muted); font-size:.85rem; line-height:1.45; margin:0 0 1.7rem;
+      word-break:break-word;}
+    .actions{display:flex; gap:.6rem;}
+    .btn{flex:1; display:flex; align-items:center; justify-content:center; padding:.65rem 1rem;
+      border-radius:6px; font-size:.9rem; font-weight:600; cursor:pointer; text-decoration:none;
+      border:1px solid var(--border); background:transparent; color:var(--text); transition:.15s;}
+    .btn:hover{border-color:var(--accent); color:var(--accent);}
+    .btn.primary{background:var(--accent); color:#06222e; border-color:var(--accent);}
+    .btn.primary:hover{background:var(--accent-hover); color:#06222e;}
+    .btn:focus-visible{outline:2px solid var(--accent-hover); outline-offset:2px;}
+    .foot{margin-top:1.7rem; color:var(--text-dim); font-size:.72rem;}
+    @media (prefers-reduced-motion:reduce){.btn{transition:none}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <p class="code">{{.StatusCode}}</p>
+    <h1 class="title">{{.Title}}</h1>
+    {{ if .Message }}<p class="msg">{{.Message}}</p>{{ end }}
+    {{ if .Redirect }}
+    <div class="actions">
+      <form method="GET" action="{{.Redirect}}" style="flex:1"><button type="submit" class="btn">Go back</button></form>
+      <form method="GET" action="{{.ProxyPrefix}}/sign_in" style="flex:1">
+        <input type="hidden" name="rd" value="{{.Redirect}}">
+        <button type="submit" class="btn primary">Sign in</button>
+      </form>
+    </div>
+    {{ end }}
+    <p class="foot">Protected by Vaier</p>
+  </main>
+</body>
+</html>
