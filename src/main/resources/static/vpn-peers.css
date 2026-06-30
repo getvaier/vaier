@@ -16,34 +16,6 @@
         .map-attribution a { color: var(--text-muted); text-decoration: none; }
         .map-attribution a:hover { color: var(--text); }
 
-        /* Topology diagram: force-directed bird's-eye view of the whole Vaier net, with published
-           services hanging off their host machines. Rendered by Cytoscape + cola into this container
-           (canvas/SVG managed by the library); this rule just sizes and frames the viewport. */
-        #network-diagram {
-            position: relative;
-            height: calc(100vh - 14rem);
-            min-height: 320px;
-            margin-bottom: 1rem;
-            border: 1px solid var(--border);
-            border-radius: 2px;
-            background: var(--bg);
-            overflow: hidden;
-        }
-        /* Hover tooltip for the Cytoscape topology graph (follows the cursor, never intercepts it). */
-        .topo-tip {
-            position: fixed;
-            z-index: 9999;
-            pointer-events: none;
-            max-width: 240px;
-            padding: 0.35rem 0.5rem;
-            background: var(--bg-panel);
-            border: 1px solid var(--border);
-            border-radius: 3px;
-            font-size: 0.72rem;
-            color: var(--text);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-        }
-        .topo-tip span { color: var(--text-muted); font-size: 0.68rem; }
 
         .tab-nav {
             display: flex;
@@ -696,4 +668,5 @@
                 width: auto;
                 max-width: none;
             }
+
         }

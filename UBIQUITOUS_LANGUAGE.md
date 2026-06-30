@@ -16,7 +16,7 @@ Terms are drawn from the domain model (`src/main/java/net/vaier/domain/`), the u
 | **Stack** | The five containers in `docker-compose.yml`: `wireguard`, `traefik`, `authelia`, `redis`, `vaier`. Stack components are upstream and pinned by tag — never floating `:latest`. |
 | **Bootstrap admin** | The one-time `admin` user Vaier creates on first boot, with a password written to `authelia/config/.bootstrap-admin-password`. The operator reads it, logs in, changes the password, and deletes the file. |
 | **Concepts page** | The in-app, operator-facing glossary shown inside the admin shell: a trimmed, plain-language subset of this document's terms, grouped, each with a short definition and a one-line "why it matters". Its terms are a curated subset of the ones defined here. |
-| **Infrastructure** | The single admin-shell section that manages machines and the services published on them. It carries three inner views — **List**, **Map**, and **Topology** tabs — and is where peers and LAN servers are added, monitored, and have their published services managed inline on each machine card. Replaces the former separate **Machines** and **Services** pages, which no longer exist as distinct sections. |
+| **Infrastructure** | The single admin-shell section that manages machines and the services published on them. It carries two inner views — **List** and **Map** tabs — and is where peers and LAN servers are added, monitored, and have their published services managed inline on each machine card. Replaces the former separate **Machines** and **Services** pages, which no longer exist as distinct sections. |
 
 ---
 
@@ -145,8 +145,7 @@ Avoid: "vhost", "site", "auth provider".
 | **Disk alert threshold** | The percentage of host filesystem capacity in use at or above which Vaier raises **disk pressure** (default 85%). Configurable in Settings. |
 | **Capability strip** | Fixed-column row of capability icons (relay, docker) on the right side of each machine card header. Empty slots render as placeholders so the same capability lines up vertically across every card. |
 | **Geolocation** | `GeoLocation(latitude, longitude, city, country)` resolved by `DbIpGeolocationAdapter` against a DB-IP City Lite MMDB downloaded by the `geoip-init` container. Used for the Map tab. |
-| **Map tab** / **List tab** / **Topology tab** | The three views on the **Infrastructure** page. The List tab shows machine cards; the Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering; the Topology tab renders the **topology diagram**. |
-| **Topology diagram** | The interactive, force-directed bird's-eye view of the whole Vaier network shown on the **Infrastructure** page's **Topology tab**: the Vaier server, every VPN peer, each LAN server, and every published service are nodes, with each published service attached to the machine that hosts it. A physics simulation lays the nodes out, and they can be dragged, zoomed, and panned. Each node is coloured by its own health and edges are coloured and dashed by connectivity status, reusing the same machine icons and status colours as the List and Map tabs. |
+| **Map tab** / **List tab** | The two views on the **Infrastructure** page. The List tab shows machine cards; the Map tab renders a self-hosted Leaflet/OpenStreetMap world map with markers and clustering. |
 | **Server marker** | The single distinct marker for the Vaier server itself on the Map tab. |
 | **Mobile/client dual marker** | Mobile/Windows-client peers plot twice: a dotted "approx. ISP" marker at the carrier IP plus a firm marker stacked at the Vaier server. Reflects `AllowedIPs = 0.0.0.0/0` full-tunnel routing. |
 

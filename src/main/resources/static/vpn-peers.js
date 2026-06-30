@@ -89,10 +89,10 @@
             }
         }
 
-        // Published services for the Topology tab (#infrastructure slice 1). Loaded alongside
-        // peers/lanServers and refreshed on the same triggers; the diagram joins each service
-        // onto its host machine node (see topologyServicesByHost). Failures are non-fatal — the
-        // diagram simply renders without service nodes.
+        // Published services for the machine cards' Services subsection (#infrastructure slice 2).
+        // Loaded alongside peers/lanServers and refreshed on the same triggers; each service is
+        // grouped onto its host machine (see topologyServicesByHost / _publishedByHost). Failures
+        // are non-fatal — the cards simply render without their Services rows.
         async function fetchPublishedServices() {
             try {
                 const response = await fetch('/published-services/discover', { cache: 'no-store' });
@@ -105,7 +105,6 @@
                     // Gate only on editing, not peer count — a hub/LAN-only deployment (zero peers)
                     // still has machine cards whose Services sections must pick up the change.
                     if (!isEditingMachineCard()) displayPeers(peers);
-                    if (_activeTab === 'topology') renderNetworkDiagram();
                 }
             } catch (error) {
                 console.error('Failed to load published services:', error);
@@ -1125,7 +1124,6 @@
 
             container.innerHTML = html;
             refreshPeerMap();
-            renderNetworkDiagram();
         }
 
         function showCreatePeerModal() {
@@ -1958,39 +1956,7 @@
             if (tab === 'map' && _peerMap) {
                 setTimeout(() => { _peerMap.invalidateSize(); refreshPeerMap(); }, 0);
             }
-            // Cytoscape lays out against its container's pixel size, only known once the panel is
-            // visible (display:none reports clientWidth 0). Resize + fit in case it was built while
-            // hidden or the viewport changed since it last showed.
-            if (tab === 'topology') {
-                setTimeout(() => {
-                    renderNetworkDiagram();
-                    if (_cy) { _cy.resize(); _cy.fit(undefined, 40); }
-                    // renderNetworkDiagram only (re)starts the layout when it rebuilds; if it took the
-                    // fast path on an unchanged graph, resume the simulation we stopped on tab-away so
-                    // drag-to-reflow keeps working (randomize=false — resume from current positions).
-                    if (_cy && !_topoRunning) startTopoLayout(false);
-                }, 0);
-            } else {
-                // cola runs infinite:true — a continuous physics loop. Stop it (and hide any tooltip)
-                // when the panel is hidden so we don't burn CPU/battery simulating an invisible graph.
-                if (_topoLayout) { try { _topoLayout.stop(); } catch (e) { /* already stopped */ } }
-                _topoRunning = false;
-                if (_topoTip) _topoTip.style.display = 'none';
-            }
         }
-
-        // Topology force graph (Cytoscape + cola). The Vaier hub, every VPN peer, each LAN server,
-        // and every published service are nodes; cola runs a continuous physics simulation (nodes
-        // repel, edges pull) so the graph self-spaces, reflows live as you drag, and re-settles when
-        // the fleet changes — replacing the old fixed-radius SVG fan that crowded badly. Reuses the
-        // same icons, status colours and data
-        // (`peers`, `lanServers`, `publishedServices`, `_serverLocation`) as the List/Map tabs.
-        // See buildTopologyElements / renderNetworkDiagram below.
-        let _cy = null;          // the Cytoscape instance (created lazily once the panel is visible)
-        let _topoSig = null;     // signature of the current node set; re-layout only when it changes
-        let _topoTip = null;     // floating hover-tooltip element
-        let _topoLayout = null;  // the running cola layout handle (continuous physics)
-        let _topoRunning = false; // whether the cola simulation is currently iterating
 
         // A published service's health colour mirrors the Services page: state OK -> green,
         // UNKNOWN -> grey (host not yet probed), anything else (UNREACHABLE) -> red. Same
@@ -1999,25 +1965,6 @@
             if (s.state === 'OK') return 'up';
             if (s.state === 'UNKNOWN') return 'unknown';
             return 'down';
-        }
-
-        // Pure join: each published service hangs off exactly one host machine node in the
-        // diagram (#infrastructure slice 1). Mirrors the nesting rule the List/launchpad use —
-        //   isLanService           -> the LAN server named lanServerName
-        //   empty/blank hostName    -> the Vaier hub (centre node, key '__hub__')
-        //   otherwise               -> the VPN peer whose name === hostName
-        // Returns a map of hostKey -> [services]. hostKey is '__hub__' for the centre, the LAN
-        // server name for LAN services, or the peer name for peer-hosted services. The caller
-        // drops any hostKey it can't resolve to a node, so a service on an absent machine is
-        // simply not drawn (no crash).
-        // serviceLocation -> machine-icon kind. Lives here on the (now sole) Infrastructure page;
-        // the old published-services.js copy was retired with that page in slice 3.
-        function serviceTypeIcon(service) {
-            switch (service.serviceLocation) {
-                case 'LAN_SERVICE':  return 'lan';
-                case 'VAIER_SERVER': return 'vaier';
-                default:             return 'server';
-            }
         }
 
         function topologyServicesByHost(services) {
@@ -2041,243 +1988,6 @@
             return byHost;
         }
 
-        // Resolve the theme palette from CSS custom properties so the graph tracks the stylesheet
-        // (Cytoscape's own stylesheet can't read var()). Concrete fallbacks mirror styles.css.
-        function topoPalette() {
-            const cs = getComputedStyle(document.documentElement);
-            const v = (name, fb) => (cs.getPropertyValue(name).trim() || fb);
-            return {
-                up:       v('--green',     '#4ec9b0'),
-                down:     v('--red',       '#f48771'),
-                degraded: v('--yellow',    '#dcdcaa'),
-                unknown:  v('--text-dim',  '#5a5a5a'),
-                node:     v('--bg-panel',  '#252526'),
-                edge:     v('--text-muted','#858585'),
-                text:     v('--text',      '#d4d4d4'),
-                accent:   v('--accent',    '#4fc3f7'),
-            };
-        }
-
-        function topoStatusColour(pal, statusKey) {
-            return pal[statusKey] || pal.unknown;
-        }
-
-        // machineIconSvg(kind) paints with currentColor; bake a concrete colour in and encode it as
-        // a data URI Cytoscape can use as a node background-image. machineIconSvg omits the xmlns
-        // (fine for inline SVG, but a data-URI image won't render without it), so inject it here.
-        function topoIconUri(kind, colour) {
-            const svg = machineIconSvg(kind)
-                .replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
-                .replace(/currentColor/g, colour);
-            return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-        }
-
-        // Build the Cytoscape element list from peers / lanServers / publishedServices. An edge is
-        // only added when both endpoints exist as nodes, so a service (or LAN server) whose host
-        // isn't drawn is simply skipped rather than producing a dangling edge.
-        function buildTopologyElements(pal) {
-            const els = [];
-            const hasNode = id => els.some(e => e.data.id === id && !e.data.source);
-
-            const hubSub = (_serverLocation && _serverLocation.publicHost) ? _serverLocation.publicHost : '';
-            // The hub mirrors the rest of the page's vaierServerStatus rather than always reading green,
-            // so a DOWN/DEGRADED/UNKNOWN server is represented honestly in the Topology view.
-            const hubSk = MAP_MARKER_STATUS_KEY[vaierServerStatus] || 'unknown';
-            els.push({ data: { id: '__hub__', label: 'Vaier server', type: 'hub', status: hubSk,
-                               icon: topoIconUri('vaier', topoStatusColour(pal, hubSk)), sub: hubSub } });
-
-            peers.forEach(p => {
-                const sk = statusKeyForPeer(p);
-                const id = 'peer:' + p.name;
-                els.push({ data: { id, label: p.name, type: 'machine', status: sk,
-                                   icon: topoIconUri(deviceCategoryIconKind(p.deviceCategory), topoStatusColour(pal, sk)),
-                                   sub: p.tunnelIp || p.endpointIp || '' } });
-                els.push({ data: { id: 'e:hub>' + id, source: '__hub__', target: id, status: sk } });
-            });
-
-            lanServers.forEach(s => {
-                if (!s.relayPeerName) return;
-                const srcId = s.relayPeerName === 'Vaier server' ? '__hub__' : 'peer:' + s.relayPeerName;
-                if (!hasNode(srcId)) return; // relay peer not drawn — nothing to anchor to
-                const sk = statusKeyForLanServer(s);
-                const id = 'lan:' + s.name;
-                els.push({ data: { id, label: s.name, type: 'machine', status: sk,
-                                   icon: topoIconUri(deviceCategoryIconKind(s.deviceCategory), topoStatusColour(pal, sk)),
-                                   sub: s.lanAddress || '' } });
-                els.push({ data: { id: 'e:' + srcId + '>' + id, source: srcId, target: id, status: sk } });
-            });
-
-            // Each published service hangs off the machine that hosts it. hostKey is '__hub__', a
-            // peer name, or a LAN-server name (see topologyServicesByHost); resolve it to a node id.
-            const byHost = topologyServicesByHost(publishedServices);
-            Object.keys(byHost).forEach(hostKey => {
-                let hostId = null;
-                if (hostKey === '__hub__') hostId = '__hub__';
-                else if (hasNode('peer:' + hostKey)) hostId = 'peer:' + hostKey;
-                else if (hasNode('lan:' + hostKey)) hostId = 'lan:' + hostKey;
-                if (!hostId) return; // host machine not in the diagram — skip its services
-                byHost[hostKey].forEach(s => {
-                    const sk = statusKeyForService(s);
-                    // Stable per-service id (dns + path prefix uniquely identify a published route,
-                    // same key used by patch/delete) so the fast-path data update never re-labels the
-                    // wrong node when service ordering shifts but the node set is unchanged.
-                    const id = 'svc:' + (s.dnsAddress || s.name || '') + ':' + (s.pathPrefix || '/');
-                    els.push({ data: { id, type: 'service', status: sk,
-                                       label: s.launchpadAlias || s.shortName || s.name || '',
-                                       icon: topoIconUri(serviceTypeIcon(s), topoStatusColour(pal, sk)),
-                                       sub: s.authenticated ? 'Auth required' : 'Public (no auth)' } });
-                    els.push({ data: { id: 'e:' + hostId + '>' + id, source: hostId, target: id, status: sk } });
-                });
-            });
-            return els;
-        }
-
-        function topoStyle(pal) {
-            const nodeBorder = st => ({ selector: `node[status="${st}"]`, style: { 'border-color': topoStatusColour(pal, st) } });
-            const edgeColour = st => ({ selector: `edge[status="${st}"]`, style: { 'line-color': topoStatusColour(pal, st) } });
-            return [
-                { selector: 'node', style: {
-                    'background-color': pal.node,
-                    'background-image': 'data(icon)',
-                    'background-fit': 'none',
-                    'background-width': '55%',
-                    'background-height': '55%',
-                    'border-width': 2.5,
-                    'width': 44, 'height': 44,
-                    'label': 'data(label)',
-                    'color': pal.text,
-                    'font-size': 10,
-                    'text-valign': 'bottom',
-                    'text-halign': 'center',
-                    'text-margin-y': 4,
-                    'text-max-width': 92,
-                    'text-wrap': 'ellipsis',
-                    'min-zoomed-font-size': 7,
-                } },
-                { selector: 'node[type="hub"]',     style: { 'width': 66, 'height': 66, 'font-size': 12, 'border-width': 3 } },
-                { selector: 'node[type="service"]', style: { 'width': 28, 'height': 28, 'font-size': 9, 'border-width': 2 } },
-                nodeBorder('up'), nodeBorder('down'), nodeBorder('degraded'), nodeBorder('unknown'),
-                { selector: 'edge', style: {
-                    'width': 1.6,
-                    'curve-style': 'bezier',
-                    'line-color': pal.edge,
-                    'opacity': 0.55,
-                    'target-arrow-shape': 'none',
-                } },
-                edgeColour('up'), edgeColour('degraded'),
-                { selector: 'edge[status="down"]',    style: { 'line-color': pal.down, 'line-style': 'dashed' } },
-                { selector: 'edge[status="unknown"]', style: { 'line-style': 'dashed', 'opacity': 0.4 } },
-                { selector: 'node:selected', style: { 'border-color': pal.accent, 'border-width': 3 } },
-            ];
-        }
-
-        // cola is a continuous force simulation: it keeps iterating (infinite:true), so dragging a
-        // node tugs its neighbours through the springs in real time. Services hug their host (short
-        // edges) while peers sit further from the hub. randomize is only used for a fresh layout —
-        // resumes continue from current positions so the graph doesn't teleport. fit is handled
-        // manually (an infinite layout never emits layoutstop).
-        function topoLayout(randomize) {
-            return {
-                name: 'cola',
-                animate: true,
-                infinite: true,
-                fit: false,
-                randomize: randomize === true,
-                handleDisconnected: true,
-                nodeSpacing: 14,
-                edgeLength: e => (e.target().data('type') === 'service' ? 60 : 130),
-            };
-        }
-
-        // (Re)start the continuous cola simulation. Stops any prior run first so we never stack two
-        // infinite layouts. Fits once after a short settle (infinite layouts never self-fit).
-        function startTopoLayout(randomize) {
-            if (!_cy) return;
-            if (_topoLayout) { try { _topoLayout.stop(); } catch (e) { /* already stopped */ } }
-            _topoLayout = _cy.layout(topoLayout(randomize));
-            _topoLayout.run();
-            _topoRunning = true;
-            setTimeout(() => { if (_cy && _activeTab === 'topology') _cy.fit(undefined, 40); }, 700);
-        }
-
-        function ensureTopoTip() {
-            if (_topoTip) return _topoTip;
-            _topoTip = document.createElement('div');
-            _topoTip.className = 'topo-tip';
-            _topoTip.style.display = 'none';
-            document.body.appendChild(_topoTip);
-            return _topoTip;
-        }
-
-        // Lightweight hover tooltip — Cytoscape has no built-in one. Follows the cursor; carries the
-        // node label and its sub-line (tunnel/LAN address, or a service's auth state).
-        function wireTopoTips() {
-            const tip = ensureTopoTip();
-            const place = evt => {
-                const oe = evt.originalEvent;
-                if (!oe) return;
-                tip.style.left = (oe.clientX + 14) + 'px';
-                tip.style.top  = (oe.clientY + 14) + 'px';
-            };
-            _cy.on('mouseover', 'node', evt => {
-                const d = evt.target.data();
-                tip.innerHTML = `<strong>${escapeHtml(d.label || '')}</strong>`
-                    + (d.sub ? `<br><span>${escapeHtml(d.sub)}</span>` : '');
-                tip.style.display = 'block';
-                place(evt);
-            });
-            _cy.on('mousemove', 'node', place);
-            _cy.on('mouseout', 'node', () => { tip.style.display = 'none'; });
-            _cy.on('tapstart pan zoom', () => { tip.style.display = 'none'; });
-        }
-
-        // Build (or refresh) the Cytoscape topology graph. A status-only refresh (same node set)
-        // updates node/edge data in place — no re-layout — so the periodic poll and SSE updates
-        // recolour the graph without teleporting it. A changed node set rebuilds and re-runs cola.
-        function renderNetworkDiagram() {
-            const host = document.getElementById('network-diagram');
-            if (!host) return;
-            if (host.clientWidth === 0 || host.clientHeight === 0) return; // panel not visible yet
-            if (typeof cytoscape === 'undefined') return;                  // vendor lib missing
-
-            const pal = topoPalette();
-            const elements = buildTopologyElements(pal);
-            // Signature covers nodes AND edges: edge ids encode source>target, so a relay/host change
-            // that rewires an edge without changing the node set still forces a rebuild (no stale edges).
-            const sig = elements.map(e => e.data.id).sort().join('|');
-
-            if (_cy && sig === _topoSig) {
-                _cy.batch(() => {
-                    elements.forEach(e => {
-                        const el = _cy.getElementById(e.data.id);
-                        if (el && el.nonempty()) el.data(e.data);
-                    });
-                });
-                return;
-            }
-
-            _topoSig = sig;
-            if (!_cy) {
-                _cy = cytoscape({
-                    container: host,
-                    elements,
-                    style: topoStyle(pal),
-                    minZoom: 0.25, maxZoom: 3, wheelSensitivity: 0.2,
-                });
-                wireTopoTips();
-            } else {
-                _cy.elements().remove();
-                _cy.add(elements);
-                _cy.style(topoStyle(pal));
-            }
-            startTopoLayout(true);
-        }
-
-        // Keep Cytoscape sized to its container when the window/iframe resizes while showing.
-        window.addEventListener('resize', () => {
-            if (_activeTab === 'topology' && _cy) { _cy.resize(); _cy.fit(undefined, 40); }
-        });
-
         async function fetchServerLocation() {
             // Always fetch — the response carries both the Map tab's lat/lon and the Vaier-server
             // machine card's LAN CIDR (#204). Either group can be absent (null lat/lon when the
@@ -2290,8 +2000,6 @@
                 // Re-render the Machines list so the Vaier server card picks up the LAN CIDR — even
                 // on an empty net (zero peers), where the hub/LAN cards still need the update.
                 displayPeers(peers);
-                // Keep the diagram's hub label in sync too.
-                renderNetworkDiagram();
             } catch (e) {
                 console.error('Failed to load server location:', e);
             }
@@ -2442,7 +2150,7 @@
         // (#300) — same reason saveLanServerName refetches both.
         _sse.addEventListener('lan-servers-updated', () => { fetchLanServers(); fetchPublishedServices(); fetchPublishable(); });
 
-        // Keep the Topology tab's service layer fresh: published-services health/changes arrive on
+        // Keep the machine cards' Services rows fresh: published-services health/changes arrive on
         // their own SSE stream (#infrastructure slice 1). A separate EventSource keeps this seam
         // independent of the peers stream — same DTO the Services page consumes.
         const _servicesSse = new EventSource('/published-services/events');
