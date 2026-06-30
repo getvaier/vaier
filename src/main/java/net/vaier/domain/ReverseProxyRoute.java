@@ -232,6 +232,31 @@ public class ReverseProxyRoute {
         return name != null && !name.contains("@");
     }
 
+    /**
+     * How this route is gated, read off its Traefik middleware chain — {@link AuthMode#SOCIAL} when
+     * the oauth2-proxy links are present, {@link AuthMode#AUTHELIA} for the legacy single auth
+     * middleware, else {@link AuthMode#NONE}. The published-services API and the UI auth-mode picker
+     * read this so they reflect the route's actual gateway rather than re-deriving it.
+     */
+    public AuthMode authMode() {
+        return AuthMode.fromMiddlewareNames(middlewares);
+    }
+
+    /**
+     * True when this is the per-host {@code Host(...) && PathPrefix(/oauth2/)} helper router that a
+     * social-gated route needs so oauth2-proxy's sign-in/callback/sign-out endpoints are reachable
+     * without auth. It is infrastructure, not a published service — the published-services view and
+     * the launchpad filter it out, and it is named {@code <host-with-dashes>-oauth2-router}.
+     */
+    public boolean isOauth2EndpointsRouter() {
+        return name != null && name.endsWith("-oauth2-router");
+    }
+
+    /** The router key of the {@code /oauth2/} helper router for {@code dnsName}. */
+    public static String oauth2EndpointsRouterName(String dnsName) {
+        return dnsName.replace(".", "-") + "-oauth2-router";
+    }
+
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service, AuthInfo authInfo) {
         this(name, domainName, address, port, service, authInfo, null, null, null, null, false);
     }

@@ -1,6 +1,9 @@
 // Extracted from vpn-peers.html (#273). Classic script — runs in global scope so the page's
 // inline on* handlers keep resolving. Modularisation tracked as follow-up slices of #273.
         let peers = [];
+        // Whether the per-service Social auth mode is offered (Google OAuth configured server-side,
+        // #305). Loaded once from /settings/config; gates the Social option in the auth-mode picker.
+        let _socialAuthAvailable = false;
         let peerServices = {};
         let vaierServerStatus = 'UNKNOWN'; // domain MachineStatus enum value
         let lanServers = [];
@@ -108,6 +111,21 @@
                 }
             } catch (error) {
                 console.error('Failed to load published services:', error);
+            }
+        }
+
+        // Deployment-level config the page needs: currently just whether Social auth is on offer.
+        // Fetched once at load; re-renders so already-open editors pick up the Social option.
+        async function fetchAppConfig() {
+            try {
+                const response = await fetch('/settings/config', { cache: 'no-store' });
+                if (response.ok) {
+                    const cfg = await response.json();
+                    _socialAuthAvailable = !!cfg.socialAuthAvailable;
+                    if (!isEditingMachineCard()) displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load app config:', error);
             }
         }
 
@@ -254,7 +272,13 @@
             const linkOpen   = (dnsOk && !isSelf)
                 ? `<a class="pub-open" href="${encodeURI(url)}" target="_blank" rel="noopener" title="Open ${escapeHtml(display)}" onclick="event.stopPropagation()">↗</a>`
                 : '';
-            const authBadge  = s.authenticated
+            // The badge names the gateway in front of the service, not just "gated y/n", so the
+            // operator sees at a glance which login a tile leads to. Fall back to the legacy
+            // authenticated flag for routes that predate authMode (e.g. Docker-label basicAuth).
+            const mode = s.authMode || (s.authenticated ? 'authelia' : 'none');
+            const authBadge = mode === 'social'
+                ? `<span class="pub-badge pub-social" title="Social login (Google) required">social</span>`
+                : mode === 'authelia'
                 ? `<span class="pub-badge pub-auth" title="Authelia authentication required">auth</span>`
                 : `<span class="pub-badge pub-noauth" title="Public — no authentication required">no auth</span>`;
             return `<div class="published-entry">
@@ -297,9 +321,7 @@
                 <div class="detail-row"><span class="detail-label">Host</span><span class="detail-value">${escapeHtml(s.hostAddress)}:${s.hostPort}</span></div>
                 ${versionRow}
                 <div class="detail-row"><span class="detail-label">Auth</span><span class="detail-value">
-                    <input type="checkbox" id="pub-auth-${id}" ${s.authenticated ? 'checked' : ''}
-                        style="accent-color:var(--accent);cursor:pointer" title="Require Authelia authentication to reach this service."
-                        onchange="setPublishedAuth('${dns}','${path}',this.checked)"></span></div>
+                    ${renderAuthModePicker(s, id, dns, path)}</span></div>
                 <div class="detail-row"><span class="detail-label">Display name</span><span class="detail-value">
                     <input type="text" id="pub-alias-${id}" class="form-input" style="width:100%;max-width:240px"
                         value="${escapeHtml(s.launchpadAlias || '')}" data-original="${escapeHtml(s.launchpadAlias || '')}" placeholder="(default)"
@@ -330,6 +352,23 @@
                             style="accent-color:var(--accent);cursor:pointer" title="Show a tile for this service on the launchpad."
                             onchange="setPublishedHidden('${dns}','${path}',!this.checked)"></span></div>
                 </details>`;
+        }
+
+        // The per-service auth-mode picker (#305): which gateway sits in front of the service. The
+        // Social option is offered only when Google OAuth is configured (_socialAuthAvailable) — but
+        // a route already on Social always keeps its option visible so the mode can be read and changed.
+        function renderAuthModePicker(s, id, dns, path) {
+            const mode = s.authMode || (s.authenticated ? 'authelia' : 'none');
+            const showSocial = _socialAuthAvailable || mode === 'social';
+            const opt = (value, label) =>
+                `<option value="${value}" ${mode === value ? 'selected' : ''}>${label}</option>`;
+            return `<select id="pub-authmode-${id}" class="form-input" style="width:100%;max-width:240px"
+                        title="Which login a visitor must pass to reach this service."
+                        onchange="setPublishedAuthMode('${dns}','${path}',this.value)">
+                ${opt('none', 'Public — no sign-in')}
+                ${opt('authelia', 'Authelia')}
+                ${showSocial ? opt('social', 'Social (Google)') : ''}
+            </select>`;
         }
 
         // A discoverable container that isn't published yet — a "+ Publish" row in the Services list
@@ -518,8 +557,8 @@
             setTimeout(() => input.classList.remove('save-ok'), 900);
         }
 
-        async function setPublishedAuth(dnsAddress, pathPrefix, requiresAuth) {
-            try { await patchPublishedService(dnsAddress, pathPrefix, { requiresAuth }); await fetchPublishedServices(); }
+        async function setPublishedAuthMode(dnsAddress, pathPrefix, authMode) {
+            try { await patchPublishedService(dnsAddress, pathPrefix, { authMode }); await fetchPublishedServices(); }
             catch (e) { displayError(`Failed to update authentication: ${e.message}`); }
         }
 
@@ -2134,6 +2173,7 @@
         // (escapeHtml is defined once, near jsArg above — the duplicate here was removed in #273.)
 
         setupPeerMap();
+        fetchAppConfig();
         fetchPeers();
         fetchVaierServerServices();
         fetchLanServers();

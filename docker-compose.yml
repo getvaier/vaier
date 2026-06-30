@@ -474,6 +474,8 @@ services:
       # back into the server's LAN through the tunnel (#204).
       VAIER_SERVER_LAN_CIDR: ${VAIER_SERVER_LAN_CIDR:-}
       VAIER_LICENSE: ${VAIER_LICENSE:-}
+      # Presence of the Google client id enables the per-service "Social" auth mode (#305).
+      VAIER_OIDC_GOOGLE_CLIENT_ID: ${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
@@ -532,6 +534,43 @@ services:
       # (defined on vaier-offline) serves the branded offline page instead of Traefik's bare "Bad
       # gateway". vaier-public also carries it so unauthenticated public paths degrade gracefully.
       - traefik.http.routers.vaier-public.middlewares=vaier-down
+    networks:
+      - vaier-network
+
+  # --- #305 social login: oauth2-proxy authenticates with Google; Vaier owns authorization
+  # via /authz/verify. A first-class stack service, but GATED behind the `social` profile so a
+  # Community deployment that doesn't use social login is unaffected (the container simply never
+  # starts). Activate it by setting Google OAuth credentials AND opting into the profile, e.g. in
+  # .env:  VAIER_OIDC_GOOGLE_CLIENT_ID=..., VAIER_OIDC_GOOGLE_CLIENT_SECRET=..., COMPOSE_PROFILES=social
+  # (or `docker compose --profile social up -d`). With the profile off, the `social` auth mode is
+  # not offered in the UI and no social routes are generated, so nothing depends on this container.
+  # Per-service routes still gate via Authelia (or stay public) exactly as before.
+  # VAIER_OAUTH2_COOKIE_SECRET is auto-generated into .env (not operator-authored).
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    container_name: oauth2-proxy
+    profiles: ["social"]
+    command:
+      - --provider=google
+      - --client-id=${VAIER_OIDC_GOOGLE_CLIENT_ID}
+      - --client-secret=${VAIER_OIDC_GOOGLE_CLIENT_SECRET}
+      - --cookie-secret=${VAIER_OAUTH2_COOKIE_SECRET}
+      - --cookie-domain=.${VAIER_DOMAIN}
+      - --cookie-secure=true
+      - --whitelist-domain=.${VAIER_DOMAIN}
+      - --email-domain=*
+      - --upstream=static://202
+      - --reverse-proxy=true
+      - --set-xauthrequest=true
+      - --redirect-url=https://oauth2.${VAIER_DOMAIN}/oauth2/callback
+      - --http-address=0.0.0.0:4180
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.oauth2-proxy.rule=Host(`oauth2.${VAIER_DOMAIN}`)
+      - traefik.http.routers.oauth2-proxy.entrypoints=websecure
+      - traefik.http.routers.oauth2-proxy.tls.certresolver=letsencrypt
+      - traefik.http.services.oauth2-proxy.loadbalancer.server.port=4180
     networks:
       - vaier-network
 

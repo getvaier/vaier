@@ -1,31 +1,48 @@
 package net.vaier.domain.port;
 
+import net.vaier.domain.AuthMode;
 import net.vaier.domain.ReverseProxyRoute;
 import java.util.List;
 
 public interface ForPersistingReverseProxyRoutes {
     /**
-     * Add a route. {@code pathPrefix} may be null for a host-only route, or a normalised path like
-     * {@code "/auth"} to add a path-scoped route that coexists with others on the same host.
-     * Router/service names include a path-derived slug so multiple routes on one host don't collide.
+     * Add a route gated by {@code authMode}. {@code pathPrefix} may be null for a host-only route, or
+     * a normalised path like {@code "/auth"} to add a path-scoped route that coexists with others on
+     * the same host. Router/service names include a path-derived slug so multiple routes on one host
+     * don't collide. The mode owns which middleware chain the route carries (see {@link AuthMode}).
      */
-    void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
+    void addReverseProxyRoute(String dnsName, String address, int port, AuthMode authMode,
                               String rootRedirectPath, String pathPrefix);
     void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
-                                 boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                 AuthMode authMode, boolean directUrlDisabled, String rootRedirectPath,
                                  String pathPrefix);
+
+    /** Legacy boolean overload: {@code true} → Authelia, {@code false} → no auth. */
+    default void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
+                                      String rootRedirectPath, String pathPrefix) {
+        addReverseProxyRoute(dnsName, address, port, AuthMode.fromRequiresAuth(requiresAuth),
+            rootRedirectPath, pathPrefix);
+    }
+    /** Legacy boolean overload: {@code true} → Authelia, {@code false} → no auth. */
+    default void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
+                                         boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                         String pathPrefix) {
+        addLanReverseProxyRoute(dnsName, host, port, protocol, AuthMode.fromRequiresAuth(requiresAuth),
+            directUrlDisabled, rootRedirectPath, pathPrefix);
+    }
 
     /** Convenience overload for the common host-only case. */
     default void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
                                       String rootRedirectPath) {
-        addReverseProxyRoute(dnsName, address, port, requiresAuth, rootRedirectPath, null);
+        addReverseProxyRoute(dnsName, address, port, AuthMode.fromRequiresAuth(requiresAuth),
+            rootRedirectPath, null);
     }
     /** Convenience overload for the common host-only case. */
     default void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
                                          boolean requiresAuth, boolean directUrlDisabled,
                                          String rootRedirectPath) {
-        addLanReverseProxyRoute(dnsName, host, port, protocol, requiresAuth, directUrlDisabled,
-            rootRedirectPath, null);
+        addLanReverseProxyRoute(dnsName, host, port, protocol, AuthMode.fromRequiresAuth(requiresAuth),
+            directUrlDisabled, rootRedirectPath, null);
     }
 
     List<ReverseProxyRoute> getReverseProxyRoutes();
@@ -34,7 +51,12 @@ public interface ForPersistingReverseProxyRoutes {
     void deleteReverseProxyRouteByDnsName(String dnsName);
 
     /** Path-aware setters target a specific (dnsName, pathPrefix) router. */
-    void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth);
+    void setRouteAuthMode(String dnsName, String pathPrefix, AuthMode authMode);
+
+    /** Legacy boolean overload: {@code true} → Authelia, {@code false} → no auth. */
+    default void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth) {
+        setRouteAuthMode(dnsName, pathPrefix, AuthMode.fromRequiresAuth(requiresAuth));
+    }
     void setRouteRootRedirectPath(String dnsName, String pathPrefix, String rootRedirectPath);
     void setRouteDirectUrlDisabled(String dnsName, String pathPrefix, boolean directUrlDisabled);
     void setRouteHiddenFromLaunchpad(String dnsName, String pathPrefix, boolean hiddenFromLaunchpad);

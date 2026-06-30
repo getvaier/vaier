@@ -10,7 +10,9 @@ import net.vaier.application.UpdateUserDisplayNameUseCase;
 import net.vaier.application.UpdateUserEmailUseCase;
 import net.vaier.application.UpdateUserGroupsUseCase;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.AuthMode;
 import net.vaier.domain.User;
+import net.vaier.domain.VaierHostnames;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -115,8 +117,14 @@ public class AuthRestController {
             @RequestHeader(value = "Remote-Email", required = false) String email) {
         String domain = configResolver.getDomain();
         boolean hasDomain = domain != null && !domain.isBlank();
-        String logoutUrl = hasDomain ? "https://login." + domain + "/logout?rd=https://vaier." + domain + "/" : null;
-        String loginUrl = hasDomain ? "https://login." + domain + "/?rd=https://vaier." + domain + "/" : null;
+        // The Vaier console itself stays Authelia-gated in 3a (#305). The logout URL is resolved
+        // through the mode-aware domain helper so that when the console moves to social login (3b)
+        // only the AuthMode argument changes — social-gated *services* already log out via
+        // oauth2-proxy's sign-out (see VaierHostnames#logoutUrl).
+        VaierHostnames hostnames = new VaierHostnames(domain);
+        String console = hasDomain ? "https://" + hostnames.vaierServerFqdn() + "/" : null;
+        String logoutUrl = hasDomain ? hostnames.logoutUrl(AuthMode.AUTHELIA, console) : null;
+        String loginUrl = hasDomain ? "https://" + hostnames.autheliaHost() + "/?rd=" + console : null;
         return ResponseEntity.ok(new MeResponse(username, displayname, email, logoutUrl, loginUrl));
     }
 

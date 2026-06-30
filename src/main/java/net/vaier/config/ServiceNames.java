@@ -13,6 +13,12 @@ public final class ServiceNames {
     public static final String TRAEFIK = "traefik";
 
     public static final String AUTH_MIDDLEWARE = "auth-middleware";
+    // Social-login (#305) middleware + service names — the proven step-1 two-stage chain.
+    public static final String OAUTH2 = "oauth2";
+    public static final String OAUTH2_SIGNIN_MIDDLEWARE = "oauth2-signin";
+    public static final String OAUTH2_AUTHN_MIDDLEWARE = "oauth2-authn";
+    public static final String VAIER_AUTHZ_MIDDLEWARE = "vaier-authz";
+    public static final String OAUTH2_PROXY_SERVICE = "oauth2-proxy-svc";
     public static final String ERROR_PAGES_MIDDLEWARE = "vaier-errors";
     public static final String ERROR_PAGES_SERVICE = "vaier-error-pages";
     public static final String CERT_RESOLVER = "letsencrypt";

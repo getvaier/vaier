@@ -22,6 +22,20 @@ public interface UpdatePublishedServiceUseCase {
         String rootRedirectPath,
         String launchpadAlias,
         String versionEndpoint,
-        String versionProperty
-    ) {}
+        String versionProperty,
+        /**
+         * The route's auth mode wire value ({@code none}/{@code authelia}/{@code social}); null means
+         * "leave unchanged". Supersedes the legacy {@code requiresAuth} toggle — when both are set,
+         * {@code authMode} wins.
+         */
+        String authMode
+    ) {
+        /** Back-compat constructor for callers predating the {@code authMode} field. */
+        public PublishedServicePatch(Boolean requiresAuth, Boolean directUrlDisabled,
+                                     Boolean hiddenFromLaunchpad, String rootRedirectPath,
+                                     String launchpadAlias, String versionEndpoint, String versionProperty) {
+            this(requiresAuth, directUrlDisabled, hiddenFromLaunchpad, rootRedirectPath,
+                launchpadAlias, versionEndpoint, versionProperty, null);
+        }
+    }
 }

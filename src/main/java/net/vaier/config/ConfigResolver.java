@@ -23,6 +23,7 @@ public class ConfigResolver {
     private String smtpUsername;
     private String smtpSender;
     private int diskMonitorThresholdPercent;
+    private String googleClientId;
 
     @Autowired
     public ConfigResolver(ForPersistingAppConfiguration configPersistence) {
@@ -46,6 +47,7 @@ public class ConfigResolver {
         this.smtpUsername = config.getSmtpUsername();
         this.smtpSender = config.getSmtpSender();
         this.diskMonitorThresholdPercent = config.effectiveDiskMonitorThresholdPercent();
+        this.googleClientId = envLookup.apply("VAIER_OIDC_GOOGLE_CLIENT_ID");
         if (domain != null) {
             log.info("Configuration resolved for domain: {} (DNS provider: {})", domain, getDnsProvider());
         }
@@ -66,6 +68,14 @@ public class ConfigResolver {
     public String getSmtpUsername() { return smtpUsername; }
     public String getSmtpSender() { return smtpSender; }
     public int getDiskMonitorThresholdPercent() { return diskMonitorThresholdPercent; }
+    /**
+     * Whether social login (#305) is configured: true once a Google OAuth client id is present. When
+     * false, the {@code social} auth mode isn't offered in the UI and oauth2-proxy need not run.
+     */
+    public boolean isSocialAuthAvailable() {
+        return googleClientId != null && !googleClientId.isBlank();
+    }
+
     public DnsProvider getDnsProvider() {
         boolean hasAwsCredentials = awsKey != null && !awsKey.isBlank()
             && awsSecret != null && !awsSecret.isBlank();

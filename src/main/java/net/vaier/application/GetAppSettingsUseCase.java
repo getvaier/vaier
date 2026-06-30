@@ -12,6 +12,8 @@ public interface GetAppSettingsUseCase {
         String smtpUsername,
         String smtpSender,
         String dnsProvider,
-        int diskMonitorThresholdPercent
+        int diskMonitorThresholdPercent,
+        /** Whether the per-service {@code social} auth mode is offered (Google OAuth configured, #305). */
+        boolean socialAuthAvailable
     ) {}
 }

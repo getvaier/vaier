@@ -109,6 +109,19 @@ class ConfigResolverTest {
     }
 
     @Test
+    void socialAuthAvailable_isTrueOnlyWhenGoogleClientIdIsSet() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+
+        assertThat(new ConfigResolver(configPersistence, Map.<String, String>of()::get)
+            .isSocialAuthAvailable()).isFalse();
+        assertThat(new ConfigResolver(configPersistence,
+            Map.of("VAIER_OIDC_GOOGLE_CLIENT_ID", "")::get).isSocialAuthAvailable()).isFalse();
+        assertThat(new ConfigResolver(configPersistence,
+            Map.of("VAIER_OIDC_GOOGLE_CLIENT_ID", "abc.apps.googleusercontent.com")::get)
+            .isSocialAuthAvailable()).isTrue();
+    }
+
+    @Test
     void infersManualDnsProviderWhenAwsKeysAbsent() {
         when(configPersistence.load()).thenReturn(Optional.empty());
 

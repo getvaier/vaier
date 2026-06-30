@@ -56,14 +56,24 @@ public interface GetPublishedServicesUseCase {
         String versionEndpoint,
         String versionProperty,
         String image,
-        String version
+        String version,
+        /**
+         * The route's auth mode wire value ({@code none}/{@code authelia}/{@code social}). Read off the
+         * route's middleware chain so the UI auth-mode picker reflects the live gateway. {@code
+         * authenticated} stays for callers that only need "is it gated at all".
+         */
+        String authMode
     ){
+        private static String legacyAuthMode(boolean authenticated) {
+            return (authenticated ? net.vaier.domain.AuthMode.AUTHELIA : net.vaier.domain.AuthMode.NONE).wireValue();
+        }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
                                    String rootRedirectPath, boolean directUrlDisabled) {
             this(name, name, "", null, ServiceLocation.VAIER_SERVER, dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, false, null, false, null, null, null, null, null);
+                rootRedirectPath, directUrlDisabled, false, null, false, null, null, null, null, null,
+                legacyAuthMode(authenticated));
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -72,7 +82,8 @@ public interface GetPublishedServicesUseCase {
                 isLanService ? ServiceLocation.LAN_SERVICE : ServiceLocation.VAIER_SERVER,
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, null, false, null, null, null, null, null);
+                rootRedirectPath, directUrlDisabled, isLanService, null, false, null, null, null, null, null,
+                legacyAuthMode(authenticated));
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -82,7 +93,8 @@ public interface GetPublishedServicesUseCase {
                 isLanService ? ServiceLocation.LAN_SERVICE : ServiceLocation.VAIER_SERVER,
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
-                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false, null, null, null, null, null);
+                rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, false, null, null, null, null, null,
+                legacyAuthMode(authenticated));
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -93,7 +105,7 @@ public interface GetPublishedServicesUseCase {
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
-                null, null, null, null, null);
+                null, null, null, null, null, legacyAuthMode(authenticated));
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,
@@ -104,7 +116,7 @@ public interface GetPublishedServicesUseCase {
                 dnsState == DnsState.OK && state == State.OK,
                 dnsAddress, dnsState, hostAddress, hostPort, state, authenticated,
                 rootRedirectPath, directUrlDisabled, isLanService, pathPrefix, hiddenFromLaunchpad,
-                launchpadAlias, null, null, null, null);
+                launchpadAlias, null, null, null, null, legacyAuthMode(authenticated));
         }
     }
 }

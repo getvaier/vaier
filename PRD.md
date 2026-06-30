@@ -450,11 +450,32 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   "N awaiting approval" count, per-row email, role badge, group chips, and actions (Approve → User /
   Approve → Admin, edit groups, Revoke).
 
-**Backlog (not in this slice):** wiring oauth2-proxy and the `oauth2-authn → vaier-authz` Traefik chain
-in `docker-compose.yml` (needs the operator's Google credentials), the unauthenticated "awaiting
-approval" page, migration off Authelia for existing deployments, and multi-provider login (GitHub, etc.).
-The **availability coupling** the spike flags — Vaier being in the request path for protected services —
-remains the open trade-off to accept or revisit.
+**Delivered in step 3a (per-service social auth mode, TDD-first):**
+- Domain: `domain.AuthMode` (`NONE`/`AUTHELIA`/`SOCIAL`) replaces the per-route "requires auth" boolean.
+  The mode *owns which middleware chain a route needs* (`authMiddlewareNames`), reads back off a
+  router's chain (`fromMiddlewareNames`), and `ReverseProxyRoute.authMode()` surfaces it. `authelia` and
+  `social` coexist so services migrate one at a time; existing routes default to `authelia` (unchanged).
+- Traefik generation (`TraefikReverseProxyAdapter`): per route, the chain for its mode — `authelia` →
+  today's `auth-middleware`; `social` → the proven step-1 trio (`oauth2-signin` errors page →
+  `oauth2-authn` Google forward-auth → `vaier-authz` Vaier forward-auth) **plus** a higher-priority
+  per-host `Host(...) && PathPrefix(/oauth2/)` router pointing at oauth2-proxy (without which the Google
+  button loops); `none` → no auth middleware. The `/oauth2/` helper router is torn down with its last
+  social route and never appears as a published service.
+- Logout: `VaierHostnames.logoutUrl(AuthMode, target)` is mode-aware — Authelia portal logout vs
+  oauth2-proxy `/oauth2/sign_out` (which clears the domain-wide cookie). The console itself stays
+  Authelia-gated in this step (3b moves it).
+- oauth2-proxy is promoted to a first-class `docker-compose.yml` service, gated behind the `social`
+  profile so a Community deployment without social login is unaffected; the throwaway `whoami` is removed.
+  `social` is offered (UI + route generation) only when `VAIER_OIDC_GOOGLE_CLIENT_ID` is set
+  (`ConfigResolver.isSocialAuthAvailable`, surfaced on `GET /settings/config`).
+- UI: a per-service **auth-mode picker** (Public / Authelia / Social) on the service card replaces the
+  on/off auth toggle; the Social option appears only when configured, and a distinct badge names the
+  gateway in front of each service.
+
+**Backlog (not in this slice):** moving the Vaier console itself to social login and decommissioning
+Authelia (3b), the unauthenticated "awaiting approval" page, migration off Authelia for existing
+deployments, and multi-provider login (GitHub, etc.). The **availability coupling** the spike flags —
+Vaier being in the request path for protected services — remains the open trade-off to accept or revisit.
 
 ---
 

@@ -70,7 +70,7 @@ public class SettingsService implements
         return configPersistence.load()
             .map(this::toResult)
             .orElse(new AppSettingsResult(null, null, null, null, null, null, null, dnsProviderName(),
-                VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT));
+                VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT, configResolver.isSocialAuthAvailable()));
     }
 
     @Override
@@ -127,7 +127,8 @@ public class SettingsService implements
             config.getSmtpUsername(),
             config.getSmtpSender(),
             dnsProviderName(),
-            config.effectiveDiskMonitorThresholdPercent()
+            config.effectiveDiskMonitorThresholdPercent(),
+            configResolver.isSocialAuthAvailable()
         );
     }
 

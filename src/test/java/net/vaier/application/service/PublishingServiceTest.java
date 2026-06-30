@@ -134,6 +134,36 @@ class PublishingServiceTest {
     }
 
     @Test
+    void getPublishedServices_surfacesTheRoutesAuthMode() {
+        ReverseProxyRoute social = new ReverseProxyRoute("app-router", "app.example.com", "10.0.0.1", 8080,
+            "svc", null, List.of("websecure"), null,
+            List.of("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors"));
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(social));
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+
+        PublishedServiceUco result = service.getPublishedServices().get(0);
+
+        assertThat(result.authMode()).isEqualTo("social");
+    }
+
+    @Test
+    void getPublishedServices_excludesTheOauth2HelperRouter() {
+        ReverseProxyRoute primary = new ReverseProxyRoute("app-router", "app.example.com", "10.0.0.1", 8080,
+            "svc", null, List.of("websecure"), null,
+            List.of("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors"));
+        ReverseProxyRoute helper = new ReverseProxyRoute("app-example-com-oauth2-router", "app.example.com",
+            "oauth2-proxy", 4180, "oauth2-proxy-svc", null, List.of("websecure"), null, List.of());
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(primary, helper));
+        setupNoDnsRecords();
+        setupEmptyVpnClients();
+        setupEmptyVaierServerServices();
+
+        assertThat(service.getPublishedServices()).hasSize(1);
+    }
+
+    @Test
     void getPublishedServices_routeWithCnameRecord_dnsStateOk() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
@@ -1481,6 +1511,27 @@ class PublishingServiceTest {
         verify(forPersistingReverseProxyRoutes).setRouteRootRedirectPath("app.example.com", null, "/dashboard/");
         verify(forPersistingReverseProxyRoutes).setRouteLaunchpadAlias("app.example.com", null, "Alias");
         verify(forPersistingReverseProxyRoutes).setRouteVersionEndpoint("app.example.com", null, "/status", "build");
+    }
+
+    @Test
+    void updateService_authMode_delegatesToSetRouteAuthMode() {
+        service.updateService("app.example.com", null,
+            new net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch(
+                null, null, null, null, null, null, null, "social"));
+
+        verify(forPersistingReverseProxyRoutes).setRouteAuthMode(
+            "app.example.com", null, net.vaier.domain.AuthMode.SOCIAL);
+        verify(forPersistingReverseProxyRoutes, never()).setRouteAuthentication(anyString(), any(), anyBoolean());
+    }
+
+    @Test
+    void updateService_authMode_none_disablesAuth() {
+        service.updateService("svc.example.com", "/grafana",
+            new net.vaier.application.UpdatePublishedServiceUseCase.PublishedServicePatch(
+                null, null, null, null, null, null, null, "none"));
+
+        verify(forPersistingReverseProxyRoutes).setRouteAuthMode(
+            "svc.example.com", "/grafana", net.vaier.domain.AuthMode.NONE);
     }
 
     @Test

@@ -286,6 +286,8 @@ external **identity provider**; Vaier owns **authorization** through a file-base
 | **User** (role) | An approved, non-administrative identity. Reaches the services whose required **access group** it holds; cannot administer Vaier. Distinct from an Authelia *user* (see §11). |
 | **Admin** (role) | An approved identity that may administer the Vaier console and reach every service, regardless of access groups. |
 | **Access group** | A label on an **access entry** that gates per-service access: a service requires a group, and a user reaches it only if their entry carries that group. Admins bypass the requirement. |
+| **Auth mode** | How a published service is gated (`domain.AuthMode`): **none** (public), **authelia** (the legacy forward-auth to Authelia), or **social** (the oauth2-proxy → Vaier authorization chain). One mode per route; the two gated modes coexist so services migrate one at a time. Replaces the earlier per-route "requires auth" on/off toggle. |
+| **oauth2-proxy** | The external component that performs **social login** authentication (the Google sign-in dance and the domain-wide SSO session) and asserts the signed-in email to Vaier. A first-class stack service, active only when social login is configured. |
 
 ---
 

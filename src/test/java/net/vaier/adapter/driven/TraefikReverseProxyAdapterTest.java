@@ -125,6 +125,113 @@ class TraefikReverseProxyAdapterTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    // --- auth modes (#305 step 3a) ---
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> loadYaml() throws IOException {
+        try (var in = Files.newInputStream(tempDir.resolve("remote-apps.yml"))) {
+            return new org.yaml.snakeyaml.Yaml().load(in);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> http() throws IOException {
+        return (java.util.Map<String, Object>) loadYaml().get("http");
+    }
+
+    @Test
+    void addReverseProxyRoute_socialMode_attachesTheTwoStageChainInOrder() throws IOException {
+        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
+            net.vaier.domain.AuthMode.SOCIAL, null, null);
+
+        var routers = (java.util.Map<String, Object>) http().get("routers");
+        var router = (java.util.Map<String, Object>) routers.get("secure-example-com-router");
+        assertThat((List<String>) router.get("middlewares"))
+            .containsExactly("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors");
+    }
+
+    @Test
+    void addReverseProxyRoute_socialMode_definesTheProvenMiddlewares() throws IOException {
+        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
+            net.vaier.domain.AuthMode.SOCIAL, null, null);
+
+        var middlewares = (java.util.Map<String, Object>) http().get("middlewares");
+
+        var signin = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-signin")).get("errors");
+        assertThat((List<String>) signin.get("status")).containsExactly("401");
+        assertThat(signin.get("service")).isEqualTo("oauth2-proxy-svc");
+        assertThat(signin.get("query")).isEqualTo("/oauth2/sign_in?rd={url}");
+
+        var authn = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-authn")).get("forwardAuth");
+        assertThat(authn.get("address")).isEqualTo("http://oauth2-proxy:4180/oauth2/auth");
+        assertThat((List<String>) authn.get("authResponseHeaders"))
+            .containsExactly("X-Auth-Request-Email", "X-Auth-Request-User");
+
+        var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
+        assertThat(authz.get("address")).isEqualTo("http://vaier:8080/authz/verify");
+        assertThat((List<String>) authz.get("authResponseHeaders"))
+            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups");
+    }
+
+    @Test
+    void addReverseProxyRoute_socialMode_addsHigherPriorityOauth2EndpointsRouterForTheHost() throws IOException {
+        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
+            net.vaier.domain.AuthMode.SOCIAL, null, null);
+
+        var routers = (java.util.Map<String, Object>) http().get("routers");
+        var endpoints = (java.util.Map<String, Object>) routers.get("secure-example-com-oauth2-router");
+        assertThat(endpoints).isNotNull();
+        assertThat(endpoints.get("rule"))
+            .isEqualTo("Host(`secure.example.com`) && PathPrefix(`/oauth2/`)");
+        assertThat(endpoints.get("service")).isEqualTo("oauth2-proxy-svc");
+        assertThat(endpoints.get("priority")).isEqualTo(100);
+
+        var services = (java.util.Map<String, Object>) http().get("services");
+        var svc = (java.util.Map<String, Object>) services.get("oauth2-proxy-svc");
+        var servers = (List<java.util.Map<String, Object>>)
+            ((java.util.Map<String, Object>) svc.get("loadBalancer")).get("servers");
+        assertThat(servers.get(0).get("url")).isEqualTo("http://oauth2-proxy:4180");
+    }
+
+    @Test
+    void addReverseProxyRoute_socialMode_roundTripsAsSocialViaGetRoutes() {
+        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
+            net.vaier.domain.AuthMode.SOCIAL, null, null);
+
+        // The /oauth2/ endpoints router carries no backend the published list cares about; the
+        // primary route must report SOCIAL.
+        ReverseProxyRoute primary = adapter.getReverseProxyRoutes().stream()
+            .filter(r -> r.getName().equals("secure-example-com-router"))
+            .findFirst().orElseThrow();
+        assertThat(primary.authMode()).isEqualTo(net.vaier.domain.AuthMode.SOCIAL);
+    }
+
+    @Test
+    void setRouteAuthMode_switchesAutheliaRouteToSocial_strippingTheOldChain() throws IOException {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, true, null);
+
+        adapter.setRouteAuthMode("app.example.com", null, net.vaier.domain.AuthMode.SOCIAL);
+
+        var routers = (java.util.Map<String, Object>) http().get("routers");
+        var router = (java.util.Map<String, Object>) routers.get("app-example-com-router");
+        assertThat((List<String>) router.get("middlewares"))
+            .containsExactly("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors")
+            .doesNotContain("auth-middleware");
+        assertThat(routers).containsKey("app-example-com-oauth2-router");
+    }
+
+    @Test
+    void setRouteAuthMode_switchesSocialRouteBackToNone() throws IOException {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080,
+            net.vaier.domain.AuthMode.SOCIAL, null, null);
+
+        adapter.setRouteAuthMode("app.example.com", null, net.vaier.domain.AuthMode.NONE);
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().stream()
+            .filter(r -> r.getName().equals("app-example-com-router")).findFirst().orElseThrow();
+        assertThat(route.authMode()).isEqualTo(net.vaier.domain.AuthMode.NONE);
+    }
+
     // --- setRouteAuthentication ---
 
     @Test

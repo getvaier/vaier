@@ -170,6 +170,7 @@ public class PublishingService implements
 
         cache = routes.stream()
             .filter(r -> !isInfrastructureRouter(r))
+            .filter(r -> !r.isOauth2EndpointsRouter())
             .map(r -> toUco(r, allDnsRecords, vpnClients, localServices, serverLanCidr, lanReachabilities,
                 images, probedVersions))
             .toList();
@@ -313,7 +314,8 @@ public class PublishingService implements
             route.getVersionEndpoint(),
             route.getVersionProperty(),
             backing == null ? null : backing.image(),
-            probedVersion != null ? probedVersion : (backing == null ? null : backing.version())
+            probedVersion != null ? probedVersion : (backing == null ? null : backing.version()),
+            route.authMode().wireValue()
         );
     }
 
@@ -729,7 +731,11 @@ public class PublishingService implements
         }
         log.info("Updating {} ({}): {}", dnsName, normalisedPath, patch);
 
-        if (patch.requiresAuth() != null) {
+        // authMode supersedes the legacy requiresAuth toggle; either may be set, not both from the UI.
+        if (patch.authMode() != null) {
+            forPersistingReverseProxyRoutes.setRouteAuthMode(
+                dnsName, normalisedPath, net.vaier.domain.AuthMode.fromString(patch.authMode()));
+        } else if (patch.requiresAuth() != null) {
             forPersistingReverseProxyRoutes.setRouteAuthentication(dnsName, normalisedPath, patch.requiresAuth());
         }
         if (patch.directUrlDisabled() != null) {

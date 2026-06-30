@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.config.ServiceNames;
+import net.vaier.domain.AuthMode;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
@@ -808,7 +809,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * @param requiresAuth Whether to add the auth-middleware
      */
     @Override
-    public void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
+    public void addReverseProxyRoute(String dnsName, String address, int port, AuthMode authMode,
                                      String rootRedirectPath, String pathPrefix) {
         loadConfig();
 
@@ -846,10 +847,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
 
-        // Build middleware list. The errors middleware is always last so a backend failure on any
-        // route lands on Vaier's branded offline page.
-        List<String> middlewareList = new ArrayList<>();
-        if (requiresAuth) middlewareList.add(ServiceNames.AUTH_MIDDLEWARE);
+        // Build middleware list. The auth chain (which the AuthMode owns) comes first, then any
+        // redirect, then the errors middleware last so a backend failure lands on Vaier's branded
+        // offline page.
+        List<String> middlewareList = new ArrayList<>(authMode.authMiddlewareNames());
         if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
         middlewareList.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
         routerConfig.put("middlewares", middlewareList);
@@ -871,7 +872,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         services.put(serviceName, serviceConfig);
 
         // Add middlewares (after routers and services to maintain order)
-        if (requiresAuth) ensureAuthMiddlewareExists(http);
+        ensureAuthInfraExists(http, authMode, dnsName);
         if (rootRedirectPath != null) {
             Map<String, Object> middlewaresSection = getOrCreateNestedMapOrdered(http, "middlewares");
             Map<String, Object> redirectRegex = new LinkedHashMap<>();
@@ -894,7 +895,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      */
     @Override
     public void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
-                                        boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
+                                        AuthMode authMode, boolean directUrlDisabled, String rootRedirectPath,
                                         String pathPrefix) {
         loadConfig();
         if (config == null) config = new LinkedHashMap<>();
@@ -918,8 +919,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         Map<String, Object> tlsMap = new LinkedHashMap<>();
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
-        List<String> middlewareList = new ArrayList<>();
-        if (requiresAuth) middlewareList.add(ServiceNames.AUTH_MIDDLEWARE);
+        List<String> middlewareList = new ArrayList<>(authMode.authMiddlewareNames());
         if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
         middlewareList.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
         routerConfig.put("middlewares", middlewareList);
@@ -936,7 +936,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         serviceConfig.put("loadBalancer", loadBalancer);
         services.put(serviceName, serviceConfig);
 
-        if (requiresAuth) ensureAuthMiddlewareExists(http);
+        ensureAuthInfraExists(http, authMode, dnsName);
         if (rootRedirectPath != null) {
             Map<String, Object> middlewaresSection = getOrCreateNestedMapOrdered(http, "middlewares");
             Map<String, Object> redirectRegex = new LinkedHashMap<>();
@@ -1144,6 +1144,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         String serviceName = routerConfig != null ? (String) routerConfig.get("service") : null;
         String fqdn = routerConfig != null ? extractDomainFromRule(routerConfig) : null;
         boolean hostOnly = routerConfig != null && extractPathPrefixFromRule(routerConfig) == null;
+        boolean wasSocial = routerConfig != null
+            && AuthMode.fromMiddlewareNames(extractMiddlewareList(routerConfig)) == AuthMode.SOCIAL;
 
         // Remove router
         routers.remove(routeName);
@@ -1152,6 +1154,15 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         // Note: This assumes services are not shared. If they are, you may need additional logic.
         if (serviceName != null && services != null) {
             services.remove(serviceName);
+        }
+
+        // A social route owns a per-host /oauth2/ helper router. Remove it once no social route
+        // remains on the host — otherwise it would linger as an orphan and (sharing the host's
+        // FQDN) block CNAME cleanup by looking like a surviving sibling. The shared oauth2-proxy-svc
+        // service and the social middlewares are intentionally left, like auth-middleware, since
+        // other hosts may still use them.
+        if (wasSocial && fqdn != null && noSocialRouteRemainsOnHost(routers, fqdn)) {
+            routers.remove(ReverseProxyRoute.oauth2EndpointsRouterName(fqdn));
         }
 
         // Do NOT remove middlewares as they are typically shared (e.g., auth-middleware)
@@ -1167,6 +1178,25 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         }
 
         saveConfig();
+    }
+
+    /**
+     * Whether no remaining router on {@code fqdn} still carries the social auth chain (ignoring the
+     * {@code /oauth2/} helper router itself). Used to decide when the per-host helper router can be
+     * torn down.
+     */
+    private boolean noSocialRouteRemainsOnHost(Map<String, Object> routers, String fqdn) {
+        if (routers == null) return true;
+        for (Map.Entry<String, Object> e : routers.entrySet()) {
+            if (e.getKey().equals(ReverseProxyRoute.oauth2EndpointsRouterName(fqdn))) continue;
+            Map<String, Object> rc = castToMap(e.getValue());
+            if (rc == null) continue;
+            if (!fqdn.equals(extractDomainFromRule(rc))) continue;
+            if (AuthMode.fromMiddlewareNames(extractMiddlewareList(rc)) == AuthMode.SOCIAL) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1241,7 +1271,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     @Override
-    public void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth) {
+    public void setRouteAuthMode(String dnsName, String pathPrefix, AuthMode authMode) {
         loadConfig();
 
         Map<String, Object> http = getNestedMap(config, "http");
@@ -1255,18 +1285,22 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         Map<String, Object> routerConfig = castToMap(routers.get(routerName));
 
-        // Preserve the redirect middleware if it's already on this router; only toggle the auth one.
+        // Strip every known auth link (any mode's), preserving redirect/errors, then prepend the
+        // new mode's chain in order. Stripping the whole union means a mode switch never leaves a
+        // stale link from the prior gateway behind.
         @SuppressWarnings("unchecked")
         List<String> existing = routerConfig.get("middlewares") instanceof List
             ? new ArrayList<>((List<String>) routerConfig.get("middlewares"))
             : new ArrayList<>();
-        existing.remove(ServiceNames.AUTH_MIDDLEWARE);
-        if (requiresAuth) {
-            existing.add(0, ServiceNames.AUTH_MIDDLEWARE);
-            ensureAuthMiddlewareExists(http);
+        existing.removeAll(AuthMode.allAuthMiddlewareNames());
+        List<String> chain = authMode.authMiddlewareNames();
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            existing.add(0, chain.get(i));
         }
         if (existing.isEmpty()) routerConfig.remove("middlewares");
         else routerConfig.put("middlewares", existing);
+
+        ensureAuthInfraExists(http, authMode, dnsName);
 
         saveConfig();
     }
@@ -1380,6 +1414,111 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             map.put(key, nested);
         }
         return nested;
+    }
+
+    /**
+     * Ensure the shared infrastructure a route's {@link AuthMode} needs exists. Authelia routes need
+     * the single {@code auth-middleware}; social routes need the proven two-stage middlewares plus a
+     * higher-priority per-host {@code /oauth2/} router pointing at oauth2-proxy (without which the
+     * "Sign in with Google" button's relative {@code /oauth2/start} loops back into the auth chain).
+     * No-op for {@link AuthMode#NONE}. Must be called AFTER routers and services are created.
+     */
+    private void ensureAuthInfraExists(Map<String, Object> http, AuthMode authMode, String dnsName) {
+        switch (authMode) {
+            case AUTHELIA -> ensureAuthMiddlewareExists(http);
+            case SOCIAL -> {
+                ensureSocialAuthMiddlewaresExist(http);
+                ensureOauth2EndpointsRouterExists(http, dnsName);
+            }
+            case NONE -> { /* public route — no auth infrastructure */ }
+        }
+    }
+
+    /**
+     * Ensure the oauth2-proxy backend service and the two-stage social middlewares
+     * ({@code oauth2-signin} errors page, {@code oauth2-authn} Google forward-auth,
+     * {@code vaier-authz} Vaier forward-auth) exist — reproducing exactly the config proven in
+     * step 1 ({@code traefik/config/oauth2-test.yml}). Idempotent.
+     */
+    private void ensureSocialAuthMiddlewaresExist(Map<String, Object> http) {
+        Map<String, Object> services = getOrCreateNestedMapOrdered(http, "services");
+        if (!services.containsKey(ServiceNames.OAUTH2_PROXY_SERVICE)) {
+            Map<String, Object> serviceConfig = new LinkedHashMap<>();
+            Map<String, Object> loadBalancer = new LinkedHashMap<>();
+            List<Map<String, Object>> servers = new ArrayList<>();
+            Map<String, Object> server = new LinkedHashMap<>();
+            server.put("url", "http://oauth2-proxy:4180");
+            servers.add(server);
+            loadBalancer.put("servers", servers);
+            serviceConfig.put("loadBalancer", loadBalancer);
+            services.put(ServiceNames.OAUTH2_PROXY_SERVICE, serviceConfig);
+        }
+
+        Map<String, Object> middlewares = getOrCreateNestedMapOrdered(http, "middlewares");
+
+        if (!middlewares.containsKey(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE)) {
+            // On a 401 from the auth stage, serve oauth2-proxy's sign-in page (Google button ->
+            // /oauth2/start, routed by the per-host endpoints router).
+            Map<String, Object> errors = new LinkedHashMap<>();
+            List<String> statuses = new ArrayList<>();
+            statuses.add("401");
+            errors.put("status", statuses);
+            errors.put("service", ServiceNames.OAUTH2_PROXY_SERVICE);
+            errors.put("query", "/oauth2/sign_in?rd={url}");
+            Map<String, Object> signin = new LinkedHashMap<>();
+            signin.put("errors", errors);
+            middlewares.put(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, signin);
+        }
+
+        if (!middlewares.containsKey(ServiceNames.OAUTH2_AUTHN_MIDDLEWARE)) {
+            Map<String, Object> forwardAuth = new LinkedHashMap<>();
+            forwardAuth.put("address", "http://oauth2-proxy:4180/oauth2/auth");
+            forwardAuth.put("trustForwardHeader", true);
+            List<String> headers = new ArrayList<>();
+            headers.add("X-Auth-Request-Email");
+            headers.add("X-Auth-Request-User");
+            forwardAuth.put("authResponseHeaders", headers);
+            Map<String, Object> authn = new LinkedHashMap<>();
+            authn.put("forwardAuth", forwardAuth);
+            middlewares.put(ServiceNames.OAUTH2_AUTHN_MIDDLEWARE, authn);
+        }
+
+        if (!middlewares.containsKey(ServiceNames.VAIER_AUTHZ_MIDDLEWARE)) {
+            Map<String, Object> forwardAuth = new LinkedHashMap<>();
+            forwardAuth.put("address", "http://" + ServiceNames.VAIER + ":8080/authz/verify");
+            forwardAuth.put("trustForwardHeader", true);
+            List<String> headers = new ArrayList<>();
+            headers.add("Remote-User");
+            headers.add("Remote-Email");
+            headers.add("Remote-Groups");
+            forwardAuth.put("authResponseHeaders", headers);
+            Map<String, Object> authz = new LinkedHashMap<>();
+            authz.put("forwardAuth", forwardAuth);
+            middlewares.put(ServiceNames.VAIER_AUTHZ_MIDDLEWARE, authz);
+        }
+    }
+
+    /**
+     * Ensure a higher-priority router exists that sends {@code Host(host) && PathPrefix(/oauth2/)}
+     * straight to oauth2-proxy (no auth, so the sign-in / callback / sign_out endpoints are
+     * reachable). Keyed per host so each social-gated host gets its own. Idempotent.
+     */
+    private void ensureOauth2EndpointsRouterExists(Map<String, Object> http, String dnsName) {
+        Map<String, Object> routers = getOrCreateNestedMapOrdered(http, "routers");
+        String endpointsRouterName = ReverseProxyRoute.oauth2EndpointsRouterName(dnsName);
+        if (routers.containsKey(endpointsRouterName)) return;
+
+        Map<String, Object> routerConfig = new LinkedHashMap<>();
+        routerConfig.put("rule", "Host(`" + dnsName + "`) && PathPrefix(`/oauth2/`)");
+        List<String> entryPoints = new ArrayList<>();
+        entryPoints.add(ServiceNames.ENTRY_POINT_WEBSECURE);
+        routerConfig.put("entryPoints", entryPoints);
+        routerConfig.put("service", ServiceNames.OAUTH2_PROXY_SERVICE);
+        routerConfig.put("priority", 100);
+        Map<String, Object> tlsMap = new LinkedHashMap<>();
+        tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
+        routerConfig.put("tls", tlsMap);
+        routers.put(endpointsRouterName, routerConfig);
     }
 
     /**

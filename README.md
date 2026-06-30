@@ -22,7 +22,7 @@ Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single
 | **VPN peer management** | Create, delete, and monitor WireGuard peers with downloadable configs (QR code, `.conf`, docker-compose, or setup script). |
 | **Service publishing** | Publish any container on a peer — or a bare host:port on a LAN server — as a public HTTPS subdomain in one click, managed from the machine's card on the Infrastructure page. Share one subdomain across several services via path prefixes (`host/auth/*`, `host/api/*`, …), ignore discovered containers you don't want to publish, and watch each publish progress live. Automatic rollback if the flow fails. |
 | **Smart launchpad** | A dashboard that links to every published service, switching to direct LAN URLs when you're on the same network. Tiles show the path segment (for path-based routes) or the subdomain, with an optional operator-supplied display name. Hover a tile to see the Docker image and version behind the service — or point a service at a version endpoint so one running natively on a LAN machine reports its version too. Hide internal-only services per route, mark tiles whose hosting machine is unreachable with a red "host offline" dot (VPN handshake age or LAN reachability probe), and hide auth-protected tiles from anonymous viewers so internal URLs don't leak. |
-| **Reverse proxy** | Traefik dynamic config generated automatically, with per-service Authelia toggle and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
+| **Reverse proxy** | Traefik dynamic config generated automatically, with a per-service **auth mode** (public, Authelia, or — opt-in per service, when Google OAuth is configured — **Social login** via oauth2-proxy) and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **User management** | Manage Authelia users and groups from the UI. |
 | **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, or when the Vaier server's own disk fills past a configurable threshold. |
@@ -211,6 +211,14 @@ Why show-once: WireGuard has no session concept, no server-side revocation, and 
 4. Vaier creates the DNS CNAME, the Traefik route, and (optionally) Authelia middleware.
 
 The service is live at `https://subdomain.yourdomain.com`.
+
+### Per-service auth mode
+
+Each published service card carries an **auth mode** picker — **Public** (no sign-in), **Authelia** (today's
+default), or **Social** (Google sign-in via oauth2-proxy, with Vaier deciding who's approved). Change it any
+time; the change rewrites only that route's Traefik middleware chain. **Social** is opt-in per service and
+only offered when Google OAuth is configured (`VAIER_OIDC_GOOGLE_CLIENT_ID` set and the `social` Compose
+profile enabled — see `docker-compose.yml`); without it, services stay on Public/Authelia exactly as before.
 
 ### Multiple services on one subdomain
 

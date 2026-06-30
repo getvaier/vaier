@@ -21,6 +21,28 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 class ReverseProxyRouteTest {
 
+    private static ReverseProxyRoute routeWithMiddlewares(List<String> middlewares) {
+        return new ReverseProxyRoute("app-router", "app.example.com", "10.0.0.1", 8080, "app-service",
+            null, List.of("websecure"), null, middlewares);
+    }
+
+    @Test
+    void authMode_isNone_whenNoAuthMiddlewareIsPresent() {
+        assertThat(routeWithMiddlewares(List.of("vaier-errors")).authMode()).isEqualTo(AuthMode.NONE);
+    }
+
+    @Test
+    void authMode_isAuthelia_whenTheAutheliaMiddlewareIsPresent() {
+        assertThat(routeWithMiddlewares(List.of("auth-middleware", "vaier-errors")).authMode())
+            .isEqualTo(AuthMode.AUTHELIA);
+    }
+
+    @Test
+    void authMode_isSocial_whenTheOauth2ChainIsPresent() {
+        assertThat(routeWithMiddlewares(List.of("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors"))
+            .authMode()).isEqualTo(AuthMode.SOCIAL);
+    }
+
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {"   ", "\t"})

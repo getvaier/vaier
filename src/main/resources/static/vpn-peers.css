@@ -403,6 +403,9 @@
         }
         .pub-auth   { background: rgba(78, 201, 176, 0.15); color: var(--green); }
         .pub-noauth { background: rgba(244, 135, 113, 0.15); color: var(--red); }
+        /* Social login is a third gateway, distinct from Authelia — its own accent so the operator
+           reads which login a tile leads to at a glance, not just "gated or not" (#305). */
+        .pub-social { background: rgba(79, 195, 247, 0.15); color: var(--accent); }
         .pub-open {
             flex-shrink: 0;
             color: var(--accent);
