@@ -1,0 +1,194 @@
+package net.vaier.adapter.driven;
+
+import net.vaier.domain.AccessEntry;
+import net.vaier.domain.Role;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class AccessFileAdapterTest {
+
+    @TempDir
+    Path tempDir;
+
+    private AccessFileAdapter adapter() {
+        return new AccessFileAdapter(tempDir.toString(), null);
+    }
+
+    private static AccessEntry entry(String email, Role role, List<String> groups) {
+        return AccessEntry.builder().email(email).role(role).groups(groups).build();
+    }
+
+    // --- entries: empty / upsert / find / delete ---
+
+    @Test
+    void getEntries_emptyWhenFileDoesNotExist() {
+        assertThat(adapter().getEntries()).isEmpty();
+    }
+
+    @Test
+    void upsert_thenGetEntries_returnsTheEntry() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins")));
+
+        assertThat(a.getEntries()).containsExactly(entry("you@gmail.com", Role.ADMIN, List.of("admins")));
+    }
+
+    @Test
+    void upsert_existingEmail_replacesTheEntry() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("p@gmail.com", Role.PENDING, List.of()));
+        a.upsert(entry("p@gmail.com", Role.USER, List.of("family")));
+
+        assertThat(a.getEntries()).containsExactly(entry("p@gmail.com", Role.USER, List.of("family")));
+    }
+
+    @Test
+    void findByEmail_returnsMatch() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("a@gmail.com", Role.USER, List.of("family")));
+
+        assertThat(a.findByEmail("a@gmail.com")).contains(entry("a@gmail.com", Role.USER, List.of("family")));
+    }
+
+    @Test
+    void findByEmail_emptyWhenUnknown() {
+        assertThat(adapter().findByEmail("nobody@gmail.com")).isEmpty();
+    }
+
+    @Test
+    void delete_removesTheEntry() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("a@gmail.com", Role.USER, List.of()));
+        a.upsert(entry("b@gmail.com", Role.ADMIN, List.of("admins")));
+
+        a.delete("a@gmail.com");
+
+        assertThat(a.getEntries()).containsExactly(entry("b@gmail.com", Role.ADMIN, List.of("admins")));
+    }
+
+    @Test
+    void delete_unknownEmail_isNoOp() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("a@gmail.com", Role.USER, List.of()));
+
+        a.delete("does-not-exist@gmail.com");
+
+        assertThat(a.getEntries()).hasSize(1);
+    }
+
+    // --- persistence / file schema ---
+
+    @Test
+    void upsert_writesRoleAsLowercaseTokenAndGroups() throws Exception {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins")));
+
+        Path file = tempDir.resolve("access.yml");
+        assertThat(Files.exists(file)).isTrue();
+        String contents = Files.readString(file);
+        assertThat(contents)
+                .contains("entries")
+                .contains("you@gmail.com")
+                .contains("role: admin")
+                .contains("admins");
+    }
+
+    @Test
+    void getEntries_roundTripsThroughFreshAdapter() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins")));
+        a.upsert(entry("friend@gmail.com", Role.USER, List.of("family")));
+        a.upsert(entry("new@gmail.com", Role.PENDING, List.of()));
+
+        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
+
+        assertThat(fresh.getEntries()).containsExactlyInAnyOrder(
+                entry("you@gmail.com", Role.ADMIN, List.of("admins")),
+                entry("friend@gmail.com", Role.USER, List.of("family")),
+                entry("new@gmail.com", Role.PENDING, List.of()));
+    }
+
+    @Test
+    void getEntries_unknownRoleTokenReadsAsPending() throws Exception {
+        // access.yml can be hand-edited — a malformed role must never accidentally grant access.
+        Files.writeString(tempDir.resolve("access.yml"), """
+            entries:
+              weird@gmail.com:
+                role: superuser
+                groups: []
+            """);
+
+        assertThat(adapter().findByEmail("weird@gmail.com"))
+                .map(AccessEntry::getRole).contains(Role.PENDING);
+    }
+
+    // --- service-group resolution ---
+
+    @Test
+    void requiredGroupForHost_returnsConfiguredGroup() throws Exception {
+        Files.writeString(tempDir.resolve("access.yml"), """
+            entries: {}
+            serviceGroups:
+              plex.example.com: family
+              vaier.example.com: admins
+            """);
+
+        AccessFileAdapter a = adapter();
+        assertThat(a.requiredGroupForHost("plex.example.com")).contains("family");
+        assertThat(a.requiredGroupForHost("vaier.example.com")).contains("admins");
+    }
+
+    @Test
+    void requiredGroupForHost_emptyWhenHostNotConfigured() throws Exception {
+        Files.writeString(tempDir.resolve("access.yml"), """
+            serviceGroups:
+              plex.example.com: family
+            """);
+
+        assertThat(adapter().requiredGroupForHost("unknown.example.com")).isEmpty();
+    }
+
+    @Test
+    void requiredGroupForHost_emptyWhenNoServiceGroupsSection() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("a@gmail.com", Role.USER, List.of()));
+
+        assertThat(a.requiredGroupForHost("plex.example.com")).isEmpty();
+    }
+
+    // --- seeding the first admin from VAIER_ADMIN_EMAIL ---
+
+    @Test
+    void construction_seedsFirstAdminWhenStoreEmptyAndAdminEmailSet() {
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "owner@gmail.com");
+
+        assertThat(a.findByEmail("owner@gmail.com"))
+                .hasValueSatisfying(e -> {
+                    assertThat(e.getRole()).isEqualTo(Role.ADMIN);
+                    assertThat(e.getGroups()).contains("admins");
+                });
+    }
+
+    @Test
+    void construction_doesNotSeedWhenStoreAlreadyHasEntries() {
+        adapter().upsert(entry("existing@gmail.com", Role.USER, List.of()));
+
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "owner@gmail.com");
+
+        assertThat(a.findByEmail("owner@gmail.com")).isEmpty();
+        assertThat(a.getEntries()).hasSize(1);
+    }
+
+    @Test
+    void construction_doesNotSeedWhenAdminEmailBlank() {
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "  ");
+
+        assertThat(a.getEntries()).isEmpty();
+    }
+}

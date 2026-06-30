@@ -414,6 +414,48 @@ A step toward operator-friendly error feedback under the V2 usability theme: eve
 - **Extended the envelope to not-found and conflict across the rest layer ✅ (closes [#282](https://github.com/getvaier/vaier/issues/282)).** Two domain exceptions — `net.vaier.domain.NotFoundException` and `net.vaier.domain.ConflictException` — give the handler typed signals for the two missing categories (`PeerNotFoundException` now extends `NotFoundException`). `GlobalExceptionHandler` maps `NotFoundException` → `404` `ApiError(code=NOT_FOUND)` and `ConflictException` → `409` `ApiError(code=CONFLICT)`, alongside the existing `IllegalArgumentException`→`400`/`BAD_REQUEST` and catch-all→`500`/`INTERNAL_ERROR`. The conflict/not-found throw sites were retyped from raw `IllegalStateException` / `NoSuchElementException` / `RuntimeException` to the new typed exceptions: `VpnService` (LAN-CIDR already owned → `ConflictException`), `LanServerService` (not-found → `NotFoundException`, name-taken → `ConflictException`), `LanServerSetupScript` (relay without a LAN address → `ConflictException`), and `AutheliaUserAdapter` (user already exists → `ConflictException`, user-not-found → `NotFoundException`). Genuine server faults (invalid licence key, SMTP provider unavailable, file-write failures) deliberately stay `IllegalStateException`/`RuntimeException` → `500`. Four controllers were migrated to let these exceptions propagate to the handler instead of hand-rolling responses, removing: `VpnPeerRestController`'s body-less `4xx`/`5xx` on rename / delete / lan-address / lan-cidr / description / reissue; `LanServerRestController`'s body-less `4xx` and its `Map.of("error", …)` `409`; `AuthRestController`'s bare-string error bodies (7 handlers); and `DockerServiceRestController`'s body-less `500`s on discovery. Net result: validation, not-found, conflict, and `500` all render as `ApiError`.
 - **Caveat:** `ApiError` is now the shape for every error response *except* two intentional cases: the enterprise-gate `402` (`EnterpriseLicenseInterceptor`), and the deliberately body-less `404`s for a missing optional GET artifact (the icon, and an already-retrieved one-shot peer config).
 
+### 6.17 Social login + Vaier-owned authorization 🟡 (V2, in progress — Option C from the spike)
+
+Replacing Authelia's file/LDAP-only first factor with **social login** (Google first) while keeping
+the no-database, file-based model. Per the spike (`docs/spikes/social-login-spike.md`), authentication
+moves to an external **identity provider** via oauth2-proxy, and **Vaier owns authorization** through a
+file-based **access store** — the part that carries the real product logic and is fully testable
+without Google credentials.
+
+**Authorization model:** a **role** ladder `pending → user → admin`. A freshly seen Google identity
+lands as **pending** (authenticated but blocked, "awaiting approval"); an admin promotes it to **user**
+(reaches the services whose **access group** it holds) or **admin** (administers Vaier and reaches every
+service). The same store gates **both** the Vaier console (admin-only) and per-service access.
+
+**Delivered in this slice (authorization core + admin UI, TDD-first):**
+- Domain: `domain.Role` (`PENDING`/`USER`/`ADMIN`), `domain.AccessEntry` (email, role, groups) with the
+  access decisions *on the entity* — `isPending`, `isAdmin`, `mayAccessConsole` (admin only), and
+  `mayAccessService(requiredGroup)`; plus `domain.AccessDecision` carrying the downstream identity headers.
+- Ports: `ForPersistingAccessEntries` (list/find/upsert/delete) and `ForResolvingServiceGroup`
+  (host → required group).
+- Use cases (narrow, one each) on the existing `UserService` (identities are its domain):
+  `VerifyAccessUseCase`, `ListAccessEntriesUseCase`, `GrantRoleUseCase`, `AssignGroupsUseCase`,
+  `RevokeAccessUseCase`. An unknown email is auto-created as **pending** and denied, so it surfaces for
+  the admin.
+- Adapter: `AccessFileAdapter` — SnakeYAML at `${VAIER_CONFIG_PATH}/access.yml` (mirrors
+  `AutheliaUserAdapter`: atomic-style write, owner-only perms), with the schema's `entries:` and
+  `serviceGroups:` maps. Seeds the first admin from `VAIER_ADMIN_EMAIL` when the store is empty so the
+  owner isn't locked out as pending.
+- Web: `AuthzRestController` — `GET /authz/verify` (the Traefik forward-auth endpoint, reading
+  `X-Auth-Request-Email` / `X-Forwarded-Host`, emitting `Remote-User`/`Remote-Email`/`Remote-Groups`),
+  plus authenticated admin endpoints `GET /access`, `PATCH /access/{email}/role`,
+  `PATCH /access/{email}/groups`, `DELETE /access/{email}`.
+- UI: an **Access overview on the Users page** (alongside the Authelia users — both are identity/access
+  management) — entries grouped and filterable by role, **pending rows highlighted at the top** with an
+  "N awaiting approval" count, per-row email, role badge, group chips, and actions (Approve → User /
+  Approve → Admin, edit groups, Revoke).
+
+**Backlog (not in this slice):** wiring oauth2-proxy and the `oauth2-authn → vaier-authz` Traefik chain
+in `docker-compose.yml` (needs the operator's Google credentials), the unauthenticated "awaiting
+approval" page, migration off Authelia for existing deployments, and multi-provider login (GitHub, etc.).
+The **availability coupling** the spike flags — Vaier being in the request path for protected services —
+remains the open trade-off to accept or revisit.
+
 ---
 
 ## 7. End-to-End Workflows

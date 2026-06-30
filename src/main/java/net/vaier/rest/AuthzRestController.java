@@ -1,0 +1,100 @@
+package net.vaier.rest;
+
+import net.vaier.application.AssignGroupsUseCase;
+import net.vaier.application.GrantRoleUseCase;
+import net.vaier.application.ListAccessEntriesUseCase;
+import net.vaier.application.RevokeAccessUseCase;
+import net.vaier.application.VerifyAccessUseCase;
+import net.vaier.domain.AccessDecision;
+import net.vaier.domain.Role;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+/**
+ * Social-login authorization (Option C). Hosts two distinct surfaces:
+ *
+ * <ul>
+ *   <li>{@code GET /authz/verify} — the Traefik forward-auth endpoint. oauth2-proxy authenticates
+ *       the user (Google) and injects {@code X-Auth-Request-Email}; this endpoint answers whether
+ *       that email may reach {@code X-Forwarded-Host}, emitting the downstream identity headers.
+ *       <p><b>Traefik wiring (later step):</b> when oauth2-proxy + the {@code vaier-authz}
+ *       middleware are wired in {@code docker-compose.yml}, this exact path must be reachable
+ *       <em>without</em> the Vaier console's own auth middleware (it is the auth check itself).
+ *       Do NOT make any of the {@code /access*} admin endpoints anonymous — they stay behind the
+ *       existing console auth.</li>
+ *   <li>{@code GET/PATCH/DELETE /access...} — admin management of access entries, authenticated
+ *       behind the existing Vaier console auth.</li>
+ * </ul>
+ */
+@RestController
+public class AuthzRestController {
+
+    private final VerifyAccessUseCase verifyAccessUseCase;
+    private final ListAccessEntriesUseCase listAccessEntriesUseCase;
+    private final GrantRoleUseCase grantRoleUseCase;
+    private final AssignGroupsUseCase assignGroupsUseCase;
+    private final RevokeAccessUseCase revokeAccessUseCase;
+
+    public AuthzRestController(VerifyAccessUseCase verifyAccessUseCase,
+                              ListAccessEntriesUseCase listAccessEntriesUseCase,
+                              GrantRoleUseCase grantRoleUseCase,
+                              AssignGroupsUseCase assignGroupsUseCase,
+                              RevokeAccessUseCase revokeAccessUseCase) {
+        this.verifyAccessUseCase = verifyAccessUseCase;
+        this.listAccessEntriesUseCase = listAccessEntriesUseCase;
+        this.grantRoleUseCase = grantRoleUseCase;
+        this.assignGroupsUseCase = assignGroupsUseCase;
+        this.revokeAccessUseCase = revokeAccessUseCase;
+    }
+
+    // --- Forward-auth (data path) ---
+
+    @GetMapping("/authz/verify")
+    public ResponseEntity<Void> verify(
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
+            @RequestHeader(value = "X-Forwarded-Host", required = false) String host) {
+        AccessDecision decision = verifyAccessUseCase.verify(email, host);
+        if (!decision.isAllowed()) {
+            return ResponseEntity.status(403).build();
+        }
+        return ResponseEntity.ok()
+                .header("Remote-User", decision.getUser())
+                .header("Remote-Email", decision.getEmail())
+                .header("Remote-Groups", decision.groupsHeader())
+                .build();
+    }
+
+    // --- Admin management (behind the console's existing auth) ---
+
+    @GetMapping("/access")
+    public List<AccessEntryResponse> listAccess() {
+        return listAccessEntriesUseCase.listAccessEntries().stream()
+                .map(e -> new AccessEntryResponse(e.getEmail(), e.getRole().wireValue(),
+                        e.getGroups() != null ? e.getGroups() : List.of()))
+                .toList();
+    }
+
+    @PatchMapping("/access/{email}/role")
+    public ResponseEntity<String> grantRole(@PathVariable String email, @RequestBody GrantRoleRequest request) {
+        grantRoleUseCase.grantRole(email, Role.fromString(request.role()));
+        return ResponseEntity.ok("Role updated successfully");
+    }
+
+    @PatchMapping("/access/{email}/groups")
+    public ResponseEntity<String> assignGroups(@PathVariable String email, @RequestBody AssignGroupsRequest request) {
+        assignGroupsUseCase.assignGroups(email, request.groups());
+        return ResponseEntity.ok("Groups updated successfully");
+    }
+
+    @DeleteMapping("/access/{email}")
+    public ResponseEntity<String> revokeAccess(@PathVariable String email) {
+        revokeAccessUseCase.revokeAccess(email);
+        return ResponseEntity.ok("Access revoked successfully");
+    }
+
+    public record AccessEntryResponse(String email, String role, List<String> groups) {}
+    public record GrantRoleRequest(String role) {}
+    public record AssignGroupsRequest(List<String> groups) {}
+}

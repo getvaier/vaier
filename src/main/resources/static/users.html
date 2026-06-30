@@ -192,11 +192,186 @@
             .user-actions { flex: 1 1 100%; flex-wrap: wrap; }
             .user-body { padding: 0 0.75rem 0.75rem; }
         }
+
+        /* --- Access (social-login authorization) --- */
+        /* Reuses this page's existing .chip*, .btn*, .loading styles. */
+        .access-section {
+            margin-bottom: 1.75rem;
+        }
+
+        .access-section-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .access-heading,
+        .users-heading {
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin: 0;
+        }
+
+        .access-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin: 0 0 0.75rem;
+        }
+
+        .pending-count {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #ddb640;
+            background: rgba(221, 182, 64, 0.12);
+            border: 1px solid #6b5a2a;
+            border-radius: 2px;
+            padding: 0.15rem 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .pending-count.none {
+            color: var(--text-dim);
+            background: transparent;
+            border-color: var(--border);
+            font-weight: 400;
+        }
+
+        .access-filters {
+            display: flex;
+            gap: 0.3rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .access-filter {
+            font-size: 0.72rem;
+            padding: 0.2rem 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .access-filter.active {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .access-group-title {
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin: 1rem 0 0.5rem;
+        }
+
+        .access-row {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+
+        /* Pending identities are awaiting approval — make them impossible to miss. */
+        .access-row.pending {
+            border-color: #6b5a2a;
+            background: rgba(221, 182, 64, 0.06);
+        }
+
+        .access-row-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .access-email {
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            color: var(--text);
+            word-break: break-all;
+        }
+
+        .role-badge {
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.1rem 0.45rem;
+            border-radius: 2px;
+            border: 1px solid var(--border);
+            margin-left: 0.5rem;
+        }
+
+        .role-badge.admin   { color: var(--accent); border-color: var(--accent); }
+        .role-badge.user    { color: var(--green);  border-color: var(--green); }
+        .role-badge.pending { color: #ddb640;       border-color: #6b5a2a; }
+
+        .access-actions {
+            display: flex;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .access-groups-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .access-groups-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            padding-top: 0.3rem;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div id="message"></div>
+
+        <!-- Access (social-login authorization) — identities from the external identity provider -->
+        <div class="access-section" id="accessSection">
+            <div class="access-section-head">
+                <h2 class="access-heading">Access — social login</h2>
+                <span class="pending-count none" id="pendingCount">0 awaiting approval</span>
+            </div>
+            <p class="access-desc">
+                Identities that have signed in via social login. New identities arrive as
+                <strong>pending</strong> (authenticated but blocked) until you approve them. Approve to
+                <em>user</em> (reaches approved services) or <em>admin</em> (also administers Vaier),
+                assign access groups, or revoke access entirely.
+            </p>
+            <div class="access-filters" id="accessFilters">
+                <button class="access-filter active" data-filter="all">All</button>
+                <button class="access-filter" data-filter="pending">Pending</button>
+                <button class="access-filter" data-filter="user">Users</button>
+                <button class="access-filter" data-filter="admin">Admins</button>
+            </div>
+            <div id="accessList"><div class="loading">Loading access entries…</div></div>
+        </div>
+
+        <!-- Authelia users (local password accounts) -->
+        <h2 class="users-heading" style="margin-bottom:0.5rem">Authelia users</h2>
         <div class="groups-toolbar">
             <button class="btn btn-small btn-secondary" onclick="showManageGroupsModal()">Manage groups</button>
         </div>
@@ -304,6 +479,21 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('deleteGroupModal')">Cancel</button>
                 <button class="btn btn-danger" onclick="confirmDeleteGroup()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="revokeAccessModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Revoke access</div>
+            <div id="revokeAccessError" style="display:none"></div>
+            <p style="font-size:0.85rem;color:var(--text-muted)">
+                Remove access for <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="revokeAccessEmail"></code>?
+            </p>
+            <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;">Their access stops now. If they sign in again they'll come back as pending and need approving.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal('revokeAccessModal')">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmRevokeAccess()">Revoke access</button>
             </div>
         </div>
     </div>
@@ -720,7 +910,160 @@
             if (e.target.classList.contains('modal')) e.target.classList.remove('active');
         });
 
-        fetchAllGroups().then(fetchUsers);
+        // --- Access (social-login authorization) ---
+        // Reuses this page's escapeHtml, cardId, displayMessage and the mountGroupsPicker /
+        // getPickerGroups chip helpers (and allGroups, for group-name suggestions).
+        let accessEntries = [];
+        let accessFilter = 'all';
+
+        async function loadAccess() {
+            const list = document.getElementById('accessList');
+            try {
+                const r = await fetch('/access', { cache: 'no-store' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                accessEntries = await r.json();
+                renderAccess();
+            } catch (e) {
+                list.innerHTML = '<div class="error">Failed to load access entries: ' + escapeHtml(e.message) + '</div>';
+            }
+        }
+
+        function renderAccess() {
+            const list = document.getElementById('accessList');
+            const pending = accessEntries.filter(e => e.role === 'pending');
+
+            // Pending count badge — pending identities are time-sensitive, surface the total.
+            const countEl = document.getElementById('pendingCount');
+            countEl.textContent = pending.length + ' awaiting approval';
+            countEl.classList.toggle('none', pending.length === 0);
+
+            const visible = accessEntries.filter(e => accessFilter === 'all' || e.role === accessFilter);
+            if (visible.length === 0) {
+                list.innerHTML = '<div class="loading">No matching access entries.</div>';
+                return;
+            }
+
+            // Pending always float to the top; then admins, then users — each alphabetical.
+            const order = { pending: 0, admin: 1, user: 2 };
+            visible.sort((a, b) => (order[a.role] - order[b.role]) || a.email.localeCompare(b.email));
+
+            const labels = { pending: 'Awaiting approval', admin: 'Admins', user: 'Users' };
+            let html = '';
+            let lastGroup = null;
+            visible.forEach(entry => {
+                const id = cardId(entry.email);
+                if (accessFilter === 'all' && entry.role !== lastGroup) {
+                    lastGroup = entry.role;
+                    html += `<div class="access-group-title">${labels[entry.role]}</div>`;
+                }
+                let roleActions = '';
+                if (entry.role === 'pending') {
+                    roleActions = '<button class="btn btn-small btn-success js-role" data-role="user">Approve → User</button>'
+                                + '<button class="btn btn-small btn-primary js-role" data-role="admin">Approve → Admin</button>';
+                } else if (entry.role === 'user') {
+                    roleActions = '<button class="btn btn-small btn-primary js-role" data-role="admin">Make admin</button>';
+                } else if (entry.role === 'admin') {
+                    roleActions = '<button class="btn btn-small btn-secondary js-role" data-role="user">Make user</button>';
+                }
+                html += `
+                <div class="access-row ${entry.role === 'pending' ? 'pending' : ''}" data-id="${id}">
+                    <div class="access-row-top">
+                        <div>
+                            <span class="access-email">${escapeHtml(entry.email)}</span>
+                            <span class="role-badge ${entry.role}">${entry.role}</span>
+                        </div>
+                        <div class="access-actions">
+                            ${roleActions}
+                            <button class="btn btn-small btn-danger js-revoke">Revoke</button>
+                        </div>
+                    </div>
+                    <div class="access-groups-row">
+                        <span class="access-groups-label">Groups</span>
+                        <div id="access-picker-${id}" style="flex:1;min-width:200px"></div>
+                        <button class="btn btn-small btn-primary js-save-groups">Save groups</button>
+                    </div>
+                </div>`;
+            });
+            list.innerHTML = html;
+
+            // Mount the group picker and wire actions via closures — never interpolate the email
+            // into an onclick string, where a " in the address would break out of the attribute.
+            visible.forEach(entry => {
+                const id = cardId(entry.email);
+                mountGroupsPicker('access-picker-' + id, 'access-' + id, entry.groups || []);
+                const row = list.querySelector(`[data-id="${id}"]`);
+                if (!row) return;
+                row.querySelectorAll('.js-role').forEach(btn =>
+                    btn.addEventListener('click', () => grantRole(entry.email, btn.getAttribute('data-role'))));
+                row.querySelector('.js-revoke')?.addEventListener('click', () => openRevokeAccess(entry.email));
+                row.querySelector('.js-save-groups')?.addEventListener('click',
+                    () => saveAccessGroups(entry.email, 'access-' + id));
+            });
+        }
+
+        async function grantRole(email, role) {
+            displayMessage('Updating role…', '');
+            try {
+                const r = await fetch('/access/' + encodeURIComponent(email) + '/role', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role })
+                });
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'HTTP ' + r.status);
+                displayMessage(email + ' is now ' + role + '.', 'success');
+                loadAccess();
+            } catch (e) { displayMessage(e.message, 'error'); }
+        }
+
+        async function saveAccessGroups(email, pickerId) {
+            const groups = getPickerGroups(pickerId);
+            displayMessage('Saving groups…', '');
+            try {
+                const r = await fetch('/access/' + encodeURIComponent(email) + '/groups', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ groups })
+                });
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'HTTP ' + r.status);
+                displayMessage('Groups saved for ' + email + '.', 'success');
+                await fetchAllGroups();
+                loadAccess();
+            } catch (e) { displayMessage(e.message, 'error'); }
+        }
+
+        let emailToRevoke = null;
+
+        function openRevokeAccess(email) {
+            emailToRevoke = email;
+            clearModalError('revokeAccessError');
+            document.getElementById('revokeAccessEmail').textContent = email;
+            document.getElementById('revokeAccessModal').classList.add('active');
+        }
+
+        async function confirmRevokeAccess() {
+            if (!emailToRevoke) return;
+            const email = emailToRevoke;
+            clearModalError('revokeAccessError');
+            try {
+                const r = await fetch('/access/' + encodeURIComponent(email), { method: 'DELETE' });
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'HTTP ' + r.status);
+                closeModal('revokeAccessModal');
+                emailToRevoke = null;
+                displayMessage('Access revoked for ' + email + '.', 'success');
+                loadAccess();
+            } catch (e) { showModalError('revokeAccessError', e.message); }
+        }
+
+        document.getElementById('accessFilters').addEventListener('click', e => {
+            const btn = e.target.closest('.access-filter');
+            if (!btn) return;
+            accessFilter = btn.getAttribute('data-filter');
+            document.querySelectorAll('.access-filter').forEach(b => b.classList.toggle('active', b === btn));
+            renderAccess();
+        });
+
+        // Load groups first so the chip pickers' suggestions are ready, then users + access.
+        fetchAllGroups().then(() => { fetchUsers(); loadAccess(); });
     </script>
 </body>
 </html>

@@ -271,7 +271,25 @@ These pairs come up often. Use the left, never the right.
 
 ---
 
-## 13. Out-of-language
+## 13. Social login and access
+
+Vocabulary for the social-login authorization model (V2, in progress). Authentication moves to an
+external **identity provider**; Vaier owns **authorization** through a file-based access store.
+
+| Term | Definition |
+|------|------------|
+| **Social login** | Signing in with an external identity provider (Google first) instead of a Vaier-local password. Vaier no longer authenticates the user itself; it authorizes an already-authenticated identity. |
+| **Identity provider** | The external service that authenticates a user and asserts their email to Vaier (Google via oauth2-proxy in the first cut). Abbreviated IdP. |
+| **Access entry** | One known identity in the access store: its email, its **role**, and its **access groups** (`domain.AccessEntry`). The unit the access overview lists and an admin actions. |
+| **Role** | The access level granted to an **access entry** (`domain.Role`): **pending**, **user**, or **admin**. Exactly one role per entry. |
+| **Pending** | The role a freshly seen identity lands in: authenticated by the identity provider but not yet approved, so blocked from everything until an admin promotes it. "Awaiting approval." |
+| **User** (role) | An approved, non-administrative identity. Reaches the services whose required **access group** it holds; cannot administer Vaier. Distinct from an Authelia *user* (see §11). |
+| **Admin** (role) | An approved identity that may administer the Vaier console and reach every service, regardless of access groups. |
+| **Access group** | A label on an **access entry** that gates per-service access: a service requires a group, and a user reaches it only if their entry carries that group. Admins bypass the requirement. |
+
+---
+
+## 14. Out-of-language
 
 Terms that look like they belong here but don't — these are explicitly **not** Vaier vocabulary because the underlying concept is out of scope:
 

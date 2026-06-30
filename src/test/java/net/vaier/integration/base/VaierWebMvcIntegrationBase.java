@@ -77,6 +77,22 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected DeleteGroupUseCase deleteGroupUseCase;
 
+    // --- Social-login authorization use cases ---
+    @MockBean
+    protected VerifyAccessUseCase verifyAccessUseCase;
+
+    @MockBean
+    protected ListAccessEntriesUseCase listAccessEntriesUseCase;
+
+    @MockBean
+    protected GrantRoleUseCase grantRoleUseCase;
+
+    @MockBean
+    protected AssignGroupsUseCase assignGroupsUseCase;
+
+    @MockBean
+    protected RevokeAccessUseCase revokeAccessUseCase;
+
     // --- DNS use cases ---
     @MockBean
     protected GetDnsInfoUseCase getDnsInfoUseCase;

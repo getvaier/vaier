@@ -30,7 +30,9 @@ class UserServiceFileIT {
     @BeforeEach
     void setUp() {
         userAdapter = new AutheliaUserAdapter(tempDir.resolve("users_database.yml").toString());
-        userService = new UserService(userAdapter);
+        // This IT exercises only user-management use cases; the social-login authorization
+        // collaborators are not touched here, so they are left unwired.
+        userService = new UserService(userAdapter, null, null, null);
     }
 
     @Test
