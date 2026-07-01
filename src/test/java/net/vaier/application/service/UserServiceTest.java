@@ -7,6 +7,7 @@ import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
+import net.vaier.domain.port.ForPersistingServiceAccessRules;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +35,9 @@ class UserServiceTest {
 
     @Mock
     ForResolvingServiceGroup forResolvingServiceGroup;
+
+    @Mock
+    ForPersistingServiceAccessRules forPersistingServiceAccessRules;
 
     @Mock
     ForNotifyingAdmins forNotifyingAdmins;
@@ -122,7 +126,7 @@ class UserServiceTest {
     void verify_allowedDecision_doesNotNotify() {
         when(forPersistingAccessEntries.findByEmail("friend@example.com"))
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("family"))));
-        when(forResolvingServiceGroup.requiredGroupForHost("plex.example.com")).thenReturn(Optional.of("family"));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com")).thenReturn(List.of("family"));
 
         service.verify("friend@example.com", "plex.example.com", null);
 
@@ -160,7 +164,7 @@ class UserServiceTest {
     void verify_userInRequiredGroup_allowsAndEmitsIdentityHeaders() {
         when(forPersistingAccessEntries.findByEmail("friend@example.com"))
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("family"))));
-        when(forResolvingServiceGroup.requiredGroupForHost("plex.example.com")).thenReturn(Optional.of("family"));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com")).thenReturn(List.of("family"));
 
         AccessDecision decision = service.verify("friend@example.com", "plex.example.com", null);
 
@@ -173,7 +177,7 @@ class UserServiceTest {
     void verify_userNotInRequiredGroup_denies() {
         when(forPersistingAccessEntries.findByEmail("friend@example.com"))
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("media"))));
-        when(forResolvingServiceGroup.requiredGroupForHost("plex.example.com")).thenReturn(Optional.of("family"));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com")).thenReturn(List.of("family"));
 
         AccessDecision decision = service.verify("friend@example.com", "plex.example.com", null);
 
@@ -184,11 +188,86 @@ class UserServiceTest {
     void verify_serviceHostWithoutRequiredGroup_allowsAnyApprovedUser() {
         when(forPersistingAccessEntries.findByEmail("friend@example.com"))
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of())));
-        when(forResolvingServiceGroup.requiredGroupForHost("open.example.com")).thenReturn(Optional.empty());
+        when(forResolvingServiceGroup.allowedGroupsForHost("open.example.com")).thenReturn(List.of());
 
         AccessDecision decision = service.verify("friend@example.com", "open.example.com", null);
 
         assertThat(decision.isAllowed()).isTrue();
+    }
+
+    // --- verify: any-of rule — user in one of several allowed groups is admitted ---
+
+    @Test
+    void verify_userInOneOfSeveralAllowedGroups_allows() {
+        when(forPersistingAccessEntries.findByEmail("friend@example.com"))
+                .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("media"))));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com"))
+                .thenReturn(List.of("family", "media", "devs"));
+
+        AccessDecision decision = service.verify("friend@example.com", "plex.example.com", null);
+
+        assertThat(decision.isAllowed()).isTrue();
+    }
+
+    @Test
+    void verify_userInNoneOfSeveralAllowedGroups_denies() {
+        when(forPersistingAccessEntries.findByEmail("friend@example.com"))
+                .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of("photos"))));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com"))
+                .thenReturn(List.of("family", "media"));
+
+        AccessDecision decision = service.verify("friend@example.com", "plex.example.com", null);
+
+        assertThat(decision.isAllowed()).isFalse();
+    }
+
+    @Test
+    void verify_pendingIsDeniedEvenWhenItsGroupMatchesTheRule() {
+        when(forPersistingAccessEntries.findByEmail("p@example.com"))
+                .thenReturn(Optional.of(accessEntry("p@example.com", Role.PENDING, List.of("family"))));
+
+        AccessDecision decision = service.verify("p@example.com", "plex.example.com", null);
+
+        assertThat(decision.isAllowed()).isFalse();
+    }
+
+    @Test
+    void verify_adminIsAllowedRegardlessOfTheRule() {
+        when(forPersistingAccessEntries.findByEmail("boss@example.com"))
+                .thenReturn(Optional.of(accessEntry("boss@example.com", Role.ADMIN, List.of())));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com"))
+                .thenReturn(List.of("family", "media"));
+
+        AccessDecision decision = service.verify("boss@example.com", "plex.example.com", null);
+
+        assertThat(decision.isAllowed()).isTrue();
+    }
+
+    // --- service access rules: set / get (admin management) ---
+
+    @Test
+    void setServiceAccessRule_delegatesToPort() {
+        service.setAllowedGroups("plex.example.com", List.of("family", "media"));
+
+        verify(forPersistingServiceAccessRules).setAllowedGroups("plex.example.com", List.of("family", "media"));
+    }
+
+    @Test
+    void setServiceAccessRule_emptyGroupsClearsTheRule() {
+        service.setAllowedGroups("plex.example.com", List.of());
+
+        // The normalise-empty-removes decision lives in the adapter; the service passes the empty
+        // list straight through so the rule is cleared.
+        verify(forPersistingServiceAccessRules).setAllowedGroups("plex.example.com", List.of());
+    }
+
+    @Test
+    void getServiceAccessRules_delegatesToPort() {
+        java.util.Map<String, List<String>> rules = java.util.Map.of(
+                "plex.example.com", List.of("family"), "git.example.com", List.of("devs"));
+        when(forPersistingServiceAccessRules.allServiceAccessRules()).thenReturn(rules);
+
+        assertThat(service.getServiceAccessRules()).isEqualTo(rules);
     }
 
     // --- verify: the Vaier console host requires admin ---
@@ -235,7 +314,7 @@ class UserServiceTest {
     void verify_knownEmail_refreshesDisplayNameFromHeader() {
         when(forPersistingAccessEntries.findByEmail("friend@example.com"))
                 .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of())));
-        when(forResolvingServiceGroup.requiredGroupForHost("open.example.com")).thenReturn(Optional.empty());
+        when(forResolvingServiceGroup.allowedGroupsForHost("open.example.com")).thenReturn(List.of());
 
         service.verify("friend@example.com", "open.example.com", "Alice Smith");
 
@@ -249,7 +328,7 @@ class UserServiceTest {
     void verify_knownEmailWithName_isNotWipedWhenHeaderAbsent(String header) {
         when(forPersistingAccessEntries.findByEmail("friend@example.com")).thenReturn(Optional.of(
                 AccessEntry.builder().email("friend@example.com").role(Role.USER).groups(List.of()).name("Alice").build()));
-        when(forResolvingServiceGroup.requiredGroupForHost("open.example.com")).thenReturn(Optional.empty());
+        when(forResolvingServiceGroup.allowedGroupsForHost("open.example.com")).thenReturn(List.of());
 
         AccessDecision decision = service.verify("friend@example.com", "open.example.com", header);
 

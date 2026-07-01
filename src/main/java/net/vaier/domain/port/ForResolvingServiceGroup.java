@@ -1,12 +1,14 @@
 package net.vaier.domain.port;
 
-import java.util.Optional;
+import java.util.List;
 
 /**
- * Driven port resolving which access group a published service host requires. An empty result means
- * the host has no group requirement — any authenticated, approved identity may reach it.
+ * Driven port resolving the access rule for a published service host: the <em>any-of</em> list of
+ * groups an identity may satisfy to reach it. Read on the forward-auth hot path. An empty list means
+ * the host has no rule — any authenticated, approved identity may reach it.
  */
 public interface ForResolvingServiceGroup {
 
-    Optional<String> requiredGroupForHost(String host);
+    /** The allowed groups (any-of) for {@code host}, or an empty list when the host has no rule. */
+    List<String> allowedGroupsForHost(String host);
 }

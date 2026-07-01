@@ -587,6 +587,34 @@ from previously-deployed stacks, and the `ServiceNames.AUTHELIA`/`REDIS`/`AUTH`/
 survive to feed that cleanup and the defensive `VaierServerCatalogue` infra-exclusion. No Authelia runtime, no
 Authelia config written, and no dead Authelia Java classes remain.
 
+**Delivered (per-service access rules — any-of allowed groups, TDD-first):** ✅ (part of #305)
+- Generalised per-service gating from a single required group to an **access rule**: the *any-of* list of
+  **allowed groups** an identity may satisfy to reach one service. Empty rule ⇒ any approved user; **admin**
+  always passes; **pending** never does.
+- Domain: `AccessEntry.mayAccessService` now takes a `Collection<String> allowedGroups` and allows an
+  ordinary user iff its own groups intersect the allowed set on at least one group (was
+  `mayAccessService(String requiredGroup)` with a single-group `contains`). Semantics for admin/pending and
+  the empty case are unchanged.
+- Ports: `ForResolvingServiceGroup.requiredGroupForHost(host): Optional<String>` becomes
+  `allowedGroupsForHost(host): List<String>` (read on the forward-auth hot path). New write/list port
+  `ForPersistingServiceAccessRules` (`setAllowedGroups(host, groups)`, `allServiceAccessRules(): Map<host,
+  List<group>>`).
+- Use cases on `UserService`: `SetServiceAccessRuleUseCase` (empty/all-blank list clears the rule) and
+  `GetServiceAccessRulesUseCase` (the rules map). `host` must be non-blank; normalisation lives in the adapter.
+- Adapter: `AccessFileAdapter` now implements `ForPersistingServiceAccessRules` too. `access.yml`'s
+  `serviceGroups:` maps host → **list** of groups (was a scalar); the adapter trims/drops-blanks/dedupes,
+  and an empty result removes the host key. **Back-compat:** a host whose value is a bare scalar (older files)
+  is read as a one-element list. `allServiceAccessRules()` omits hosts with no groups.
+- Web: `AuthzRestController` gains admin endpoints `GET /access/services` (host → `[groups]`) and
+  `PUT /access/services/{host}/groups` with body `{ "groups": [...] }` (empty list clears the rule), behind
+  the console's existing social-login gate.
+- UI: on the **Infrastructure** page, a Social published service's row carries an **Allowed groups** chip
+  multi-select (suggestions derived from groups already assigned to access entries; free-typing new groups
+  allowed; helper text "Leave empty — any signed-in, approved user can reach this."). A **restricted** badge
+  marks Social services with a non-empty rule. In Public auth mode no rule applies and the control is hidden.
+- Known limitation: rules key on host (matching the forward-auth `X-Forwarded-Host`), so path-scoped
+  services that share a host share one rule.
+
 **Backlog (not in this slice):**
 - The unauthenticated "awaiting approval" page, migration off Authelia for existing deployments, and
   multi-provider login (GitHub, etc.). The **availability coupling** the spike flags — Vaier being in the

@@ -42,48 +42,55 @@ class AccessEntryTest {
         assertThat(entry(Role.PENDING, List.of()).mayAccessConsole()).isFalse();
     }
 
-    // --- mayAccessService ---
+    // --- mayAccessService — any-of-groups rule ---
 
     @Test
     void mayAccessService_pendingIsAlwaysDenied() {
-        assertThat(entry(Role.PENDING, List.of("family")).mayAccessService("family")).isFalse();
+        // Denied even when the entry carries a group the rule allows, and even for an unrestricted rule.
+        assertThat(entry(Role.PENDING, List.of("family")).mayAccessService(List.of("family"))).isFalse();
         assertThat(entry(Role.PENDING, List.of()).mayAccessService(null)).isFalse();
+        assertThat(entry(Role.PENDING, List.of()).mayAccessService(List.of())).isFalse();
     }
 
     @Test
-    void mayAccessService_adminIsAlwaysAllowed() {
-        assertThat(entry(Role.ADMIN, List.of()).mayAccessService("family")).isTrue();
-        assertThat(entry(Role.ADMIN, List.of()).mayAccessService("anything")).isTrue();
+    void mayAccessService_adminIsAlwaysAllowedRegardlessOfTheRule() {
+        assertThat(entry(Role.ADMIN, List.of()).mayAccessService(List.of("family"))).isTrue();
+        assertThat(entry(Role.ADMIN, List.of()).mayAccessService(List.of("family", "media", "devs"))).isTrue();
     }
 
     @Test
-    void mayAccessService_userAllowedWhenInRequiredGroup() {
-        assertThat(entry(Role.USER, List.of("family", "media")).mayAccessService("family")).isTrue();
+    void mayAccessService_userAllowedWhenInAtLeastOneAllowedGroup() {
+        // any-of: the entry only needs to intersect the allowed set on one group.
+        assertThat(entry(Role.USER, List.of("media")).mayAccessService(List.of("family", "media", "devs"))).isTrue();
+        assertThat(entry(Role.USER, List.of("family", "photos")).mayAccessService(List.of("family", "media"))).isTrue();
     }
 
     @Test
-    void mayAccessService_userDeniedWhenNotInRequiredGroup() {
-        assertThat(entry(Role.USER, List.of("media")).mayAccessService("family")).isFalse();
+    void mayAccessService_userDeniedWhenInNoneOfTheAllowedGroups() {
+        assertThat(entry(Role.USER, List.of("photos")).mayAccessService(List.of("family", "media"))).isFalse();
     }
 
     @Test
-    void mayAccessService_userWithNullGroupsDeniedForRequiredGroup() {
-        assertThat(entry(Role.USER, null).mayAccessService("family")).isFalse();
+    void mayAccessService_userWithNullGroupsDeniedForNonEmptyRule() {
+        assertThat(entry(Role.USER, null).mayAccessService(List.of("family"))).isFalse();
     }
 
-    @ParameterizedTest
-    @NullAndEmptySource
-    @ValueSource(strings = {"   "})
-    void mayAccessService_blankRequiredGroupAllowsAnyNonPendingUser(String requiredGroup) {
-        assertThat(entry(Role.USER, List.of()).mayAccessService(requiredGroup)).isTrue();
-        assertThat(entry(Role.ADMIN, List.of()).mayAccessService(requiredGroup)).isTrue();
+    @Test
+    void mayAccessService_emptyRuleAllowsAnyApprovedUser() {
+        assertThat(entry(Role.USER, List.of()).mayAccessService(List.of())).isTrue();
+        assertThat(entry(Role.ADMIN, List.of()).mayAccessService(List.of())).isTrue();
     }
 
-    @ParameterizedTest
-    @NullAndEmptySource
-    @ValueSource(strings = {"   "})
-    void mayAccessService_blankRequiredGroupStillDeniesPending(String requiredGroup) {
-        assertThat(entry(Role.PENDING, List.of()).mayAccessService(requiredGroup)).isFalse();
+    @Test
+    void mayAccessService_nullRuleAllowsAnyApprovedUser() {
+        assertThat(entry(Role.USER, List.of()).mayAccessService((java.util.Collection<String>) null)).isTrue();
+        assertThat(entry(Role.ADMIN, List.of()).mayAccessService((java.util.Collection<String>) null)).isTrue();
+    }
+
+    @Test
+    void mayAccessService_emptyRuleStillDeniesPending() {
+        assertThat(entry(Role.PENDING, List.of()).mayAccessService(List.of())).isFalse();
+        assertThat(entry(Role.PENDING, List.of()).mayAccessService((java.util.Collection<String>) null)).isFalse();
     }
 
     // --- role-mirroring groups — 'admins'/'users' are the Role's job, never access groups ---

@@ -3,6 +3,7 @@ package net.vaier.domain;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -83,21 +84,22 @@ public class AccessEntry {
     }
 
     /**
-     * Whether this identity may reach a published service that requires {@code requiredGroup}.
-     * Pending identities are always denied; admins are always allowed; an ordinary user is allowed
-     * iff their groups contain {@code requiredGroup}. A null/blank {@code requiredGroup} means the
-     * service only requires an authenticated, approved identity (any USER or ADMIN).
+     * Whether this identity may reach a published service governed by an access rule of
+     * {@code allowedGroups} (an <em>any-of</em> set). Pending identities are always denied; admins
+     * are always allowed; a null/empty {@code allowedGroups} means the service only requires an
+     * authenticated, approved identity (any USER or ADMIN). Otherwise an ordinary user is allowed
+     * iff their own groups intersect {@code allowedGroups} on at least one group.
      */
-    public boolean mayAccessService(String requiredGroup) {
+    public boolean mayAccessService(Collection<String> allowedGroups) {
         if (isPending()) {
             return false;
         }
         if (isAdmin()) {
             return true;
         }
-        if (requiredGroup == null || requiredGroup.isBlank()) {
+        if (allowedGroups == null || allowedGroups.isEmpty()) {
             return true;
         }
-        return groups != null && groups.contains(requiredGroup);
+        return groups != null && groups.stream().anyMatch(allowedGroups::contains);
     }
 }

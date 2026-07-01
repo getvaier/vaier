@@ -65,6 +65,12 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected RevokeAccessUseCase revokeAccessUseCase;
 
+    @MockBean
+    protected SetServiceAccessRuleUseCase setServiceAccessRuleUseCase;
+
+    @MockBean
+    protected GetServiceAccessRulesUseCase getServiceAccessRulesUseCase;
+
     // --- DNS use cases ---
     @MockBean
     protected GetDnsInfoUseCase getDnsInfoUseCase;

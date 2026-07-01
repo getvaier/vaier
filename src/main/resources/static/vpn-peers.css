@@ -405,6 +405,29 @@
         /* Social login gets its own accent so the operator reads which login a tile leads to at a
            glance, not just "gated or not" (#305). */
         .pub-social { background: rgba(79, 195, 247, 0.15); color: var(--accent); }
+        /* A Social service whose access rule names specific groups (#access rules). */
+        .pub-restricted { background: rgba(255, 213, 79, 0.15); color: var(--yellow); }
+
+        /* "Allowed groups" chip picker inside a Social service's editor — mirrors the Users page's
+           access-group picker so the two authorization surfaces read the same (#access rules). */
+        .groups-picker { display: flex; flex-direction: column; gap: 0.4rem; }
+        .groups-picker .chip-list {
+            display: flex; flex-wrap: wrap; gap: 0.3rem; min-height: 1.4rem; align-items: center;
+        }
+        .groups-picker .chip {
+            display: inline-flex; align-items: center; gap: 0.3rem;
+            padding: 0.1rem 0.4rem; background: rgba(79, 195, 247, 0.15); color: var(--accent);
+            border-radius: 2px; font-family: var(--mono); font-size: 0.75rem;
+        }
+        .groups-picker .chip-remove {
+            background: none; border: 0; color: var(--accent); cursor: pointer;
+            padding: 0; font-size: 0.9rem; line-height: 1; opacity: 0.75;
+        }
+        .groups-picker .chip-remove:hover { opacity: 1; }
+        .groups-picker .chip-empty { font-size: 0.75rem; color: var(--text-muted); font-style: italic; }
+        .groups-picker .chip-input-row { display: flex; gap: 0.4rem; align-items: center; }
+        .groups-picker .chip-input-row .form-input { flex: 1; min-width: 0; max-width: 180px; }
+        .pub-hint { font-size: 0.7rem; color: var(--text-dim); line-height: 1.4; }
         .pub-open {
             flex-shrink: 0;
             color: var(--accent);

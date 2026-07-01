@@ -1,9 +1,11 @@
 package net.vaier.rest;
 
 import net.vaier.application.AssignGroupsUseCase;
+import net.vaier.application.GetServiceAccessRulesUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
 import net.vaier.application.RevokeAccessUseCase;
+import net.vaier.application.SetServiceAccessRuleUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.Role;
@@ -15,6 +17,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Social-login authorization (Option C). Hosts two distinct surfaces:
@@ -40,17 +43,23 @@ public class AuthzRestController {
     private final GrantRoleUseCase grantRoleUseCase;
     private final AssignGroupsUseCase assignGroupsUseCase;
     private final RevokeAccessUseCase revokeAccessUseCase;
+    private final SetServiceAccessRuleUseCase setServiceAccessRuleUseCase;
+    private final GetServiceAccessRulesUseCase getServiceAccessRulesUseCase;
 
     public AuthzRestController(VerifyAccessUseCase verifyAccessUseCase,
                               ListAccessEntriesUseCase listAccessEntriesUseCase,
                               GrantRoleUseCase grantRoleUseCase,
                               AssignGroupsUseCase assignGroupsUseCase,
-                              RevokeAccessUseCase revokeAccessUseCase) {
+                              RevokeAccessUseCase revokeAccessUseCase,
+                              SetServiceAccessRuleUseCase setServiceAccessRuleUseCase,
+                              GetServiceAccessRulesUseCase getServiceAccessRulesUseCase) {
         this.verifyAccessUseCase = verifyAccessUseCase;
         this.listAccessEntriesUseCase = listAccessEntriesUseCase;
         this.grantRoleUseCase = grantRoleUseCase;
         this.assignGroupsUseCase = assignGroupsUseCase;
         this.revokeAccessUseCase = revokeAccessUseCase;
+        this.setServiceAccessRuleUseCase = setServiceAccessRuleUseCase;
+        this.getServiceAccessRulesUseCase = getServiceAccessRulesUseCase;
     }
 
     // --- Forward-auth (data path) ---
@@ -123,7 +132,23 @@ public class AuthzRestController {
         return ResponseEntity.ok("Access revoked successfully");
     }
 
+    // --- Per-service access rules (admin) ---
+
+    @GetMapping("/access/services")
+    public Map<String, List<String>> getServiceAccessRules() {
+        return getServiceAccessRulesUseCase.getServiceAccessRules();
+    }
+
+    @PutMapping("/access/services/{host}/groups")
+    public ResponseEntity<String> setServiceAccessRule(@PathVariable String host,
+                                                       @RequestBody ServiceAccessRuleRequest request) {
+        List<String> groups = request.groups() != null ? request.groups() : List.of();
+        setServiceAccessRuleUseCase.setAllowedGroups(host, groups);
+        return ResponseEntity.ok("Service access rule updated successfully");
+    }
+
     public record AccessEntryResponse(String email, String role, List<String> groups, String name) {}
     public record GrantRoleRequest(String role) {}
     public record AssignGroupsRequest(List<String> groups) {}
+    public record ServiceAccessRuleRequest(List<String> groups) {}
 }

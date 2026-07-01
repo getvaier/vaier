@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -168,38 +169,155 @@ class AccessFileAdapterTest {
                 .map(AccessEntry::getRole).contains(Role.PENDING);
     }
 
-    // --- service-group resolution ---
+    // --- service access rules: read (any-of allowed groups per host) ---
 
     @Test
-    void requiredGroupForHost_returnsConfiguredGroup() throws Exception {
+    void allowedGroupsForHost_returnsConfiguredGroupList() throws Exception {
         Files.writeString(tempDir.resolve("access.yml"), """
             entries: {}
             serviceGroups:
-              plex.example.com: family
-              vaier.example.com: admins
+              plex.example.com: [family, media]
+              git.example.com: [devs]
             """);
 
         AccessFileAdapter a = adapter();
-        assertThat(a.requiredGroupForHost("plex.example.com")).contains("family");
-        assertThat(a.requiredGroupForHost("vaier.example.com")).contains("admins");
+        assertThat(a.allowedGroupsForHost("plex.example.com")).containsExactly("family", "media");
+        assertThat(a.allowedGroupsForHost("git.example.com")).containsExactly("devs");
     }
 
     @Test
-    void requiredGroupForHost_emptyWhenHostNotConfigured() throws Exception {
+    void allowedGroupsForHost_readsLegacyScalarValueAsSingletonList() throws Exception {
+        // Back-compat: files written before the any-of change stored a single scalar group per host.
         Files.writeString(tempDir.resolve("access.yml"), """
             serviceGroups:
               plex.example.com: family
             """);
 
-        assertThat(adapter().requiredGroupForHost("unknown.example.com")).isEmpty();
+        assertThat(adapter().allowedGroupsForHost("plex.example.com")).containsExactly("family");
     }
 
     @Test
-    void requiredGroupForHost_emptyWhenNoServiceGroupsSection() {
+    void allowedGroupsForHost_emptyWhenHostNotConfigured() throws Exception {
+        Files.writeString(tempDir.resolve("access.yml"), """
+            serviceGroups:
+              plex.example.com: [family]
+            """);
+
+        assertThat(adapter().allowedGroupsForHost("unknown.example.com")).isEmpty();
+    }
+
+    @Test
+    void allowedGroupsForHost_emptyWhenNoServiceGroupsSection() {
         AccessFileAdapter a = adapter();
         a.upsert(entry("a@gmail.com", Role.USER, List.of()));
 
-        assertThat(a.requiredGroupForHost("plex.example.com")).isEmpty();
+        assertThat(a.allowedGroupsForHost("plex.example.com")).isEmpty();
+    }
+
+    @Test
+    void allowedGroupsForHost_emptyWhenHostIsNull() {
+        assertThat(adapter().allowedGroupsForHost(null)).isEmpty();
+    }
+
+    // --- service access rules: write + list ---
+
+    @Test
+    void setAllowedGroups_thenAllowedGroupsForHost_roundTrips() {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("plex.example.com", List.of("family", "media"));
+
+        assertThat(new AccessFileAdapter(tempDir.toString(), null).allowedGroupsForHost("plex.example.com"))
+                .containsExactly("family", "media");
+    }
+
+    @Test
+    void setAllowedGroups_normalisesTrimBlanksAndDuplicates() {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("plex.example.com", Arrays.asList("  family  ", "", null, "family", "media"));
+
+        assertThat(a.allowedGroupsForHost("plex.example.com")).containsExactly("family", "media");
+    }
+
+    @Test
+    void setAllowedGroups_emptyListRemovesTheHostRule() {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("plex.example.com", List.of("family"));
+
+        a.setAllowedGroups("plex.example.com", List.of());
+
+        assertThat(a.allowedGroupsForHost("plex.example.com")).isEmpty();
+        assertThat(a.allServiceAccessRules()).doesNotContainKey("plex.example.com");
+    }
+
+    @Test
+    void setAllowedGroups_blankOnlyListRemovesTheHostRule() {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("plex.example.com", List.of("family"));
+
+        a.setAllowedGroups("plex.example.com", Arrays.asList("  ", "", (String) null));
+
+        assertThat(a.allServiceAccessRules()).doesNotContainKey("plex.example.com");
+    }
+
+    @Test
+    void setAllowedGroups_nullListRemovesTheHostRule() {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("plex.example.com", List.of("family"));
+
+        a.setAllowedGroups("plex.example.com", null);
+
+        assertThat(a.allServiceAccessRules()).doesNotContainKey("plex.example.com");
+    }
+
+    @Test
+    void setAllowedGroups_preservesOtherHostsRules() {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("git.example.com", List.of("devs"));
+
+        a.setAllowedGroups("plex.example.com", List.of("family"));
+
+        assertThat(a.allServiceAccessRules())
+                .containsEntry("git.example.com", List.of("devs"))
+                .containsEntry("plex.example.com", List.of("family"));
+    }
+
+    @Test
+    void setAllowedGroups_lockedDownFileAfterWrite() throws Exception {
+        AccessFileAdapter a = adapter();
+        a.setAllowedGroups("plex.example.com", List.of("family"));
+
+        Path file = tempDir.resolve("access.yml");
+        assertThat(Files.getPosixFilePermissions(file))
+                .containsExactlyInAnyOrder(java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                        java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+    }
+
+    @Test
+    void allServiceAccessRules_emptyWhenNoSection() {
+        assertThat(adapter().allServiceAccessRules()).isEmpty();
+    }
+
+    @Test
+    void allServiceAccessRules_readsLegacyScalarValuesAsSingletonLists() throws Exception {
+        Files.writeString(tempDir.resolve("access.yml"), """
+            serviceGroups:
+              plex.example.com: family
+              git.example.com: [devs, ops]
+            """);
+
+        assertThat(adapter().allServiceAccessRules())
+                .containsEntry("plex.example.com", List.of("family"))
+                .containsEntry("git.example.com", List.of("devs", "ops"));
+    }
+
+    @Test
+    void setAllowedGroups_doesNotDisturbEntries() {
+        AccessFileAdapter a = adapter();
+        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins")));
+
+        a.setAllowedGroups("plex.example.com", List.of("family"));
+
+        assertThat(a.getEntries()).containsExactly(entry("you@gmail.com", Role.ADMIN, List.of("admins")));
     }
 
     // --- ensuring a configured admin from VAIER_ADMIN_EMAIL (self-heal to keep an admin) ---

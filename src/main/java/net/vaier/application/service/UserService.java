@@ -1,9 +1,11 @@
 package net.vaier.application.service;
 
 import net.vaier.application.AssignGroupsUseCase;
+import net.vaier.application.GetServiceAccessRulesUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
 import net.vaier.application.RevokeAccessUseCase;
+import net.vaier.application.SetServiceAccessRuleUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
@@ -14,6 +16,7 @@ import net.vaier.domain.Role;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
+import net.vaier.domain.port.ForPersistingServiceAccessRules;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -21,27 +24,31 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
 @Slf4j
 public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
-        RevokeAccessUseCase {
+        RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
+    private final ForPersistingServiceAccessRules forPersistingServiceAccessRules;
     private final ForNotifyingAdmins forNotifyingAdmins;
     private final ConfigResolver configResolver;
 
     public UserService(ForPersistingAccessEntries forPersistingAccessEntries,
                        ForResolvingServiceGroup forResolvingServiceGroup,
+                       ForPersistingServiceAccessRules forPersistingServiceAccessRules,
                        // @Lazy defers resolving NotificationService until the first notification, so
                        // it never lands on the forward-auth hot path's critical construction timing.
                        @Lazy ForNotifyingAdmins forNotifyingAdmins,
                        ConfigResolver configResolver) {
         this.forPersistingAccessEntries = forPersistingAccessEntries;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
+        this.forPersistingServiceAccessRules = forPersistingServiceAccessRules;
         this.forNotifyingAdmins = forNotifyingAdmins;
         this.configResolver = configResolver;
     }
@@ -76,8 +83,10 @@ public class UserService implements
         if (isConsoleHost(host)) {
             allowed = entry.mayAccessConsole();
         } else {
-            String requiredGroup = forResolvingServiceGroup.requiredGroupForHost(host).orElse(null);
-            allowed = entry.mayAccessService(requiredGroup);
+            // Access rules are keyed by host (matching the forward-auth X-Forwarded-Host). Path-scoped
+            // services sharing a host therefore share one rule — acceptable for now (see docs).
+            List<String> allowedGroups = forResolvingServiceGroup.allowedGroupsForHost(host);
+            allowed = entry.mayAccessService(allowedGroups);
         }
         return allowed ? AccessDecision.allow(entry) : AccessDecision.deny();
     }
@@ -153,6 +162,23 @@ public class UserService implements
         forPersistingAccessEntries.upsert(AccessEntry.builder()
                 .email(normalised).role(role).groups(normaliseGroups(groups))
                 .name(current.map(AccessEntry::getName).orElse(null)).build());
+    }
+
+    // === Per-service access rules (serviceGroups store) ===
+
+    @Override
+    public void setAllowedGroups(String host, List<String> groups) {
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("host must not be blank");
+        }
+        // Normalisation (trim/dedupe) and the "empty clears the rule" decision live in the adapter,
+        // so the service passes the list straight through.
+        forPersistingServiceAccessRules.setAllowedGroups(host, groups);
+    }
+
+    @Override
+    public Map<String, List<String>> getServiceAccessRules() {
+        return forPersistingServiceAccessRules.allServiceAccessRules();
     }
 
     @Override

@@ -4,6 +4,12 @@
         // Whether the per-service Social auth mode is offered (Google OAuth configured server-side,
         // #305). Loaded once from /settings/config; gates the Social option in the auth-mode picker.
         let _socialAuthAvailable = false;
+        // Per-service access rules: host -> [allowed groups] (any-of). An absent host (or empty list)
+        // means any signed-in, approved user may reach it. Shown/edited in a Social service's editor.
+        let _serviceAccessRules = {};
+        // Group names already assigned to access entries — the "Allowed groups" picker's suggestions,
+        // mirroring how the Users page derives its group suggestions from the access entries.
+        let _accessGroupSuggestions = [];
         let peerServices = {};
         let vaierServerStatus = 'UNKNOWN'; // domain MachineStatus enum value
         let lanServers = [];
@@ -126,6 +132,36 @@
                 }
             } catch (error) {
                 console.error('Failed to load app config:', error);
+            }
+        }
+
+        // Per-service access rules for Social services (host -> any-of allowed groups). Loaded once at
+        // start and refreshed after each edit; re-renders so an open Social editor shows the live rule.
+        async function fetchServiceAccessRules() {
+            try {
+                const response = await fetch('/access/services', { cache: 'no-store' });
+                if (response.ok) {
+                    _serviceAccessRules = await response.json();
+                    if (!isEditingMachineCard()) displayPeers(peers);
+                }
+            } catch (error) {
+                console.error('Failed to load service access rules:', error);
+            }
+        }
+
+        // Known group names for the "Allowed groups" picker's suggestions — derived from the groups
+        // already assigned across access entries (groups live only on the access entries). Non-fatal.
+        async function fetchAccessGroupSuggestions() {
+            try {
+                const response = await fetch('/access', { cache: 'no-store' });
+                if (response.ok) {
+                    const entries = await response.json();
+                    const set = new Set();
+                    entries.forEach(e => (e.groups || []).forEach(g => set.add(g)));
+                    _accessGroupSuggestions = [...set].sort();
+                }
+            } catch (error) {
+                console.error('Failed to load access group suggestions:', error);
             }
         }
 
@@ -279,6 +315,11 @@
             const authBadge = mode === 'social'
                 ? `<span class="pub-badge pub-social" title="Social login (Google) required">social</span>`
                 : `<span class="pub-badge pub-noauth" title="Public — no authentication required">no auth</span>`;
+            // A Social service with a non-empty access rule is restricted to specific groups (#access
+            // rules); flag it so the operator sees at a glance it's not open to every approved user.
+            const restrictedBadge = (mode === 'social' && (_serviceAccessRules[s.dnsAddress] || []).length > 0)
+                ? `<span class="pub-badge pub-restricted" title="Restricted to specific groups">restricted</span>`
+                : '';
             return `<div class="published-entry">
                 <div class="published-item" role="button" tabindex="0"
                      aria-expanded="${isOpen ? 'true' : 'false'}"
@@ -287,6 +328,7 @@
                     <span class="pub-status icon-${statusKey}" title="${statusKey}"></span>
                     <span class="pub-name" title="${escapeHtml(display)}">${escapeHtml(label)}</span>
                     ${authBadge}
+                    ${restrictedBadge}
                     ${linkOpen}
                     <button class="pub-del" title="Delete this published service"
                             onclick="event.stopPropagation(); deletePublishedService('${jsArg(s.dnsAddress)}','${jsArg(s.pathPrefix || '')}')">✕</button>
@@ -320,6 +362,7 @@
                 ${versionRow}
                 <div class="detail-row"><span class="detail-label">Auth</span><span class="detail-value">
                     ${renderAuthModePicker(s, id, dns, path)}</span></div>
+                ${(s.authMode || (s.authenticated ? 'social' : 'none')) === 'social' ? renderAllowedGroupsRow(s, id) : ''}
                 <div class="detail-row"><span class="detail-label">Display name</span><span class="detail-value">
                     <input type="text" id="pub-alias-${id}" class="form-input" style="width:100%;max-width:240px"
                         value="${escapeHtml(s.launchpadAlias || '')}" data-original="${escapeHtml(s.launchpadAlias || '')}" placeholder="(default)"
@@ -366,6 +409,36 @@
                 ${opt('none', 'Public — no sign-in')}
                 ${showSocial ? opt('social', 'Social (Google)') : ''}
             </select>`;
+        }
+
+        // The per-service access rule for a Social service (#access rules): an any-of chip picker of
+        // the groups a signed-in visitor must satisfy. Empty means any approved user. Edits apply
+        // immediately. Suggestions come from groups already assigned to access entries, plus this
+        // rule's own groups; free-typing a brand-new group is allowed. Only shown in Social mode.
+        function renderAllowedGroupsRow(s, id) {
+            const host   = s.dnsAddress;
+            const groups = _serviceAccessRules[host] || [];
+            const chips  = groups.length
+                ? groups.map(g =>
+                    `<span class="chip">${escapeHtml(g)}<button type="button" class="chip-remove" title="Remove group"
+                          onclick="removeAllowedGroup('${jsArg(host)}','${jsArg(g)}')">×</button></span>`).join('')
+                : `<span class="chip-empty">Any signed-in, approved user</span>`;
+            const suggestions = [...new Set([..._accessGroupSuggestions, ...groups])].sort();
+            const options = suggestions.map(g => `<option value="${escapeHtml(g)}">`).join('');
+            return `<div class="detail-row"><span class="detail-label">Allowed groups</span><span class="detail-value">
+                <div class="groups-picker">
+                    <div class="chip-list">${chips}</div>
+                    <div class="chip-input-row">
+                        <input type="text" class="form-input" id="pub-agroup-input-${id}"
+                               list="pub-agroup-list-${id}" placeholder="Add group…" autocomplete="off"
+                               onkeydown="if(event.key==='Enter'){event.preventDefault();addAllowedGroup('${jsArg(host)}','${id}')}">
+                        <button type="button" class="btn btn-small btn-secondary"
+                                onclick="addAllowedGroup('${jsArg(host)}','${id}')">Add</button>
+                    </div>
+                    <datalist id="pub-agroup-list-${id}">${options}</datalist>
+                    <span class="pub-hint">Leave empty — any signed-in, approved user can reach this.
+                        Otherwise a visitor needs at least one of these groups.</span>
+                </div></span></div>`;
         }
 
         // A discoverable container that isn't published yet — a "+ Publish" row in the Services list
@@ -557,6 +630,44 @@
         async function setPublishedAuthMode(dnsAddress, pathPrefix, authMode) {
             try { await patchPublishedService(dnsAddress, pathPrefix, { authMode }); await fetchPublishedServices(); }
             catch (e) { displayError(`Failed to update authentication: ${e.message}`); }
+        }
+
+        // Persist a Social service's access rule (its any-of allowed groups). An empty list clears the
+        // rule server-side, meaning any signed-in, approved user may reach the service.
+        async function putServiceAccessRule(host, groups) {
+            const r = await fetch('/access/services/' + encodeURIComponent(host) + '/groups', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groups }),
+            });
+            if (!r.ok) throw new Error(await apiErrorMessage(r));
+        }
+
+        // Add a group to a Social service's allowed-groups rule. Edits apply immediately (like the
+        // auth-mode picker) — no separate save step, so the visible chips are always the live rule.
+        async function addAllowedGroup(host, id) {
+            const input = document.getElementById('pub-agroup-input-' + id);
+            if (!input) return;
+            const value = (input.value || '').trim();
+            input.value = '';
+            if (!value) return;
+            const current = (_serviceAccessRules[host] || []);
+            if (current.some(g => g.toLowerCase() === value.toLowerCase())) return;
+            try {
+                await putServiceAccessRule(host, current.concat(value));
+                await fetchServiceAccessRules();
+                await fetchAccessGroupSuggestions();
+                if (!isEditingMachineCard()) displayPeers(peers);
+            } catch (e) { displayError(`Failed to update allowed groups: ${e.message}`); }
+        }
+
+        async function removeAllowedGroup(host, group) {
+            const next = (_serviceAccessRules[host] || []).filter(g => g !== group);
+            try {
+                await putServiceAccessRule(host, next);
+                await fetchServiceAccessRules();
+                if (!isEditingMachineCard()) displayPeers(peers);
+            } catch (e) { displayError(`Failed to update allowed groups: ${e.message}`); }
         }
 
         async function setPublishedDirectUrlDisabled(dnsAddress, pathPrefix, directUrlDisabled) {
@@ -2177,6 +2288,8 @@
         fetchServerLocation();
         fetchPublishedServices();
         fetchPublishable();
+        fetchServiceAccessRules();
+        fetchAccessGroupSuggestions();
         fetchPublishProgress();
         detectEdition();
 

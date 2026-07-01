@@ -5,6 +5,7 @@ import net.vaier.domain.AccessEntry;
 import net.vaier.domain.AccessRoster;
 import net.vaier.domain.Role;
 import net.vaier.domain.port.ForPersistingAccessEntries;
+import net.vaier.domain.port.ForPersistingServiceAccessRules;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.DumperOptions;
@@ -32,13 +33,17 @@ import java.util.Optional;
  *     role: admin            # admin | user | pending — sole authority for admin-vs-user
  *     groups: [devs]         # per-service access tags only (never admins/users)
  * serviceGroups:
- *   plex.example.com: family
- *   git.example.com: devs
+ *   plex.example.com: [family, media]   # any-of allowed groups for the host
+ *   git.example.com: [devs]
  * </pre>
+ *
+ * <p>Back-compat: a host whose value is a bare scalar (written before the any-of change) is read as
+ * a one-element list.
  */
 @Component
 @Slf4j
-public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvingServiceGroup {
+public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvingServiceGroup,
+        ForPersistingServiceAccessRules {
 
     private static final String FILE_NAME = "access.yml";
     private static final String ENTRIES_KEY = "entries";
@@ -151,16 +156,71 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
     }
 
     @Override
-    public synchronized Optional<String> requiredGroupForHost(String host) {
+    public synchronized List<String> allowedGroupsForHost(String host) {
         if (host == null) {
-            return Optional.empty();
+            return List.of();
         }
         Object rawGroups = load().get(SERVICE_GROUPS_KEY);
         if (!(rawGroups instanceof Map<?, ?> groupsMap)) {
-            return Optional.empty();
+            return List.of();
         }
-        String group = asString(groupsMap.get(host));
-        return (group == null || group.isBlank()) ? Optional.empty() : Optional.of(group);
+        return readAllowedGroups(groupsMap.get(host));
+    }
+
+    @Override
+    public synchronized Map<String, List<String>> allServiceAccessRules() {
+        Object rawGroups = load().get(SERVICE_GROUPS_KEY);
+        if (!(rawGroups instanceof Map<?, ?> groupsMap)) {
+            return Map.of();
+        }
+        Map<String, List<String>> rules = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : groupsMap.entrySet()) {
+            List<String> groups = readAllowedGroups(e.getValue());
+            if (!groups.isEmpty()) {
+                rules.put(String.valueOf(e.getKey()), groups);
+            }
+        }
+        return rules;
+    }
+
+    @Override
+    public synchronized void setAllowedGroups(String host, List<String> groups) {
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("host must not be blank");
+        }
+        Map<String, Object> root = load();
+        Map<String, Object> serviceGroups = section(root, SERVICE_GROUPS_KEY);
+        List<String> normalised = normaliseGroups(groups);
+        // An empty rule means "any approved user" — represented by the absence of the host key.
+        if (normalised.isEmpty()) {
+            serviceGroups.remove(host);
+        } else {
+            serviceGroups.put(host, normalised);
+        }
+        write(root);
+    }
+
+    /**
+     * Read a {@code serviceGroups} value as an any-of group list. Accepts both the current list form
+     * ({@code [family, media]}) and the legacy bare-scalar form ({@code family}) for back-compat.
+     */
+    private static List<String> readAllowedGroups(Object raw) {
+        if (raw instanceof List<?> list) {
+            return normaliseGroups(list.stream().map(AccessFileAdapter::asString).toList());
+        }
+        String scalar = asString(raw);
+        return (scalar == null || scalar.isBlank()) ? List.of() : List.of(scalar.trim());
+    }
+
+    private static List<String> normaliseGroups(List<String> groups) {
+        if (groups == null) {
+            return List.of();
+        }
+        return groups.stream()
+                .filter(g -> g != null && !g.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
     }
 
     @SuppressWarnings("unchecked")

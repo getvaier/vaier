@@ -1,9 +1,11 @@
 package net.vaier.rest;
 
 import net.vaier.application.AssignGroupsUseCase;
+import net.vaier.application.GetServiceAccessRulesUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
 import net.vaier.application.RevokeAccessUseCase;
+import net.vaier.application.SetServiceAccessRuleUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
@@ -29,6 +31,8 @@ class AuthzRestControllerTest {
     @Mock GrantRoleUseCase grantRoleUseCase;
     @Mock AssignGroupsUseCase assignGroupsUseCase;
     @Mock RevokeAccessUseCase revokeAccessUseCase;
+    @Mock SetServiceAccessRuleUseCase setServiceAccessRuleUseCase;
+    @Mock GetServiceAccessRulesUseCase getServiceAccessRulesUseCase;
 
     @InjectMocks AuthzRestController controller;
 
@@ -157,6 +161,44 @@ class AuthzRestControllerTest {
 
         verify(revokeAccessUseCase).revokeAccess("gone@example.com");
         assertThat(response.getStatusCode().value()).isEqualTo(200);
+    }
+
+    // --- PUT /access/services/{host}/groups (set a per-service access rule) ---
+
+    @Test
+    void setServiceAccessRule_delegatesToUseCase() {
+        ResponseEntity<String> response = controller.setServiceAccessRule("plex.example.com",
+                new AuthzRestController.ServiceAccessRuleRequest(List.of("family", "media")));
+
+        verify(setServiceAccessRuleUseCase).setAllowedGroups("plex.example.com", List.of("family", "media"));
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    void setServiceAccessRule_emptyGroupsClearsTheRule() {
+        controller.setServiceAccessRule("plex.example.com",
+                new AuthzRestController.ServiceAccessRuleRequest(List.of()));
+
+        verify(setServiceAccessRuleUseCase).setAllowedGroups("plex.example.com", List.of());
+    }
+
+    @Test
+    void setServiceAccessRule_nullGroupsTreatedAsEmpty() {
+        controller.setServiceAccessRule("plex.example.com",
+                new AuthzRestController.ServiceAccessRuleRequest(null));
+
+        verify(setServiceAccessRuleUseCase).setAllowedGroups("plex.example.com", List.of());
+    }
+
+    // --- GET /access/services (list per-service access rules) ---
+
+    @Test
+    void getServiceAccessRules_returnsTheRulesMap() {
+        java.util.Map<String, List<String>> rules = java.util.Map.of(
+                "plex.example.com", List.of("family"), "git.example.com", List.of("devs"));
+        when(getServiceAccessRulesUseCase.getServiceAccessRules()).thenReturn(rules);
+
+        assertThat(controller.getServiceAccessRules()).isEqualTo(rules);
     }
 
     // --- last-admin protection surfaces as 409 Conflict ---
