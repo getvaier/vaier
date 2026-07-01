@@ -513,6 +513,16 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   `ForPersistingUsers.changePassword` port and its `AutheliaUserAdapter` implementation are kept for now
   and cleaned up when Authelia is decommissioned.
 
+**Delivered (all published services migrated to social on startup, TDD-first):** ✅
+- `SocialAuthMigration`, an idempotent `ApplicationReadyEvent` component, flips every remaining
+  `AuthMode.AUTHELIA` published route over to `AuthMode.SOCIAL` in one pass on boot — the mass move off
+  Authelia forward-auth now that the console and `dozzle` proved the chain. It reads all routes via the
+  `ForPersistingReverseProxyRoutes` port and calls `setRouteAuthMode(dnsName, pathPrefix, SOCIAL)` for
+  each Authelia route, which swaps the middleware chain and stands up the per-host `/oauth2/` helper
+  router. `NONE` and `SOCIAL` routes are left untouched, so a second run flips nothing (there are no
+  Authelia routes left). Reversible while Authelia's container is still running; the container is removed
+  in a later step. No new domain concept — the mode decision stays on `ReverseProxyRoute.authMode()`.
+
 **Delivered (role is the sole admin/user authority, TDD-first):** ✅
 - **Role** and **access groups** are now cleanly orthogonal — the role (`pending`/`user`/`admin`) is the
   single authority for admin-vs-user, and groups are purely **per-service access tags**. The reserved

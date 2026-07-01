@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.Server.State;
@@ -481,12 +482,17 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void launchpadUrl_authProtectedRoute_routesThroughTheAutheliaLoginUrl() {
+    void launchpadUrl_socialRoute_linksDirectlyRelyingOnDomainWideSso() {
+        // A social-gated route links straight to its host — no Authelia portal, no /oauth2/start
+        // bounce. The domain-wide oauth2-proxy cookie means an already-signed-in user passes edge
+        // auth; an anonymous user is met at the edge with the Google sign-in.
         ReverseProxyRoute route = new ReverseProxyRoute("r", "internal.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null));
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null,
+            List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE), null, false);
 
         assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
-            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Finternal.example.com%2F");
+            .isEqualTo("https://internal.example.com");
     }
 
     @Test
@@ -523,23 +529,27 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void launchpadUrl_authProtectedRouteWithRedirect_encodesRedirectAsRdTarget() {
+    void launchpadUrl_socialRouteWithRedirect_linksDirectlyToTheLandingPath() {
         ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null,
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null,
+            List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE),
             "/builder/ui/", false, false, null, "/builder/ui");
 
         assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
-            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fbmp.example.com%2Fbuilder%2Fui%2F");
+            .isEqualTo("https://bmp.example.com/builder/ui/");
     }
 
     @Test
-    void launchpadUrl_authProtectedRouteWithPathPrefix_encodesPathPrefixAsRdTarget() {
+    void launchpadUrl_socialRouteWithPathPrefix_linksDirectlyToThePathPrefix() {
         ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null,
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null,
+            List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE),
             null, false, false, null, "/builder/ui/");
 
         assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
-            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fbmp.example.com%2Fbuilder%2Fui%2F");
+            .isEqualTo("https://bmp.example.com/builder/ui/");
     }
 
     @Test

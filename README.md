@@ -220,6 +220,12 @@ time; the change rewrites only that route's Traefik middleware chain. **Social**
 only offered when Google OAuth is configured (`VAIER_OIDC_GOOGLE_CLIENT_ID` set and the `social` Compose
 profile enabled — see `docker-compose.yml`); without it, services stay on Public/Authelia exactly as before.
 
+**Social is now the norm.** On startup Vaier runs a one-off, idempotent migration that flips every
+remaining **Authelia**-gated published route to **Social** — so all protected services move off Authelia
+forward-auth in one go. Public (no-auth) routes are left alone, and routes already on Social are untouched,
+so a second boot changes nothing. Authelia's container keeps running for now, so the flip is reversible; it
+is removed in a later step.
+
 When someone signs in with Google for the first time, Vaier records them as a **pending** access request (authenticated but blocked) and denies access until an admin approves them. The moment that pending entry is created, Vaier emails every admin so the request doesn't sit unseen — the mail names the email and links straight to the **Users → Access** page to approve or deny. It reuses the same SMTP configuration as the other alerts, so with SMTP unconfigured (or no admins to notify) it stays silent, and the send is fire-and-forget so it never slows the sign-in check.
 
 Admin-vs-user is decided **only by the role** (pending → user → admin) — promote an entry with the role control. **Access groups** are a separate, per-service concept: free-form tags (e.g. `devs`, `family`) that gate individual services, where a user reaches a service only if their entry carries the group the service requires (admins reach everything). The names `admins` and `users` are never access groups; the group picker on the Access page won't suggest or accept them.

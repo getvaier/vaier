@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.port.ForDiscoveringPeerContainers;
 import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
 import net.vaier.domain.port.ForGettingLanServerScrape;
@@ -306,10 +307,12 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
-    void getLaunchpadServices_authenticatedRoute_urlGoesViaAuthelia() {
+    void getLaunchpadServices_socialRoute_urlLinksDirectlyToTheHost() {
         ReverseProxyRoute route = new ReverseProxyRoute(
             "route", "app.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null,
+            List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE), null, false
         );
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
         setupDnsRecord("app.example.com", DnsRecordType.CNAME);
@@ -319,7 +322,7 @@ class GetLaunchpadServicesTest {
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result.get(0).url())
-            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fapp.example.com%2F");
+            .isEqualTo("https://app.example.com");
     }
 
     @Test
@@ -408,11 +411,12 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
-    void getLaunchpadServices_authProtectedPathRoute_autheliaReturnTargetHasNoTrailingSlash() {
+    void getLaunchpadServices_socialPathRoute_linksDirectlyToThePathPrefix() {
         ReverseProxyRoute pathBased = new ReverseProxyRoute(
             "svc-grafana-router", "svc.example.com", "10.0.0.1", 8080, "svc",
             new ReverseProxyRoute.AuthInfo("forwardAuth", null, null),
-            null, null, null, null, false, false, null, "/grafana"
+            null, null, List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE), null, false, false, null, "/grafana"
         );
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(pathBased));
         setupDnsRecord("svc.example.com", DnsRecordType.CNAME);
@@ -422,7 +426,7 @@ class GetLaunchpadServicesTest {
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
         assertThat(result.get(0).url())
-            .isEqualTo("https://login.example.com/?rd=https%3A%2F%2Fsvc.example.com%2Fgrafana");
+            .isEqualTo("https://svc.example.com/grafana");
     }
 
     @Test

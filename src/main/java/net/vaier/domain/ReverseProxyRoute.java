@@ -323,23 +323,16 @@ public class ReverseProxyRoute {
 
     /**
      * The URL the launchpad tile links to. A reachable direct-LAN URL wins (see {@link #directUrl});
-     * otherwise a public route links straight to its {@code https://} address, while an auth-protected
-     * route routes through Authelia's login URL so the browser navigates to that origin first —
-     * without it, SPA service workers serve a cached app that loops on its own login.
+     * otherwise every route — public or social-gated — links straight to its {@code https://} address.
+     * The oauth2-proxy SSO cookie is domain-wide, so an already-signed-in user reaches a social route
+     * without a fresh login (Traefik's edge auth passes the request through), and an anonymous user is
+     * met at the edge with the Google sign-in carrying the correct return URL. No portal bounce.
      */
     public String launchpadUrl(String callerIp, List<PeerConfiguration> peers,
                                List<VpnClient> vpnClients, String baseDomain) {
         String direct = directUrl(callerIp, peers, vpnClients);
         if (direct != null) return direct;
-        String landingPath = landingPath();
-        if (authInfo == null) {
-            return "https://" + domainName + landingPath;
-        }
-        // Authelia needs an absolute target with at least a path; bare "https://host" round-trips
-        // through the login flow and lands the browser on the host root without a slash.
-        String target = "https://" + domainName + (landingPath.isEmpty() ? "/" : landingPath);
-        String encoded = URLEncoder.encode(target, StandardCharsets.UTF_8);
-        return "https://" + new VaierHostnames(baseDomain).autheliaHost() + "/?rd=" + encoded;
+        return "https://" + domainName + landingPath();
     }
 
     /**
