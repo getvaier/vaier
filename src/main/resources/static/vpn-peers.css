@@ -290,6 +290,25 @@
             margin-top: 0.75rem;
         }
 
+        /* Collapsed "Connection details" disclosure — the read-only WireGuard diagnostics live behind
+           this so an expanded card leads with settings + services. Quiet by default; hover to surface. */
+        .conn-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin-top: 0.85rem;
+            padding: 0.2rem 0;
+            font-size: 0.72rem;
+            letter-spacing: 0.02em;
+            color: var(--text-dim);
+            cursor: pointer;
+            user-select: none;
+            width: fit-content;
+        }
+        .conn-toggle:hover { color: var(--text-muted); }
+        .conn-toggle .conn-caret { font-size: 0.6rem; line-height: 1; }
+        .peer-details.conn-details { margin-top: 0.5rem; }
+
         /* Config preview */
         .config-preview {
             background: var(--bg);

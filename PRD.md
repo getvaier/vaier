@@ -441,9 +441,10 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   plus authenticated admin endpoints `GET /access`, `PATCH /access/{email}/role`,
   `PATCH /access/{email}/groups`, `DELETE /access/{email}`.
 - UI: an **Access overview on the Users page** (alongside the Authelia users — both are identity/access
-  management) — entries grouped and filterable by role, **pending rows highlighted at the top** with an
-  "N awaiting approval" count, per-row email, role badge, group chips, and actions (Approve → User /
-  Approve → Admin, edit groups, Revoke).
+  management) — one flat list, **pending rows highlighted at the top** with an "N awaiting approval"
+  count, per-row identity monogram, email, role badge, group chips, and actions (Approve as user /
+  Approve as admin, edit groups, Revoke). _(The Authelia list and the by-role filter tabs were later
+  removed — see the Users-page convergence and redesign entries below.)_
 
 **Delivered in step 3a (per-service social auth mode, TDD-first):**
 - Domain: `domain.AuthMode` (originally `NONE`/`AUTHELIA`/`SOCIAL`) replaces the per-route "requires auth" boolean.
@@ -512,9 +513,34 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - The legacy Authelia user-management surface was removed now that names and email are provider-owned
   (Google): the local-password user list, add-user form, change-groups modal, delete-user action, and the
   group manager are gone from `users.html`, and the **Users** page is now the single access-entry list
-  (pending highlight, role control, per-service groups, pre-approve-by-email, revoke, filters, last-admin
+  (pending highlight, role control, per-service groups, pre-approve-by-email, revoke, last-admin
   guard). The chip picker's group suggestions are derived from the groups already assigned across entries
   (the removed `/groups` feed is gone).
+
+**Delivered (Infrastructure card declutter — Connection details disclosure):** ✅
+- An expanded VPN-peer card used to show a flat grid mixing editable settings (name, description,
+  device category, LAN CIDR/address) with raw read-only WireGuard diagnostics (IP, public key, allowed
+  IPs, endpoint, Rx/Tx, last seen). The diagnostics now collapse behind a quiet **Connection details**
+  toggle (`toggleConnection`, state held in the `expandedConnection` set so it survives SSE/poll
+  re-renders like the other expansion sets), so an expanded card leads with the settings and services
+  the operator manages. Last-seen / Rx-Tx still update live via the `peers-stats` SSE stream when the
+  block is open — the header machine-icon colour already signals liveness when it isn't. LAN-server and
+  Vaier-server cards are unchanged (they carry no WireGuard internals). Static-resource-only change.
+- The inline machine-field editors (peer name / description / LAN CIDR / LAN address, and LAN-server
+  name / description) **lost their per-field Save buttons** — they now **save on blur** (or on Enter,
+  which blurs), matching the published-service editor fields. A green flash + toast confirms; an
+  unchanged field is a silent no-op; a blank or duplicate name reverts. Because a blur-save repaints
+  the list to refresh the card header, the repaint is deferred while another card field is focused
+  (tabbing between edits) and flushed on `focusout`, so it can't wipe an edit-in-progress.
+
+**Delivered (Users page redesign — one calm roster):** ✅
+- `users.html` was reworked from a control-panel layout into a single scannable roster. The by-role
+  filter tabs (All / Pending / Users / Admins) and the per-role section headings were dropped — with a
+  homelab's handful of users a flat list is clearer than filtering. Each row now leads with a per-identity
+  **monogram** (a square tile whose hue is derived from the email; pending identities are forced amber),
+  the wall-of-text description shrank to a one-line subtitle, and the pre-approve form collapses behind a
+  header button so the roster stays the focus. A group row's **Save** button stays disabled until the
+  group set actually changes. No API, endpoint, or use-case change — purely a static-resource redesign.
 - REST + use cases removed: `GET/POST /users`, `DELETE /users/{username}`, `PUT /users/{username}/email`,
   `/displayname`, `/groups`, `GET /groups`, `DELETE /groups/{name}` and their `AddUser`/`DeleteUser`/
   `UpdateUserEmail`/`UpdateUserDisplayName`/`GetUsers`/`GetGroups`/`UpdateUserGroups`/`DeleteGroup` use

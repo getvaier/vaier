@@ -6,6 +6,219 @@
     <title>Users</title>
     <link rel="stylesheet" href="styles.css">
     <style>
+        /* --- Page header --- */
+        .users-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.25rem;
+        }
+
+        .users-head-text h1 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text);
+            letter-spacing: 0.01em;
+        }
+
+        .users-head-text p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        .users-head-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-shrink: 0;
+        }
+
+        /* Amber count of identities waiting at the door — only rendered when there are any. */
+        .waiting-pill {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #ddb640;
+            background: rgba(221, 182, 64, 0.12);
+            border: 1px solid #6b5a2a;
+            border-radius: 2px;
+            padding: 0.2rem 0.55rem;
+            white-space: nowrap;
+        }
+
+        /* --- Pre-approve (collapsed behind the header button) --- */
+        .preapprove-panel {
+            display: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 0.9rem 1rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .preapprove-panel.open { display: block; }
+
+        .preapprove-panel .hint {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 0.6rem;
+            line-height: 1.5;
+        }
+
+        .preapprove-form {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .preapprove-form .preapprove-email {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .preapprove-form .preapprove-role { flex: 0 0 auto; width: auto; }
+
+        /* --- Roster --- */
+        .roster {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .person {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            padding: 0.85rem 1rem;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            grid-template-areas:
+                "mono identity actions"
+                "mono groups   groups";
+            column-gap: 0.9rem;
+            row-gap: 0.7rem;
+            align-items: start;
+            transition: border-color 0.12s;
+        }
+
+        .person:hover { border-color: var(--border-hi); }
+
+        /* Awaiting approval — the one row type that should catch the eye. */
+        .person.pending {
+            border-color: #6b5a2a;
+            background: rgba(221, 182, 64, 0.05);
+        }
+
+        /* Signature: a per-identity monogram. Square (matching the IDE 2px radius, not a social
+           round avatar); background/foreground hues are derived from the email so each person keeps
+           a stable colour. Pending identities are forced amber to read as "not yet one of us". */
+        .mono {
+            grid-area: mono;
+            width: 38px;
+            height: 38px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            user-select: none;
+        }
+
+        .identity { grid-area: identity; min-width: 0; }
+
+        .identity-line {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .person-name {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            word-break: break-word;
+        }
+
+        .person-email {
+            font-family: var(--mono);
+            font-size: 0.76rem;
+            color: var(--text-muted);
+            word-break: break-all;
+        }
+
+        /* When there is no display name yet, the email is promoted to the primary line. */
+        .person-email.primary {
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+
+        .role-badge {
+            font-size: 0.66rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            padding: 0.08rem 0.4rem;
+            border-radius: 2px;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .role-badge.admin   { color: var(--accent); border-color: rgba(79, 195, 247, 0.4); }
+        .role-badge.user    { color: var(--green);  border-color: rgba(78, 201, 176, 0.4); }
+        .role-badge.pending { color: #ddb640;       border-color: #6b5a2a; }
+
+        .person-actions {
+            grid-area: actions;
+            display: flex;
+            gap: 0.25rem;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        /* Explains why the sole admin's demote/revoke controls are disabled. */
+        .lastadmin-note {
+            grid-area: actions;
+            justify-self: end;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-style: italic;
+            max-width: 15rem;
+            text-align: right;
+        }
+
+        .groups-cell {
+            grid-area: groups;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6rem;
+            padding-top: 0.15rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .person.pending .groups-cell { border-top-color: #514627; }
+
+        .groups-label {
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-dim);
+            padding-top: 0.55rem;
+            flex-shrink: 0;
+        }
+
+        .groups-picker-slot { flex: 1; min-width: 0; }
+
+        .groups-save { flex-shrink: 0; align-self: flex-start; }
+
+        /* --- Chip picker (group tags) --- */
         .groups-picker {
             display: flex;
             flex-direction: column;
@@ -24,30 +237,30 @@
             display: inline-flex;
             align-items: center;
             gap: 0.3rem;
-            padding: 0.15rem 0.45rem;
-            background: #0e639c;
-            color: #fff;
+            padding: 0.12rem 0.45rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border-hi);
+            color: var(--text);
             border-radius: 2px;
             font-family: var(--mono);
-            font-size: 0.78rem;
+            font-size: 0.76rem;
         }
 
         .chip-remove {
             background: none;
             border: 0;
-            color: #fff;
+            color: var(--text-muted);
             cursor: pointer;
             padding: 0;
             font-size: 0.95rem;
             line-height: 1;
-            opacity: 0.8;
         }
 
-        .chip-remove:hover { opacity: 1; }
+        .chip-remove:hover { color: var(--red); }
 
         .chip-empty {
-            font-size: 0.78rem;
-            color: var(--text-muted);
+            font-size: 0.76rem;
+            color: var(--text-dim);
             font-style: italic;
         }
 
@@ -55,217 +268,36 @@
             display: flex;
             gap: 0.4rem;
             align-items: center;
+            max-width: 26rem;
         }
 
         .chip-input-row .form-input {
             flex: 1;
             min-width: 0;
-        }
-
-        /* --- Access (social-login authorization) --- */
-        /* Reuses this page's existing .chip*, .btn*, .loading styles. */
-        .access-section {
-            margin-bottom: 1.75rem;
-        }
-
-        .access-section-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            margin-bottom: 0.4rem;
-            flex-wrap: wrap;
-        }
-
-        .access-heading {
-            font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-            margin: 0;
-        }
-
-        .access-desc {
             font-size: 0.78rem;
+            padding: 0.3rem 0.5rem;
+        }
+
+        .empty {
+            text-align: center;
+            padding: 2.5rem 1rem;
             color: var(--text-muted);
-            line-height: 1.5;
-            margin: 0 0 0.75rem;
-        }
-
-        .pending-count {
-            font-size: 0.72rem;
-            font-weight: 600;
-            color: #ddb640;
-            background: rgba(221, 182, 64, 0.12);
-            border: 1px solid #6b5a2a;
-            border-radius: 2px;
-            padding: 0.15rem 0.5rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .pending-count.none {
-            color: var(--text-dim);
-            background: transparent;
-            border-color: var(--border);
-            font-weight: 400;
-        }
-
-        .access-filters {
-            display: flex;
-            gap: 0.3rem;
-            margin-bottom: 0.75rem;
-            flex-wrap: wrap;
-        }
-
-        .access-filter {
-            font-size: 0.72rem;
-            padding: 0.2rem 0.6rem;
-            border: 1px solid var(--border);
-            border-radius: 2px;
-            background: transparent;
-            color: var(--text-muted);
-            cursor: pointer;
-        }
-
-        .access-filter.active {
-            color: var(--accent);
-            border-color: var(--accent);
-        }
-
-        .access-preapprove {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-        .access-preapprove .preapprove-label {
-            width: 100%;
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            margin-bottom: 0.1rem;
-        }
-        .access-preapprove .preapprove-email {
-            flex: 1;
-            min-width: 200px;
-        }
-        .access-preapprove .preapprove-role {
-            flex: 0 0 auto;
-        }
-
-        .access-group-title {
-            font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: var(--text-dim);
-            margin: 1rem 0 0.5rem;
-        }
-
-        .access-row {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 2px;
-            padding: 0.75rem 1rem;
-            margin-bottom: 0.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.6rem;
-        }
-
-        /* Pending identities are awaiting approval — make them impossible to miss. */
-        .access-row.pending {
-            border-color: #6b5a2a;
-            background: rgba(221, 182, 64, 0.06);
-        }
-
-        .access-row-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-        }
-
-        .access-email {
-            font-family: var(--mono);
             font-size: 0.85rem;
-            color: var(--text);
-            word-break: break-all;
-        }
-
-        /* Identity block: display name on top, email beneath. When the provider has no name yet,
-           the email takes the primary line and the secondary line is omitted. */
-        .access-identity {
-            display: flex;
-            flex-direction: column;
-            gap: 0.15rem;
-            min-width: 0;
-        }
-
-        .access-identity-head {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .access-name {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text);
-            word-break: break-word;
-        }
-
-        /* The email demoted to a caption when a display name leads. */
-        .access-email.secondary {
-            font-size: 0.74rem;
-            color: var(--text-muted);
-        }
-
-        .role-badge {
-            font-size: 0.68rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            padding: 0.1rem 0.45rem;
+            line-height: 1.6;
+            border: 1px dashed var(--border);
             border-radius: 2px;
-            border: 1px solid var(--border);
-            margin-left: 0.5rem;
         }
 
-        .role-badge.admin   { color: var(--accent); border-color: var(--accent); }
-        .role-badge.user    { color: var(--green);  border-color: var(--green); }
-        .role-badge.pending { color: #ddb640;       border-color: #6b5a2a; }
-
-        .access-actions {
-            display: flex;
-            gap: 0.3rem;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        /* Explains why the sole admin's Revoke / Make-user controls are disabled. */
-        .access-lastadmin-note {
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            font-style: italic;
-        }
-
-        .access-groups-row {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.4rem;
-            flex-wrap: wrap;
-        }
-
-        .access-groups-label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-muted);
-            padding-top: 0.3rem;
+        @media (max-width: 600px) {
+            .person {
+                grid-template-columns: auto 1fr;
+                grid-template-areas:
+                    "mono identity"
+                    "actions actions"
+                    "groups groups";
+            }
+            .person-actions { justify-content: flex-start; }
+            .lastadmin-note { justify-self: start; text-align: left; }
         }
     </style>
 </head>
@@ -273,37 +305,32 @@
     <div class="container">
         <div id="message"></div>
 
-        <!-- Users — social identities from the external identity provider -->
-        <div class="access-section" id="accessSection">
-            <div class="access-section-head">
-                <h2 class="access-heading">Users</h2>
-                <span class="pending-count none" id="pendingCount">0 awaiting approval</span>
+        <div class="users-head">
+            <div class="users-head-text">
+                <h1>Users</h1>
+                <p>Everyone who can sign in with Google. New people land here awaiting approval.</p>
             </div>
-            <p class="access-desc">
-                Everyone who can sign in. People appear here the first time they sign in with Google, as
-                <strong>pending</strong> (authenticated but blocked) until you approve them. Approve to
-                <em>user</em> (reaches approved services) or <em>admin</em> (also administers Vaier).
-                Names and email come from Google and can't be edited here. Groups are per-service access
-                tags — admin vs user is set only by the role control.
-            </p>
-            <form class="access-preapprove" id="preApproveForm">
-                <span class="preapprove-label">Grant access before the first sign-in — they'll be approved the moment they sign in with Google.</span>
+            <div class="users-head-actions">
+                <span class="waiting-pill" id="waitingPill" style="display:none"></span>
+                <button class="btn btn-primary" id="preApproveToggle" aria-expanded="false">Pre-approve</button>
+            </div>
+        </div>
+
+        <!-- Grant access before the first sign-in. Kept collapsed so the roster stays the focus. -->
+        <div class="preapprove-panel" id="preApprovePanel">
+            <p class="hint">Know someone's email? Grant them a role now — they're approved the moment they first sign in with Google.</p>
+            <form class="preapprove-form" id="preApproveForm">
                 <input type="email" class="form-input preapprove-email" id="preApproveEmail"
                        placeholder="name@email.com" autocomplete="off" aria-label="Email to pre-approve">
                 <select class="form-input preapprove-role" id="preApproveRole" aria-label="Role to grant">
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
                 </select>
-                <button type="submit" class="btn" id="preApproveBtn">Pre-approve</button>
+                <button type="submit" class="btn btn-primary" id="preApproveBtn">Pre-approve</button>
             </form>
-            <div class="access-filters" id="accessFilters">
-                <button class="access-filter active" data-filter="all">All</button>
-                <button class="access-filter" data-filter="pending">Pending</button>
-                <button class="access-filter" data-filter="user">Users</button>
-                <button class="access-filter" data-filter="admin">Admins</button>
-            </div>
-            <div id="accessList"><div class="loading">Loading users…</div></div>
         </div>
+
+        <div class="roster" id="roster"><div class="loading">Loading users…</div></div>
     </div>
 
     <div id="revokeAccessModal" class="modal">
@@ -313,7 +340,7 @@
             <p style="font-size:0.85rem;color:var(--text-muted)">
                 Remove access for <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="revokeAccessEmail"></code>?
             </p>
-            <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;">Their access stops now. If they sign in again they'll come back as pending and need approving.</p>
+            <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.5rem;">Their access stops now. If they sign in again they'll come back awaiting approval.</p>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('revokeAccessModal')">Cancel</button>
                 <button class="btn btn-danger" onclick="confirmRevokeAccess()">Revoke access</button>
@@ -333,14 +360,14 @@
             allGroups = [...set].sort();
         }
 
-        // Names that mirror the access Role (admin vs user) rather than gating a service. In the
-        // Access section, Role is the sole authority for admin-vs-user, so these are never valid
-        // per-service group tags — mirrors AccessEntry.ROLE_MIRRORING_GROUPS in the domain.
+        // Names that mirror the access Role (admin vs user) rather than gating a service. Role is the
+        // sole authority for admin-vs-user, so these are never valid per-service group tags —
+        // mirrors AccessEntry.ROLE_MIRRORING_GROUPS in the domain.
         const ROLE_MIRRORING_GROUPS = ['admins', 'users'];
 
         // Shown when an entry is the last remaining admin — the server refuses the change too, this is
         // just the friendlier client-side guard so the disabled controls read clearly.
-        const LAST_ADMIN_NOTE = "Can't remove the last administrator — promote another admin first.";
+        const LAST_ADMIN_NOTE = "Can't remove the last administrator.";
 
         function knownGroupsUnion(extra, perServiceOnly) {
             const set = new Set(allGroups);
@@ -349,8 +376,18 @@
             return [...set].sort();
         }
 
-        function mountGroupsPicker(containerId, pickerId, initial, perServiceOnly) {
-            pickers.set(pickerId, { selected: new Set(initial), perServiceOnly: !!perServiceOnly });
+        // Stable key for a group set, so a Save button can stay disabled until the set actually changes.
+        function groupsKey(groups) {
+            return [...groups].sort().join(' ');
+        }
+
+        function mountGroupsPicker(containerId, pickerId, initial, perServiceOnly, saveBtnId) {
+            pickers.set(pickerId, {
+                selected: new Set(initial),
+                perServiceOnly: !!perServiceOnly,
+                initialKey: groupsKey(initial),
+                saveBtnId: saveBtnId,
+            });
             const options = knownGroupsUnion(initial, perServiceOnly)
                 .map(g => `<option value="${escapeHtml(g)}">`).join('');
             const container = document.getElementById(containerId);
@@ -360,7 +397,7 @@
                     <div class="chip-list" id="chips-${pickerId}"></div>
                     <div class="chip-input-row">
                         <input type="text" class="form-input chip-input" id="chip-input-${pickerId}"
-                               list="groups-datalist-${pickerId}" placeholder="Add group…"
+                               list="groups-datalist-${pickerId}" placeholder="Add a group…"
                                autocomplete="off">
                         <button type="button" class="btn btn-small btn-secondary"
                                 onclick="addChip('${pickerId}')">Add</button>
@@ -377,22 +414,32 @@
             renderChips(pickerId);
         }
 
+        // Toggle a picker's Save button on/off depending on whether the group set differs from load.
+        function refreshDirty(pickerId) {
+            const state = pickers.get(pickerId);
+            if (!state || !state.saveBtnId) return;
+            const btn = document.getElementById(state.saveBtnId);
+            if (!btn) return;
+            btn.disabled = groupsKey(state.selected) === state.initialKey;
+        }
+
         function renderChips(pickerId) {
             const state = pickers.get(pickerId);
             const list = document.getElementById('chips-' + pickerId);
             if (!state || !list) return;
             if (state.selected.size === 0) {
-                list.innerHTML = '<span class="chip-empty">No groups</span>';
-                return;
+                list.innerHTML = '<span class="chip-empty">No groups — reaches services open to any approved user</span>';
+            } else {
+                const groups = [...state.selected].sort();
+                list.innerHTML = groups.map(g =>
+                    `<span class="chip">${escapeHtml(g)}<button type="button" class="chip-remove" aria-label="Remove ${escapeHtml(g)}">×</button></span>`
+                ).join('');
+                // Wire by index over the rendered order — never interpolate the group name
+                // into an onclick string (a " in the name would break out of the attribute).
+                list.querySelectorAll('.chip-remove').forEach((btn, i) =>
+                    btn.addEventListener('click', () => removeChip(pickerId, groups[i])));
             }
-            const groups = [...state.selected].sort();
-            list.innerHTML = groups.map(g =>
-                `<span class="chip">${escapeHtml(g)}<button type="button" class="chip-remove">×</button></span>`
-            ).join('');
-            // Wire by index over the rendered order — never interpolate the group name
-            // into an onclick string (a " in the name would break out of the attribute).
-            list.querySelectorAll('.chip-remove').forEach((btn, i) =>
-                btn.addEventListener('click', () => removeChip(pickerId, groups[i])));
+            refreshDirty(pickerId);
         }
 
         function addChip(pickerId) {
@@ -403,7 +450,7 @@
             const state = pickers.get(pickerId);
             if (!state) return;
             if (state.perServiceOnly && ROLE_MIRRORING_GROUPS.includes(value.toLowerCase())) {
-                displayMessage(`"${value}" is a role, not a service group. Use the role control for admin vs user.`, 'error');
+                displayMessage(`"${value}" is a role, not a service group. Use the role buttons for admin vs user.`, 'error');
                 input.value = '';
                 return;
             }
@@ -434,6 +481,23 @@
             return d.innerHTML;
         }
 
+        // Deterministic hue from the email, so each person keeps a stable monogram colour.
+        function hueFor(seed) {
+            let h = 0;
+            for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+            return h;
+        }
+
+        // One or two initials for the monogram: initials of the display name, else the email's lead.
+        function initialsFor(name, email) {
+            const src = (name && name.trim()) || email || '?';
+            const words = src.trim().split(/\s+/).filter(Boolean);
+            const letters = words.length >= 2
+                ? words[0][0] + words[1][0]
+                : src.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?';
+            return letters.toUpperCase();
+        }
+
         function displayMessage(message, type) {
             const el = document.getElementById('message');
             el.innerHTML = `<div class="${type}">${escapeHtml(message)}</div>`;
@@ -461,14 +525,11 @@
             if (e.target.classList.contains('modal')) e.target.classList.remove('active');
         });
 
-        // --- Access (social-login authorization) ---
-        // Reuses this page's escapeHtml, cardId, displayMessage and the mountGroupsPicker /
-        // getPickerGroups chip helpers (and allGroups, for group-name suggestions).
+        // --- Users (social-login access entries) ---
         let accessEntries = [];
-        let accessFilter = 'all';
 
         async function loadAccess() {
-            const list = document.getElementById('accessList');
+            const list = document.getElementById('roster');
             try {
                 const r = await fetch('/access', { cache: 'no-store' });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -476,87 +537,77 @@
                 deriveGroups();
                 renderAccess();
             } catch (e) {
-                list.innerHTML = '<div class="error">Failed to load users: ' + escapeHtml(e.message) + '</div>';
+                list.innerHTML = '<div class="error">Couldn\'t load users: ' + escapeHtml(e.message) + '</div>';
             }
         }
 
         function renderAccess() {
-            const list = document.getElementById('accessList');
-            const pending = accessEntries.filter(e => e.role === 'pending');
+            const list = document.getElementById('roster');
 
-            // Pending count badge — pending identities are time-sensitive, surface the total.
-            const countEl = document.getElementById('pendingCount');
-            countEl.textContent = pending.length + ' awaiting approval';
-            countEl.classList.toggle('none', pending.length === 0);
+            // Waiting pill — pending identities are time-sensitive; surface the count, hide it at zero.
+            const pending = accessEntries.filter(e => e.role === 'pending').length;
+            const pill = document.getElementById('waitingPill');
+            pill.textContent = pending + ' awaiting approval';
+            pill.style.display = pending ? '' : 'none';
 
-            const visible = accessEntries.filter(e => accessFilter === 'all' || e.role === accessFilter);
-            if (visible.length === 0) {
-                list.innerHTML = '<div class="loading">No matching users.</div>';
+            if (accessEntries.length === 0) {
+                list.innerHTML = '<div class="empty">No users yet.<br>People appear here the first time they sign in with Google — or pre-approve someone above.</div>';
                 return;
             }
 
             // The console is admin-only with no fallback, so the store must always keep at least one
-            // admin. Compute the count over ALL entries (not just the filtered view) so the guard holds
-            // even when the filter hides the other admins.
+            // admin — used to disable the sole admin's demote/revoke controls.
             const adminCount = accessEntries.filter(e => e.role === 'admin').length;
 
-            // Pending always float to the top; then admins, then users — each alphabetical.
+            // Pending float to the top, then admins, then users — each alphabetical. One flat list.
             const order = { pending: 0, admin: 1, user: 2 };
-            visible.sort((a, b) => (order[a.role] - order[b.role]) || a.email.localeCompare(b.email));
+            const rows = [...accessEntries].sort(
+                (a, b) => (order[a.role] - order[b.role]) || a.email.localeCompare(b.email));
 
-            const labels = { pending: 'Awaiting approval', admin: 'Admins', user: 'Users' };
             let html = '';
-            let lastGroup = null;
-            visible.forEach(entry => {
+            rows.forEach(entry => {
                 const id = cardId(entry.email);
-                if (accessFilter === 'all' && entry.role !== lastGroup) {
-                    lastGroup = entry.role;
-                    html += `<div class="access-group-title">${labels[entry.role]}</div>`;
-                }
                 // The sole remaining admin can be neither demoted nor revoked — that would lock the
-                // console out for everyone. Disable both controls and explain why inline.
+                // console out for everyone. Replace both controls with an inline note.
                 const isOnlyAdmin = entry.role === 'admin' && adminCount === 1;
                 let roleActions = '';
                 if (entry.role === 'pending') {
-                    roleActions = '<button class="btn btn-small btn-success js-role" data-role="user">Approve → User</button>'
-                                + '<button class="btn btn-small btn-primary js-role" data-role="admin">Approve → Admin</button>';
+                    roleActions = '<button class="btn btn-small btn-success js-role" data-role="user">Approve as user</button>'
+                                + '<button class="btn btn-small btn-primary js-role" data-role="admin">Approve as admin</button>';
                 } else if (entry.role === 'user') {
-                    roleActions = '<button class="btn btn-small btn-primary js-role" data-role="admin">Make admin</button>';
-                } else if (entry.role === 'admin') {
-                    roleActions = isOnlyAdmin
-                        ? `<button class="btn btn-small btn-secondary" disabled title="${LAST_ADMIN_NOTE}">Make user</button>`
-                        : '<button class="btn btn-small btn-secondary js-role" data-role="user">Make user</button>';
+                    roleActions = '<button class="btn btn-small btn-secondary js-role" data-role="admin">Make admin</button>';
+                } else if (entry.role === 'admin' && !isOnlyAdmin) {
+                    roleActions = '<button class="btn btn-small btn-secondary js-role" data-role="user">Make user</button>';
                 }
                 const revokeAction = isOnlyAdmin
-                    ? `<button class="btn btn-small btn-danger" disabled title="${LAST_ADMIN_NOTE}">Revoke</button>`
+                    ? ''
                     : '<button class="btn btn-small btn-danger js-revoke">Revoke</button>';
+
+                const hue = entry.role === 'pending' ? 44 : hueFor(entry.email);
+                const monoStyle = `background:hsl(${hue},42%,20%);color:hsl(${hue},60%,72%)`;
+                const initials = escapeHtml(initialsFor(entry.name, entry.email));
+
                 const hasName = entry.name && entry.name.trim();
-                const primary = hasName
-                    ? `<span class="access-name">${escapeHtml(entry.name)}</span>`
-                    : `<span class="access-email">${escapeHtml(entry.email)}</span>`;
-                const secondary = hasName
-                    ? `<span class="access-email secondary">${escapeHtml(entry.email)}</span>`
-                    : '';
+                const identity = hasName
+                    ? `<span class="person-name">${escapeHtml(entry.name)}</span>
+                       <span class="role-badge ${entry.role}">${entry.role}</span>
+                       <span class="person-email" style="flex-basis:100%">${escapeHtml(entry.email)}</span>`
+                    : `<span class="person-email primary">${escapeHtml(entry.email)}</span>
+                       <span class="role-badge ${entry.role}">${entry.role}</span>`;
+
+                const rightCol = isOnlyAdmin
+                    ? `<div class="lastadmin-note">${LAST_ADMIN_NOTE}</div>`
+                    : `<div class="person-actions">${roleActions}${revokeAction}</div>`;
+
                 html += `
-                <div class="access-row ${entry.role === 'pending' ? 'pending' : ''}" data-id="${id}">
-                    <div class="access-row-top">
-                        <div class="access-identity">
-                            <div class="access-identity-head">
-                                ${primary}
-                                <span class="role-badge ${entry.role}">${entry.role}</span>
-                            </div>
-                            ${secondary}
-                        </div>
-                        <div class="access-actions">
-                            ${roleActions}
-                            ${revokeAction}
-                        </div>
-                    </div>
-                    ${isOnlyAdmin ? `<div class="access-lastadmin-note">${LAST_ADMIN_NOTE}</div>` : ''}
-                    <div class="access-groups-row">
-                        <span class="access-groups-label">Groups</span>
-                        <div id="access-picker-${id}" style="flex:1;min-width:200px"></div>
-                        <button class="btn btn-small btn-primary js-save-groups">Save groups</button>
+                <div class="person ${entry.role === 'pending' ? 'pending' : ''}" data-id="${id}">
+                    <div class="mono" style="${monoStyle}">${initials}</div>
+                    <div class="identity"><div class="identity-line">${identity}</div></div>
+                    ${rightCol}
+                    <div class="groups-cell">
+                        <span class="groups-label">Groups</span>
+                        <div class="groups-picker-slot" id="access-picker-${id}"></div>
+                        <button class="btn btn-small btn-primary groups-save js-save-groups" id="save-${id}" disabled>Save</button>
                     </div>
                 </div>`;
             });
@@ -564,9 +615,9 @@
 
             // Mount the group picker and wire actions via closures — never interpolate the email
             // into an onclick string, where a " in the address would break out of the attribute.
-            visible.forEach(entry => {
+            rows.forEach(entry => {
                 const id = cardId(entry.email);
-                mountGroupsPicker('access-picker-' + id, 'access-' + id, entry.groups || [], true);
+                mountGroupsPicker('access-picker-' + id, 'access-' + id, entry.groups || [], true, 'save-' + id);
                 const row = list.querySelector(`[data-id="${id}"]`);
                 if (!row) return;
                 row.querySelectorAll('.js-role').forEach(btn =>
@@ -629,17 +680,17 @@
             } catch (e) { showModalError('revokeAccessError', e.message); }
         }
 
-        document.getElementById('accessFilters').addEventListener('click', e => {
-            const btn = e.target.closest('.access-filter');
-            if (!btn) return;
-            accessFilter = btn.getAttribute('data-filter');
-            document.querySelectorAll('.access-filter').forEach(b => b.classList.toggle('active', b === btn));
-            renderAccess();
+        // Pre-approve panel: collapsed by default so the roster stays the focus.
+        const preApproveToggle = document.getElementById('preApproveToggle');
+        const preApprovePanel = document.getElementById('preApprovePanel');
+        preApproveToggle.addEventListener('click', () => {
+            const open = preApprovePanel.classList.toggle('open');
+            preApproveToggle.setAttribute('aria-expanded', String(open));
+            if (open) document.getElementById('preApproveEmail').focus();
         });
 
         // Pre-approve an email before its first sign-in. /access/{email}/role upserts, so this
-        // creates the entry as user/admin; on first Google sign-in they skip pending. Groups can
-        // be added afterwards on the resulting row.
+        // creates the entry as user/admin; on first Google sign-in they skip awaiting approval.
         document.getElementById('preApproveForm').addEventListener('submit', async e => {
             e.preventDefault();
             const emailEl = document.getElementById('preApproveEmail');
@@ -661,6 +712,8 @@
                 if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'HTTP ' + r.status);
                 displayMessage(email + ' pre-approved as ' + role + ' — access starts at first sign-in.', 'success');
                 emailEl.value = '';
+                preApprovePanel.classList.remove('open');
+                preApproveToggle.setAttribute('aria-expanded', 'false');
                 loadAccess();
             } catch (err) {
                 displayMessage(err.message, 'error');

@@ -35,6 +35,15 @@
         // Which published-service rows are expanded into their inline editor (slice 2b). Keyed by the
         // service's unique name (dnsAddress + pathPrefix); persists across re-renders like expandedPeers.
         const expandedPublished = new Set();
+        // Which peer cards have their read-only "Connection details" block open. The raw WireGuard
+        // diagnostics (IP, public key, allowed IPs, endpoint, transfer) are collapsed by default so an
+        // expanded card leads with the settings and services you actually manage. Keyed by peer.id;
+        // persists across the SSE/poll re-renders like the other expansion sets.
+        const expandedConnection = new Set();
+        // Blur-save repaints the list so a saved name/description shows in the card header. If focus has
+        // moved to another field on the card (tabbing between edits), that repaint is deferred until
+        // focus leaves the card, so it can't wipe an edit-in-progress; a focusout flush repaints then.
+        let _renderPending = false;
 
         // A peer has an immutable id (slug — drives DOM keys + REST paths) and a separate
         // editable display name. This resolves the display name from the id for toasts and
@@ -49,7 +58,7 @@
                 const response = await fetch('/vpn/peers');
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 peers = await response.json();
-                displayPeers(peers);
+                renderPeersDeferrable();
                 lastFetchSuccessful = true;
                 document.getElementById('error-message').innerHTML = '';
             } catch (error) {
@@ -63,11 +72,19 @@
                 if (response.ok) {
                     const services = await response.json();
                     peerServices = Object.fromEntries(services.map(s => [s.peerName, s]));
-                    displayPeers(peers);
+                    renderPeersDeferrable();
                 }
             } catch (error) {
                 console.error('Failed to load peer services:', error);
             }
+        }
+
+        // Repaint the machine list, unless a card field is focused — then mark it pending and let the
+        // focusout flush repaint once editing stops (see the peers-container focusout listener).
+        function renderPeersDeferrable() {
+            if (isEditingMachineCard()) { _renderPending = true; return; }
+            _renderPending = false;
+            displayPeers(peers);
         }
 
         async function fetchVaierServerServices() {
@@ -91,7 +108,7 @@
                 const response = await fetch('/lan-servers');
                 if (response.ok) {
                     lanServers = await response.json();
-                    displayPeers(peers);
+                    renderPeersDeferrable();
                 }
             } catch (error) {
                 console.error('Failed to load LAN servers:', error);
@@ -536,6 +553,14 @@
             if (!isEditingMachineCard()) displayPeers(peers);
         }
 
+        // Show/hide a peer card's read-only Connection details block. Mirrors toggleIgnoredCandidates:
+        // the open set persists across re-renders, and we skip the rebuild while a field is being edited.
+        function toggleConnection(peerId) {
+            if (expandedConnection.has(peerId)) expandedConnection.delete(peerId);
+            else expandedConnection.add(peerId);
+            if (!isEditingMachineCard()) displayPeers(peers);
+        }
+
         // Pull the backend's ApiError { message } out of a failed response so toasts are actionable
         // ("Subdomain already in use") instead of bare "HTTP 400"; falls back to the status code.
         async function apiErrorMessage(response) {
@@ -971,28 +996,24 @@
                     <div class="peer-details">
                         <div class="detail-row">
                             <span class="detail-label">Name</span>
-                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                <input type="text" id="lan-name-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                            <span class="detail-value">
+                                <input type="text" id="lan-name-${id}" class="form-input" style="width:280px;max-width:100%"
                                        value="${escapeHtml(server.name)}"
                                        data-original="${escapeHtml(server.name)}"
-                                       oninput="onLanServerNameInput('${jsArg(server.name)}')">
-                                <button class="btn btn-primary" id="lan-name-save-${id}"
-                                        style="flex-shrink:0" disabled
-                                        onclick="saveLanServerName('${jsArg(server.name)}')">Save</button>
+                                       onkeydown="if(event.key==='Enter')this.blur()"
+                                       onblur="saveLanServerName('${jsArg(server.name)}')">
                             </span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Description</span>
-                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                <input type="text" id="lan-desc-${id}" class="form-input" style="flex:1;min-width:0;max-width:320px"
+                            <span class="detail-value">
+                                <input type="text" id="lan-desc-${id}" class="form-input" style="width:360px;max-width:100%"
                                        maxlength="200"
                                        value="${escapeHtml(server.description || '')}"
                                        data-original="${escapeHtml(server.description || '')}"
                                        placeholder="e.g. Synology NAS in the closet"
-                                       oninput="onLanServerDescriptionInput('${jsArg(server.name)}')">
-                                <button class="btn btn-primary" id="lan-desc-save-${id}"
-                                        style="flex-shrink:0" disabled
-                                        onclick="saveLanServerDescription('${jsArg(server.name)}')">Save</button>
+                                       onkeydown="if(event.key==='Enter')this.blur()"
+                                       onblur="saveLanServerDescription('${jsArg(server.name)}')">
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1110,6 +1131,45 @@
             // recover a fresh config the operator regenerates the peer (delete + recreate with
             // the same name/IP/lanCidr/lanAddress/description).
 
+            // Read-only WireGuard diagnostics, collapsed behind "Connection details" by default so an
+            // expanded card leads with the settings + services you manage, not the public-key wall.
+            const endpointRow = peer.endpointIp ? `
+                        <div class="detail-row">
+                            <span class="detail-label">Endpoint</span>
+                            <span class="detail-value">${peer.endpointIp}:${peer.endpointPort}</span>
+                        </div>` : '';
+            const connOpen = expandedConnection.has(peer.id);
+            const connectionRows = `
+                        <div class="detail-row">
+                            <span class="detail-label">IP Address</span>
+                            <span class="detail-value">${vpnIp}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Public Key</span>
+                            <span class="detail-value">${peer.publicKey}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Allowed IPs</span>
+                            <span class="detail-value">${peer.allowedIps}</span>
+                        </div>
+                        ${endpointRow}
+                        <div class="detail-row">
+                            <span class="detail-label">Last Seen</span>
+                            <span class="detail-value" id="last-seen-detail-${id}">${lastSeenAbsolute(peer.latestHandshake)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Rx / Tx</span>
+                            <span class="detail-value" id="rxtx-${id}">${formatBytes(peer.transferRx)} / ${formatBytes(peer.transferTx)}</span>
+                        </div>
+                        ${outdatedRow}`;
+            const connectionBlock = `
+                    <div class="conn-toggle" role="button" tabindex="0" aria-expanded="${connOpen ? 'true' : 'false'}"
+                         onclick="toggleConnection('${peer.id}')"
+                         onkeydown="if((event.key==='Enter'||event.key===' ')&&event.target===this){event.preventDefault();toggleConnection('${peer.id}')}">
+                        <span class="conn-caret">${connOpen ? '▾' : '▸'}</span> Connection details
+                    </div>
+                    ${connOpen ? `<div class="peer-details conn-details">${connectionRows}</div>` : ''}`;
+
             return `
             <div class="peer-card">
                 <div class="peer-header" onclick="togglePeer('${peer.id}')">
@@ -1130,89 +1190,56 @@
                     <div class="peer-details">
                         <div class="detail-row">
                             <span class="detail-label">Name</span>
-                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                <input type="text" id="peer-name-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                            <span class="detail-value">
+                                <input type="text" id="peer-name-${id}" class="form-input" style="width:280px;max-width:100%"
                                        value="${escapeHtml(peer.name)}"
                                        data-original="${escapeHtml(peer.name)}"
-                                       oninput="onPeerNameInput('${peer.id}')">
-                                <button class="btn btn-primary" id="peer-name-save-${id}"
-                                        style="flex-shrink:0" disabled
-                                        onclick="savePeerName('${peer.id}')">Save</button>
+                                       onkeydown="if(event.key==='Enter')this.blur()"
+                                       onblur="savePeerName('${peer.id}')">
                             </span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Description</span>
-                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                <input type="text" id="peer-desc-${id}" class="form-input" style="flex:1;min-width:0;max-width:320px"
+                            <span class="detail-value">
+                                <input type="text" id="peer-desc-${id}" class="form-input" style="width:360px;max-width:100%"
                                        maxlength="200"
                                        value="${escapeHtml(peer.description || '')}"
                                        data-original="${escapeHtml(peer.description || '')}"
                                        placeholder="e.g. Home media server"
-                                       oninput="onDescriptionInput('${peer.id}')">
-                                <button class="btn btn-primary" id="peer-desc-save-${id}"
-                                        style="flex-shrink:0" disabled
-                                        onclick="saveDescription('${peer.id}')">Save</button>
+                                       onkeydown="if(event.key==='Enter')this.blur()"
+                                       onblur="saveDescription('${peer.id}')">
                             </span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Device category</span>
                             ${deviceCategorySelectHtml('peer-cat-' + id, 'peer', peer.id, peer.deviceCategory, peer.deviceCategoryOverridden)}
                         </div>
-                        <div class="detail-row">
-                            <span class="detail-label">IP Address</span>
-                            <span class="detail-value">${vpnIp}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Public Key</span>
-                            <span class="detail-value">${peer.publicKey}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Allowed IPs</span>
-                            <span class="detail-value">${peer.allowedIps}</span>
-                        </div>
-                        ${peer.endpointIp ? `
-                        <div class="detail-row">
-                            <span class="detail-label">Endpoint</span>
-                            <span class="detail-value">${peer.endpointIp}:${peer.endpointPort}</span>
-                        </div>` : ''}
-                        <div class="detail-row">
-                            <span class="detail-label">Last Seen</span>
-                            <span class="detail-value" id="last-seen-detail-${id}">${lastSeenAbsolute(peer.latestHandshake)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Rx / Tx</span>
-                            <span class="detail-value" id="rxtx-${id}">${formatBytes(peer.transferRx)} / ${formatBytes(peer.transferTx)}</span>
-                        </div>
-                        ${outdatedRow}
                         ${isServer ? `
                         <div class="detail-row">
                             <span class="detail-label">LAN CIDR</span>
-                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                <input type="text" id="lan-cidr-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                            <span class="detail-value">
+                                <input type="text" id="lan-cidr-${id}" class="form-input" style="width:280px;max-width:100%"
                                        value="${peer.lanCidr || ''}"
                                        data-original="${peer.lanCidr || ''}"
                                        placeholder="e.g. 192.168.1.0/24"
-                                       oninput="onLanCidrInput('${peer.id}')">
-                                <button class="btn btn-primary" id="lan-cidr-save-${id}"
-                                        style="flex-shrink:0" disabled
-                                        onclick="saveLanCidr('${peer.id}')">Save</button>
+                                       onkeydown="if(event.key==='Enter')this.blur()"
+                                       onblur="saveLanCidr('${peer.id}')">
                             </span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">LAN address</span>
-                            <span class="detail-value" style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
-                                <input type="text" id="lan-addr-${id}" class="form-input" style="flex:1;min-width:0;max-width:240px"
+                            <span class="detail-value">
+                                <input type="text" id="lan-addr-${id}" class="form-input" style="width:280px;max-width:100%"
                                        value="${peer.lanAddress || ''}"
                                        data-original="${peer.lanAddress || ''}"
                                        placeholder="e.g. 192.168.1.50"
-                                       oninput="onLanAddressInput('${peer.id}')">
-                                <button class="btn btn-primary" id="lan-addr-save-${id}"
-                                        style="flex-shrink:0" disabled
-                                        onclick="saveLanAddress('${peer.id}')">Save</button>
+                                       onkeydown="if(event.key==='Enter')this.blur()"
+                                       onblur="saveLanAddress('${peer.id}')">
                             </span>
                         </div>` : ''}
                         ${renderServicesSubsection(peer.name)}
                     </div>
+                    ${connectionBlock}
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
                             <button class="btn btn-small ${peer.configOutOfDate ? 'btn-primary' : 'btn-secondary'}" onclick="reissuePeerConfig('${peer.id}')"
@@ -1529,20 +1556,16 @@
             }
         }
 
-        function onLanAddressInput(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`lan-addr-${id}`);
-            const btn = document.getElementById(`lan-addr-save-${id}`);
-            if (!input || !btn) return;
-            btn.disabled = input.value.trim() === (input.dataset.original || '');
-        }
+        // Inline machine-field edits save on blur (no Save buttons): losing focus — or pressing Enter,
+        // which blurs — persists the change. A green flash confirms; an unchanged field is a silent
+        // no-op, and a blank or duplicate name reverts to the previous value. Mirrors the
+        // published-service editor's blur-save fields (savePublishedField / pubFlashOk).
 
         async function saveLanAddress(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`lan-addr-${id}`);
-            const btn = document.getElementById(`lan-addr-save-${id}`);
+            const input = document.getElementById(`lan-addr-${cardId(peerId)}`);
+            if (!input) return;
             const lanAddress = input.value.trim();
-            btn.disabled = true;
+            if (lanAddress === (input.dataset.original || '')) return;
             try {
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/lan-address`, {
                     method: 'PATCH',
@@ -1551,28 +1574,19 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = lanAddress;
+                pubFlashOk(input);
                 displaySuccess(`LAN address saved for "${peerDisplayName(peerId)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save LAN address: ${error.message}`);
-                onLanAddressInput(peerId);
             }
         }
 
-        function onDescriptionInput(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`peer-desc-${id}`);
-            const btn = document.getElementById(`peer-desc-save-${id}`);
-            if (!input || !btn) return;
-            btn.disabled = input.value.trim() === (input.dataset.original || '');
-        }
-
         async function saveDescription(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`peer-desc-${id}`);
-            const btn = document.getElementById(`peer-desc-save-${id}`);
+            const input = document.getElementById(`peer-desc-${cardId(peerId)}`);
+            if (!input) return;
             const description = input.value.trim();
-            btn.disabled = true;
+            if (description === (input.dataset.original || '')) return;
             try {
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/description`, {
                     method: 'PATCH',
@@ -1581,32 +1595,23 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = description;
+                pubFlashOk(input);
                 displaySuccess(`Description saved for "${peerDisplayName(peerId)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save description: ${error.message}`);
-                onDescriptionInput(peerId);
             }
         }
 
-        function onPeerNameInput(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`peer-name-${id}`);
-            const btn = document.getElementById(`peer-name-save-${id}`);
-            if (!input || !btn) return;
-            const v = input.value.trim();
-            btn.disabled = v === '' || v === (input.dataset.original || '');
-        }
-
-        // Renames the peer's editable display name only — the immutable id (config dir,
-        // REST path) never moves. Saving a blank name is rejected by the input guard.
+        // Renames the peer's editable display name only — the immutable id (config dir, REST path)
+        // never moves. Blank or unchanged names don't save; a duplicate is rejected and reverted.
         async function savePeerName(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`peer-name-${id}`);
-            const btn = document.getElementById(`peer-name-save-${id}`);
+            const input = document.getElementById(`peer-name-${cardId(peerId)}`);
+            if (!input) return;
+            const original = input.dataset.original || '';
             const newName = input.value.trim();
-            if (!newName) return;
-            btn.disabled = true;
+            if (!newName) { input.value = original; return; }
+            if (newName === original) return;
             try {
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}`, {
                     method: 'PATCH',
@@ -1615,34 +1620,27 @@
                 });
                 if (response.status === 409) {
                     displayError(`A machine named "${newName}" already exists`);
-                    onPeerNameInput(peerId);
+                    input.value = original;
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                input.dataset.original = newName;
+                pubFlashOk(input);
                 displaySuccess(`Renamed to "${newName}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to rename machine: ${error.message}`);
-                onPeerNameInput(peerId);
+                input.value = original;
             }
         }
 
-        function onLanServerNameInput(serverName) {
-            const id = cardId('lan-server:' + serverName);
-            const input = document.getElementById(`lan-name-${id}`);
-            const btn = document.getElementById(`lan-name-save-${id}`);
-            if (!input || !btn) return;
-            const v = input.value.trim();
-            btn.disabled = v === '' || v === (input.dataset.original || '');
-        }
-
         async function saveLanServerName(serverName) {
-            const id = cardId('lan-server:' + serverName);
-            const input = document.getElementById(`lan-name-${id}`);
-            const btn = document.getElementById(`lan-name-save-${id}`);
+            const input = document.getElementById(`lan-name-${cardId('lan-server:' + serverName)}`);
+            if (!input) return;
+            const original = input.dataset.original || '';
             const newName = input.value.trim();
-            if (!newName) return;
-            btn.disabled = true;
+            if (!newName) { input.value = original; return; }
+            if (newName === original) return;
             try {
                 const response = await fetch(`/lan-servers/${encodeURIComponent(serverName)}`, {
                     method: 'PATCH',
@@ -1651,10 +1649,11 @@
                 });
                 if (response.status === 409) {
                     displayError(`A machine named "${newName}" already exists`);
-                    onLanServerNameInput(serverName);
+                    input.value = original;
                     return;
                 }
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                pubFlashOk(input);
                 displaySuccess(`Renamed "${serverName}"`);
                 // Published services are joined onto machine cards client-side by the resolved
                 // LAN-server name (topologyServicesByHost keys on lanServerName, computed server-side).
@@ -1665,24 +1664,15 @@
                 fetchPublishable();
             } catch (error) {
                 displayError(`Failed to rename LAN server: ${error.message}`);
-                onLanServerNameInput(serverName);
+                input.value = original;
             }
         }
 
-        function onLanServerDescriptionInput(serverName) {
-            const id = cardId('lan-server:' + serverName);
-            const input = document.getElementById(`lan-desc-${id}`);
-            const btn = document.getElementById(`lan-desc-save-${id}`);
-            if (!input || !btn) return;
-            btn.disabled = input.value.trim() === (input.dataset.original || '');
-        }
-
         async function saveLanServerDescription(serverName) {
-            const id = cardId('lan-server:' + serverName);
-            const input = document.getElementById(`lan-desc-${id}`);
-            const btn = document.getElementById(`lan-desc-save-${id}`);
+            const input = document.getElementById(`lan-desc-${cardId('lan-server:' + serverName)}`);
+            if (!input) return;
             const description = input.value.trim();
-            btn.disabled = true;
+            if (description === (input.dataset.original || '')) return;
             try {
                 const response = await fetch(`/lan-servers/${encodeURIComponent(serverName)}/description`, {
                     method: 'PATCH',
@@ -1691,28 +1681,19 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = description;
+                pubFlashOk(input);
                 displaySuccess(`Description saved for "${serverName}"`);
                 fetchLanServers();
             } catch (error) {
                 displayError(`Failed to save description: ${error.message}`);
-                onLanServerDescriptionInput(serverName);
             }
         }
 
-        function onLanCidrInput(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`lan-cidr-${id}`);
-            const btn = document.getElementById(`lan-cidr-save-${id}`);
-            if (!input || !btn) return;
-            btn.disabled = input.value.trim() === (input.dataset.original || '');
-        }
-
         async function saveLanCidr(peerId) {
-            const id = cardId(peerId);
-            const input = document.getElementById(`lan-cidr-${id}`);
-            const btn = document.getElementById(`lan-cidr-save-${id}`);
+            const input = document.getElementById(`lan-cidr-${cardId(peerId)}`);
+            if (!input) return;
             const lanCidr = input.value.trim();
-            btn.disabled = true;
+            if (lanCidr === (input.dataset.original || '')) return;
             try {
                 const response = await fetch(`/vpn/peers/${encodeURIComponent(peerId)}/lan-cidr`, {
                     method: 'PATCH',
@@ -1721,11 +1702,11 @@
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 input.dataset.original = lanCidr;
+                pubFlashOk(input);
                 displaySuccess(`LAN CIDR saved for "${peerDisplayName(peerId)}"`);
                 fetchPeers();
             } catch (error) {
                 displayError(`Failed to save LAN CIDR: ${error.message}`);
-                onLanCidrInput(peerId);
             }
         }
 
@@ -2292,6 +2273,13 @@
         fetchAccessGroupSuggestions();
         fetchPublishProgress();
         detectEdition();
+
+        // Flush a deferred repaint once focus leaves the machine cards: a blur-save that landed while
+        // another field was focused marked _renderPending instead of repainting under the operator.
+        // focusout bubbles, so one listener on the container covers every card field.
+        document.getElementById('peers-container')?.addEventListener('focusout', () => {
+            setTimeout(() => { if (_renderPending && !isEditingMachineCard()) renderPeersDeferrable(); }, 0);
+        });
 
         const _sse = new EventSource('/vpn/peers/events');
         _sse.addEventListener('peers-updated', () => fetchPeers());
