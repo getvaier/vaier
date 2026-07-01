@@ -60,9 +60,6 @@ public abstract class VaierWebMvcIntegrationBase {
     protected DeleteUserUseCase deleteUserUseCase;
 
     @MockBean
-    protected ChangePasswordUseCase changePasswordUseCase;
-
-    @MockBean
     protected UpdateUserEmailUseCase updateUserEmailUseCase;
 
     @MockBean

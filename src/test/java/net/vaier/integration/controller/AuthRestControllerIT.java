@@ -122,34 +122,9 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void changePassword_returns200OnSuccess() throws Exception {
-        mockMvc.perform(put("/users/alice/password")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"newPassword":"newpass"}
-                           """))
-               .andExpect(status().isOk());
-
-        verify(changePasswordUseCase).changePassword("alice", "newpass");
-    }
-
-    @Test
-    void changePassword_returns404WhenUserNotFound() throws Exception {
-        doThrow(new NotFoundException("User not found: alice"))
-                .when(changePasswordUseCase).changePassword(eq("alice"), any());
-
-        mockMvc.perform(put("/users/alice/password")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {"newPassword":"newpass"}
-                           """))
-               .andExpect(status().isNotFound())
-               .andExpect(jsonPath("$.code").value("NOT_FOUND"));
-    }
-
-    @Test
     void getMe_returnsUsernameFromHeader() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
+        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         mockMvc.perform(get("/users/me").header("Remote-User", "alice"))
                .andExpect(status().isOk())
@@ -161,6 +136,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getMe_returnsNullWhenHeaderAbsent() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
+        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         mockMvc.perform(get("/users/me"))
                .andExpect(status().isOk())
@@ -181,6 +157,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getMe_returnsDisplaynameAndEmailFromHeaders() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
+        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         mockMvc.perform(get("/users/me")
                        .header("Remote-User", "alice")

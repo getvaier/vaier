@@ -1,7 +1,6 @@
 package net.vaier.rest;
 
 import net.vaier.application.AddUserUseCase;
-import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteGroupUseCase;
 import net.vaier.application.DeleteUserUseCase;
 import net.vaier.application.GetGroupsUseCase;
@@ -10,7 +9,6 @@ import net.vaier.application.UpdateUserDisplayNameUseCase;
 import net.vaier.application.UpdateUserEmailUseCase;
 import net.vaier.application.UpdateUserGroupsUseCase;
 import net.vaier.config.ConfigResolver;
-import net.vaier.domain.AuthMode;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierHostnames;
 import org.springframework.http.ResponseEntity;
@@ -25,7 +23,6 @@ public class AuthRestController {
     private final GetUsersUseCase getUsersUseCase;
     private final AddUserUseCase addUserUseCase;
     private final DeleteUserUseCase deleteUserUseCase;
-    private final ChangePasswordUseCase changePasswordUseCase;
     private final UpdateUserEmailUseCase updateUserEmailUseCase;
     private final UpdateUserDisplayNameUseCase updateUserDisplayNameUseCase;
     private final GetGroupsUseCase getGroupsUseCase;
@@ -36,7 +33,6 @@ public class AuthRestController {
                               GetUsersUseCase getUsersUseCase,
                               AddUserUseCase addUserUseCase,
                               DeleteUserUseCase deleteUserUseCase,
-                              ChangePasswordUseCase changePasswordUseCase,
                               UpdateUserEmailUseCase updateUserEmailUseCase,
                               UpdateUserDisplayNameUseCase updateUserDisplayNameUseCase,
                               GetGroupsUseCase getGroupsUseCase,
@@ -46,7 +42,6 @@ public class AuthRestController {
         this.getUsersUseCase = getUsersUseCase;
         this.addUserUseCase = addUserUseCase;
         this.deleteUserUseCase = deleteUserUseCase;
-        this.changePasswordUseCase = changePasswordUseCase;
         this.updateUserEmailUseCase = updateUserEmailUseCase;
         this.updateUserDisplayNameUseCase = updateUserDisplayNameUseCase;
         this.getGroupsUseCase = getGroupsUseCase;
@@ -72,15 +67,6 @@ public class AuthRestController {
     public ResponseEntity<String> deleteUser(@PathVariable String username) {
         deleteUserUseCase.deleteUser(username);
         return ResponseEntity.ok("User deleted successfully");
-    }
-
-    @PutMapping("/users/{username}/password")
-    public ResponseEntity<String> changePassword(
-        @PathVariable String username,
-        @RequestBody ChangePasswordRequest request
-    ) {
-        changePasswordUseCase.changePassword(username, request.newPassword());
-        return ResponseEntity.ok("Password changed successfully");
     }
 
     @PutMapping("/users/{username}/email")
@@ -117,13 +103,12 @@ public class AuthRestController {
             @RequestHeader(value = "Remote-Email", required = false) String email) {
         String domain = configResolver.getDomain();
         boolean hasDomain = domain != null && !domain.isBlank();
-        // The Vaier console itself stays Authelia-gated in 3a (#305). The logout URL is resolved
-        // through the mode-aware domain helper so that when the console moves to social login (3b)
-        // only the AuthMode argument changes — social-gated *services* already log out via
-        // oauth2-proxy's sign-out (see VaierHostnames#logoutUrl).
+        // The logout URL is resolved through the mode-aware domain helper driven by the console's own
+        // auth mode (VAIER_CONSOLE_AUTH_MODE): when the console runs on social login (#305 step 3b) it
+        // ends the session via oauth2-proxy's sign-out; otherwise it uses the Authelia portal logout.
         VaierHostnames hostnames = new VaierHostnames(domain);
         String console = hasDomain ? "https://" + hostnames.vaierServerFqdn() + "/" : null;
-        String logoutUrl = hasDomain ? hostnames.logoutUrl(AuthMode.AUTHELIA, console) : null;
+        String logoutUrl = hasDomain ? hostnames.logoutUrl(configResolver.getConsoleAuthMode(), console) : null;
         String loginUrl = hasDomain ? "https://" + hostnames.autheliaHost() + "/?rd=" + console : null;
         return ResponseEntity.ok(new MeResponse(username, displayname, email, logoutUrl, loginUrl));
     }
@@ -140,7 +125,6 @@ public class AuthRestController {
     }
 
     public record AddUserRequest(String username, String password, String email, String displayname, List<String> groups) {}
-    public record ChangePasswordRequest(String newPassword) {}
     public record UpdateEmailRequest(String email) {}
     public record UpdateDisplayNameRequest(String displayname) {}
     public record UpdateGroupsRequest(List<String> groups) {}

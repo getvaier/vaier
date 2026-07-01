@@ -1498,6 +1498,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             headers.add("Remote-User");
             headers.add("Remote-Email");
             headers.add("Remote-Groups");
+            // The display name Vaier resolves from the access entry, so the console topbar / My Page
+            // can greet a social user by name rather than email.
+            headers.add("Remote-Name");
             forwardAuth.put("authResponseHeaders", headers);
             Map<String, Object> authz = new LinkedHashMap<>();
             authz.put("forwardAuth", forwardAuth);

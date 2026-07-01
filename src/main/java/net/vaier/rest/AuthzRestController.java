@@ -66,11 +66,17 @@ public class AuthzRestController {
             // (pending or not-in-group) identity sees the branded "awaiting approval" page.
             return ResponseEntity.status(403).contentType(MediaType.TEXT_HTML).body(DENIED_PAGE);
         }
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder ok = ResponseEntity.ok()
                 .header("Remote-User", decision.getUser())
                 .header("Remote-Email", decision.getEmail())
-                .header("Remote-Groups", decision.groupsHeader())
-                .body(null);
+                .header("Remote-Groups", decision.groupsHeader());
+        // Pre-approved entries have no display name yet — only forward Remote-Name once known, so we
+        // never emit an empty header for a nameless identity.
+        String displayName = decision.getName();
+        if (displayName != null && !displayName.isBlank()) {
+            ok.header("Remote-Name", displayName);
+        }
+        return ok.body(null);
     }
 
     /** The branded "awaiting approval" page, loaded once from the classpath. */

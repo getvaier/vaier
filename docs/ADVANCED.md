@@ -22,6 +22,7 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 | `TRAEFIK_CONFIG_PATH` | No | Traefik dynamic config dir (default: `/traefik/config`) |
 | `TRAEFIK_API_URL` | No | Traefik API URL (default: `http://traefik:8080`) |
 | `AUTHELIA_CONFIG_PATH` | No | Authelia config dir (default: `/authelia/config`) |
+| `VAIER_CONSOLE_AUTH_MODE` | No | How the Vaier console itself is gated: `authelia` (default) or `social`. Drives the console logout link — `social` ends the session via oauth2-proxy's sign-out, `authelia` via the Authelia portal logout. Set to `social` once the console runs behind Google login. |
 
 On EC2, the public hostname is detected from instance metadata. On other hosts, set `VAIER_PUBLIC_HOST` (CNAME target) or `VAIER_PUBLIC_IP` (A record target) in `.env`.
 

@@ -49,6 +49,31 @@ class AuthzRestControllerTest {
     }
 
     @Test
+    void verify_allowed_emitsRemoteNameHeaderWhenTheEntryHasADisplayName() {
+        AccessEntry entry = AccessEntry.builder()
+                .email("friend@example.com").role(Role.USER).name("Alice Smith").build();
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith"))
+                .thenReturn(AccessDecision.allow(entry));
+
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", "Alice Smith");
+
+        assertThat(response.getHeaders().getFirst("Remote-Name")).isEqualTo("Alice Smith");
+    }
+
+    @Test
+    void verify_allowed_omitsRemoteNameHeaderWhenTheEntryHasNoDisplayName() {
+        AccessEntry entry = AccessEntry.builder()
+                .email("friend@example.com").role(Role.USER).build();
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null))
+                .thenReturn(AccessDecision.allow(entry));
+
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", null);
+
+        // Pre-approved entries have no name yet — don't emit an empty header.
+        assertThat(response.getHeaders().containsKey("Remote-Name")).isFalse();
+    }
+
+    @Test
     void verify_denied_returns403WithBrandedHtmlPage() {
         when(verifyAccessUseCase.verify("p@example.com", "plex.example.com", null))
                 .thenReturn(AccessDecision.deny());

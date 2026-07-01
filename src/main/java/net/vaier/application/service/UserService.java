@@ -2,7 +2,6 @@ package net.vaier.application.service;
 
 import net.vaier.application.AddUserUseCase;
 import net.vaier.application.AssignGroupsUseCase;
-import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteGroupUseCase;
 import net.vaier.application.DeleteUserUseCase;
 import net.vaier.application.GetGroupsUseCase;
@@ -36,7 +35,7 @@ import java.util.Optional;
 
 @Service
 @Slf4j
-public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePasswordUseCase,
+public class UserService implements AddUserUseCase, DeleteUserUseCase,
         UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase, GetUsersUseCase, ForGettingUsers,
         GetGroupsUseCase, UpdateUserGroupsUseCase, DeleteGroupUseCase,
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
@@ -82,13 +81,6 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase, ChangePas
     public void deleteUser(String username) {
         User.validateUsername(username);
         forPersistingUsers.deleteUser(username);
-    }
-
-    @Override
-    public void changePassword(String username, String newPassword) {
-        User.validateUsername(username);
-        User.validatePassword(newPassword);
-        forPersistingUsers.changePassword(username, newPassword);
     }
 
     @Override

@@ -290,9 +290,10 @@ No planned changes beyond what service publishing drives automatically.
 Manage Authelia users from the Vaier UI.
 
 **Current capabilities:**
-- List / create / delete users
-- Change passwords (Argon2 hashing)
+- List / create / delete users (new users get an Argon2-hashed password)
 - Update display name and email per user
+
+**In-UI password change removed** — the change-password action and `PUT /users/{username}/password` were removed with #305 step 3b (see §6.17); social-login users have no Vaier password. The `ForPersistingUsers.changePassword` port + Authelia adapter remain for now, and Authelia's own reset-password flow still covers the bootstrap admin.
 - Choose group(s) when creating a user (no more hardcoded `admins`); edit a user's groups inline; delete a group across all users in one action ([#84](https://github.com/getvaier/vaier/issues/84))
 - Authelia login / 2FA pages inherit Vaier's dark theme and logo via `theme: dark` + `asset_path: /config/assets`; the Vaier container publishes `logo.png` into the Authelia assets directory at startup so the hand-off between `vaier.<domain>` and `login.<domain>` reads as one product.
 
@@ -492,8 +493,29 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - UI: the **Users → Access** rows lead with the display name and demote the email to a caption, falling
   back to email-only when there's no name yet.
 
-**Backlog (not in this slice):** moving the Vaier console itself to social login and decommissioning
-Authelia (3b), the unauthenticated "awaiting approval" page, migration off Authelia for existing
+**Delivered in step 3b (console social-login polish, TDD-first):**
+- Display name plumbed to the console identity: `GET /authz/verify` emits a `Remote-Name` response header
+  when the access entry has a known display name (pre-approved entries with no name yet omit it), and the
+  `vaier-authz` Traefik middleware's `authResponseHeaders` now forwards `Remote-Name` alongside
+  `Remote-User`/`Remote-Email`/`Remote-Groups` (self-healing onto older configs via the existing startup
+  backfill in `TraefikReverseProxyAdapter`). `GET /users/me` therefore returns a social-login console
+  user's Google display name as `displayname`, so the console topbar and My Page greet them by name
+  (falling back to email when absent).
+- Console auth mode: a new `VAIER_CONSOLE_AUTH_MODE` env var (`authelia` | `social`, default `authelia`,
+  read via `ConfigResolver.getConsoleAuthMode`) selects how the Vaier console itself is gated and therefore
+  its logout URL — `social` ends the session via oauth2-proxy's `/oauth2/sign_out`, `authelia` via the
+  Authelia portal `/logout`. The already-mode-aware `VaierHostnames.logoutUrl(AuthMode, target)` (from 3a)
+  is now driven by this setting; wired on the `vaier` service in `docker-compose.yml` as
+  `VAIER_CONSOLE_AUTH_MODE: ${VAIER_CONSOLE_AUTH_MODE:-authelia}`.
+- Password-change surface removed: the "Change password" card on My Page (`mypage.html`), the per-user
+  change-password action/modal on the Users page (`users.html`), the `PUT /users/{username}/password`
+  endpoint, and `ChangePasswordUseCase` are all gone — social-login users have no Vaier password. The
+  `ForPersistingUsers.changePassword` port and its `AutheliaUserAdapter` implementation are kept for now
+  and cleaned up when Authelia is decommissioned.
+
+**Backlog (not in this slice):** fully decommissioning Authelia — the console can already run on social
+login via `VAIER_CONSOLE_AUTH_MODE`, so the remaining 3b work is removing Authelia from the stack — plus
+the unauthenticated "awaiting approval" page, migration off Authelia for existing
 deployments, and multi-provider login (GitHub, etc.). The **availability coupling** the spike flags —
 Vaier being in the request path for protected services — remains the open trade-off to accept or revisit.
 

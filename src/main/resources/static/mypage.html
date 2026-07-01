@@ -117,23 +117,6 @@
                 </form>
                 <div id="emailMsg" class="inline-msg"></div>
             </div>
-
-            <div class="profile-card">
-                <h2>Password</h2>
-                <form id="passwordForm">
-                    <div class="form-group">
-                        <label class="form-label" for="newPassword">New password</label>
-                        <input type="password" class="form-input" id="newPassword" minlength="8" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="confirmPassword">Confirm new password</label>
-                        <input type="password" class="form-input" id="confirmPassword" minlength="8" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Change password</button>
-                </form>
-                <div id="passwordMsg" class="inline-msg"></div>
-                <div class="helper">Minimum 8 characters.</div>
-            </div>
         </div>
     </div>
 
@@ -214,21 +197,6 @@
                 setMsg('emailMsg', 'Updated. New value will appear after your next sign-in.', true);
             } catch (err) {
                 setMsg('emailMsg', err.message, false);
-            }
-        });
-
-        document.getElementById('passwordForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const a = document.getElementById('newPassword').value;
-            const b = document.getElementById('confirmPassword').value;
-            if (a !== b) { setMsg('passwordMsg', 'Passwords do not match.', false); return; }
-            try {
-                await putJson(`/users/${encodeURIComponent(currentUser.username)}/password`, { newPassword: a });
-                setMsg('passwordMsg', 'Password changed.', true);
-                document.getElementById('newPassword').value = '';
-                document.getElementById('confirmPassword').value = '';
-            } catch (err) {
-                setMsg('passwordMsg', err.message, false);
             }
         });
 

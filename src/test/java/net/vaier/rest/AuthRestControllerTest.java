@@ -1,7 +1,6 @@
 package net.vaier.rest;
 
 import net.vaier.application.AddUserUseCase;
-import net.vaier.application.ChangePasswordUseCase;
 import net.vaier.application.DeleteUserUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingUsers;
@@ -13,7 +12,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,32 +29,8 @@ class AuthRestControllerTest {
     @Mock
     DeleteUserUseCase deleteUserUseCase;
 
-    @Mock
-    ChangePasswordUseCase changePasswordUseCase;
-
     @InjectMocks
     AuthRestController controller;
-
-    @Test
-    void changePassword_delegatesToUseCase() {
-        ResponseEntity<String> response = controller.changePassword("alice",
-                new AuthRestController.ChangePasswordRequest("newpassword"));
-
-        verify(changePasswordUseCase).changePassword("alice", "newpassword");
-        assertThat(response.getStatusCode().value()).isEqualTo(200);
-    }
-
-    @Test
-    void changePassword_propagatesUseCaseFailure() {
-        // The controller no longer swallows exceptions into a 400 string; it propagates to
-        // GlobalExceptionHandler, which renders the uniform ApiError (here a generic 500).
-        doThrow(new RuntimeException("password write failed"))
-                .when(changePasswordUseCase).changePassword(eq("alice"), any());
-
-        assertThatThrownBy(() -> controller.changePassword("alice",
-                new AuthRestController.ChangePasswordRequest("newpassword")))
-            .isInstanceOf(RuntimeException.class);
-    }
 
     @Test
     void me_returnsUsernameFromRemoteUserHeader() {
@@ -74,5 +48,29 @@ class AuthRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().username()).isNull();
+    }
+
+    @Test
+    void me_logoutUrl_pointsAtAutheliaPortalWhenConsoleModeIsAuthelia() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
+
+        ResponseEntity<AuthRestController.MeResponse> response =
+                controller.getMe("alice", "Alice", "alice@example.com");
+
+        assertThat(response.getBody().logoutUrl())
+                .isEqualTo("https://login.example.com/logout?rd=https://vaier.example.com/");
+    }
+
+    @Test
+    void me_logoutUrl_pointsAtOauth2ProxySignOutWhenConsoleModeIsSocial() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.SOCIAL);
+
+        ResponseEntity<AuthRestController.MeResponse> response =
+                controller.getMe("alice", "Alice", "alice@example.com");
+
+        assertThat(response.getBody().logoutUrl())
+                .startsWith("https://oauth2.example.com/oauth2/sign_out?rd=");
     }
 }

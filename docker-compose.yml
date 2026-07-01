@@ -476,6 +476,8 @@ services:
       VAIER_LICENSE: ${VAIER_LICENSE:-}
       # Presence of the Google client id enables the per-service "Social" auth mode (#305).
       VAIER_OIDC_GOOGLE_CLIENT_ID: ${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
+      # How the Vaier console itself is gated (authelia|social) — drives the console logout URL (#305 3b).
+      VAIER_CONSOLE_AUTH_MODE: ${VAIER_CONSOLE_AUTH_MODE:-authelia}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config

@@ -153,7 +153,7 @@ Once `docker compose ps` shows every service as `Up`, read the one-time admin pa
 cat authelia/config/.bootstrap-admin-password
 ```
 
-Open `https://vaier.yourdomain.com`, log in as `admin`, change the password from *Settings → Users*, then delete the bootstrap file:
+Open `https://vaier.yourdomain.com`, log in as `admin`, set your own password from the login page's **Reset password** link, then delete the bootstrap file:
 
 ```bash
 rm authelia/config/.bootstrap-admin-password
@@ -222,7 +222,7 @@ profile enabled — see `docker-compose.yml`); without it, services stay on Publ
 
 When someone signs in with Google for the first time, Vaier records them as a **pending** access request (authenticated but blocked) and denies access until an admin approves them. The moment that pending entry is created, Vaier emails every admin so the request doesn't sit unseen — the mail names the email and links straight to the **Users → Access** page to approve or deny. It reuses the same SMTP configuration as the other alerts, so with SMTP unconfigured (or no admins to notify) it stays silent, and the send is fire-and-forget so it never slows the sign-in check.
 
-Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it on the **Users → Access** page with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one.
+Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it on the **Users → Access** page with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one. The same captured name follows the identity into the Vaier console when the console runs on Social login, greeting them by name in the topbar and on My Page (falling back to email until a name is known).
 
 ### Multiple services on one subdomain
 

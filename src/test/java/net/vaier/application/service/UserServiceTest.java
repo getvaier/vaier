@@ -192,55 +192,6 @@ class UserServiceTest {
         verifyNoInteractions(forPersistingUsers);
     }
 
-    // --- changePassword ---
-
-    @Test
-    void changePassword_changesPassword() {
-        service.changePassword("alice", "newpassword");
-
-        verify(forPersistingUsers).changePassword("alice", "newpassword");
-    }
-
-    @Test
-    void changePassword_throwsWhenUserNotFound() {
-        doThrow(new RuntimeException("User not found: alice"))
-                .when(forPersistingUsers).changePassword("alice", "newpassword");
-
-        assertThatThrownBy(() -> service.changePassword("alice", "newpassword"))
-                .isInstanceOf(RuntimeException.class);
-    }
-
-    @ParameterizedTest
-    @NullAndEmptySource
-    @ValueSource(strings = {"   "})
-    void changePassword_rejectsBlankUsername(String username) {
-        assertThatThrownBy(() -> service.changePassword(username, "newpassword"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("username");
-
-        verifyNoInteractions(forPersistingUsers);
-    }
-
-    @ParameterizedTest
-    @NullAndEmptySource
-    @ValueSource(strings = {"   "})
-    void changePassword_rejectsBlankNewPassword(String newPassword) {
-        assertThatThrownBy(() -> service.changePassword("alice", newPassword))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("password");
-
-        verifyNoInteractions(forPersistingUsers);
-    }
-
-    @Test
-    void changePassword_rejectsNewPasswordShorterThanMinimum() {
-        assertThatThrownBy(() -> service.changePassword("alice", "short"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("password");
-
-        verifyNoInteractions(forPersistingUsers);
-    }
-
     // --- updateEmail ---
 
     @Test

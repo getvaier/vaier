@@ -15,6 +15,7 @@ class AccessDecisionTest {
         assertThat(decision.isAllowed()).isFalse();
         assertThat(decision.getEmail()).isNull();
         assertThat(decision.getUser()).isNull();
+        assertThat(decision.getName()).isNull();
         assertThat(decision.getGroups()).isEmpty();
     }
 
@@ -29,6 +30,26 @@ class AccessDecisionTest {
         assertThat(decision.getEmail()).isEqualTo("friend@example.com");
         assertThat(decision.getUser()).isEqualTo("friend@example.com");
         assertThat(decision.getGroups()).containsExactly("family", "media");
+    }
+
+    @Test
+    void allow_carriesTheDisplayNameFromTheEntry() {
+        AccessEntry entry = AccessEntry.builder()
+                .email("friend@example.com").role(Role.USER).name("Alice Smith").build();
+
+        AccessDecision decision = AccessDecision.allow(entry);
+
+        assertThat(decision.getName()).isEqualTo("Alice Smith");
+    }
+
+    @Test
+    void allow_nameIsNullWhenEntryHasNone() {
+        AccessEntry entry = AccessEntry.builder()
+                .email("friend@example.com").role(Role.USER).build();
+
+        AccessDecision decision = AccessDecision.allow(entry);
+
+        assertThat(decision.getName()).isNull();
     }
 
     @Test

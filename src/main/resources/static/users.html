@@ -490,25 +490,6 @@
         </div>
     </div>
 
-    <!-- Change Password Modal -->
-    <div id="changePasswordModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">Change Password</div>
-            <form id="changePasswordForm">
-                <input type="hidden" id="changePasswordUsername">
-                <div id="changePasswordError" style="display:none"></div>
-                <div class="form-group">
-                    <label class="form-label">New Password</label>
-                    <input type="password" class="form-input" id="changePassword" required>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('changePasswordModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Change Password</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <!-- Manage Groups Modal -->
     <div id="manageGroupsModal" class="modal">
         <div class="modal-content">
@@ -709,7 +690,6 @@
                             </div>
                         </div>
                         <div class="user-actions">
-                            <button class="btn btn-small btn-secondary js-passwd">passwd</button>
                             <button class="btn btn-small btn-danger js-delete">
                                 <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
                             </button>
@@ -751,9 +731,6 @@
                 const card = container.querySelector(`[data-card="${id}"]`);
                 if (!card) return;
                 card.querySelector('.js-toggle')?.addEventListener('click', () => toggleUser(user.name));
-                card.querySelector('.js-passwd')?.addEventListener('click', e => {
-                    e.stopPropagation(); showChangePasswordModal(user.name);
-                });
                 card.querySelector('.js-delete')?.addEventListener('click', e => {
                     e.stopPropagation(); deleteUser(user.name);
                 });
@@ -806,12 +783,6 @@
             await fetchAllGroups();
             mountGroupsPicker('newGroupsPicker', 'new-user', ['admins']);
             document.getElementById('addUserModal').classList.add('active');
-        }
-
-        function showChangePasswordModal(username) {
-            clearModalError('changePasswordError');
-            document.getElementById('changePasswordUsername').value = username;
-            document.getElementById('changePasswordModal').classList.add('active');
         }
 
         function closeModal(modalId) {
@@ -909,30 +880,6 @@
                 }
             } catch (error) {
                 showModalError('addUserError', `Failed to add user: ${error.message}`);
-            }
-        });
-
-        document.getElementById('changePasswordForm').addEventListener('submit', async e => {
-            e.preventDefault();
-            clearModalError('changePasswordError');
-            const username    = document.getElementById('changePasswordUsername').value;
-            const newPassword = document.getElementById('changePassword').value;
-            try {
-                const response = await fetch(`/users/${username}/password`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ newPassword })
-                });
-                const message = await response.text();
-                if (response.ok) {
-                    displayMessage(message, 'success');
-                    closeModal('changePasswordModal');
-                    document.getElementById('changePasswordForm').reset();
-                } else {
-                    showModalError('changePasswordError', message);
-                }
-            } catch (error) {
-                showModalError('changePasswordError', `Failed to change password: ${error.message}`);
             }
         });
 
