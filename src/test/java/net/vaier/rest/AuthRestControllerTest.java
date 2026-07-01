@@ -39,26 +39,35 @@ class AuthRestControllerTest {
     }
 
     @Test
-    void me_logoutUrl_pointsAtAutheliaPortalWhenConsoleModeIsAuthelia() {
+    void me_logoutUrl_alwaysPointsAtOauth2ProxySignOut() {
+        // The console is always on social login, so logout always ends the session via oauth2-proxy.
         when(configResolver.getDomain()).thenReturn("example.com");
-        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         ResponseEntity<AuthRestController.MeResponse> response =
                 controller.getMe("alice", "Alice", "alice@example.com");
 
         assertThat(response.getBody().logoutUrl())
-                .isEqualTo("https://login.example.com/logout?rd=https://vaier.example.com/");
+                .isEqualTo("https://oauth2.example.com/oauth2/sign_out?rd=https%3A%2F%2Fvaier.example.com%2F");
     }
 
     @Test
-    void me_logoutUrl_pointsAtOauth2ProxySignOutWhenConsoleModeIsSocial() {
+    void me_loginUrl_pointsAtTheConsole_whichForcesSignInWhenAnonymous() {
         when(configResolver.getDomain()).thenReturn("example.com");
-        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.SOCIAL);
+
+        ResponseEntity<AuthRestController.MeResponse> response =
+                controller.getMe(null, null, null);
+
+        assertThat(response.getBody().loginUrl()).isEqualTo("https://vaier.example.com/");
+    }
+
+    @Test
+    void me_returnsNullLogoutAndLoginWhenDomainMissing() {
+        when(configResolver.getDomain()).thenReturn(null);
 
         ResponseEntity<AuthRestController.MeResponse> response =
                 controller.getMe("alice", "Alice", "alice@example.com");
 
-        assertThat(response.getBody().logoutUrl())
-                .startsWith("https://oauth2.example.com/oauth2/sign_out?rd=");
+        assertThat(response.getBody().logoutUrl()).isNull();
+        assertThat(response.getBody().loginUrl()).isNull();
     }
 }

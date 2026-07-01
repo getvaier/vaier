@@ -58,14 +58,14 @@ public interface GetPublishedServicesUseCase {
         String image,
         String version,
         /**
-         * The route's auth mode wire value ({@code none}/{@code authelia}/{@code social}). Read off the
-         * route's middleware chain so the UI auth-mode picker reflects the live gateway. {@code
-         * authenticated} stays for callers that only need "is it gated at all".
+         * The route's auth mode wire value ({@code none}/{@code social}). Read off the route's
+         * middleware chain so the UI auth-mode picker reflects the live gateway. {@code authenticated}
+         * stays for callers that only need "is it gated at all".
          */
         String authMode
     ){
         private static String legacyAuthMode(boolean authenticated) {
-            return (authenticated ? net.vaier.domain.AuthMode.AUTHELIA : net.vaier.domain.AuthMode.NONE).wireValue();
+            return (authenticated ? net.vaier.domain.AuthMode.SOCIAL : net.vaier.domain.AuthMode.NONE).wireValue();
         }
         public PublishedServiceUco(String name, String dnsAddress, DnsState dnsState, String hostAddress,
                                    int hostPort, State state, boolean authenticated,

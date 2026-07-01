@@ -14,7 +14,6 @@ Terms are drawn from the domain model (`src/main/java/net/vaier/domain/`), the u
 | **Vaier server** | The single Linux host that runs the full Compose stack (WireGuard, Traefik, oauth2-proxy, Vaier). Has one public IP and is the WireGuard gateway. There is exactly one. |
 | **Operator** | The human running Vaier — typically a homelab developer. Not "user" (which means an access entry). |
 | **Stack** | The long-running containers in `docker-compose.yml`: `wireguard`, `traefik`, `docker-proxy`, `oauth2-proxy`, `vaier`, and `vaier-offline`, alongside sidecar/init helpers. `authelia` and `redis` were removed when social login replaced Authelia as the running auth gateway. Stack components are upstream and pinned by tag — never floating `:latest`. |
-| **Bootstrap admin** | Legacy: the one-time `admin` user Vaier's boot sequence writes to `authelia/config/.bootstrap-admin-password`. It was the Authelia-era way to reach the console; the code still writes it, but with Authelia decommissioned the console is reached via social login and seeded from the **configured administrator**. |
 | **Configured administrator** | The email (`VAIER_ADMIN_EMAIL`) Vaier seeds as the first **admin** **access entry** when the access store is empty, and restores to admin on startup whenever no admin remains. The way the operator first reaches the admin-only console under social login. |
 | **Concepts page** | The in-app, operator-facing glossary shown inside the admin shell: a trimmed, plain-language subset of this document's terms, grouped, each with a short definition and a one-line "why it matters". Its terms are a curated subset of the ones defined here. |
 | **Infrastructure** | The single admin-shell section that manages machines and the services published on them. It carries two inner views — **List** and **Map** tabs — and is where peers and LAN servers are added, monitored, and have their published services managed inline on each machine card. Replaces the former separate **Machines** and **Services** pages, which no longer exist as distinct sections. |
@@ -118,7 +117,7 @@ Avoid: "expose", "deploy", "route" (as a verb for the user-facing publish action
 | **TLS config** | Per-route TLS settings; `certResolver` names the ACME resolver in Traefik static config. |
 | **Middleware** | Traefik chain element. A social-gated route carries the oauth2-proxy → Vaier authorization chain (`oauth2-signin`, `oauth2-authn`, `vaier-authz`); a public route carries none. |
 | **Forward-auth** | The auth pattern where Traefik forwards each request to an external authenticator before passing it upstream. Under social login the chain is oauth2-proxy (Google sign-in) followed by Vaier's own `/authz/verify` authorization check. There is no in-process Spring Security. |
-| **Group** | Legacy: an Authelia group string. Superseded for authorization by **access group** and **role** (see §13); the Authelia group list survives only in the not-yet-removed Authelia Java code. |
+| **Group** | A named set of identities used to gate who may reach protected services. In Vaier this is realised as an **access group** on an **access entry** (see §13); **access group** is the canonical term for the concept. |
 | **ACME** | Let's Encrypt protocol for issuing TLS certs. `ACME_EMAIL` env var feeds the Traefik resolver. |
 
 Avoid: "vhost", "site", "auth provider".
@@ -171,11 +170,11 @@ Avoid: "vhost", "site", "auth provider".
 
 | Term | Definition |
 |------|------------|
-| **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the `vaier.<domain>` DNS record exists, then run the legacy Authelia bootstrap steps (create the `login.<domain>` CNAME, write Authelia config and the bootstrap admin password) that remain in the not-yet-removed Authelia code path. In manual DNS mode the DNS-record steps are silent no-ops since the operator owns those records. |
+| **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the `vaier.<domain>` DNS record exists. In manual DNS mode this step is a silent no-op since the operator owns that record. |
 | **First-run** | The first `docker compose up -d` on a host. Triggers the `geoip-init`, `vaier-init`, and `oauth2-proxy-init` one-shot containers, seeds the **configured administrator** into the access store, and (in Route53 mode) the auto-create of `vaier.<domain>`. |
 | **Docker socket proxy** | The `tecnativa/docker-socket-proxy` sidecar (`docker-proxy` container) that holds the real `/var/run/docker.sock` and exposes a restricted HTTP API on `tcp://docker-proxy:2375` over `vaier-network`. Vaier and Traefik talk to it instead of mounting the host socket. Allowlist: `CONTAINERS, EVENTS, EXEC, IMAGES, PING, POST, ALLOW_RESTARTS`. Default-deny on `/containers/create`, `/containers/{id}/start`, image pulls, swarm/network/volume management. |
 | **vaier-init** | One-shot busybox container that `chown`s the bind-mounted config dirs to UID 1000 on every start, so the non-root Vaier process can read and write its own state. |
-| **SMTP notifier** | The Jakarta Mail-based outbound mail integration. Powers Vaier's admin alert emails. Settings in `vaier-config.yml`; the password is stored in `secrets.properties`. |
+| **SMTP notifier** | The Jakarta Mail-based outbound mail integration. Powers Vaier's admin alert emails. Settings and the password live in `vaier-config.yml`. |
 | **Test email** | A full AUTH + roundtrip Jakarta Mail send triggered from Settings, used to verify SMTP config independently of the auth layer. |
 | **Machine transition** / **up/down alert** | Email sent to every **admin**-role **access entry** when a server-type machine (VPN server peer or LAN server) flips connected/disconnected. Mobile/Windows clients are excluded — their disconnects are routine. The first observation after Vaier startup is treated as a baseline so restarts don't generate noise. |
 | **Disk-pressure alert** | Email sent to every **admin**-role **access entry** when host **disk usage** crosses into **disk pressure** (above the **disk alert threshold**), with a paired **disk-recovery** email when it drops back below. Only a boundary crossing notifies — not every poll — and the first observation after Vaier startup is a baseline, mirroring the **up/down alert**. |
@@ -194,9 +193,7 @@ Vaier has **no database**. State lives in files, in Route53, or in memory.
 | **Vaier config** | `vaier/config/vaier-config.yml`. Holds Route53 credentials (`awsKey`, `awsSecret`), `domain`, `acmeEmail`, SMTP settings, and the **disk alert threshold**. Loaded as `domain.VaierConfig`. |
 | **WireGuard config** | The set of files under `WIREGUARD_CONFIG_PATH`. `wg0.conf` plus per-peer client configs. |
 | **Traefik dynamic config** | YAML files under `TRAEFIK_CONFIG_PATH`, generated by `TraefikReverseProxyAdapter`. Picked up live by Traefik. |
-| **Authelia config** | `authelia/config/configuration.yml`, `users_database.yml`, `secrets.properties`. Still generated by `AutheliaConfigAdapter` / `AutheliaUserAdapter` (and holds the SMTP password), but no longer configures a running Authelia — the service was removed from the stack. Legacy, pending cleanup. |
 | **lan-servers.yml** | Persists registered LAN servers. `lan-docker-hosts.yml` is the legacy filename and is auto-migrated on startup. |
-| **Bootstrap password file** | `authelia/config/.bootstrap-admin-password`, mode `600`. Legacy Authelia-era artefact still written on boot; no longer used to reach the console, which is entered via social login. |
 | **Secrets on disk** | New secret files are written at mode `600`; surrounding directories should be `go-rwx`. |
 
 ---
@@ -253,7 +250,7 @@ These pairs come up often. Use the left, never the right.
 | direct URL | local URL, lan URL (when written as one word) |
 | Vaier server | local, local host, this host (when referring to the machine running the stack) |
 | operator | admin (means a role), user (means an access entry) |
-| bootstrap admin | initial admin, default user |
+| configured administrator | initial admin, default user, bootstrap admin |
 | latest handshake | last seen (UI label only — derived from this) |
 | endpoint IP | public IP (peer's public IP, not the Vaier server's) |
 | public host | server hostname, our IP |
@@ -286,11 +283,11 @@ is delegated to an external **identity provider**; Vaier owns **authorization** 
 | **Display name** (access entry) | The identity's human name as reported by the **identity provider** (Google's `name` claim), stored on the **access entry** and shown beside the email in the access overview. Also greets the identity in the Vaier console when the console runs on Social **auth mode**. Null until a sign-in fills it in (e.g. a pre-approved entry); a sign-in without one never clears it. Distinct from the *launchpad display name* (a service tile's label). |
 | **Role** | The access level granted to an **access entry** (`domain.Role`): **pending**, **user**, or **admin**. Exactly one role per entry, and the sole authority for admin-vs-user — orthogonal to **access groups**, which never decide it. |
 | **Pending** | The role a freshly seen identity lands in: authenticated by the identity provider but not yet approved, so blocked from everything until an admin promotes it. "Awaiting approval." |
-| **User** (role) | An approved, non-administrative identity — an **access entry** with the user role. Reaches the services whose required **access group** it holds; cannot administer Vaier. This is the only user concept an operator manages (on the **Users** page); the legacy Authelia local-account `User` survives in backend code only (boot bootstrap) and is no longer surfaced. |
+| **User** (role) | An approved, non-administrative identity — an **access entry** with the user role. Reaches the services whose required **access group** it holds; cannot administer Vaier. This is the only user concept an operator manages (on the **Users** page). |
 | **Admin** (role) | An approved identity that may administer the Vaier console and reach every service, regardless of access groups. |
 | **Last-admin protection** | The invariant that the access store always retains at least one **admin**, so the admin-only console can never be locked out for everyone. Revoking or demoting the sole remaining admin is refused, and a configured administrator is restored on startup when no admin exists. |
 | **Access group** | A free-form, per-service access tag on an **access entry** (e.g. `devs`, `family`): a service requires a group, and a user reaches it only if their entry carries that group. Admins bypass the requirement. Purely per-service — the names `admins` and `users` are never access groups (they mirror the **role**, which is the sole authority for admin-vs-user). |
-| **Auth mode** | How a gated surface signs a user in (`domain.AuthMode`): **none** (public), **social** (the oauth2-proxy → Vaier authorization chain), or **authelia** (a legacy value whose Authelia backend no longer runs in the stack). Set per published service (one mode per route) and also selected for the Vaier console itself, which decides how the operator signs in and out. Every gated route now runs on **social**. Replaces the earlier per-route "requires auth" on/off toggle. |
+| **Auth mode** | How a gated surface signs a user in (`domain.AuthMode`): **none** (public) or **social** (the oauth2-proxy → Vaier authorization chain). Set per published service (one mode per route); the Vaier console is always social. Every gated route runs on **social**. Replaces the earlier per-route "requires auth" on/off toggle. |
 | **oauth2-proxy** | The external component that performs **social login** authentication (the Google sign-in dance and the domain-wide SSO session) and asserts the signed-in email to Vaier. Mandatory, always-on stack infrastructure — the sole runtime auth gateway since Authelia was decommissioned. |
 
 ---

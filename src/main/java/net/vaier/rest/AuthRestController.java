@@ -23,13 +23,13 @@ public class AuthRestController {
             @RequestHeader(value = "Remote-Email", required = false) String email) {
         String domain = configResolver.getDomain();
         boolean hasDomain = domain != null && !domain.isBlank();
-        // The logout URL is resolved through the mode-aware domain helper driven by the console's own
-        // auth mode (VAIER_CONSOLE_AUTH_MODE): when the console runs on social login (#305 step 3b) it
-        // ends the session via oauth2-proxy's sign-out; otherwise it uses the Authelia portal logout.
+        // The console is always on social login, so a session is always ended via oauth2-proxy's
+        // sign-out, which clears the domain-wide SSO cookie. The login link
+        // just points back at the console; hitting it unauthenticated triggers the Google sign-in.
         VaierHostnames hostnames = new VaierHostnames(domain);
         String console = hasDomain ? "https://" + hostnames.vaierServerFqdn() + "/" : null;
-        String logoutUrl = hasDomain ? hostnames.logoutUrl(configResolver.getConsoleAuthMode(), console) : null;
-        String loginUrl = hasDomain ? "https://" + hostnames.autheliaHost() + "/?rd=" + console : null;
+        String logoutUrl = hasDomain ? hostnames.oauth2SignOutUrl(console) : null;
+        String loginUrl = console;
         return ResponseEntity.ok(new MeResponse(username, displayname, email, logoutUrl, loginUrl));
     }
 

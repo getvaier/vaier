@@ -224,9 +224,9 @@ Each published service card carries an **auth mode** picker — **Public** (no s
 sign-in via oauth2-proxy, with Vaier deciding who's approved). Change it any time; the change rewrites only
 that route's Traefik middleware chain.
 
-Social login is now the sole runtime auth gateway: **Authelia has been removed from the running stack**, and
-every gated service authenticates via Google. (The legacy `authelia` auth-mode value still exists in the
-code but has no running backend; the dead Authelia Java classes are a pending cleanup.)
+Social login is the sole runtime auth gateway: **Authelia has been fully removed** — both the running
+service and the last of its Java code — and every gated service authenticates via Google. There is no
+`authelia` auth mode; the two modes are Public and Social.
 
 When someone signs in with Google for the first time, Vaier records them as a **pending** access request (authenticated but blocked) and denies access until an admin approves them. The moment that pending entry is created, Vaier emails every admin so the request doesn't sit unseen — the mail names the email and links straight to the **Users** page to approve or deny. It reuses the same SMTP configuration as the other alerts, so with SMTP unconfigured (or no admins to notify) it stays silent, and the send is fire-and-forget so it never slows the sign-in check.
 
@@ -234,7 +234,7 @@ Admin-vs-user is decided **only by the role** (pending → user → admin) — p
 
 The console is admin-only, so Vaier keeps a **last-admin protection** invariant: the access store always holds at least one admin. Revoking or demoting the sole remaining admin is refused (the Access page disables those controls with an inline note, and the API answers `409 Conflict`), and on startup the configured administrator (`VAIER_ADMIN_EMAIL`) is restored to admin whenever no admin exists — promoting an existing entry in place or creating one — so the console can never be locked out for everyone.
 
-Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it on the **Users** page with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one. The same captured name follows the identity into the Vaier console when the console runs on Social login, greeting them by name in the topbar (falling back to email until a name is known).
+Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it on the **Users** page with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one. The same captured name follows the identity into the Vaier console — which always runs on Social login — greeting them by name in the topbar (falling back to email until a name is known).
 
 The **Users** page is this single list of social identities. Vaier no longer manages local password accounts and has no self-service profile page — each identity's name and email are owned by Google and shown read-only; only the role and access groups are edited here.
 

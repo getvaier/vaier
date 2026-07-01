@@ -17,13 +17,13 @@ public interface ForPersistingReverseProxyRoutes {
                                  AuthMode authMode, boolean directUrlDisabled, String rootRedirectPath,
                                  String pathPrefix);
 
-    /** Legacy boolean overload: {@code true} → Authelia, {@code false} → no auth. */
+    /** Legacy boolean overload: {@code true} → social login, {@code false} → no auth. */
     default void addReverseProxyRoute(String dnsName, String address, int port, boolean requiresAuth,
                                       String rootRedirectPath, String pathPrefix) {
         addReverseProxyRoute(dnsName, address, port, AuthMode.fromRequiresAuth(requiresAuth),
             rootRedirectPath, pathPrefix);
     }
-    /** Legacy boolean overload: {@code true} → Authelia, {@code false} → no auth. */
+    /** Legacy boolean overload: {@code true} → social login, {@code false} → no auth. */
     default void addLanReverseProxyRoute(String dnsName, String host, int port, String protocol,
                                          boolean requiresAuth, boolean directUrlDisabled, String rootRedirectPath,
                                          String pathPrefix) {
@@ -53,7 +53,7 @@ public interface ForPersistingReverseProxyRoutes {
     /** Path-aware setters target a specific (dnsName, pathPrefix) router. */
     void setRouteAuthMode(String dnsName, String pathPrefix, AuthMode authMode);
 
-    /** Legacy boolean overload: {@code true} → Authelia, {@code false} → no auth. */
+    /** Legacy boolean overload: {@code true} → social login, {@code false} → no auth. */
     default void setRouteAuthentication(String dnsName, String pathPrefix, boolean requiresAuth) {
         setRouteAuthMode(dnsName, pathPrefix, AuthMode.fromRequiresAuth(requiresAuth));
     }

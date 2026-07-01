@@ -5,14 +5,9 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.config.ServiceNames;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.domain.Lifecycle;
-import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForPersistingDnsRecords;
-import net.vaier.domain.port.ForPersistingUsers;
-import net.vaier.domain.port.ForPublishingAutheliaAssets;
 import net.vaier.domain.port.ForResolvingPublicHost;
-import net.vaier.domain.port.ForRestartingContainers;
-import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -22,38 +17,23 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class LifecycleService {
 
-    private final ForInitialisingUserService forInitialisingUserService;
-    private final ForPersistingUsers forPersistingUsers;
-    private final ForRestartingContainers containerRestarter;
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForInitialisingVpnRouting forInitialisingVpnRouting;
-    private final ForWritingBootstrapCredentials bootstrapCredentialsWriter;
-    private final ForPublishingAutheliaAssets autheliaAssetsPublisher;
     private final ForResolvingPublicHost publicHostResolver;
     private final SetupStateHolder setupStateHolder;
     private final ConfigResolver configResolver;
     private final SyncLanRoutesUseCase syncLanRoutesUseCase;
 
     public LifecycleService(
-        ForInitialisingUserService forInitialisingUserService,
-        ForPersistingUsers forPersistingUsers,
-        ForRestartingContainers containerRestarter,
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForInitialisingVpnRouting forInitialisingVpnRouting,
-        ForWritingBootstrapCredentials bootstrapCredentialsWriter,
-        ForPublishingAutheliaAssets autheliaAssetsPublisher,
         ForResolvingPublicHost publicHostResolver,
         SetupStateHolder setupStateHolder,
         ConfigResolver configResolver,
         SyncLanRoutesUseCase syncLanRoutesUseCase
     ) {
-        this.forInitialisingUserService = forInitialisingUserService;
-        this.forPersistingUsers = forPersistingUsers;
-        this.containerRestarter = containerRestarter;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.forInitialisingVpnRouting = forInitialisingVpnRouting;
-        this.bootstrapCredentialsWriter = bootstrapCredentialsWriter;
-        this.autheliaAssetsPublisher = autheliaAssetsPublisher;
         this.publicHostResolver = publicHostResolver;
         this.setupStateHolder = setupStateHolder;
         this.configResolver = configResolver;
@@ -74,18 +54,10 @@ public class LifecycleService {
     public void runLifecycle() {
         configResolver.reload();
         new Lifecycle(
-            forInitialisingUserService,
-            forPersistingUsers,
             forPersistingDnsRecords,
-            containerRestarter,
-            bootstrapCredentialsWriter,
-            autheliaAssetsPublisher,
             publicHostResolver,
             configResolver.getDomain(),
-            ServiceNames.DEFAULT_ADMIN_USERNAME,
-            ServiceNames.AUTHELIA,
-            ServiceNames.VAIER,
-            ServiceNames.AUTH
+            ServiceNames.VAIER
         ).start();
 
         forInitialisingVpnRouting.setupVpnRouting();

@@ -63,11 +63,14 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
-    void addReverseProxyRoute_withAuthAddsAuthMiddlewareToRouter() throws IOException {
+    void addReverseProxyRoute_withAuthAddsSocialMiddlewaresToRouter() throws IOException {
+        // requiresAuth=true now maps to social login (Authelia is gone), so the route carries the
+        // proven oauth2 middleware chain rather than the legacy auth-middleware.
         adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080, true, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(content).contains(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
+        assertThat(content).doesNotContain(ServiceNames.AUTH_MIDDLEWARE);
     }
 
     @Test
@@ -76,6 +79,7 @@ class TraefikReverseProxyAdapterTest {
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).doesNotContain(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(content).doesNotContain(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
     }
 
     @Test
@@ -241,7 +245,7 @@ class TraefikReverseProxyAdapterTest {
         adapter.setRouteAuthentication("app.example.com", true);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(content).contains(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
     }
 
     @Test
@@ -524,11 +528,11 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
-    void addLanReverseProxyRoute_withRequiresAuth_addsAuthMiddleware() throws IOException {
+    void addLanReverseProxyRoute_withRequiresAuth_addsSocialMiddlewares() throws IOException {
         adapter.addLanReverseProxyRoute("nas.example.com", "192.168.3.50", 5000, "http", true, false, null);
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(content).contains(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
     }
 
     @Test

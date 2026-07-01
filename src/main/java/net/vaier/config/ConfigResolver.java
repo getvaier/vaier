@@ -2,7 +2,6 @@ package net.vaier.config;
 
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.domain.AuthMode;
 import net.vaier.domain.DnsProvider;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
@@ -25,7 +24,6 @@ public class ConfigResolver {
     private String smtpSender;
     private int diskMonitorThresholdPercent;
     private String googleClientId;
-    private AuthMode consoleAuthMode;
 
     @Autowired
     public ConfigResolver(ForPersistingAppConfiguration configPersistence) {
@@ -50,7 +48,6 @@ public class ConfigResolver {
         this.smtpSender = config.getSmtpSender();
         this.diskMonitorThresholdPercent = config.effectiveDiskMonitorThresholdPercent();
         this.googleClientId = envLookup.apply("VAIER_OIDC_GOOGLE_CLIENT_ID");
-        this.consoleAuthMode = AuthMode.fromString(envLookup.apply("VAIER_CONSOLE_AUTH_MODE"));
         if (domain != null) {
             log.info("Configuration resolved for domain: {} (DNS provider: {})", domain, getDnsProvider());
         }
@@ -71,12 +68,6 @@ public class ConfigResolver {
     public String getSmtpUsername() { return smtpUsername; }
     public String getSmtpSender() { return smtpSender; }
     public int getDiskMonitorThresholdPercent() { return diskMonitorThresholdPercent; }
-    /**
-     * How the Vaier console itself is gated, from {@code VAIER_CONSOLE_AUTH_MODE} — {@code social}
-     * once the console moves behind oauth2-proxy (#305 step 3b), else the {@code authelia} default.
-     * Drives the mode-aware logout URL surfaced on {@code /users/me}.
-     */
-    public AuthMode getConsoleAuthMode() { return consoleAuthMode; }
     /**
      * Whether social login (#305) is configured: true once a Google OAuth client id is present. When
      * false, the {@code social} auth mode isn't offered in the UI and oauth2-proxy need not run.

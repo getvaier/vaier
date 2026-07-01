@@ -2,14 +2,11 @@ package net.vaier.application.service;
 
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.config.ConfigResolver;
-import net.vaier.config.ServiceNames;
 import net.vaier.domain.DnsProvider;
 import net.vaier.domain.VaierConfig;
-import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingAppVersion;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
-import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForSendingTestEmail;
 import net.vaier.domain.port.ForValidatingAwsCredentials;
 import net.vaier.domain.port.ForVerifyingSmtpCredentials;
@@ -39,8 +36,6 @@ class SettingsServiceTest {
 
     @Mock ForPersistingAppConfiguration configPersistence;
     @Mock ForValidatingAwsCredentials forValidatingAwsCredentials;
-    @Mock ForConfiguringSmtpNotifier smtpNotifierConfig;
-    @Mock ForRestartingContainers containerRestarter;
     @Mock ForVerifyingSmtpCredentials smtpVerifier;
     @Mock ForReadingStoredSmtpPassword storedPasswordReader;
     @Mock ForSendingTestEmail testEmailSender;
@@ -283,7 +278,9 @@ class SettingsServiceTest {
     }
 
     @Test
-    void updateSmtpSettings_doesNotSavePasswordToVaierConfig() {
+    void updateSmtpSettings_savesResolvedPasswordToVaierConfig() {
+        // Authelia's secrets store is gone; the SMTP password now lives in Vaier's own owner-only
+        // config file, so the notifier can send admin mail without any external component.
         when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
 
         service.updateSmtpSettings("smtp.example.com", 587, "user@example.com", "secretpass", "noreply@example.com");
@@ -293,6 +290,7 @@ class SettingsServiceTest {
         VaierConfig saved = captor.getValue();
         assertThat(saved.getDomain()).isEqualTo("example.com");
         assertThat(saved.getAwsKey()).isEqualTo("AKID");
+        assertThat(saved.getSmtpPassword()).isEqualTo("secretpass");
     }
 
     @Test
@@ -311,40 +309,18 @@ class SettingsServiceTest {
     }
 
     @Test
-    void updateSmtpSettings_triggersAutheliaConfigRegeneration() {
+    void updateSmtpSettings_verifiesCredentialsBeforeSaving() {
         when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
 
         service.updateSmtpSettings("smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
 
-        verify(smtpNotifierConfig).updateSmtpConfig("smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
-    }
-
-    @Test
-    void updateSmtpSettings_restartsAutheliaAfterConfigRegeneration() {
-        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
-
-        service.updateSmtpSettings("smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
-
-        InOrder order = inOrder(smtpNotifierConfig, containerRestarter);
-        order.verify(smtpNotifierConfig).updateSmtpConfig("smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
-        order.verify(containerRestarter).restartContainer(ServiceNames.AUTHELIA);
-    }
-
-    @Test
-    void updateSmtpSettings_verifiesCredentialsBeforeAnythingElse() {
-        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
-
-        service.updateSmtpSettings("smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
-
-        InOrder order = inOrder(smtpVerifier, configPersistence, smtpNotifierConfig, containerRestarter);
+        InOrder order = inOrder(smtpVerifier, configPersistence);
         order.verify(smtpVerifier).verify("smtp.example.com", 587, "user@example.com", "pass");
         order.verify(configPersistence).save(any(VaierConfig.class));
-        order.verify(smtpNotifierConfig).updateSmtpConfig("smtp.example.com", 587, "user@example.com", "pass", "noreply@example.com");
-        order.verify(containerRestarter).restartContainer(ServiceNames.AUTHELIA);
     }
 
     @Test
-    void updateSmtpSettings_doesNotTouchConfigOrAutheliaWhenVerificationFails() {
+    void updateSmtpSettings_doesNotTouchConfigWhenVerificationFails() {
         doThrow(new RuntimeException("SMTP AUTH failed"))
             .when(smtpVerifier).verify("smtp.example.com", 587, "user@example.com", "badpass");
 
@@ -353,8 +329,6 @@ class SettingsServiceTest {
             .hasMessageContaining("SMTP AUTH failed");
 
         verify(configPersistence, never()).save(any());
-        verify(smtpNotifierConfig, never()).updateSmtpConfig(any(), anyInt(), any(), any(), any());
-        verify(containerRestarter, never()).restartContainer(any());
     }
 
     @Test
@@ -365,7 +339,9 @@ class SettingsServiceTest {
         service.updateSmtpSettings("smtp.example.com", 587, "user@example.com", "", "noreply@example.com");
 
         verify(smtpVerifier).verify("smtp.example.com", 587, "user@example.com", "storedPass");
-        verify(smtpNotifierConfig).updateSmtpConfig("smtp.example.com", 587, "user@example.com", "storedPass", "noreply@example.com");
+        ArgumentCaptor<VaierConfig> captor = ArgumentCaptor.forClass(VaierConfig.class);
+        verify(configPersistence).save(captor.capture());
+        assertThat(captor.getValue().getSmtpPassword()).isEqualTo("storedPass");
     }
 
     @Test

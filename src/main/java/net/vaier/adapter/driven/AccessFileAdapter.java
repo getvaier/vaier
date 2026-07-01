@@ -21,10 +21,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * File-based access store for social-login authorization — a sibling of Authelia's
- * {@code users_database.yml}. Persists the {@code email → role + groups} map and the per-host
- * required group at {@code ${VAIER_CONFIG_PATH}/access.yml}. Mirrors {@link AutheliaUserAdapter}'s
- * SnakeYAML load/dump style and locks the file down to owner-only after each write.
+ * File-based access store for social-login authorization. Persists the {@code email → role + groups}
+ * map and the per-host required group at {@code ${VAIER_CONFIG_PATH}/access.yml} using SnakeYAML
+ * load/dump, and locks the file down to owner-only after each write.
  *
  * <p>Schema:
  * <pre>
@@ -70,8 +69,7 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
 
     /**
      * Guarantee the access store always holds at least one admin, so the admin-only console can never
-     * lock everyone out (there is no Authelia fallback once it is decommissioned). Idempotent and
-     * self-healing:
+     * lock everyone out. Idempotent and self-healing:
      *
      * <ul>
      *   <li>If any entry is already an admin, do nothing.</li>

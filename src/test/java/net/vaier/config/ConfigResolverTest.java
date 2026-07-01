@@ -122,26 +122,6 @@ class ConfigResolverTest {
     }
 
     @Test
-    void consoleAuthMode_defaultsToAutheliaWhenUnset() {
-        when(configPersistence.load()).thenReturn(Optional.empty());
-
-        assertThat(new ConfigResolver(configPersistence, Map.<String, String>of()::get)
-            .getConsoleAuthMode()).isEqualTo(net.vaier.domain.AuthMode.AUTHELIA);
-        assertThat(new ConfigResolver(configPersistence,
-            Map.of("VAIER_CONSOLE_AUTH_MODE", "")::get)
-            .getConsoleAuthMode()).isEqualTo(net.vaier.domain.AuthMode.AUTHELIA);
-    }
-
-    @Test
-    void consoleAuthMode_readsSocialFromEnv() {
-        when(configPersistence.load()).thenReturn(Optional.empty());
-
-        assertThat(new ConfigResolver(configPersistence,
-            Map.of("VAIER_CONSOLE_AUTH_MODE", "social")::get)
-            .getConsoleAuthMode()).isEqualTo(net.vaier.domain.AuthMode.SOCIAL);
-    }
-
-    @Test
     void infersManualDnsProviderWhenAwsKeysAbsent() {
         when(configPersistence.load()).thenReturn(Optional.empty());
 

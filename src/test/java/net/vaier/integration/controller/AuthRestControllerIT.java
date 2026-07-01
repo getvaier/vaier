@@ -31,24 +31,22 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getMe_returnsUsernameFromHeader() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
-        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         mockMvc.perform(get("/users/me").header("Remote-User", "alice"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.username").value("alice"))
-               .andExpect(jsonPath("$.logoutUrl").value("https://login.example.com/logout?rd=https://vaier.example.com/"))
-               .andExpect(jsonPath("$.loginUrl").value("https://login.example.com/?rd=https://vaier.example.com/"));
+               .andExpect(jsonPath("$.logoutUrl").value("https://oauth2.example.com/oauth2/sign_out?rd=https%3A%2F%2Fvaier.example.com%2F"))
+               .andExpect(jsonPath("$.loginUrl").value("https://vaier.example.com/"));
     }
 
     @Test
     void getMe_returnsNullWhenHeaderAbsent() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
-        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         mockMvc.perform(get("/users/me"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.username").doesNotExist())
-               .andExpect(jsonPath("$.loginUrl").value("https://login.example.com/?rd=https://vaier.example.com/"));
+               .andExpect(jsonPath("$.loginUrl").value("https://vaier.example.com/"));
     }
 
     @Test
@@ -64,7 +62,6 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getMe_returnsDisplaynameAndEmailFromHeaders() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
-        when(configResolver.getConsoleAuthMode()).thenReturn(net.vaier.domain.AuthMode.AUTHELIA);
 
         mockMvc.perform(get("/users/me")
                        .header("Remote-User", "alice")

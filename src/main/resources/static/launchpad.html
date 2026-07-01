@@ -396,17 +396,16 @@
             throw lastErr;
         }
 
-        // Try the Authelia-gated endpoint first — when the visitor has a session it returns the
-        // full list including auth-protected tiles. Anonymous loads either hit Authelia's
-        // {@code one_factor} redirect (we follow it to login.<domain> and {@code res.ok} stays
-        // true but the body isn't JSON) or get an explicit error; in both cases we fall back to
-        // the public-only endpoint at /launchpad/services.
+        // Try the auth-gated endpoint first — when the visitor has a session it returns the full
+        // list including auth-protected tiles. Anonymous loads either hit the oauth2-proxy sign-in
+        // redirect (we follow it and res.ok stays true but the body isn't JSON) or get an explicit
+        // error; in both cases we fall back to the public-only endpoint at /launchpad/services.
         async function fetchServices() {
             try {
                 const res = await fetch('/launchpad/services-authenticated', { cache: 'no-store' });
                 if (res.ok) {
                     const text = await res.text();
-                    try { return JSON.parse(text); } catch (_) { /* not JSON — Authelia login page */ }
+                    try { return JSON.parse(text); } catch (_) { /* not JSON — sign-in page */ }
                 }
             } catch (_) { /* fall through */ }
             const res = await fetchWithRetry('/launchpad/services');

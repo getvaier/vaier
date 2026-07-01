@@ -275,11 +275,9 @@
             // The badge names the gateway in front of the service, not just "gated y/n", so the
             // operator sees at a glance which login a tile leads to. Fall back to the legacy
             // authenticated flag for routes that predate authMode (e.g. Docker-label basicAuth).
-            const mode = s.authMode || (s.authenticated ? 'authelia' : 'none');
+            const mode = s.authMode || (s.authenticated ? 'social' : 'none');
             const authBadge = mode === 'social'
                 ? `<span class="pub-badge pub-social" title="Social login (Google) required">social</span>`
-                : mode === 'authelia'
-                ? `<span class="pub-badge pub-auth" title="Authelia authentication required">auth</span>`
                 : `<span class="pub-badge pub-noauth" title="Public — no authentication required">no auth</span>`;
             return `<div class="published-entry">
                 <div class="published-item" role="button" tabindex="0"
@@ -358,7 +356,7 @@
         // Social option is offered only when Google OAuth is configured (_socialAuthAvailable) — but
         // a route already on Social always keeps its option visible so the mode can be read and changed.
         function renderAuthModePicker(s, id, dns, path) {
-            const mode = s.authMode || (s.authenticated ? 'authelia' : 'none');
+            const mode = s.authMode || (s.authenticated ? 'social' : 'none');
             const showSocial = _socialAuthAvailable || mode === 'social';
             const opt = (value, label) =>
                 `<option value="${value}" ${mode === value ? 'selected' : ''}>${label}</option>`;
@@ -366,7 +364,6 @@
                         title="Which login a visitor must pass to reach this service."
                         onchange="setPublishedAuthMode('${dns}','${path}',this.value)">
                 ${opt('none', 'Public — no sign-in')}
-                ${opt('authelia', 'Authelia')}
                 ${showSocial ? opt('social', 'Social (Google)') : ''}
             </select>`;
         }

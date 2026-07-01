@@ -234,9 +234,9 @@ public class ReverseProxyRoute {
 
     /**
      * How this route is gated, read off its Traefik middleware chain — {@link AuthMode#SOCIAL} when
-     * the oauth2-proxy links are present, {@link AuthMode#AUTHELIA} for the legacy single auth
-     * middleware, else {@link AuthMode#NONE}. The published-services API and the UI auth-mode picker
-     * read this so they reflect the route's actual gateway rather than re-deriving it.
+     * the oauth2-proxy links are present, else {@link AuthMode#NONE}. The published-services API and
+     * the UI auth-mode picker read this so they reflect the route's actual gateway rather than
+     * re-deriving it.
      */
     public AuthMode authMode() {
         return AuthMode.fromMiddlewareNames(middlewares);
@@ -768,16 +768,14 @@ public class ReverseProxyRoute {
         /**
          * Whether the Traefik middleware named {@code middlewareName} is an authentication
          * middleware — case-insensitive substring match against the canonical keywords
-         * ({@code auth}, {@code authelia}, {@code oauth}, {@code sso}). Used by adapters reading
-         * back a route from the Traefik API where only middleware names (not their type) are
-         * exposed. The heuristic is good-enough rather than exhaustive; it's a domain decision so
-         * it isn't re-invented per adapter.
+         * ({@code auth}, {@code oauth}, {@code sso}). Used by adapters reading back a route from the
+         * Traefik API where only middleware names (not their type) are exposed. The heuristic is
+         * good-enough rather than exhaustive; it's a domain decision so it isn't re-invented per adapter.
          */
         public static boolean isAuthMiddlewareName(String middlewareName) {
             if (middlewareName == null) return false;
             String lower = middlewareName.toLowerCase();
             return lower.contains("auth")
-                || lower.contains("authelia")
                 || lower.contains("oauth")
                 || lower.contains("sso");
         }

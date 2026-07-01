@@ -18,8 +18,7 @@ public interface GetLaunchpadServicesUseCase {
      * Returns the launchpad tiles visible to this caller. {@code callerAuthenticated} gates
      * auth-protected routes (issue #207): when false, any route with forward-auth is filtered
      * out so anonymous viewers don't see internal-only services. The launchpad endpoint itself
-     * is anonymously reachable; this flag is set from Authelia's forwarded {@code Remote-User}
-     * header.
+     * is anonymously reachable; this flag is set from the forwarded {@code Remote-User} header.
      */
     List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, boolean callerAuthenticated);
 

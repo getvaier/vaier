@@ -1417,15 +1417,14 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
-     * Ensure the shared infrastructure a route's {@link AuthMode} needs exists. Authelia routes need
-     * the single {@code auth-middleware}; social routes need the proven two-stage middlewares plus a
-     * higher-priority per-host {@code /oauth2/} router pointing at oauth2-proxy (without which the
-     * "Sign in with Google" button's relative {@code /oauth2/start} loops back into the auth chain).
-     * No-op for {@link AuthMode#NONE}. Must be called AFTER routers and services are created.
+     * Ensure the shared infrastructure a route's {@link AuthMode} needs exists. Social routes need the
+     * proven two-stage middlewares plus a higher-priority per-host {@code /oauth2/} router pointing at
+     * oauth2-proxy (without which the "Sign in with Google" button's relative {@code /oauth2/start}
+     * loops back into the auth chain). No-op for {@link AuthMode#NONE}. Must be called AFTER routers
+     * and services are created.
      */
     private void ensureAuthInfraExists(Map<String, Object> http, AuthMode authMode, String dnsName) {
         switch (authMode) {
-            case AUTHELIA -> ensureAuthMiddlewareExists(http);
             case SOCIAL -> {
                 ensureSocialAuthMiddlewaresExist(http);
                 ensureOauth2EndpointsRouterExists(http, dnsName);
@@ -1529,34 +1528,6 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
         routers.put(endpointsRouterName, routerConfig);
-    }
-
-    /**
-     * Ensure the auth-middleware exists in the middlewares section.
-     * Creates it with standard forwardAuth configuration if it doesn't exist.
-     * Must be called AFTER routers and services are created to maintain order.
-     */
-    private void ensureAuthMiddlewareExists(Map<String, Object> http) {
-        Map<String, Object> middlewares = getOrCreateNestedMapOrdered(http, "middlewares");
-
-        // Check if auth-middleware already exists
-        if (!middlewares.containsKey(ServiceNames.AUTH_MIDDLEWARE)) {
-            // Create standard auth-middleware with forwardAuth to Authelia
-            Map<String, Object> authMiddleware = new LinkedHashMap<>();
-            Map<String, Object> forwardAuth = new LinkedHashMap<>();
-
-            forwardAuth.put("address", "http://authelia:9091/api/verify?rd=https://login." + vaierDomain + "/");
-            forwardAuth.put("trustForwardHeader", true);
-
-            List<String> authResponseHeaders = new ArrayList<>();
-            authResponseHeaders.add("X-Forwarded-User");
-            authResponseHeaders.add("X-Forwarded-Groups");
-            authResponseHeaders.add("X-Forwarded-Email");
-            forwardAuth.put("authResponseHeaders", authResponseHeaders);
-
-            authMiddleware.put("forwardAuth", forwardAuth);
-            middlewares.put(ServiceNames.AUTH_MIDDLEWARE, authMiddleware);
-        }
     }
 
     /**

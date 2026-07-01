@@ -40,7 +40,7 @@ class ManualDnsAdapterTest {
         List<DnsRecord> records = adapter.getDnsRecords(new DnsZone("example.com"));
 
         assertThat(records).extracting(DnsRecord::name)
-            .containsExactlyInAnyOrder("vaier.example.com", "login.example.com");
+            .containsExactly("vaier.example.com");
         assertThat(records).allMatch(r -> r.type() == DnsRecordType.CNAME);
     }
 
@@ -81,7 +81,7 @@ class ManualDnsAdapterTest {
             new DnsZone("example.com")
         );
         // No throw, no state change
-        assertThat(adapter.getDnsRecords(new DnsZone("example.com"))).hasSize(2);
+        assertThat(adapter.getDnsRecords(new DnsZone("example.com"))).hasSize(1);
     }
 
     @Test

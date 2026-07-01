@@ -24,8 +24,8 @@ public interface UpdatePublishedServiceUseCase {
         String versionEndpoint,
         String versionProperty,
         /**
-         * The route's auth mode wire value ({@code none}/{@code authelia}/{@code social}); null means
-         * "leave unchanged". Supersedes the legacy {@code requiresAuth} toggle — when both are set,
+         * The route's auth mode wire value ({@code none}/{@code social}); null means "leave
+         * unchanged". Supersedes the legacy {@code requiresAuth} toggle — when both are set,
          * {@code authMode} wins.
          */
         String authMode

@@ -3,14 +3,9 @@ package net.vaier.domain;
 import java.util.List;
 import java.util.Optional;
 import net.vaier.domain.DnsRecord.DnsRecordType;
-import net.vaier.domain.port.ForInitialisingUserService;
 import net.vaier.domain.port.ForPersistingDnsRecords;
-import net.vaier.domain.port.ForPersistingUsers;
-import net.vaier.domain.port.ForPublishingAutheliaAssets;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
-import net.vaier.domain.port.ForRestartingContainers;
-import net.vaier.domain.port.ForWritingBootstrapCredentials;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -26,108 +21,11 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class LifecycleTest {
 
-    @Mock ForInitialisingUserService forInitialisingUserService;
-    @Mock ForPersistingUsers forPersistingUsers;
     @Mock ForPersistingDnsRecords forPersistingDnsRecords;
-    @Mock ForRestartingContainers containerRestarter;
-    @Mock ForWritingBootstrapCredentials bootstrapCredentialsWriter;
-    @Mock ForPublishingAutheliaAssets autheliaAssetsPublisher;
     @Mock ForResolvingPublicHost publicHostResolver;
 
     private Lifecycle lifecycle() {
-        return new Lifecycle(forInitialisingUserService, forPersistingUsers, forPersistingDnsRecords, containerRestarter,
-                bootstrapCredentialsWriter, autheliaAssetsPublisher, publicHostResolver,
-                "test.example.com", "admin", "authelia", "vaier", "login");
-    }
-
-    @Test
-    void initUsers_createsAdminWithRandomPasswordOnFirstStartup() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(false);
-
-        lifecycle().initUsers();
-
-        ArgumentCaptor<String> passwordCaptor = ArgumentCaptor.forClass(String.class);
-        verify(forPersistingUsers).addUser(eq("admin"), passwordCaptor.capture(), any(), any(), any());
-        assertThat(passwordCaptor.getValue()).isNotEqualTo("admin");
-        assertThat(passwordCaptor.getValue()).hasSizeGreaterThanOrEqualTo(12);
-    }
-
-    @Test
-    void initUsers_writesBootstrapPasswordToFileInsteadOfLogging() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(false);
-
-        lifecycle().initUsers();
-
-        ArgumentCaptor<String> usernameCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> passwordCaptor = ArgumentCaptor.forClass(String.class);
-        verify(bootstrapCredentialsWriter)
-            .writeBootstrapPassword(usernameCaptor.capture(), passwordCaptor.capture());
-        assertThat(usernameCaptor.getValue()).isEqualTo("admin");
-        assertThat(passwordCaptor.getValue()).hasSizeGreaterThanOrEqualTo(12);
-    }
-
-    @Test
-    void initUsers_doesNotWriteBootstrapPasswordWhenAdminAlreadyExists() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
-
-        lifecycle().initUsers();
-
-        verify(bootstrapCredentialsWriter, never()).writeBootstrapPassword(any(), any());
-    }
-
-    @Test
-    void initUsers_doesNotCreateAdminOnSubsequentStartup() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
-
-        lifecycle().initUsers();
-
-        verify(forPersistingUsers, never()).addUser(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void initUsers_restartsAutheliaWhenAdminIsCreated() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(false);
-
-        lifecycle().initUsers();
-
-        verify(containerRestarter).restartContainer("authelia");
-    }
-
-    @Test
-    void initUsers_restartsAutheliaWhenConfigChanged() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(true);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
-
-        lifecycle().initUsers();
-
-        verify(containerRestarter).restartContainer("authelia");
-    }
-
-    @Test
-    void initUsers_doesNotRestartAutheliaWhenNothingChanged() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(false);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
-
-        lifecycle().initUsers();
-
-        verify(containerRestarter, never()).restartContainer(any());
-    }
-
-    @Test
-    void initUsers_publishesBrandingAssetsBeforeAutheliaRestart() {
-        when(forInitialisingUserService.initialiseConfiguration()).thenReturn(true);
-        when(forPersistingUsers.isDatabaseInitialised()).thenReturn(true);
-
-        lifecycle().initUsers();
-
-        var inOrder = inOrder(autheliaAssetsPublisher, containerRestarter);
-        inOrder.verify(autheliaAssetsPublisher).publishAssets();
-        inOrder.verify(containerRestarter).restartContainer("authelia");
+        return new Lifecycle(forPersistingDnsRecords, publicHostResolver, "test.example.com", "vaier");
     }
 
     @Test
@@ -172,9 +70,7 @@ class LifecycleTest {
         ForPersistingDnsRecords manualAdapter = spy(
             new net.vaier.adapter.driven.ManualDnsAdapter(configResolver));
 
-        Lifecycle lifecycle = new Lifecycle(forInitialisingUserService, forPersistingUsers, manualAdapter,
-            containerRestarter, bootstrapCredentialsWriter, autheliaAssetsPublisher, publicHostResolver,
-            "test.example.com", "admin", "authelia", "vaier", "login");
+        Lifecycle lifecycle = new Lifecycle(manualAdapter, publicHostResolver, "test.example.com", "vaier");
 
         assertThatCode(lifecycle::start).doesNotThrowAnyException();
 
@@ -197,7 +93,7 @@ class LifecycleTest {
     }
 
     @Test
-    void initDns_stillCreatesAuthCnameRecord_afterAutoCreatingVaierRecord() {
+    void initDns_doesNotCreateLoginCnameRecord_afterAutoCreatingVaierRecord() {
         DnsZone zone = new DnsZone("test.example.com");
         when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
         when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of());
@@ -208,9 +104,7 @@ class LifecycleTest {
 
         ArgumentCaptor<DnsRecord> captor = ArgumentCaptor.forClass(DnsRecord.class);
         verify(forPersistingDnsRecords, atLeastOnce()).addDnsRecord(captor.capture(), eq(zone));
-        assertThat(captor.getAllValues()).anyMatch(r -> r.name().equals("login.test.example.com")
-            && r.type() == DnsRecordType.CNAME
-            && r.values().equals(List.of("vaier.test.example.com")));
+        assertThat(captor.getAllValues()).noneMatch(r -> r.name().equals("login.test.example.com"));
     }
 
     @Test

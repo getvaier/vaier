@@ -4,9 +4,9 @@ import java.util.List;
 
 /**
  * An immutable snapshot of the access store's {@link AccessEntry entries}, used to reason about the
- * "at least one admin" invariant. Once Authelia is decommissioned the console is admin-only with no
- * fallback, so the store must never reach zero admins — these predicates encode that rule in the
- * domain, where services only orchestrate around them.
+ * "at least one admin" invariant. The console is admin-only with no fallback, so the store must never
+ * reach zero admins — these predicates encode that rule in the domain, where services only orchestrate
+ * around them.
  */
 public final class AccessRoster {
 

@@ -182,6 +182,31 @@ class VaierConfigFileAdapterTest {
     }
 
     @Test
+    void readStoredPassword_roundTripsTheSmtpPassword() {
+        // The config file is Vaier's own SMTP-credential store now that Authelia's secrets file is gone.
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .smtpHost("smtp.example.com")
+            .smtpUsername("user@example.com")
+            .smtpPassword("s3cr3t")
+            .build();
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        assertThat(adapter().readStoredPassword()).contains("s3cr3t");
+    }
+
+    @Test
+    void readStoredPassword_isEmptyWhenNoPasswordStored() {
+        VaierConfig config = VaierConfig.builder().domain("example.com").build();
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        assertThat(adapter().readStoredPassword()).isEmpty();
+    }
+
+    @Test
     void load_smtpFieldsAreNullWhenNotPresent() {
         VaierConfig config = VaierConfig.builder()
             .domain("example.com")

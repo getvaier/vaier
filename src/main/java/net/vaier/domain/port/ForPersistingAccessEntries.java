@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port for the file-based access store (sibling of Authelia's {@code users_database.yml}):
- * the {@code email → role + groups} map that backs social-login authorization.
+ * Driven port for the file-based access store: the {@code email → role + groups} map that backs
+ * social-login authorization.
  */
 public interface ForPersistingAccessEntries {
 

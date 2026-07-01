@@ -318,13 +318,12 @@ services:
         set -e
         # Vaier container runs as UID 1000 (Dockerfile USER directive). Bind mounts inherit
         # host ownership, so we chown the config dirs once on every start.
-        for d in /vaier/config /traefik/config /authelia/config /wireguard/config /icons; do
+        for d in /vaier/config /traefik/config /wireguard/config /icons; do
           [ -d "$$d" ] && chown -R 1000:1000 "$$d"
         done
     volumes:
       - ./vaier/config:/vaier/config
       - ./traefik/config:/traefik/config
-      - ./authelia/config:/authelia/config
       - ./wireguard/config:/wireguard/config
       - ./icons:/icons
     restart: "no"
@@ -355,14 +354,10 @@ services:
       # Seeds/keeps this identity as an admin AccessEntry so the console is never locked out
       # (self-heal in AccessFileAdapter, read via System.getenv). Must reach the container (#305).
       VAIER_ADMIN_EMAIL: ${VAIER_ADMIN_EMAIL:-}
-      # How the Vaier console itself is gated — drives the console logout URL. Authelia is
-      # decommissioned, so social is the only real mode and the default (#305).
-      VAIER_CONSOLE_AUTH_MODE: ${VAIER_CONSOLE_AUTH_MODE:-social}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
       TRAEFIK_API_URL: http://traefik:8080
-      AUTHELIA_CONFIG_PATH: /authelia/config
       VAIER_CONFIG_PATH: /vaier/config
       VAIER_HOST_ROOT_PATH: /host
       DOCKER_HOST: tcp://docker-proxy:2375
@@ -380,7 +375,6 @@ services:
     volumes:
       - ./traefik/config:/traefik/config
       - ./wireguard/config:/wireguard/config
-      - ./authelia/config:/authelia/config
       - ./vaier/config:/vaier/config
       - ./geoip:/geoip:ro
       # Resolved service icons — read-write so a resolved icon is fetched online once then served
@@ -420,7 +414,7 @@ services:
       - vaier-network
 
   # --- #305 social login: oauth2-proxy authenticates with Google; Vaier owns authorization
-  # via /authz/verify. Now that Authelia is decommissioned this is mandatory infrastructure — it
+  # via /authz/verify. This is mandatory infrastructure — the sole auth gateway — so it
   # always starts with `docker compose up -d` (no `social` profile). Set the Google OAuth
   # credentials in .env: VAIER_OIDC_GOOGLE_CLIENT_ID=..., VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
   # VAIER_OAUTH2_COOKIE_SECRET is auto-generated into .env (not operator-authored).

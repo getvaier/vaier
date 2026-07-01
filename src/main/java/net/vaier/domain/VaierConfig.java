@@ -17,6 +17,7 @@ public class VaierConfig {
     private Integer smtpPort;
     private String smtpUsername;
     private String smtpSender;
+    private String smtpPassword;
     private Integer diskMonitorThresholdPercent;
 
     /** The default host-disk alert threshold when none is configured: notify above 85% used. */
@@ -37,14 +38,20 @@ public class VaierConfig {
             .build();
     }
 
-    /** A copy with the SMTP settings replaced; every other field carries over unchanged. */
+    /**
+     * A copy with the SMTP settings replaced; every other field carries over unchanged. The password
+     * is persisted here (in this owner-only-readable config file, alongside {@code awsSecret}) — it is
+     * Vaier's own store for the notifier credentials.
+     */
     public VaierConfig withSmtpSettings(String newSmtpHost, int newSmtpPort,
-                                        String newSmtpUsername, String newSmtpSender) {
+                                        String newSmtpUsername, String newSmtpSender,
+                                        String newSmtpPassword) {
         return toBuilder()
             .smtpHost(newSmtpHost)
             .smtpPort(newSmtpPort)
             .smtpUsername(newSmtpUsername)
             .smtpSender(newSmtpSender)
+            .smtpPassword(newSmtpPassword)
             .build();
     }
 

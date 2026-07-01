@@ -10,7 +10,7 @@ public final class PublishingConstants {
     /**
      * The infrastructure subdomains Vaier publishes for itself — currently just its own web UI.
      * They are created at setup and must never be deletable or listed as ordinary published
-     * services. (The Authelia login portal used to live here too, but Authelia is decommissioned.)
+     * services.
      */
     private static final Set<String> MANDATORY_SUBDOMAINS = Set.of(ServiceNames.VAIER);
 

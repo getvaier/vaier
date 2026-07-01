@@ -97,7 +97,7 @@ public final class OperatorGlossary {
                     "A mode where Vaier doesn't touch DNS and you manage records yourself.",
                     "Pick it when your DNS lives somewhere Vaier can't automate."),
                 Concept.of("Forward-auth",
-                    "Routing requests through Authelia for a login check before they reach a service.",
+                    "Routing requests through a login check before they reach a service.",
                     "It's how a service gets put behind Vaier's single sign-on."),
                 Concept.of("Auth toggle",
                     "The switch that turns forward-auth on or off for a published service.",

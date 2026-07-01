@@ -33,9 +33,11 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void authMode_isAuthelia_whenTheAutheliaMiddlewareIsPresent() {
+    void authMode_isNone_whenOnlyTheLegacyAutheliaMiddlewareIsPresent() {
+        // Authelia is decommissioned: a leftover auth-middleware carries no social links, so the route
+        // reads as NONE (the startup cleanup strips the middleware anyway).
         assertThat(routeWithMiddlewares(List.of("auth-middleware", "vaier-errors")).authMode())
-            .isEqualTo(AuthMode.AUTHELIA);
+            .isEqualTo(AuthMode.NONE);
     }
 
     @Test

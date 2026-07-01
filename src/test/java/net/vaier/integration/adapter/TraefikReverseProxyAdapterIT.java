@@ -48,7 +48,7 @@ class TraefikReverseProxyAdapterIT {
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, true, "/dashboard");
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).contains(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(content).contains(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
         assertThat(content).contains("redirectRegex");
     }
 
@@ -182,13 +182,13 @@ class TraefikReverseProxyAdapterIT {
     }
 
     @Test
-    void setRouteAuthentication_addsAuthMiddleware() {
+    void setRouteAuthentication_addsSocialMiddlewares() {
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
 
         adapter.setRouteAuthentication("app.example.com", true);
 
         List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
-        assertThat(routes.getFirst().getMiddlewares()).contains(ServiceNames.AUTH_MIDDLEWARE);
+        assertThat(routes.getFirst().getMiddlewares()).contains(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
     }
 
     @Test

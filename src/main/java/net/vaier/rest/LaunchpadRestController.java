@@ -24,9 +24,8 @@ public class LaunchpadRestController {
 
     /**
      * Public launchpad listing. Returns only services that anyone is allowed to see — never
-     * auth-protected ones (issue #207). The Authelia bypass set must include this path so an
-     * anonymous browser load of {@code /launchpad.html} can fetch it without being redirected
-     * to the login portal.
+     * auth-protected ones (issue #207). This path stays publicly reachable so an anonymous browser
+     * load of {@code /launchpad.html} can fetch it without being redirected to sign in.
      */
     @GetMapping("/services")
     public List<LaunchpadServiceUco> getServices(HttpServletRequest request) {
@@ -34,10 +33,10 @@ public class LaunchpadRestController {
     }
 
     /**
-     * Authenticated launchpad listing. Includes auth-protected tiles. The path must NOT be in
-     * Authelia's bypass set — it falls through to {@code one_factor}, so reaching this method
-     * is itself proof that the caller holds a valid session. The launchpad page tries this
-     * endpoint first and falls back to {@link #getServices} on a 401/302 redirect.
+     * Authenticated launchpad listing. Includes auth-protected tiles. The path must stay behind the
+     * forward-auth gateway, so reaching this method is itself proof that the caller holds a valid
+     * session. The launchpad page tries this endpoint first and falls back to {@link #getServices}
+     * on a 401/302 redirect.
      */
     @GetMapping("/services-authenticated")
     public List<LaunchpadServiceUco> getServicesAuthenticated(HttpServletRequest request) {

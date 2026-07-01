@@ -84,12 +84,13 @@ class VaierConfigTest {
 
     @Test
     void withSmtpSettings_replacesSmtpFieldsAndCarriesEveryOtherFieldOver() {
-        VaierConfig updated = fullConfig().withSmtpSettings("smtp.new.com", 2525, "newuser", "from@vaier.net");
+        VaierConfig updated = fullConfig().withSmtpSettings("smtp.new.com", 2525, "newuser", "from@vaier.net", "newpass");
 
         assertThat(updated.getSmtpHost()).isEqualTo("smtp.new.com");
         assertThat(updated.getSmtpPort()).isEqualTo(2525);
         assertThat(updated.getSmtpUsername()).isEqualTo("newuser");
         assertThat(updated.getSmtpSender()).isEqualTo("from@vaier.net");
+        assertThat(updated.getSmtpPassword()).isEqualTo("newpass");
         assertThat(updated.getDomain()).isEqualTo("vaier.net");
         assertThat(updated.getAwsKey()).isEqualTo("AKIAEXAMPLEKEY12345");
         assertThat(updated.getAwsSecret()).isEqualTo("topsecret");

@@ -8,13 +8,10 @@ import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.config.ConfigResolver;
-import net.vaier.config.ServiceNames;
 import net.vaier.domain.VaierConfig;
-import net.vaier.domain.port.ForConfiguringSmtpNotifier;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingAppVersion;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
-import net.vaier.domain.port.ForRestartingContainers;
 import net.vaier.domain.port.ForSendingTestEmail;
 import net.vaier.domain.port.ForValidatingAwsCredentials;
 import net.vaier.domain.port.ForVerifyingSmtpCredentials;
@@ -32,8 +29,6 @@ public class SettingsService implements
 
     private final ForPersistingAppConfiguration configPersistence;
     private final ForValidatingAwsCredentials forValidatingAwsCredentials;
-    private final ForConfiguringSmtpNotifier smtpNotifierConfig;
-    private final ForRestartingContainers containerRestarter;
     private final ForVerifyingSmtpCredentials smtpVerifier;
     private final ForReadingStoredSmtpPassword storedPasswordReader;
     private final ForSendingTestEmail testEmailSender;
@@ -42,8 +37,6 @@ public class SettingsService implements
 
     public SettingsService(ForPersistingAppConfiguration configPersistence,
                            ForValidatingAwsCredentials forValidatingAwsCredentials,
-                           ForConfiguringSmtpNotifier smtpNotifierConfig,
-                           ForRestartingContainers containerRestarter,
                            ForVerifyingSmtpCredentials smtpVerifier,
                            ForReadingStoredSmtpPassword storedPasswordReader,
                            ForSendingTestEmail testEmailSender,
@@ -51,8 +44,6 @@ public class SettingsService implements
                            ForReadingAppVersion appVersionReader) {
         this.configPersistence = configPersistence;
         this.forValidatingAwsCredentials = forValidatingAwsCredentials;
-        this.smtpNotifierConfig = smtpNotifierConfig;
-        this.containerRestarter = containerRestarter;
         this.smtpVerifier = smtpVerifier;
         this.storedPasswordReader = storedPasswordReader;
         this.testEmailSender = testEmailSender;
@@ -100,11 +91,8 @@ public class SettingsService implements
         smtpVerifier.verify(host, port, username, resolvedPassword);
 
         VaierConfig current = configPersistence.load().orElse(VaierConfig.builder().build());
-        configPersistence.save(current.withSmtpSettings(host, port, username, sender));
+        configPersistence.save(current.withSmtpSettings(host, port, username, sender, resolvedPassword));
         log.info("SMTP settings updated for host: {}", host);
-
-        smtpNotifierConfig.updateSmtpConfig(host, port, username, resolvedPassword, sender);
-        containerRestarter.restartContainer(ServiceNames.AUTHELIA);
     }
 
     @Override
