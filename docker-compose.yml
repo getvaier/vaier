@@ -522,8 +522,19 @@ services:
       - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt
-      - traefik.http.routers.vaier.middlewares=vaier-auth,vaier-down
+      # #305 step 3b: the console is gated by the Social chain (Google) instead of Authelia.
+      # The oauth2-* middlewares live in the file provider (kept alive by social-gated services);
+      # rollback to Authelia = set this back to "vaier-auth,vaier-down". vaier-auth is left defined
+      # below for that rollback.
+      - traefik.http.routers.vaier.middlewares=oauth2-signin@file,oauth2-authn@file,vaier-authz@file,vaier-down
       - traefik.http.routers.vaier.priority=100
+      # /oauth2/* on the console host must reach oauth2-proxy (sign-in / callback / sign_out),
+      # above the console router so the Google flow isn't swallowed by the auth chain.
+      - traefik.http.routers.vaier-oauth2.rule=Host(`vaier.${VAIER_DOMAIN}`) && PathPrefix(`/oauth2/`)
+      - traefik.http.routers.vaier-oauth2.entrypoints=websecure
+      - traefik.http.routers.vaier-oauth2.tls.certresolver=letsencrypt
+      - traefik.http.routers.vaier-oauth2.priority=300
+      - traefik.http.routers.vaier-oauth2.service=oauth2-proxy
       # Authelia middleware
       - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${VAIER_DOMAIN}
       - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
@@ -572,23 +583,26 @@ services:
         # body contains no other $$ so nothing else is interpolated.
         cat > /oauth2/config/alpha.yaml <<EOF
         injectRequestHeaders:
-        - {name: X-Forwarded-Groups, values: [{claim: groups}]}
-        - {name: X-Forwarded-User, values: [{claim: user}]}
-        - {name: X-Forwarded-Email, values: [{claim: email}]}
-        - {name: X-Forwarded-Preferred-Username, values: [{claim: preferred_username}]}
-        - {name: X-Forwarded-Name, values: [{claim: name}]}
+        - {name: X-Forwarded-Groups, values: [{claimSource: {claim: groups}}]}
+        - {name: X-Forwarded-User, values: [{claimSource: {claim: user}}]}
+        - {name: X-Forwarded-Email, values: [{claimSource: {claim: email}}]}
+        - {name: X-Forwarded-Preferred-Username, values: [{claimSource: {claim: preferred_username}}]}
+        - {name: X-Forwarded-Name, values: [{claimSource: {claim: name}}]}
         injectResponseHeaders:
-        - {name: X-Auth-Request-User, values: [{claim: user}]}
-        - {name: X-Auth-Request-Email, values: [{claim: email}]}
-        - {name: X-Auth-Request-Preferred-Username, values: [{claim: preferred_username}]}
-        - {name: X-Auth-Request-Groups, values: [{claim: groups}]}
-        - {name: X-Auth-Request-Name, values: [{claim: name}]}
+        - {name: X-Auth-Request-User, values: [{claimSource: {claim: user}}]}
+        - {name: X-Auth-Request-Email, values: [{claimSource: {claim: email}}]}
+        - {name: X-Auth-Request-Preferred-Username, values: [{claimSource: {claim: preferred_username}}]}
+        - {name: X-Auth-Request-Groups, values: [{claimSource: {claim: groups}}]}
+        - {name: X-Auth-Request-Name, values: [{claimSource: {claim: name}}]}
         providers:
         - id: google
           provider: google
           clientID: $${VAIER_OIDC_GOOGLE_CLIENT_ID}
           clientSecretFile: /oauth2/config/client-secret
           loginURLParameters: [{name: approval_prompt, default: [force]}]
+          # 'name' is not a standard session field; declare it so oauth2-proxy extracts it from
+          # the id_token into the session, making X-Auth-Request-Name populate (needs >= v7.7).
+          additionalClaims: [name]
           oidcConfig: {audienceClaims: [aud], emailClaim: email, groupsClaim: groups, insecureSkipNonce: true, userIDClaim: email}
         server:
           BindAddress: 0.0.0.0:4180
@@ -601,7 +615,7 @@ services:
     restart: "no"
 
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
     container_name: oauth2-proxy
     profiles: ["social"]
     command:
