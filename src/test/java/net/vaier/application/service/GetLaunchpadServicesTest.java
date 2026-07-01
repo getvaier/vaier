@@ -20,6 +20,7 @@ import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -82,8 +83,30 @@ class GetLaunchpadServicesTest {
     @Mock
     ForPersistingLanServers forPersistingLanServers;
 
+    @Mock
+    ForResolvingServiceGroup forResolvingServiceGroup;
+
     @InjectMocks
     PublishingService service;
+
+    private AccessEntry admin() {
+        return AccessEntry.builder().email("admin@example.com").role(Role.ADMIN).groups(List.of()).build();
+    }
+
+    private AccessEntry user(String... groups) {
+        return AccessEntry.builder().email("u@example.com").role(Role.USER).groups(List.of(groups)).build();
+    }
+
+    private AccessEntry pending() {
+        return AccessEntry.builder().email("p@example.com").role(Role.PENDING).groups(List.of()).build();
+    }
+
+    private ReverseProxyRoute socialRoute(String host, String address, int port) {
+        return new ReverseProxyRoute("route", host, address, port, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null,
+            List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE), null, false);
+    }
 
     @BeforeEach
     void setUp() {
@@ -447,51 +470,102 @@ class GetLaunchpadServicesTest {
         assertThat(result.get(0).displayName()).isEqualTo("Grafana Prod");
     }
 
-    // --- caller-authenticated gating (issue #207) ---
+    // --- viewer-adaptive gating (public, viewer-adaptive launchpad) ---
 
     @Test
-    void getLaunchpadServices_authProtectedRoute_excludedWhenCallerAnonymous() {
-        ReverseProxyRoute route = new ReverseProxyRoute(
-            "route", "internal.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
-        );
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
-        setupDnsRecord("internal.example.com", DnsRecordType.CNAME);
+    void getLaunchpadServices_anonymousViewer_seesOnlyPublicServices() {
+        ReverseProxyRoute publicRoute = route("public.example.com", "10.0.0.1", 8080);
+        ReverseProxyRoute social = socialRoute("internal.example.com", "10.0.0.2", 8080);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(publicRoute, social));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("public.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("internal.example.com", DnsRecordType.CNAME, 300L, List.of())));
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, false);
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, (AccessEntry) null);
 
-        assertThat(result).isEmpty();
+        assertThat(result).extracting(LaunchpadServiceUco::dnsAddress)
+            .containsExactly("public.example.com");
     }
 
     @Test
-    void getLaunchpadServices_authProtectedRoute_includedWhenCallerAuthenticated() {
-        ReverseProxyRoute route = new ReverseProxyRoute(
-            "route", "internal.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null, null, null, false
-        );
-        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(route));
-        setupDnsRecord("internal.example.com", DnsRecordType.CNAME);
+    void getLaunchpadServices_anonymousViewer_neverReadsTheAccessStore() {
+        setupOneRoute("public.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("public.example.com", DnsRecordType.CNAME);
         setupEmptyVpnClients();
         setupEmptyLocalServices();
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, true);
+        service.getLaunchpadServices(null, (AccessEntry) null);
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).dnsAddress()).isEqualTo("internal.example.com");
+        verify(forResolvingServiceGroup, org.mockito.Mockito.never()).allowedGroupsForHost(any());
     }
 
     @Test
-    void getLaunchpadServices_publicRoute_includedWhenCallerAnonymous() {
-        setupOneRoute("app.example.com", "10.0.0.1", 8080);
-        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+    void getLaunchpadServices_adminViewer_seesEveryPublicAndSocialService() {
+        ReverseProxyRoute publicRoute = route("public.example.com", "10.0.0.1", 8080);
+        ReverseProxyRoute social = socialRoute("internal.example.com", "10.0.0.2", 8080);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(publicRoute, social));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("public.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("internal.example.com", DnsRecordType.CNAME, 300L, List.of())));
         setupEmptyVpnClients();
         setupEmptyLocalServices();
+        lenient().when(forResolvingServiceGroup.allowedGroupsForHost("internal.example.com"))
+            .thenReturn(List.of("devs"));
 
-        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, false);
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, admin());
 
-        assertThat(result).hasSize(1);
+        assertThat(result).extracting(LaunchpadServiceUco::dnsAddress)
+            .containsExactlyInAnyOrder("public.example.com", "internal.example.com");
+    }
+
+    @Test
+    void getLaunchpadServices_userViewer_seesSocialServicesInAnAllowedGroupAndHidesTheRest() {
+        ReverseProxyRoute publicRoute = route("public.example.com", "10.0.0.1", 8080);
+        ReverseProxyRoute reachable = socialRoute("git.example.com", "10.0.0.2", 8080);
+        ReverseProxyRoute forbidden = socialRoute("plex.example.com", "10.0.0.3", 8080);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(publicRoute, reachable, forbidden));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("public.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("git.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("plex.example.com", DnsRecordType.CNAME, 300L, List.of())));
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        when(forResolvingServiceGroup.allowedGroupsForHost("git.example.com")).thenReturn(List.of("devs"));
+        when(forResolvingServiceGroup.allowedGroupsForHost("plex.example.com")).thenReturn(List.of("family"));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, user("devs"));
+
+        assertThat(result).extracting(LaunchpadServiceUco::dnsAddress)
+            .containsExactlyInAnyOrder("public.example.com", "git.example.com");
+    }
+
+    @Test
+    void getLaunchpadServices_pendingViewer_seesOnlyPublicServices() {
+        ReverseProxyRoute publicRoute = route("public.example.com", "10.0.0.1", 8080);
+        ReverseProxyRoute social = socialRoute("internal.example.com", "10.0.0.2", 8080);
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(publicRoute, social));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("public.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("internal.example.com", DnsRecordType.CNAME, 300L, List.of())));
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+        lenient().when(forResolvingServiceGroup.allowedGroupsForHost(any())).thenReturn(List.of());
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null, pending());
+
+        assertThat(result).extracting(LaunchpadServiceUco::dnsAddress)
+            .containsExactly("public.example.com");
     }
 
     @Test

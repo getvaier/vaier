@@ -7,6 +7,7 @@ import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -323,42 +324,85 @@ class ReverseProxyRouteTest {
             .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
     }
 
-    // --- caller-authenticated gating (issue #207) ---
+    // --- viewer-adaptive gating (public, viewer-adaptive launchpad) ---
+
+    private static final ForResolvingServiceGroup NO_RULES = host -> List.of();
+
+    private ReverseProxyRoute socialRoute(String host) {
+        return new ReverseProxyRoute("r", host, "10.0.0.1", 8080, "svc",
+            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null), null, null,
+            List.of(ServiceNames.OAUTH2_SIGNIN_MIDDLEWARE, ServiceNames.OAUTH2_AUTHN_MIDDLEWARE,
+                ServiceNames.VAIER_AUTHZ_MIDDLEWARE), null, false);
+    }
+
+    private AccessEntry admin() {
+        return AccessEntry.builder().email("admin@example.com").role(Role.ADMIN).groups(List.of()).build();
+    }
+
+    private AccessEntry user(String... groups) {
+        return AccessEntry.builder().email("u@example.com").role(Role.USER).groups(List.of(groups)).build();
+    }
+
+    private AccessEntry pending() {
+        return AccessEntry.builder().email("p@example.com").role(Role.PENDING).groups(List.of()).build();
+    }
 
     @Test
-    void launchpadVisibility_authProtectedAndCallerAnonymous_notVisible() {
-        ReverseProxyRoute route = new ReverseProxyRoute("r", "internal.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null));
-
-        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, false))
+    void launchpadVisibility_socialRouteAndAnonymousViewer_notVisible() {
+        assertThat(socialRoute("internal.example.com")
+            .launchpadVisibility(DnsState.OK, State.OK, null, NO_RULES))
             .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
     }
 
     @Test
-    void launchpadVisibility_authProtectedAndCallerAuthenticated_followsHealthRules() {
-        ReverseProxyRoute route = new ReverseProxyRoute("r", "internal.example.com", "10.0.0.1", 8080, "svc",
-            new ReverseProxyRoute.AuthInfo("forwardAuth", null, null));
+    void launchpadVisibility_socialRouteAndAdminViewer_followsHealthRules() {
+        ReverseProxyRoute route = socialRoute("internal.example.com");
 
-        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, true))
+        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, admin(), NO_RULES))
             .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
-        assertThat(route.launchpadVisibility(DnsState.OK, State.UNREACHABLE, true))
+        assertThat(route.launchpadVisibility(DnsState.OK, State.UNREACHABLE, admin(), NO_RULES))
             .isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
     }
 
     @Test
-    void launchpadVisibility_publicRoute_visibleToAnonymousCaller() {
-        ReverseProxyRoute route = route("public.example.com", "10.0.0.1", 8080);
+    void launchpadVisibility_socialRouteAndUserInAllowedGroup_visible() {
+        ForResolvingServiceGroup rules = host -> List.of("devs");
 
-        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, false))
+        assertThat(socialRoute("git.example.com")
+            .launchpadVisibility(DnsState.OK, State.OK, user("devs"), rules))
             .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
     }
 
     @Test
-    void launchpadVisibility_hiddenWins_overCallerAuthenticated() {
+    void launchpadVisibility_socialRouteAndUserNotInAllowedGroup_notVisible() {
+        ForResolvingServiceGroup rules = host -> List.of("devs");
+
+        assertThat(socialRoute("git.example.com")
+            .launchpadVisibility(DnsState.OK, State.OK, user("family"), rules))
+            .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
+    }
+
+    @Test
+    void launchpadVisibility_socialRouteAndPendingViewer_notVisible() {
+        assertThat(socialRoute("git.example.com")
+            .launchpadVisibility(DnsState.OK, State.OK, pending(), NO_RULES))
+            .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
+    }
+
+    @Test
+    void launchpadVisibility_publicRoute_visibleToAnonymousViewer() {
+        ReverseProxyRoute route = route("public.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadVisibility(DnsState.OK, State.OK, null, NO_RULES))
+            .isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+    }
+
+    @Test
+    void launchpadVisibility_hiddenWins_overAViewerWhoCouldOtherwiseSeeIt() {
         ReverseProxyRoute hidden = new ReverseProxyRoute("r", "app.example.com", "10.0.0.1", 8080, "svc",
             null, null, null, null, null, false, false, null, null, true);
 
-        assertThat(hidden.launchpadVisibility(DnsState.OK, State.OK, true))
+        assertThat(hidden.launchpadVisibility(DnsState.OK, State.OK, admin(), NO_RULES))
             .isEqualTo(LaunchpadVisibility.NOT_VISIBLE);
     }
 

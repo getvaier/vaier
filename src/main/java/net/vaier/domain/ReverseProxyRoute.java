@@ -9,6 +9,7 @@ import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingServiceGroup;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -346,27 +347,52 @@ public class ReverseProxyRoute {
         return pathPrefix == null ? "" : pathPrefix;
     }
 
-    public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
-        return launchpadVisibility(dnsState, hostState, true);
-    }
-
     /**
-     * Same as {@link #launchpadVisibility(DnsState, Server.State)} but also gates auth-protected
-     * routes on whether the launchpad viewer is authenticated. Per V1's auth model — Traefik
-     * forward-auth only, all logged-in users are admin — any non-null {@code authInfo} means
-     * "internal; log in first." An anonymous viewer therefore must not see those tiles at all
-     * (issue #207). Hidden-from-launchpad and DNS-not-propagated still win over auth gating.
+     * Health/DNS visibility, ignoring any per-viewer gating. Used where the viewer is irrelevant
+     * (e.g. the published-services admin view, or the "show everything" convenience path).
      */
-    public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState,
-                                                   boolean callerAuthenticated) {
+    public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState) {
         if (hiddenFromLaunchpad) return LaunchpadVisibility.NOT_VISIBLE;
         if (dnsState != DnsState.OK) return LaunchpadVisibility.NOT_VISIBLE;
-        if (authInfo != null && !callerAuthenticated) return LaunchpadVisibility.NOT_VISIBLE;
         // Only a confirmed-unreachable host dims the tile and suppresses its link — UNKNOWN
         // means "we don't have a signal yet"; rendering it as inactive would lie to the
         // operator (and make a healthy service unreachable while the first probe lands).
         if (hostState == Server.State.UNREACHABLE) return LaunchpadVisibility.VISIBLE_INACTIVE;
         return LaunchpadVisibility.VISIBLE_ACTIVE;
+    }
+
+    /**
+     * Launchpad-rendering state for a specific {@code viewer}. The launchpad is a public,
+     * viewer-adaptive dashboard: a public route (auth mode {@link AuthMode#NONE}) is shown to
+     * everyone; a social-gated route is shown only when the viewer is a known, approved identity
+     * that may actually reach it. A route the viewer can't reach is {@link
+     * LaunchpadVisibility#NOT_VISIBLE} — no tile is rendered. Hidden-from-launchpad and
+     * DNS-not-propagated still win over everything.
+     */
+    public LaunchpadVisibility launchpadVisibility(DnsState dnsState, Server.State hostState,
+                                                   AccessEntry viewer, ForResolvingServiceGroup serviceGroups) {
+        if (!isVisibleToLaunchpadViewer(viewer, serviceGroups)) return LaunchpadVisibility.NOT_VISIBLE;
+        return launchpadVisibility(dnsState, hostState);
+    }
+
+    /**
+     * Whether this route's tile should appear at all for the given launchpad {@code viewer}. A
+     * public route (auth mode {@link AuthMode#NONE}) is always visible. A social-gated route is
+     * visible only when the viewer is a known, approved identity that {@link
+     * AccessEntry#mayAccessService may access} it — admins always, users by group intersection with
+     * the host's {@link ForResolvingServiceGroup#allowedGroupsForHost access rule}. An anonymous
+     * viewer ({@code null}) or a pending/unknown identity never sees a social-gated tile. The access
+     * store is read only for social routes with a candidate viewer — the public path never touches
+     * it.
+     */
+    public boolean isVisibleToLaunchpadViewer(AccessEntry viewer, ForResolvingServiceGroup serviceGroups) {
+        if (authMode() == AuthMode.NONE) {
+            return true;
+        }
+        if (viewer == null) {
+            return false;
+        }
+        return viewer.mayAccessService(serviceGroups.allowedGroupsForHost(domainName));
     }
 
     public DnsState dnsState(List<DnsRecord> allDnsRecords) {

@@ -1,26 +1,31 @@
 package net.vaier.application;
 
+import net.vaier.domain.AccessEntry;
 import net.vaier.domain.LaunchpadVisibility;
+import net.vaier.domain.Role;
 import java.util.List;
 
 public interface GetLaunchpadServicesUseCase {
 
     /**
-     * Convenience overload for callers (or tests) that don't need to differentiate
-     * anonymous vs. authenticated viewers — assumes authenticated, i.e. shows everything that's
-     * otherwise visible. Production traffic goes through the two-arg method via the controller.
+     * Convenience overload for callers (or tests) that don't need to differentiate viewers —
+     * behaves as an admin viewer, i.e. shows everything that's otherwise visible. Production
+     * traffic goes through the two-arg method via the controller.
      */
     default List<LaunchpadServiceUco> getLaunchpadServices(String callerIp) {
-        return getLaunchpadServices(callerIp, true);
+        return getLaunchpadServices(callerIp,
+            AccessEntry.builder().role(Role.ADMIN).groups(List.of()).build());
     }
 
     /**
-     * Returns the launchpad tiles visible to this caller. {@code callerAuthenticated} gates
-     * auth-protected routes (issue #207): when false, any route with forward-auth is filtered
-     * out so anonymous viewers don't see internal-only services. The launchpad endpoint itself
-     * is anonymously reachable; this flag is set from the forwarded {@code Remote-User} header.
+     * Returns the launchpad tiles this {@code viewer} may actually see. The launchpad is a public,
+     * viewer-adaptive dashboard: a {@code null} viewer (anonymous) sees only public (auth mode
+     * {@code NONE}) services; a known, approved identity additionally sees every social service it
+     * may reach (per the per-service access rule), and never sees ones it can't. A pending or
+     * unknown identity gets no extra access — public services only. This is a read: it must not
+     * create or mutate any access entry.
      */
-    List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, boolean callerAuthenticated);
+    List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, AccessEntry viewer);
 
     /**
      * The launchpad's slice of a published service. The domain decides everything the client

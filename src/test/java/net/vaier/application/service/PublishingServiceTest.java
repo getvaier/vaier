@@ -113,6 +113,9 @@ class PublishingServiceTest {
     @Mock
     ForCheckingLanReachability forCheckingLanReachability;
 
+    @Mock
+    net.vaier.domain.port.ForResolvingServiceGroup forResolvingServiceGroup;
+
     @InjectMocks
     PublishingService service;
 

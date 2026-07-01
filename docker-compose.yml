@@ -385,12 +385,27 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      # Public router — launchpad API and favicon (no auth)
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/lan-servers/docker-setup.sh`))
+      # Tier 1 — PUBLIC router (no auth): serves the viewer-adaptive launchpad SHELL and its assets
+      # plus the public data feed, so a logged-out visitor gets the dashboard instead of the Google
+      # sign-in. Precisely whitelisted: the launchpad page + its static assets (styles.css, icons),
+      # the anonymous services feed, and the LAN docker-setup script. Never admin.html or any admin
+      # API — those fall through to the Tier 3 catch-all below.
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/lan-servers/docker-setup.sh`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200
-      # Authenticated router — everything else
+      # Tier 2 — IDENTITY-OPTIONAL router: the viewer-adaptive endpoints. oauth2-authn only — it
+      # injects the identity headers (X-Auth-Request-*) when a session exists, and returns 401 for an
+      # anonymous caller (the page treats that as anonymous and falls back to /launchpad/services).
+      # NO oauth2-signin (so no forced-login redirect) and NO vaier-authz (so no admin gate): a
+      # signed-in non-admin can read its own identity and its own reachable tiles.
+      - traefik.http.routers.vaier-identity.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/launchpad/services-authenticated`) || Path(`/users/me`))
+      - traefik.http.routers.vaier-identity.entrypoints=websecure
+      - traefik.http.routers.vaier-identity.tls.certresolver=letsencrypt
+      - traefik.http.routers.vaier-identity.middlewares=oauth2-authn@file,vaier-down
+      - traefik.http.routers.vaier-identity.priority=250
+      # Tier 3 — ADMIN catch-all: everything else (admin.html, all admin APIs). Gated by the full
+      # Social chain, and vaier-authz enforces admin for the console — non-admins get 403.
       - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt

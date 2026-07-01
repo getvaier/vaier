@@ -14,6 +14,7 @@ import net.vaier.application.RefreshLaunchpadVersionsUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.AccessEntry;
 import net.vaier.domain.DnsRecord;
 import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.DnsState;
@@ -48,6 +49,7 @@ import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingDns;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -91,6 +93,7 @@ public class PublishingService implements
     private final ForGettingVaierServerDockerServices forGettingVaierServerDockerServices;
     private final ForProbingServiceVersion forProbingServiceVersion;
     private final ForCheckingLanReachability forCheckingLanReachability;
+    private final ForResolvingServiceGroup forResolvingServiceGroup;
 
     private volatile List<PublishedServiceUco> cache = null;
 
@@ -121,7 +124,8 @@ public class PublishingService implements
                              ForGettingLanServerScrape forGettingLanServerScrape,
                              ForGettingVaierServerDockerServices forGettingVaierServerDockerServices,
                              ForProbingServiceVersion forProbingServiceVersion,
-                             ForCheckingLanReachability forCheckingLanReachability) {
+                             ForCheckingLanReachability forCheckingLanReachability,
+                             ForResolvingServiceGroup forResolvingServiceGroup) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forPersistingDnsRecords = forPersistingDnsRecords;
@@ -141,6 +145,7 @@ public class PublishingService implements
         this.forGettingVaierServerDockerServices = forGettingVaierServerDockerServices;
         this.forProbingServiceVersion = forProbingServiceVersion;
         this.forCheckingLanReachability = forCheckingLanReachability;
+        this.forResolvingServiceGroup = forResolvingServiceGroup;
     }
 
     @Override
@@ -182,7 +187,7 @@ public class PublishingService implements
     }
 
     @Override
-    public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, boolean callerAuthenticated) {
+    public List<LaunchpadServiceUco> getLaunchpadServices(String callerIp, AccessEntry viewer) {
         List<PublishedServiceUco> published = getPublishedServices();
         if (published.isEmpty()) return List.of();
 
@@ -201,7 +206,7 @@ public class PublishingService implements
             .flatMap(s -> ReverseProxyRoute
                 .findByFqdnAndPath(routes, s.dnsAddress(), s.pathPrefix())
                 .map(r -> {
-                    LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state(), callerAuthenticated);
+                    LaunchpadVisibility visibility = r.launchpadVisibility(s.dnsState(), s.state(), viewer, forResolvingServiceGroup);
                     if (visibility == LaunchpadVisibility.NOT_VISIBLE) return null;
                     DockerService backing = r.backingContainer(images.vaierServerContainers(),
                         images.peerContainersByVpnIp(), images.lanServerContainersByAddress()).orElse(null);

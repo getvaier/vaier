@@ -2,6 +2,7 @@ package net.vaier.adapter.driven;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,89 @@ import org.yaml.snakeyaml.Yaml;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DockerComposeStructureTest {
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> vaierLabels() throws Exception {
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> vaier = (Map<String, Object>) services.get("vaier");
+        List<String> labels = (List<String>) vaier.get("labels");
+        Map<String, String> byKey = new LinkedHashMap<>();
+        for (String label : labels) {
+            int eq = label.indexOf('=');
+            if (eq > 0) {
+                byKey.put(label.substring(0, eq), label.substring(eq + 1));
+            }
+        }
+        return byKey;
+    }
+
+    // --- Public, viewer-adaptive launchpad: three-tier routing on the console host ---
+
+    @Test
+    void publicRouter_servesTheLaunchpadShellAndAssetsWithNoAuthMiddleware() throws Exception {
+        Map<String, String> labels = vaierLabels();
+        String rule = labels.get("traefik.http.routers.vaier-public.rule");
+        String mw = labels.get("traefik.http.routers.vaier-public.middlewares");
+
+        // The launchpad shell + assets + public data must be anonymously reachable.
+        assertThat(rule).contains("Path(`/`)");
+        assertThat(rule).contains("Path(`/launchpad.html`)");
+        assertThat(rule).contains("Path(`/styles.css`)");
+        assertThat(rule).contains("PathPrefix(`/icon`)");
+        assertThat(rule).contains("Path(`/launchpad/services`)");
+
+        // But no admin surface may be whitelisted as public.
+        assertThat(rule).doesNotContain("admin.html");
+        assertThat(rule).doesNotContain("/access");
+        assertThat(rule).doesNotContain("services-authenticated");
+        assertThat(rule).doesNotContain("/users/me");
+
+        // Public tier carries the offline middleware only — never any auth link.
+        assertThat(mw).isEqualTo("vaier-down");
+        assertThat(mw).doesNotContain("oauth2");
+        assertThat(mw).doesNotContain("authz");
+    }
+
+    @Test
+    void identityRouter_carriesOnlyOauth2AuthnForTheViewerAdaptiveEndpoints() throws Exception {
+        Map<String, String> labels = vaierLabels();
+        String rule = labels.get("traefik.http.routers.vaier-identity.rule");
+        String mw = labels.get("traefik.http.routers.vaier-identity.middlewares");
+        String priority = labels.get("traefik.http.routers.vaier-identity.priority");
+
+        // Exactly the two viewer-adaptive endpoints, nothing else.
+        assertThat(rule).contains("Path(`/launchpad/services-authenticated`)");
+        assertThat(rule).contains("Path(`/users/me`)");
+
+        // oauth2-authn injects identity when a session exists and 401s anonymous — but NO
+        // forced-login redirect (oauth2-signin) and NO admin gate (vaier-authz).
+        assertThat(mw).contains("oauth2-authn@file");
+        assertThat(mw).contains("vaier-down");
+        assertThat(mw).doesNotContain("oauth2-signin");
+        assertThat(mw).doesNotContain("vaier-authz");
+
+        // Must out-rank the admin catch-all so these paths aren't swept into the full auth chain.
+        assertThat(priority).isEqualTo("250");
+    }
+
+    @Test
+    void adminCatchAll_stillEnforcesTheFullSocialChainWithAuthz() throws Exception {
+        Map<String, String> labels = vaierLabels();
+        String rule = labels.get("traefik.http.routers.vaier.rule");
+        String mw = labels.get("traefik.http.routers.vaier.middlewares");
+        String priority = labels.get("traefik.http.routers.vaier.priority");
+
+        // The catch-all still matches the whole host (admin.html + all admin APIs land here).
+        assertThat(rule).isEqualTo("Host(`vaier.${VAIER_DOMAIN}`)");
+        // And it still carries the full chain including the admin-enforcing vaier-authz.
+        assertThat(mw).contains("oauth2-signin@file");
+        assertThat(mw).contains("oauth2-authn@file");
+        assertThat(mw).contains("vaier-authz@file");
+        // Lowest priority of the real routers, so the specific public/identity/oauth2 routers win.
+        assertThat(priority).isEqualTo("100");
+    }
 
     @Test
     @SuppressWarnings("unchecked")

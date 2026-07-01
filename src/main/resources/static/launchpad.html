@@ -246,20 +246,27 @@
             if (me && me.username) {
                 const name = me.displayname || me.username;
                 const logout = me.logoutUrl || '#';
-                nav.innerHTML = `
+                // The console nav is admin-only. A signed-in non-admin viewer still gets their
+                // name and Logout — just no links into pages they can't open.
+                nav.innerHTML = me.isAdmin ? `
                     <a href="/admin.html#infrastructure" class="topbar-item">${ICON_MACHINES}<span class="link-label">Infrastructure</span></a>
                     <a href="/admin.html#users" class="topbar-item">${ICON_USERS}<span class="link-label">Users</span></a>
                     <a href="/admin.html#settings" class="topbar-item">${ICON_SETTINGS}<span class="link-label">Settings</span></a>
-                `;
+                ` : '';
                 user.innerHTML = `
                     <span class="display-name" title="${name}">${name}</span>
                     <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
                 `;
             } else {
-                const login = (me && me.loginUrl) || '/admin.html';
+                // Anonymous: the launchpad root is public now, so a plain link back here wouldn't
+                // force a login. Send the visitor straight into the Google sign-in and return them
+                // to the launchpad once they're in. rd must be ABSOLUTE — oauth2-proxy resolves a
+                // relative rd against its callback host (oauth2.<domain>), which would dead-end on
+                // its static "Authenticated" page instead of coming back here.
                 nav.innerHTML = '';
+                const signInUrl = '/oauth2/start?rd=' + encodeURIComponent(location.origin + '/launchpad.html');
                 user.innerHTML = `
-                    <a href="${login}" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
+                    <a href="${signInUrl}" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
                 `;
             }
         }
@@ -396,10 +403,10 @@
             throw lastErr;
         }
 
-        // Try the auth-gated endpoint first — when the visitor has a session it returns the full
-        // list including auth-protected tiles. Anonymous loads either hit the oauth2-proxy sign-in
-        // redirect (we follow it and res.ok stays true but the body isn't JSON) or get an explicit
-        // error; in both cases we fall back to the public-only endpoint at /launchpad/services.
+        // Try the identity-optional endpoint first — when the visitor has a session it returns the
+        // viewer-adaptive list (public services plus the social ones this identity may reach).
+        // Anonymous loads are stopped there by oauth2-authn with a 401 (or, defensively, a non-JSON
+        // sign-in body); in both cases we fall back to the public-only endpoint at /launchpad/services.
         async function fetchServices() {
             try {
                 const res = await fetch('/launchpad/services-authenticated', { cache: 'no-store' });

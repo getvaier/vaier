@@ -4,6 +4,7 @@ import net.vaier.application.AssignGroupsUseCase;
 import net.vaier.application.GetServiceAccessRulesUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
+import net.vaier.application.ResolveViewerUseCase;
 import net.vaier.application.RevokeAccessUseCase;
 import net.vaier.application.SetServiceAccessRuleUseCase;
 import net.vaier.application.VerifyAccessUseCase;
@@ -31,7 +32,8 @@ import java.util.Optional;
 @Slf4j
 public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
-        RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase {
+        RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase,
+        ResolveViewerUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
@@ -132,6 +134,14 @@ public class UserService implements
     @Override
     public List<AccessEntry> listAccessEntries() {
         return forPersistingAccessEntries.getEntries();
+    }
+
+    @Override
+    public Optional<AccessEntry> resolveViewer(String email) {
+        if (email == null || email.isBlank()) {
+            return Optional.empty();
+        }
+        return forPersistingAccessEntries.findByEmail(normaliseEmail(email));
     }
 
     @Override

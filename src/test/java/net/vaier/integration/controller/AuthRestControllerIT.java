@@ -29,10 +29,10 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void getMe_returnsUsernameFromHeader() throws Exception {
+    void getMe_returnsUsernameFromOauth2ProxyHeader() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
 
-        mockMvc.perform(get("/users/me").header("Remote-User", "alice"))
+        mockMvc.perform(get("/users/me").header("X-Auth-Request-User", "alice"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.username").value("alice"))
                .andExpect(jsonPath("$.logoutUrl").value("https://oauth2.example.com/oauth2/sign_out?rd=https%3A%2F%2Fvaier.example.com%2F"))
@@ -53,23 +53,37 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     void getMe_returnsNullLogoutUrlWhenDomainNotConfigured() throws Exception {
         when(configResolver.getDomain()).thenReturn(null);
 
-        mockMvc.perform(get("/users/me").header("Remote-User", "alice"))
+        mockMvc.perform(get("/users/me").header("X-Auth-Request-User", "alice"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.logoutUrl").doesNotExist())
                .andExpect(jsonPath("$.loginUrl").doesNotExist());
     }
 
     @Test
-    void getMe_returnsDisplaynameAndEmailFromHeaders() throws Exception {
+    void getMe_returnsDisplaynameAndEmailFromOauth2ProxyHeaders() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
 
         mockMvc.perform(get("/users/me")
-                       .header("Remote-User", "alice")
-                       .header("Remote-Name", "Alice Example")
-                       .header("Remote-Email", "alice@example.com"))
+                       .header("X-Auth-Request-User", "alice")
+                       .header("X-Auth-Request-Name", "Alice Example")
+                       .header("X-Auth-Request-Email", "alice@example.com"))
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.username").value("alice"))
                .andExpect(jsonPath("$.displayname").value("Alice Example"))
                .andExpect(jsonPath("$.email").value("alice@example.com"));
+    }
+
+    @Test
+    void getMe_reportsIsAdminFromTheResolvedAccessEntry() throws Exception {
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(resolveViewerUseCase.resolveViewer("alice@example.com")).thenReturn(
+            java.util.Optional.of(net.vaier.domain.AccessEntry.builder()
+                .email("alice@example.com").role(net.vaier.domain.Role.ADMIN).build()));
+
+        mockMvc.perform(get("/users/me")
+                       .header("X-Auth-Request-User", "alice")
+                       .header("X-Auth-Request-Email", "alice@example.com"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.isAdmin").value(true));
     }
 }

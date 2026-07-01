@@ -251,6 +251,10 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetLaunchpadServicesUseCase getLaunchpadServicesUseCase;
 
+    // --- Viewer resolution (launchpad topbar + per-viewer filtering, /users/me) ---
+    @MockBean
+    protected ResolveViewerUseCase resolveViewerUseCase;
+
     // --- Settings / version ---
     @MockBean
     protected GetAppVersionUseCase getAppVersionUseCase;
