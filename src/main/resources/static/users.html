@@ -378,6 +378,13 @@
             align-items: center;
         }
 
+        /* Explains why the sole admin's Revoke / Make-user controls are disabled. */
+        .access-lastadmin-note {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
         .access-groups-row {
             display: flex;
             align-items: flex-start;
@@ -407,8 +414,8 @@
             <p class="access-desc">
                 Identities that have signed in via social login. New identities arrive as
                 <strong>pending</strong> (authenticated but blocked) until you approve them. Approve to
-                <em>user</em> (reaches approved services) or <em>admin</em> (also administers Vaier),
-                assign access groups, or revoke access entirely.
+                <em>user</em> (reaches approved services) or <em>admin</em> (also administers Vaier).
+                Groups are per-service access tags — admin vs user is set only by the role control.
             </p>
             <form class="access-preapprove" id="preApproveForm">
                 <span class="preapprove-label">Grant access before the first sign-in — they'll be approved the moment they sign in with Google.</span>
@@ -565,15 +572,25 @@
             }
         }
 
-        function knownGroupsUnion(extra) {
+        // Names that mirror the access Role (admin vs user) rather than gating a service. In the
+        // Access section, Role is the sole authority for admin-vs-user, so these are never valid
+        // per-service group tags — mirrors AccessEntry.ROLE_MIRRORING_GROUPS in the domain.
+        const ROLE_MIRRORING_GROUPS = ['admins', 'users'];
+
+        // Shown when an entry is the last remaining admin — the server refuses the change too, this is
+        // just the friendlier client-side guard so the disabled controls read clearly.
+        const LAST_ADMIN_NOTE = "Can't remove the last administrator — promote another admin first.";
+
+        function knownGroupsUnion(extra, perServiceOnly) {
             const set = new Set(allGroups);
             (extra || []).forEach(g => set.add(g));
+            if (perServiceOnly) ROLE_MIRRORING_GROUPS.forEach(g => set.delete(g));
             return [...set].sort();
         }
 
-        function mountGroupsPicker(containerId, pickerId, initial) {
-            pickers.set(pickerId, { selected: new Set(initial) });
-            const options = knownGroupsUnion(initial)
+        function mountGroupsPicker(containerId, pickerId, initial, perServiceOnly) {
+            pickers.set(pickerId, { selected: new Set(initial), perServiceOnly: !!perServiceOnly });
+            const options = knownGroupsUnion(initial, perServiceOnly)
                 .map(g => `<option value="${escapeHtml(g)}">`).join('');
             const container = document.getElementById(containerId);
             if (!container) return;
@@ -624,6 +641,11 @@
             if (!value) return;
             const state = pickers.get(pickerId);
             if (!state) return;
+            if (state.perServiceOnly && ROLE_MIRRORING_GROUPS.includes(value.toLowerCase())) {
+                displayMessage(`"${value}" is a role, not a service group. Use the role control for admin vs user.`, 'error');
+                input.value = '';
+                return;
+            }
             state.selected.add(value);
             input.value = '';
             renderChips(pickerId);
@@ -949,6 +971,11 @@
                 return;
             }
 
+            // The console is admin-only with no fallback, so the store must always keep at least one
+            // admin. Compute the count over ALL entries (not just the filtered view) so the guard holds
+            // even when the filter hides the other admins.
+            const adminCount = accessEntries.filter(e => e.role === 'admin').length;
+
             // Pending always float to the top; then admins, then users — each alphabetical.
             const order = { pending: 0, admin: 1, user: 2 };
             visible.sort((a, b) => (order[a.role] - order[b.role]) || a.email.localeCompare(b.email));
@@ -962,6 +989,9 @@
                     lastGroup = entry.role;
                     html += `<div class="access-group-title">${labels[entry.role]}</div>`;
                 }
+                // The sole remaining admin can be neither demoted nor revoked — that would lock the
+                // console out for everyone. Disable both controls and explain why inline.
+                const isOnlyAdmin = entry.role === 'admin' && adminCount === 1;
                 let roleActions = '';
                 if (entry.role === 'pending') {
                     roleActions = '<button class="btn btn-small btn-success js-role" data-role="user">Approve → User</button>'
@@ -969,8 +999,13 @@
                 } else if (entry.role === 'user') {
                     roleActions = '<button class="btn btn-small btn-primary js-role" data-role="admin">Make admin</button>';
                 } else if (entry.role === 'admin') {
-                    roleActions = '<button class="btn btn-small btn-secondary js-role" data-role="user">Make user</button>';
+                    roleActions = isOnlyAdmin
+                        ? `<button class="btn btn-small btn-secondary" disabled title="${LAST_ADMIN_NOTE}">Make user</button>`
+                        : '<button class="btn btn-small btn-secondary js-role" data-role="user">Make user</button>';
                 }
+                const revokeAction = isOnlyAdmin
+                    ? `<button class="btn btn-small btn-danger" disabled title="${LAST_ADMIN_NOTE}">Revoke</button>`
+                    : '<button class="btn btn-small btn-danger js-revoke">Revoke</button>';
                 const hasName = entry.name && entry.name.trim();
                 const primary = hasName
                     ? `<span class="access-name">${escapeHtml(entry.name)}</span>`
@@ -990,9 +1025,10 @@
                         </div>
                         <div class="access-actions">
                             ${roleActions}
-                            <button class="btn btn-small btn-danger js-revoke">Revoke</button>
+                            ${revokeAction}
                         </div>
                     </div>
+                    ${isOnlyAdmin ? `<div class="access-lastadmin-note">${LAST_ADMIN_NOTE}</div>` : ''}
                     <div class="access-groups-row">
                         <span class="access-groups-label">Groups</span>
                         <div id="access-picker-${id}" style="flex:1;min-width:200px"></div>
@@ -1006,7 +1042,7 @@
             // into an onclick string, where a " in the address would break out of the attribute.
             visible.forEach(entry => {
                 const id = cardId(entry.email);
-                mountGroupsPicker('access-picker-' + id, 'access-' + id, entry.groups || []);
+                mountGroupsPicker('access-picker-' + id, 'access-' + id, entry.groups || [], true);
                 const row = list.querySelector(`[data-id="${id}"]`);
                 if (!row) return;
                 row.querySelectorAll('.js-role').forEach(btn =>

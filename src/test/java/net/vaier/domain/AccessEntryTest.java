@@ -86,6 +86,55 @@ class AccessEntryTest {
         assertThat(entry(Role.PENDING, List.of()).mayAccessService(requiredGroup)).isFalse();
     }
 
+    // --- role-mirroring groups — 'admins'/'users' are the Role's job, never access groups ---
+
+    @Test
+    void hasRoleMirroringGroups_trueWhenGroupsContainAdmins() {
+        assertThat(entry(Role.ADMIN, List.of("devs", "admins")).hasRoleMirroringGroups()).isTrue();
+    }
+
+    @Test
+    void hasRoleMirroringGroups_trueWhenGroupsContainUsers() {
+        assertThat(entry(Role.USER, List.of("users")).hasRoleMirroringGroups()).isTrue();
+    }
+
+    @Test
+    void hasRoleMirroringGroups_falseForPlainServiceGroups() {
+        assertThat(entry(Role.USER, List.of("devs", "family")).hasRoleMirroringGroups()).isFalse();
+    }
+
+    @Test
+    void hasRoleMirroringGroups_falseWhenGroupsEmptyOrNull() {
+        assertThat(entry(Role.ADMIN, List.of()).hasRoleMirroringGroups()).isFalse();
+        assertThat(entry(Role.ADMIN, null).hasRoleMirroringGroups()).isFalse();
+    }
+
+    @Test
+    void withoutRoleMirroringGroups_stripsAdminsAndUsersKeepingServiceGroups() {
+        AccessEntry cleaned = entry(Role.ADMIN, List.of("devs", "admins", "users", "family"))
+                .withoutRoleMirroringGroups();
+        assertThat(cleaned.getGroups()).containsExactly("devs", "family");
+    }
+
+    @Test
+    void withoutRoleMirroringGroups_preservesEmailRoleAndName() {
+        AccessEntry original = AccessEntry.builder()
+                .email("geir@example.com").role(Role.ADMIN)
+                .groups(List.of("devs", "admins")).name("Geir").build();
+
+        AccessEntry cleaned = original.withoutRoleMirroringGroups();
+
+        assertThat(cleaned.getEmail()).isEqualTo("geir@example.com");
+        assertThat(cleaned.getRole()).isEqualTo(Role.ADMIN);
+        assertThat(cleaned.getName()).isEqualTo("Geir");
+        assertThat(cleaned.getGroups()).containsExactly("devs");
+    }
+
+    @Test
+    void withoutRoleMirroringGroups_nullGroupsStaysEmpty() {
+        assertThat(entry(Role.USER, null).withoutRoleMirroringGroups().getGroups()).isEmpty();
+    }
+
     // --- resolvedName — the display-name capture decision (never wipes a known name) ---
 
     @Test

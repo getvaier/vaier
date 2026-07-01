@@ -2,8 +2,8 @@ package net.vaier.adapter.driven;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.AccessRoster;
 import net.vaier.domain.Role;
-import net.vaier.domain.User;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.springframework.stereotype.Component;
@@ -30,11 +30,11 @@ import java.util.Optional;
  * <pre>
  * entries:
  *   you@gmail.com:
- *     role: admin            # admin | user | pending
- *     groups: [admins]
+ *     role: admin            # admin | user | pending — sole authority for admin-vs-user
+ *     groups: [devs]         # per-service access tags only (never admins/users)
  * serviceGroups:
  *   plex.example.com: family
- *   vaier.example.com: admins
+ *   git.example.com: devs
  * </pre>
  */
 @Component
@@ -65,27 +65,40 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
         options.setIndent(2);
         this.dumper = new Yaml(options);
 
-        seedFirstAdminIfNeeded(adminEmail);
+        ensureConfiguredAdminExists(adminEmail);
     }
 
     /**
-     * With social login there is no password file, so the owner could otherwise land as pending and
-     * lock themselves out. When the store is empty and {@code VAIER_ADMIN_EMAIL} is set, seed that
-     * identity as an admin (in the {@code admins} group) so the first login already has access.
+     * Guarantee the access store always holds at least one admin, so the admin-only console can never
+     * lock everyone out (there is no Authelia fallback once it is decommissioned). Idempotent and
+     * self-healing:
+     *
+     * <ul>
+     *   <li>If any entry is already an admin, do nothing.</li>
+     *   <li>Otherwise, if {@code VAIER_ADMIN_EMAIL} is set: promote that identity to {@code
+     *       role=admin} — preserving its existing groups and name if it already exists as a
+     *       non-admin, or creating it with empty groups if it doesn't. The Role alone is the
+     *       authority for admin-vs-user, so no group is needed; groups stay purely per-service.</li>
+     *   <li>Otherwise (adminless and no configured email) log a warning and leave the store as-is —
+     *       there is nothing safe to heal with.</li>
+     * </ul>
      */
-    private synchronized void seedFirstAdminIfNeeded(String adminEmail) {
+    private synchronized void ensureConfiguredAdminExists(String adminEmail) {
+        if (new AccessRoster(getEntries()).adminCount() > 0) {
+            return;
+        }
         if (adminEmail == null || adminEmail.isBlank()) {
+            log.warn("No administrator in {} and VAIER_ADMIN_EMAIL is unset — the console may be "
+                    + "locked out. Set VAIER_ADMIN_EMAIL so an admin can be restored.", FILE_NAME);
             return;
         }
-        if (!getEntries().isEmpty()) {
-            return;
-        }
-        log.info("Seeding first admin '{}' into {}", adminEmail, FILE_NAME);
-        upsert(AccessEntry.builder()
-                .email(adminEmail.trim().toLowerCase(java.util.Locale.ROOT))
-                .role(Role.ADMIN)
-                .groups(List.of(User.ADMINS_GROUP))
-                .build());
+        String normalised = adminEmail.trim().toLowerCase(java.util.Locale.ROOT);
+        AccessEntry admin = findByEmail(normalised)
+                .map(existing -> existing.toBuilder().role(Role.ADMIN).build())
+                .orElseGet(() -> AccessEntry.builder()
+                        .email(normalised).role(Role.ADMIN).groups(List.of()).build());
+        log.info("Ensuring configured admin '{}' exists as ADMIN in {}", normalised, FILE_NAME);
+        upsert(admin);
     }
 
     @Override

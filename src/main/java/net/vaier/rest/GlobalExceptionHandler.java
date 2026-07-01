@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.ConflictException;
+import net.vaier.domain.LastAdminException;
 import net.vaier.domain.NotFoundException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -47,6 +48,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> handleConflict(ConflictException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of("CONFLICT", e.getMessage()));
+    }
+
+    /**
+     * The last-admin invariant is a state conflict, mapped to {@code 409} carrying the operator-safe
+     * message so the Access page can explain why the revoke/demotion was refused. Registered
+     * explicitly because {@link LastAdminException} is an {@link IllegalStateException} — which
+     * otherwise falls through to the generic {@code 500} handler.
+     */
+    @ExceptionHandler(LastAdminException.class)
+    public ResponseEntity<ApiError> handleLastAdmin(LastAdminException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of("CONFLICT", e.getMessage()));
     }
 

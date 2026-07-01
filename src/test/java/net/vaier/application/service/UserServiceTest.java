@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
 import net.vaier.domain.User;
 import net.vaier.domain.port.ForNotifyingAdmins;
@@ -796,5 +797,69 @@ class UserServiceTest {
                 .hasMessageContaining("email");
 
         verifyNoInteractions(forPersistingAccessEntries);
+    }
+
+    // --- last-admin protection: the store must always retain at least one admin ---
+
+    @Test
+    void revokeAccess_refusesToRemoveTheLastAdmin() {
+        when(forPersistingAccessEntries.getEntries()).thenReturn(List.of(
+                accessEntry("boss@example.com", Role.ADMIN, List.of()),
+                accessEntry("friend@example.com", Role.USER, List.of())));
+
+        assertThatThrownBy(() -> service.revokeAccess("boss@example.com"))
+                .isInstanceOf(LastAdminException.class)
+                .hasMessageContaining("last administrator");
+
+        verify(forPersistingAccessEntries, never()).delete(any());
+    }
+
+    @Test
+    void revokeAccess_allowsRemovingAnAdminWhenAnotherAdminRemains() {
+        when(forPersistingAccessEntries.getEntries()).thenReturn(List.of(
+                accessEntry("boss@example.com", Role.ADMIN, List.of()),
+                accessEntry("second@example.com", Role.ADMIN, List.of())));
+
+        service.revokeAccess("boss@example.com");
+
+        verify(forPersistingAccessEntries).delete("boss@example.com");
+    }
+
+    @Test
+    void grantRole_refusesToDemoteTheLastAdmin() {
+        when(forPersistingAccessEntries.getEntries()).thenReturn(List.of(
+                accessEntry("boss@example.com", Role.ADMIN, List.of()),
+                accessEntry("friend@example.com", Role.USER, List.of())));
+
+        assertThatThrownBy(() -> service.grantRole("boss@example.com", Role.USER))
+                .isInstanceOf(LastAdminException.class)
+                .hasMessageContaining("last administrator");
+
+        verify(forPersistingAccessEntries, never()).upsert(any());
+    }
+
+    @Test
+    void grantRole_allowsDemotingAnAdminWhenAnotherAdminRemains() {
+        when(forPersistingAccessEntries.getEntries()).thenReturn(List.of(
+                accessEntry("boss@example.com", Role.ADMIN, List.of()),
+                accessEntry("second@example.com", Role.ADMIN, List.of())));
+        when(forPersistingAccessEntries.findByEmail("boss@example.com"))
+                .thenReturn(Optional.of(accessEntry("boss@example.com", Role.ADMIN, List.of())));
+
+        service.grantRole("boss@example.com", Role.USER);
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getEmail().equals("boss@example.com") && e.getRole() == Role.USER));
+    }
+
+    @Test
+    void grantRole_grantingAdminNeverTripsTheLastAdminGuard() {
+        when(forPersistingAccessEntries.findByEmail("friend@example.com"))
+                .thenReturn(Optional.of(accessEntry("friend@example.com", Role.USER, List.of())));
+
+        service.grantRole("friend@example.com", Role.ADMIN);
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getEmail().equals("friend@example.com") && e.getRole() == Role.ADMIN));
     }
 }

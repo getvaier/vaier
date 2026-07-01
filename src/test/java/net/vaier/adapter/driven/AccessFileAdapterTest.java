@@ -202,31 +202,82 @@ class AccessFileAdapterTest {
         assertThat(a.requiredGroupForHost("plex.example.com")).isEmpty();
     }
 
-    // --- seeding the first admin from VAIER_ADMIN_EMAIL ---
+    // --- ensuring a configured admin from VAIER_ADMIN_EMAIL (self-heal to keep an admin) ---
 
     @Test
-    void construction_seedsFirstAdminWhenStoreEmptyAndAdminEmailSet() {
+    void construction_seedsConfiguredAdminWhenStoreEmptyAndAdminEmailSet() {
         AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "owner@gmail.com");
 
         assertThat(a.findByEmail("owner@gmail.com"))
                 .hasValueSatisfying(e -> {
                     assertThat(e.getRole()).isEqualTo(Role.ADMIN);
-                    assertThat(e.getGroups()).contains("admins");
+                    // role=ADMIN is enough — the seed must NOT mirror the role into a group.
+                    assertThat(e.getGroups()).isEmpty();
                 });
     }
 
     @Test
-    void construction_doesNotSeedWhenStoreAlreadyHasEntries() {
+    void construction_createsConfiguredAdminWhenStoreHasEntriesButNoAdmin() {
         adapter().upsert(entry("existing@gmail.com", Role.USER, List.of()));
 
         AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "owner@gmail.com");
 
+        // Adminless store must self-heal: the configured admin is created so the console can't lock out.
+        assertThat(a.findByEmail("owner@gmail.com"))
+                .hasValueSatisfying(e -> assertThat(e.getRole()).isEqualTo(Role.ADMIN));
+        assertThat(a.getEntries()).hasSize(2);
+    }
+
+    @Test
+    void construction_promotesExistingNonAdminToAdminPreservingGroupsAndName() {
+        adapter().upsert(entry("owner@gmail.com", Role.USER, List.of("family", "devs"), "Owner Name"));
+
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "owner@gmail.com");
+
+        assertThat(a.findByEmail("owner@gmail.com"))
+                .hasValueSatisfying(e -> {
+                    assertThat(e.getRole()).isEqualTo(Role.ADMIN);
+                    assertThat(e.getGroups()).containsExactlyInAnyOrder("family", "devs");
+                    assertThat(e.getName()).isEqualTo("Owner Name");
+                });
+        assertThat(a.getEntries()).hasSize(1);
+    }
+
+    @Test
+    void construction_leavesStoreUntouchedWhenAnAdminAlreadyExists() {
+        adapter().upsert(entry("someoneelse@gmail.com", Role.ADMIN, List.of()));
+
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "owner@gmail.com");
+
+        // Idempotent: the store already has an admin, so the configured owner is not added or changed.
         assertThat(a.findByEmail("owner@gmail.com")).isEmpty();
         assertThat(a.getEntries()).hasSize(1);
     }
 
     @Test
-    void construction_doesNotSeedWhenAdminEmailBlank() {
+    void construction_matchesTheConfiguredAdminCaseInsensitively() {
+        adapter().upsert(entry("owner@gmail.com", Role.USER, List.of()));
+
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "  Owner@Gmail.com ");
+
+        // The existing lowercase entry is promoted — no duplicate mixed-case entry is created.
+        assertThat(a.getEntries()).hasSize(1);
+        assertThat(a.findByEmail("owner@gmail.com"))
+                .hasValueSatisfying(e -> assertThat(e.getRole()).isEqualTo(Role.ADMIN));
+    }
+
+    @Test
+    void construction_doesNothingWhenAdminlessAndAdminEmailBlank() {
+        adapter().upsert(entry("existing@gmail.com", Role.USER, List.of()));
+
+        AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "  ");
+
+        // Nothing to heal with: no admin and no configured email — leave the store as-is (warns).
+        assertThat(a.getEntries()).containsExactly(entry("existing@gmail.com", Role.USER, List.of()));
+    }
+
+    @Test
+    void construction_doesNotSeedWhenAdminEmailBlankAndStoreEmpty() {
         AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "  ");
 
         assertThat(a.getEntries()).isEmpty();

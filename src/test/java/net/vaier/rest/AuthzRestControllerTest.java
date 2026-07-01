@@ -7,6 +7,7 @@ import net.vaier.application.RevokeAccessUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -157,4 +158,26 @@ class AuthzRestControllerTest {
         verify(revokeAccessUseCase).revokeAccess("gone@example.com");
         assertThat(response.getStatusCode().value()).isEqualTo(200);
     }
+
+    // --- last-admin protection surfaces as 409 Conflict ---
+
+    @Test
+    void revokeAccess_lastAdmin_mapsToConflictWithMessage() {
+        ResponseEntity<ApiError> response = handler.handleLastAdmin(
+                new LastAdminException("Cannot remove the last administrator — promote another admin first."));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody().message()).contains("last administrator");
+    }
+
+    @Test
+    void grantRole_lastAdmin_mapsToConflictWithMessage() {
+        ResponseEntity<ApiError> response = handler.handleLastAdmin(
+                new LastAdminException("Cannot demote the last administrator — promote another admin first."));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody().message()).contains("last administrator");
+    }
+
+    private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 }

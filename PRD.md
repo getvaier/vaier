@@ -513,6 +513,37 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   `ForPersistingUsers.changePassword` port and its `AutheliaUserAdapter` implementation are kept for now
   and cleaned up when Authelia is decommissioned.
 
+**Delivered (role is the sole admin/user authority, TDD-first):** ✅
+- **Role** and **access groups** are now cleanly orthogonal — the role (`pending`/`user`/`admin`) is the
+  single authority for admin-vs-user, and groups are purely **per-service access tags**. The reserved
+  names `admins`/`users` are no longer treated as, or generated as, access groups on an `AccessEntry`.
+- Domain: `AccessEntry` owns which names are role-mirroring (`admins`/`users`) via
+  `hasRoleMirroringGroups()` and `withoutRoleMirroringGroups()`; the reserved-name set lives on the
+  entity, not scattered across adapters/services. `mayAccessService` semantics are unchanged.
+- Adapter: `AccessFileAdapter` seeds the first admin with `role=admin` and **empty groups** (no longer
+  mirroring the role into an `admins` group, dropping the cross-concept coupling to Authelia's `User`).
+- Migration: `AccessGroupMigration`, an idempotent `ApplicationReadyEvent` component that strips
+  `admins`/`users` from every existing entry's groups through the `ForPersistingAccessEntries` port (a
+  second run is a no-op).
+- UI: the **Users → Access** section presents groups as free-form per-service tags only — the group
+  picker no longer suggests or accepts `admins`/`users`; admin-vs-user is set solely by the role control.
+
+**Delivered (last-admin protection, TDD-first):** ✅
+- With the console admin-only and no Authelia fallback after decommissioning, the access store must
+  always retain at least one admin — otherwise the console would be permanently locked out for everyone.
+- Domain: `AccessRoster` (an immutable value object over the entries) owns the decision via
+  `adminCount()` and `isOnlyAdmin(email)`; `LastAdminException` signals the refusal. The rule lives in
+  the domain, not as private service logic.
+- Service: `UserService` refuses to revoke the sole admin, or to demote the sole admin to a non-admin
+  role, throwing `LastAdminException`; granting admin never trips the guard.
+- Adapter: `AccessFileAdapter` self-heals on startup — whenever no admin exists, it restores the
+  configured `VAIER_ADMIN_EMAIL` to `role=admin` (promoting an existing entry in place, preserving its
+  groups and name, or creating one with empty groups), and warns if adminless with no configured email.
+  Idempotent when an admin already exists.
+- Web: `LastAdminException` maps to `409 Conflict` carrying the operator-safe message.
+- UI: the **Users → Access** section disables Revoke and the demote-to-user control for the sole
+  remaining admin, with an inline note explaining why.
+
 **Backlog (not in this slice):** fully decommissioning Authelia — the console can already run on social
 login via `VAIER_CONSOLE_AUTH_MODE`, so the remaining 3b work is removing Authelia from the stack — plus
 the unauthenticated "awaiting approval" page, migration off Authelia for existing

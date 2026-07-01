@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * One known social-login identity and the access it has been granted: its {@code email}, its
@@ -13,6 +14,14 @@ import java.util.List;
 @Data
 @Builder(toBuilder = true)
 public class AccessEntry {
+
+    /**
+     * Reserved names that mirror the {@link Role} (admin vs user) rather than gating a service. They
+     * must never live in {@code groups}: the Role is the sole authority for admin-vs-user, and
+     * {@code groups} are purely per-service access tags. Kept here so this knowledge lives in the
+     * domain rather than being scattered across adapters and services.
+     */
+    private static final Set<String> ROLE_MIRRORING_GROUPS = Set.of("admins", "users");
 
     private final String email;
     private final Role role;
@@ -36,6 +45,26 @@ public class AccessEntry {
             return incomingName.trim();
         }
         return name;
+    }
+
+    /**
+     * Whether any of this entry's {@code groups} is a role-mirroring name ({@code admins}/{@code
+     * users}). Such names duplicate what {@link Role} already decides and should be stripped so
+     * {@code groups} stays purely per-service.
+     */
+    public boolean hasRoleMirroringGroups() {
+        return groups != null && groups.stream().anyMatch(ROLE_MIRRORING_GROUPS::contains);
+    }
+
+    /**
+     * A copy of this entry with every role-mirroring name ({@code admins}/{@code users}) removed from
+     * {@code groups}; role, email and name are unchanged. Idempotent — an entry that already carries
+     * only per-service tags is returned with an equivalent (empty when {@code groups} was null) list.
+     */
+    public AccessEntry withoutRoleMirroringGroups() {
+        List<String> cleaned = groups == null ? List.of()
+                : groups.stream().filter(g -> !ROLE_MIRRORING_GROUPS.contains(g)).toList();
+        return toBuilder().groups(cleaned).build();
     }
 
     /** Authenticated but not yet approved — no access until an admin promotes the role. */

@@ -16,6 +16,8 @@ import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.AccessRoster;
+import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
 import net.vaier.domain.User;
 import net.vaier.domain.VaierHostnames;
@@ -216,6 +218,11 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase,
             throw new IllegalArgumentException("role must not be null");
         }
         String normalised = normaliseEmail(email);
+        if (role != Role.ADMIN
+                && new AccessRoster(forPersistingAccessEntries.getEntries()).isOnlyAdmin(normalised)) {
+            throw new LastAdminException(
+                    "Cannot demote the last administrator — promote another admin first.");
+        }
         Optional<AccessEntry> current = forPersistingAccessEntries.findByEmail(normalised);
         List<String> groups = current.map(AccessEntry::getGroups).orElse(List.of());
         forPersistingAccessEntries.upsert(AccessEntry.builder()
@@ -237,7 +244,12 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase,
     @Override
     public void revokeAccess(String email) {
         validateEmail(email);
-        forPersistingAccessEntries.delete(normaliseEmail(email));
+        String normalised = normaliseEmail(email);
+        if (new AccessRoster(forPersistingAccessEntries.getEntries()).isOnlyAdmin(normalised)) {
+            throw new LastAdminException(
+                    "Cannot remove the last administrator — promote another admin first.");
+        }
+        forPersistingAccessEntries.delete(normalised);
     }
 
     private static void validateEmail(String email) {
