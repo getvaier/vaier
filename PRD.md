@@ -287,9 +287,9 @@ No planned changes beyond what service publishing drives automatically.
 
 ### 6.6 Access Management ✅ (exists)
 
-Manage who can sign in and what they can reach, from the **Users → Access** page. With Authelia removed from the running stack, this is the live identity/access surface — see §6.17 for the full social-login model (roles, access groups, pending approvals, last-admin protection). Per-service group gating is implemented via the access store rather than Authelia `access_control` rules.
+Manage who can sign in and what they can reach, from the **Users** page — a single list of social identities (access entries). With Authelia removed from the running stack, this is the live identity/access surface — see §6.17 for the full social-login model (roles, access groups, pending approvals, last-admin protection). Per-service group gating is implemented via the access store rather than Authelia `access_control` rules.
 
-**Legacy Authelia user management** — the older List / create / delete Authelia users UI and the `AutheliaUserAdapter` / `ForPersistingUsers` port remain in the code but no longer manage a running Authelia; they are pending cleanup. In-UI password change was already removed with #305 step 3b (social-login users have no Vaier password).
+**Legacy Authelia user management** — the local-password user-management UI (list / create / delete / edit-email / edit-display-name / edit-groups + the group manager), its `/users*` and `/groups*` REST endpoints, and the `AddUser`/`DeleteUser`/`UpdateUserEmail`/`UpdateUserDisplayName`/`GetUsers`/`GetGroups`/`UpdateUserGroups`/`DeleteGroup` use cases were removed once names and email became provider-owned (Google). The `AutheliaUserAdapter` / `ForPersistingUsers` / `ForGettingUsers` ports and the `User` entity remain in the code (still used by the boot `Lifecycle` bootstrap) but no longer back any UI; they are pending cleanup. The self-service **My Page** profile screen (`mypage.html`) was removed with it — the topbar shows the name read-only. In-UI password change was already removed with #305 step 3b (social-login users have no Vaier password).
 
 ---
 
@@ -480,7 +480,7 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   `VerifyAccessUseCase.verify`; `UserService` stores/refreshes the name on the entry (preserving it across
   `grantRole`/`assignGroups`). `AccessFileAdapter` persists `name` in `access.yml` (back-compat: entries
   with no `name` read as null). `GET /access` returns `name`.
-- UI: the **Users → Access** rows lead with the display name and demote the email to a caption, falling
+- UI: the **Users** rows lead with the display name and demote the email to a caption, falling
   back to email-only when there's no name yet.
 
 **Delivered in step 3b (console social-login polish, TDD-first):**
@@ -489,8 +489,9 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   `vaier-authz` Traefik middleware's `authResponseHeaders` now forwards `Remote-Name` alongside
   `Remote-User`/`Remote-Email`/`Remote-Groups` (self-healing onto older configs via the existing startup
   backfill in `TraefikReverseProxyAdapter`). `GET /users/me` therefore returns a social-login console
-  user's Google display name as `displayname`, so the console topbar and My Page greet them by name
-  (falling back to email when absent).
+  user's Google display name as `displayname`, so the console topbar greets them by name
+  (falling back to email when absent). *(The My Page profile screen that also showed the name was later
+  removed — see the Users-convergence entry below.)*
 - Console auth mode: a new `VAIER_CONSOLE_AUTH_MODE` env var (`authelia` | `social`, default `authelia`,
   read via `ConfigResolver.getConsoleAuthMode`) selects how the Vaier console itself is gated and therefore
   its logout URL — `social` ends the session via oauth2-proxy's `/oauth2/sign_out`, `authelia` via the
@@ -502,6 +503,25 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   endpoint, and `ChangePasswordUseCase` are all gone — social-login users have no Vaier password. The
   `ForPersistingUsers.changePassword` port and its `AutheliaUserAdapter` implementation are kept for now
   and cleaned up when Authelia is decommissioned.
+
+**Delivered (Users page convergence — one social-identity list, TDD-first):** ✅
+- The legacy Authelia user-management surface was removed now that names and email are provider-owned
+  (Google): the local-password user list, add-user form, change-groups modal, delete-user action, and the
+  group manager are gone from `users.html`, and the **Users** page is now the single access-entry list
+  (pending highlight, role control, per-service groups, pre-approve-by-email, revoke, filters, last-admin
+  guard). The chip picker's group suggestions are derived from the groups already assigned across entries
+  (the removed `/groups` feed is gone).
+- REST + use cases removed: `GET/POST /users`, `DELETE /users/{username}`, `PUT /users/{username}/email`,
+  `/displayname`, `/groups`, `GET /groups`, `DELETE /groups/{name}` and their `AddUser`/`DeleteUser`/
+  `UpdateUserEmail`/`UpdateUserDisplayName`/`GetUsers`/`GetGroups`/`UpdateUserGroups`/`DeleteGroup` use
+  cases. `AuthRestController` keeps only `GET /users/me` (topbar identity + logout URL). `UserService` no
+  longer implements those use cases or injects `ForPersistingUsers`/`ForGettingUsers`; it now owns only the
+  social-login authorization use cases.
+- The self-service **My Page** profile screen (`mypage.html`) was deleted — nothing was left to edit once
+  password change (3b) and name/email editing were gone. The topbar display name across `launchpad.html`
+  and `admin.html` is now a non-interactive read-only element (no link).
+- Kept compiling and wired for a later cleanup pass: `ForPersistingUsers`, `ForGettingUsers`,
+  `AutheliaUserAdapter`, the `User` entity, and the boot `Lifecycle` Authelia bootstrap.
 
 **Delivered (all published services migrated to social on startup, TDD-first):** ✅
 - `SocialAuthMigration`, an idempotent `ApplicationReadyEvent` component, flips every remaining
@@ -526,7 +546,7 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - Migration: `AccessGroupMigration`, an idempotent `ApplicationReadyEvent` component that strips
   `admins`/`users` from every existing entry's groups through the `ForPersistingAccessEntries` port (a
   second run is a no-op).
-- UI: the **Users → Access** section presents groups as free-form per-service tags only — the group
+- UI: the **Users** section presents groups as free-form per-service tags only — the group
   picker no longer suggests or accepts `admins`/`users`; admin-vs-user is set solely by the role control.
 
 **Delivered (last-admin protection, TDD-first):** ✅
@@ -542,7 +562,7 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   groups and name, or creating one with empty groups), and warns if adminless with no configured email.
   Idempotent when an admin already exists.
 - Web: `LastAdminException` maps to `409 Conflict` carrying the operator-safe message.
-- UI: the **Users → Access** section disables Revoke and the demote-to-user control for the sole
+- UI: the **Users** section disables Revoke and the demote-to-user control for the sole
   remaining admin, with an inline note explaining why.
 
 **Delivered (Authelia decommissioned from the running stack, this change):** ✅ `authelia`, `authelia-init`,

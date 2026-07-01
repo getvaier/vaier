@@ -1,9 +1,6 @@
 package net.vaier.rest;
 
-import net.vaier.application.AddUserUseCase;
-import net.vaier.application.DeleteUserUseCase;
 import net.vaier.config.ConfigResolver;
-import net.vaier.domain.port.ForPersistingUsers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,15 +16,6 @@ class AuthRestControllerTest {
 
     @Mock
     ConfigResolver configResolver;
-
-    @Mock
-    ForPersistingUsers forPersistingUsers;
-
-    @Mock
-    AddUserUseCase addUserUseCase;
-
-    @Mock
-    DeleteUserUseCase deleteUserUseCase;
 
     @InjectMocks
     AuthRestController controller;

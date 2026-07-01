@@ -49,31 +49,6 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetEditionUseCase getEditionUseCase;
 
-    // --- User use cases ---
-    @MockBean
-    protected GetUsersUseCase getUsersUseCase;
-
-    @MockBean
-    protected AddUserUseCase addUserUseCase;
-
-    @MockBean
-    protected DeleteUserUseCase deleteUserUseCase;
-
-    @MockBean
-    protected UpdateUserEmailUseCase updateUserEmailUseCase;
-
-    @MockBean
-    protected UpdateUserDisplayNameUseCase updateUserDisplayNameUseCase;
-
-    @MockBean
-    protected GetGroupsUseCase getGroupsUseCase;
-
-    @MockBean
-    protected UpdateUserGroupsUseCase updateUserGroupsUseCase;
-
-    @MockBean
-    protected DeleteGroupUseCase deleteGroupUseCase;
-
     // --- Social-login authorization use cases ---
     @MockBean
     protected VerifyAccessUseCase verifyAccessUseCase;

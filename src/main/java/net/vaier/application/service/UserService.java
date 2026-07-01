@@ -1,17 +1,9 @@
 package net.vaier.application.service;
 
-import net.vaier.application.AddUserUseCase;
 import net.vaier.application.AssignGroupsUseCase;
-import net.vaier.application.DeleteGroupUseCase;
-import net.vaier.application.DeleteUserUseCase;
-import net.vaier.application.GetGroupsUseCase;
-import net.vaier.application.GetUsersUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
 import net.vaier.application.RevokeAccessUseCase;
-import net.vaier.application.UpdateUserDisplayNameUseCase;
-import net.vaier.application.UpdateUserEmailUseCase;
-import net.vaier.application.UpdateUserGroupsUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
@@ -19,115 +11,39 @@ import net.vaier.domain.AccessEntry;
 import net.vaier.domain.AccessRoster;
 import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
-import net.vaier.domain.User;
 import net.vaier.domain.VaierHostnames;
-import net.vaier.domain.port.ForGettingUsers;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
-import net.vaier.domain.port.ForPersistingUsers;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
 @Service
 @Slf4j
-public class UserService implements AddUserUseCase, DeleteUserUseCase,
-        UpdateUserEmailUseCase, UpdateUserDisplayNameUseCase, GetUsersUseCase, ForGettingUsers,
-        GetGroupsUseCase, UpdateUserGroupsUseCase, DeleteGroupUseCase,
+public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
         RevokeAccessUseCase {
 
-    private final ForPersistingUsers forPersistingUsers;
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
     private final ForNotifyingAdmins forNotifyingAdmins;
     private final ConfigResolver configResolver;
 
-    public UserService(ForPersistingUsers forPersistingUsers,
-                       ForPersistingAccessEntries forPersistingAccessEntries,
+    public UserService(ForPersistingAccessEntries forPersistingAccessEntries,
                        ForResolvingServiceGroup forResolvingServiceGroup,
                        // @Lazy defers resolving NotificationService until the first notification, so
                        // it never lands on the forward-auth hot path's critical construction timing.
                        @Lazy ForNotifyingAdmins forNotifyingAdmins,
                        ConfigResolver configResolver) {
-        this.forPersistingUsers = forPersistingUsers;
         this.forPersistingAccessEntries = forPersistingAccessEntries;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
         this.forNotifyingAdmins = forNotifyingAdmins;
         this.configResolver = configResolver;
-    }
-
-    @Override
-    public List<User> getUsers() {
-        return forPersistingUsers.getUsers();
-    }
-
-    @Override
-    public void addUser(String username, String password, String email, String displayname, List<String> groups) {
-        User.validateUsername(username);
-        User.validatePassword(password);
-        User.validateEmail(email);
-        List<String> normalised = normaliseGroups(groups);
-        forPersistingUsers.addUser(username, password, email, displayname, normalised);
-    }
-
-    @Override
-    public void deleteUser(String username) {
-        User.validateUsername(username);
-        forPersistingUsers.deleteUser(username);
-    }
-
-    @Override
-    public void updateEmail(String username, String email) {
-        User.validateUsername(username);
-        User.validateEmail(email);
-        forPersistingUsers.updateEmail(username, email);
-    }
-
-    @Override
-    public void updateDisplayName(String username, String displayname) {
-        User.validateUsername(username);
-        User.validateDisplayname(displayname);
-        forPersistingUsers.updateDisplayName(username, displayname);
-    }
-
-    @Override
-    public List<String> getGroups() {
-        return forPersistingUsers.getUsers().stream()
-                .flatMap(u -> u.getGroups() == null ? java.util.stream.Stream.<String>empty() : u.getGroups().stream())
-                .filter(g -> g != null && !g.isBlank())
-                .map(String::trim)
-                .distinct()
-                .sorted(Comparator.naturalOrder())
-                .toList();
-    }
-
-    @Override
-    public void updateUserGroups(String username, List<String> groups) {
-        User.validateUsername(username);
-        List<String> normalised = normaliseGroups(groups);
-        forPersistingUsers.setUserGroups(username, normalised);
-    }
-
-    @Override
-    public void deleteGroup(String groupName) {
-        User.validateGroupName(groupName);
-        for (User user : forPersistingUsers.getUsers()) {
-            List<String> existing = user.getGroups();
-            if (existing == null || !existing.contains(groupName)) {
-                continue;
-            }
-            List<String> remaining = existing.stream()
-                    .filter(g -> !groupName.equals(g))
-                    .toList();
-            forPersistingUsers.setUserGroups(user.getName(), remaining);
-        }
     }
 
     // === Social-login authorization (AccessEntry domain) ===

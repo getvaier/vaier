@@ -131,19 +131,7 @@ body {
     border-radius: 3px;
     border: 1px solid transparent;
     text-decoration: none;
-    cursor: pointer;
-}
-
-.topbar-user a.display-name:hover {
-    color: var(--text);
-    background: var(--bg-hover);
-    text-decoration: none;
-}
-
-.topbar-user a.display-name.active {
-    color: var(--accent);
-    background: var(--bg-card);
-    border-color: var(--border);
+    cursor: default;
 }
 
 /* Page header — IDE tab/breadcrumb bar */
