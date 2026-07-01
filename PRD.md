@@ -1,6 +1,6 @@
 # Product Requirements Document — Vaier
 
-**Last updated:** 2026-04-10
+**Last updated:** 2026-07-01
 **Status:** Living document
 **Issues:** https://github.com/getvaier/vaier/issues — GitHub issues are part of the spec and represent confirmed requirements and bugs.
 
@@ -12,7 +12,7 @@ Vaier is a self-hosted infrastructure management tool for developers running a h
 
 The core value proposition: add a new Docker service anywhere on your VPN, select a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — end to end.
 
-Vaier is a personal tool that will be open-sourced. It is not intended to compete with general-purpose infrastructure platforms (Portainer, Coolify, Rancher, etc.). It is opinionated about its stack: WireGuard + Traefik + Authelia + AWS Route53.
+Vaier is a personal tool that will be open-sourced. It is not intended to compete with general-purpose infrastructure platforms (Portainer, Coolify, Rancher, etc.). It is opinionated about its stack: WireGuard + Traefik + Google sign-in (via oauth2-proxy) + AWS Route53.
 
 ---
 
@@ -35,7 +35,7 @@ Running a homelab with multiple Docker hosts behind a VPN involves repetitive, e
 1. Create a WireGuard peer config and distribute it
 2. Add a DNS A/CNAME record in Route53
 3. Write a Traefik dynamic config file with the right router, service, and middleware
-4. Optionally wire in Authelia forward-auth
+4. Optionally wire in forward-auth (Google sign-in via oauth2-proxy)
 5. Verify everything propagated correctly
 
 Each step is done in a different tool, with no feedback loop. Mistakes are silent (wrong IP, missing middleware, typo in DNS name). Vaier removes all of this.
@@ -174,7 +174,7 @@ The primary workflow: expose a Docker container as a public HTTPS subdomain.
 
 **Current capabilities:**
 - Discover containers with exposed ports on the Vaier server and VPN peers
-- Publish a service: creates DNS CNAME record (pointing to the VPN server) + Traefik route + optional Authelia middleware
+- Publish a service: creates DNS CNAME record (pointing to the VPN server) + Traefik route + optional social-login middleware chain
 - Toggle authentication on/off per service
 - Check publish status (DNS propagated, Traefik active)
 - Delete published service (removes DNS + Traefik route)
@@ -241,9 +241,9 @@ A read-only launchpad page listing all published services as a clean grid of til
 - No management controls — purely presentational
 - Suitable for use as a browser home page or new-tab page
 - Launchpad page and its API (`/launchpad/services`, `/icon`) are public (no auth required)
-- Admin pages remain protected by Authelia
-- When the caller's public IP matches a VPN peer's WireGuard endpoint IP (i.e. they share a NAT gateway with that peer), and the service is hosted on that peer, the tile links to `http://lanAddress:port` directly — bypassing Traefik and Authelia. Falls back to the public HTTPS URL otherwise. The caller IP is taken from `X-Forwarded-For` only when the direct peer (`RemoteAddr`) is inside the trusted proxy CIDR (`launchpad.trusted-proxy-cidr`, default `172.20.0.0/16`).
-- **Auth-mediated tile URL** — when the service requires Authelia auth and no direct-LAN bypass applies, the tile links to `https://login.<domain>/?rd=<encoded-service-url>` instead of the service URL itself. This forces the browser to navigate to a different origin first, defeating PWA service workers (e.g. openHAB) that would otherwise serve a cached SPA from their own origin and trap the user in the app's own login screen because XHRs to `/rest/*` get answered with `401` rather than a cross-origin `302` redirect to login.
+- Admin pages remain protected by social login (Google via oauth2-proxy → Vaier `/authz/verify`)
+- When the caller's public IP matches a VPN peer's WireGuard endpoint IP (i.e. they share a NAT gateway with that peer), and the service is hosted on that peer, the tile links to `http://lanAddress:port` directly — bypassing Traefik and its auth. Falls back to the public HTTPS URL otherwise. The caller IP is taken from `X-Forwarded-For` only when the direct peer (`RemoteAddr`) is inside the trusted proxy CIDR (`launchpad.trusted-proxy-cidr`, default `172.20.0.0/16`).
+- **Auth-mediated tile URL** — when an auth-protected service has no direct-LAN bypass, the tile routes the browser through the auth gateway first (rather than the service URL itself), defeating PWA service workers (e.g. openHAB) that would otherwise serve a cached SPA from their own origin and trap the user in the app's own login screen because XHRs to `/rest/*` get answered with `401` rather than a cross-origin `302` redirect to sign-in. _(Originally an Authelia `https://login.<domain>/?rd=…` redirect; under social login the domain-wide oauth2-proxy SSO cookie carries the signed-in session across origins.)_
 - **Per-service direct LAN URL opt-out** — the reverse-proxy route carries a `directUrlDisabled` flag (persisted in the Traefik YAML as `x-vaier-direct-url-disabled`). When set, the launchpad always serves the public HTTPS hostname for that service, skipping the direct LAN URL shortcut. This is required for services whose public origin differs from `http://lan:port` — Vaultwarden is the canonical case: its `DOMAIN` env is `https://vaultwarden.<domain>`, so opening the LAN URL yields a near-blank page because the Vue app won't initialise against a mismatched origin. Available as a checkbox both in the Publish service modal (so it can be set on creation) and on the expanded service details row. Also togglable via the unified `PATCH /published-services/{dnsName}` partial-update endpoint (`{"directUrlDisabled": ...}`); accepted on `POST /published-services/publish` as a `directUrlDisabled` body field.
 - **Per-service hide-from-launchpad toggle** ✅ — the reverse-proxy route carries a `hiddenFromLaunchpad` flag (persisted in the Traefik YAML as `x-vaier-hidden-from-launchpad`). When on, the route stays reachable but the launchpad never renders a tile for it. Use case: internal APIs that back another service and don't need an operator-clickable tile. Togglable from the expanded service details row in the admin published-services page, or via the unified `PATCH /published-services/{dnsName}` partial-update endpoint (`{"hiddenFromLaunchpad": ...}`).
 - **Domain-owned tri-state launchpad visibility** ✅ — `ReverseProxyRoute.launchpadVisibility(dnsState, hostState, callerAuthenticated)` returns `LaunchpadVisibility.{NOT_VISIBLE, VISIBLE_INACTIVE, VISIBLE_ACTIVE}`, consolidating every reason a route might be hidden, dimmed, or active. The launchpad use case is a thin pass-through that filters `NOT_VISIBLE` and forwards the rest with `visibility` on `LaunchpadServiceUco`; the launchpad client only renders the value and never has to understand individual reasons. New visibility rules accrete inside the domain method, not in the application layer.
@@ -251,7 +251,7 @@ A read-only launchpad page listing all published services as a clean grid of til
 - **Branded offline page when Vaier itself is down** ✅ — the offline page above is served *by Vaier*, so it can't help when the Vaier container itself is down (Traefik then falls back to its bare "Bad gateway", and Vaier's own routers — defined on its container's labels — vanish while the self-published file-provider router still points at the dead backend). A separate, always-up `vaier-offline` service (tiny pinned nginx, `offline/html` + `offline/default.conf` bind-mounted) stands in: it serves one self-contained branded page (matching the offline-page styling, HTTP 503, 15s auto-refresh) for any path. A **low-priority Traefik fallback router** (`priority=50`) for the Vaier host sits above the lingering file router (30) but below Vaier's real docker routers (100/200), so while Vaier is up its own routers win and when the container stops this becomes the top match. A `vaier-down` `errors` middleware on the same container also covers the transient "container up but returning 5xx mid-restart" window. Infra-only (docker-compose + static assets); no Java change. A `.gitignore` exception keeps `offline/default.conf` tracked despite the blanket `*.conf` ignore.
 - **Version visible under Settings → About** ✅ — the running Vaier build version is surfaced so the operator always knows which build is deployed. The Maven `build-info` goal bakes `project.version` into the jar as Spring `BuildProperties`; `ForReadingAppVersion` / `BuildPropertiesVersionAdapter` reads it (falling back to `dev` when absent), exposed via `GetAppVersionUseCase` on `SettingsService` and `GET /settings/version`. The Settings page renders an **About** card showing `v<version> · <Edition>` (edition from `GET /license`). Replaced an earlier always-on corner badge on the machines page that was too intrusive.
 - **Host-down indicator on the launchpad** ✅ (closes [#208](https://github.com/getvaier/vaier/issues/208)) — `Server.State` is now tri-state: `OK`, `UNREACHABLE`, `UNKNOWN`. A `VISIBLE_INACTIVE` launchpad tile (host confirmed unreachable) shows an 11px red status dot in its top-right corner with a "Host offline" tooltip *and* drops its `href` so a click can't follow the dead link. An `UNKNOWN` host stays `VISIBLE_ACTIVE` (we don't know it's down) — no dot, normal link — but the services card icon goes grey (`icon-unknown`) instead of misleadingly green. `ReverseProxyRoute.hostState(...)` consumes the LAN-reachability snapshot (`Map<String, Reachability>`): `DOWN` → `UNREACHABLE` (regardless of relay), `UNKNOWN` → `UNKNOWN` when the route is otherwise routable, `OK` → existing relay / server-LAN-CIDR check. A dead relay tunnel still beats `UNKNOWN`. The snapshot comes from a new `ForCheckingLanReachability` driven port, implemented by `InMemoryLanReachabilityCache` (`adapter/driven/`) — LAN-reachability state was moved out of `LanServerReachabilityService` into that cache adapter so the cross-service read goes through a domain port rather than a use-case back-channel; the orchestrator service writes through a sibling `ForRecordingLanReachability` port. A confirmed UP↔DOWN transition invalidates the published-services cache and publishes `service-updated` on the `published-services` SSE topic, so the launchpad and services pages re-fetch immediately. The `Reachability` enum lives in the domain.
-- **Hide auth-protected services from anonymous viewers** ✅ (closes [#207](https://github.com/getvaier/vaier/issues/207)) — the launchpad page is public, but it now consumes two sibling endpoints. `GET /launchpad/services` stays in Authelia's `bypass` set and always returns the public-only subset (passes `callerAuthenticated=false` into `ReverseProxyRoute.launchpadVisibility`). `GET /launchpad/services-authenticated` falls through to Authelia's `one_factor` policy, so reaching the controller is itself proof of a valid session — the endpoint always passes `callerAuthenticated=true` and returns the full list including auth-protected tiles. The launchpad page tries the authenticated endpoint first and falls back to the public one when Authelia 302s the anonymous load to the login portal. Auth-protected routes (`authInfo != null`) collapse to `NOT_VISIBLE` for anonymous viewers, so the names and URLs of internal services stop leaking to anyone who can reach the launchpad URL. Per the V1 auth model (Traefik forward-auth only, all logged-in users are admin), any auth on a service is effectively "internal — log in first"; per-user/per-group visibility waits for V2.
+- **Hide auth-protected services from anonymous viewers** ✅ (closes [#207](https://github.com/getvaier/vaier/issues/207)) — the launchpad page is public, but it now consumes two sibling endpoints. `GET /launchpad/services` stays in Authelia's `bypass` set and always returns the public-only subset (passes `callerAuthenticated=false` into `ReverseProxyRoute.launchpadVisibility`). `GET /launchpad/services-authenticated` falls through to Authelia's `one_factor` policy, so reaching the controller is itself proof of a valid session — the endpoint always passes `callerAuthenticated=true` and returns the full list including auth-protected tiles. The launchpad page tries the authenticated endpoint first and falls back to the public one when Authelia 302s the anonymous load to the login portal. Auth-protected routes (`authInfo != null`) collapse to `NOT_VISIBLE` for anonymous viewers, so the names and URLs of internal services stop leaking to anyone who can reach the launchpad URL. Under social login, auth on a service means "internal — sign in first"; finer per-group tile visibility can build on the access store's **access groups**.
 - **Domain-owned launchpad tile name + alias** ✅ — `ReverseProxyRoute.launchpadDisplayName(baseDomain)` decides the tile label: operator-supplied `launchpadAlias` wins (persisted as `x-vaier-launchpad-alias`), otherwise the final segment of `pathPrefix` for path-based routes (so `services.example.com/grafana` displays as `grafana`, not `services/grafana`), otherwise the first DNS label. The subdomain moves into the tile's sub-line beside the peer when it differs from the display name. Editable via the Display name input in the admin published-services details panel and the unified `PATCH /published-services/{dnsName}` partial-update endpoint (`{"launchpadAlias": ...}`).
 - **Domain-owned icon lookup identity** ✅ — `ReverseProxyRoute.launchpadIconQuery()` decides what the launchpad sends to `/icon`: host-only routes resolve a single icon per FQDN; path-based routes carry both host and `pathPrefix` so siblings on one subdomain (e.g. `services.example.com/grafana` and `…/jenkins`) cache separately. The icon fetcher accepts a `pathPrefix` query param and probes `https://host{pathPrefix}/` first for HTML/`favicon.ico` discovery before falling back to the FQDN root; the CDN-by-name fallback uses the final path segment when present. Closes the regression where every path-based sibling shared a single cache key and fell back to the letter avatar.
 - **Filesystem-backed icon cache** ✅ — a resolved service icon is now fetched online at most once, then served from disk across restarts. `IconService` checks the in-memory map, then a new `ForStoringIcons` driven port (filesystem store at `icon.cache.path`, default `/icons`, mounted read-write in `docker-compose.yml`), then resolves online and persists the positive result to disk (negatives are remembered only in memory so a once-dead host can recover). The shared `IconResolution.cacheKey(host, pathPrefix)` addresses both tiers so memory and disk never drift. `FilesystemIconStoreAdapter` stores each icon as two files named by the SHA-256 of the key (`<hash>` bytes + `<hash>.ct` content-type), written via temp-file-then-atomic-move, and degrades gracefully (disables itself, never throws) when the directory can't be created/written — mirroring the geoip DB. The `Icon` value object moved to the domain (`net.vaier.domain.Icon`).
@@ -265,7 +265,7 @@ A read-only launchpad page listing all published services as a clean grid of til
 
 Vaier supports two DNS modes, inferred from the presence of AWS credentials. There is no `VAIER_DNS_PROVIDER` env var: `ConfigResolver.getDnsProvider()` derives `ROUTE53` when both `awsKey` and `awsSecret` are present and `MANUAL` otherwise.
 
-**Route53 mode ✅ (default when AWS keys present).** Vaier automates DNS through the AWS Route53 API: it auto-creates the bootstrap records (`vaier.<domain>`, `login.<domain>`) on first boot and a CNAME per published service. Backed by `Route53DnsAdapter` and the `ForPersistingDnsRecords` / `ForValidatingAwsCredentials` ports. There is no UI page for general-purpose record CRUD — the REST endpoints exist (`/dns/*`) but the navigation page was never built. Service publishing is the primary path; advanced records are managed in the AWS console.
+**Route53 mode ✅ (default when AWS keys present).** Vaier automates DNS through the AWS Route53 API: it auto-creates `vaier.<domain>` on first boot and a CNAME per published service (the not-yet-removed Authelia boot path still also writes a legacy `login.<domain>` CNAME). Backed by `Route53DnsAdapter` and the `ForPersistingDnsRecords` / `ForValidatingAwsCredentials` ports. There is no UI page for general-purpose record CRUD — the REST endpoints exist (`/dns/*`) but the navigation page was never built. Service publishing is the primary path; advanced records are managed in the AWS console.
 
 **Manual DNS mode ✅ (closes [#198](https://github.com/getvaier/vaier/issues/198), [#199](https://github.com/getvaier/vaier/issues/199)).** Omit `VAIER_AWS_KEY` / `VAIER_AWS_SECRET` (and don't save them via the Settings UI) and Vaier runs without Route53. The `ManualDnsAdapter` no-ops every DNS write and synthesizes the bootstrap records as already-present so `Lifecycle.initDns()` is silent. The publish flow is unchanged: `addDnsRecord` no-ops, then `waitForDnsThenActivate` polls real DNS via `ForResolvingDns` and activates Traefik once the operator's record propagates. If the record never appears, the existing 2-minute timeout + rollback handles it. The Settings UI hides the AWS Credentials card whenever the active provider is MANUAL, since saving keys via that form does not flip the runtime mode (it only takes effect on the next restart with env vars set) and the field was just clutter in manual installs. To opt into Route53, set `VAIER_AWS_KEY` / `VAIER_AWS_SECRET` and restart. For the launchpad, `PublishingService.toUco()` reports `DnsState.OK` for every route in MANUAL mode — the operator owns DNS and Vaier has no authoritative view, so synthesising "OK" matches the trust-the-operator semantics rather than rendering every published service as missing.
 
@@ -285,20 +285,11 @@ No planned changes beyond what service publishing drives automatically.
 
 ---
 
-### 6.6 User Management ✅ (exists)
+### 6.6 Access Management ✅ (exists)
 
-Manage Authelia users from the Vaier UI.
+Manage who can sign in and what they can reach, from the **Users → Access** page. With Authelia removed from the running stack, this is the live identity/access surface — see §6.17 for the full social-login model (roles, access groups, pending approvals, last-admin protection). Per-service group gating is implemented via the access store rather than Authelia `access_control` rules.
 
-**Current capabilities:**
-- List / create / delete users (new users get an Argon2-hashed password)
-- Update display name and email per user
-
-**In-UI password change removed** — the change-password action and `PUT /users/{username}/password` were removed with #305 step 3b (see §6.17); social-login users have no Vaier password. The `ForPersistingUsers.changePassword` port + Authelia adapter remain for now, and Authelia's own reset-password flow still covers the bootstrap admin.
-- Choose group(s) when creating a user (no more hardcoded `admins`); edit a user's groups inline; delete a group across all users in one action ([#84](https://github.com/getvaier/vaier/issues/84))
-- Authelia login / 2FA pages inherit Vaier's dark theme and logo via `theme: dark` + `asset_path: /config/assets`; the Vaier container publishes `logo.png` into the Authelia assets directory at startup so the hand-off between `vaier.<domain>` and `login.<domain>` reads as one product.
-
-**Planned next:**
-- Wire groups into Authelia `access_control` rules (per-service group gating, two-factor escalation per group) — see [#84](https://github.com/getvaier/vaier/issues/84) follow-up. Today every logged-in user reaches every published service.
+**Legacy Authelia user management** — the older List / create / delete Authelia users UI and the `AutheliaUserAdapter` / `ForPersistingUsers` port remain in the code but no longer manage a running Authelia; they are pending cleanup. In-UI password change was already removed with #305 step 3b (social-login users have no Vaier password).
 
 ---
 
@@ -341,20 +332,18 @@ Keep the operator aware when Docker images have newer versions available.
 
 ### 6.9 Email Notifications ✅ (implemented)
 
-Vaier ships an SMTP notifier that powers Authelia password-reset emails today and is intended to carry other Vaier notifications in future. Settings are stored in `vaier-config.yml`; the password lives in Authelia's `secrets.properties`.
+Vaier ships an SMTP notifier that carries Vaier's admin alert emails (machine up/down, disk pressure, new access requests). Settings are stored in `vaier-config.yml`; the password is still stored in the legacy `secrets.properties`. (It previously also powered Authelia's password-reset mail; Authelia no longer runs.)
 
 **What's implemented:**
 - Settings → *Email notifications* form with host, port, username, password, sender, and a "Send test email to …" recipient field.
 - **Send test email** button does a full AUTH + roundtrip send via Jakarta Mail so misconfigurations surface without touching the auth layer.
-- **Save** verifies credentials against the SMTP server *before* writing the Authelia notifier block or restarting Authelia. On failure the REST endpoint returns HTTP 400 with the upstream SMTP error; Authelia is left untouched.
+- **Save** verifies credentials against the SMTP server *before* storing them. On failure the REST endpoint returns HTTP 400 with the upstream SMTP error. The password is still persisted to the legacy `secrets.properties`; the old Authelia notifier-block write / container restart is now a no-op since Authelia was removed from the stack.
 - Password field can be left blank on save/test to reuse the stored value, so host/sender/etc. can be edited without retyping the secret.
-- `AutheliaConfigAdapter` generates `notifier: smtp` when a password is stored, otherwise falls back to `notifier: filesystem` so Authelia always has a valid notifier to start.
-- SMTP UI copy is provider-neutral — Authelia is one consumer; future Vaier emails will reuse the same settings.
-- **Server machine up/down alerts** ([#173](https://github.com/getvaier/vaier/issues/173)): two 30s schedulers — one watching WireGuard handshake age for `UBUNTU_SERVER`/`WINDOWS_SERVER` peers, one watching the LAN reachability TCP probe for `LAN_SERVER` machines. Mobile/Windows clients are excluded — their disconnects are routine user behaviour. On a state change either watcher emails every user in the `admins` group with subject `[Vaier] <name> is now <connected|disconnected>` and a body containing the machine's name, type, last handshake (or last-seen timestamp for LAN servers), LAN address, and a link back to `vaier.<domain>/vpn-peers.html`. Per-machine state is in-memory; the first observation after Vaier startup is treated as a baseline so a restart never produces a notification storm. No quiet-hours setting — alerts fire 24/7.
+- **Server machine up/down alerts** ([#173](https://github.com/getvaier/vaier/issues/173)): two 30s schedulers — one watching WireGuard handshake age for `UBUNTU_SERVER`/`WINDOWS_SERVER` peers, one watching the LAN reachability TCP probe for `LAN_SERVER` machines. Mobile/Windows clients are excluded — their disconnects are routine user behaviour. On a state change either watcher emails every **admin**-role **access entry** with subject `[Vaier] <name> is now <connected|disconnected>` and a body containing the machine's name, type, last handshake (or last-seen timestamp for LAN servers), LAN address, and a link back to `vaier.<domain>/vpn-peers.html`. Per-machine state is in-memory; the first observation after Vaier startup is treated as a baseline so a restart never produces a notification storm. No quiet-hours setting — alerts fire 24/7.
 - **Reachability debounce for LAN servers**: a probe result must hold for 3 consecutive 30s cycles (≈60s of consistency) before the published cache flips and an email goes out. Dampens both the WireGuard tunnel warmup window after a Vaier restart (no false-down email when it takes one cycle for the relay handshake to complete) and ordinary network flapping (a single transient timeout never propagates). The UI shows the icon as grey ("warming up") until the first state confirms.
 - **Last-seen timestamp inside the card** ([#173](https://github.com/getvaier/vaier/issues/173)): every machine's expanded card has a "Last Seen" detail row derived from the latest handshake (or the latest successful LAN reachability probe), updated live by the `peers-stats` SSE stream so the value stays current without a manual refresh. The header row itself signals liveness through the machine-icon colour rather than a separate widget.
-- **Host disk-pressure alerts** ✅ — Vaier monitors free space on its own host root filesystem and emails the `admins` group when it fills past a configurable threshold, reusing the same SMTP path as the machine up/down alerts. A `DiskUsageWatcher` (`@Scheduled(fixedDelay = 60000)`) reads host disk usage through the `ForReadingDiskUsage` driven port (`HostDiskUsageAdapter`, backed by `Files.getFileStore`), which reads the host root bind-mounted read-only into the Vaier container at `VAIER_HOST_ROOT_PATH` (default `/host`; `docker-compose.yml`'s `vaier` service mounts `- /:/host:ro` and passes the env var). All fullness decisions live on the `domain.DiskUsage` entity (`usedPercent`, `isAbove`, and its own email subject/body rendering); `HostMonitoringService` (`GetHostDiskUsageUseCase`) only orchestrates the read. An in-memory `domain.DiskPressureTracker` (mirroring `PeerConnectivityTracker`) emits a transition only on a boundary crossing — `CROSSED_ABOVE` sends the pressure email, `CROSSED_BELOW` the recovery email — so a poll that doesn't change state stays quiet, and the first reading after startup is a silent baseline. The emails go out via `NotifyAdminsOfDiskPressureUseCase` on `NotificationService`. The threshold is `diskMonitorThresholdPercent` in `vaier-config.yml` (default 85, valid 1–99, validated in `domain.VaierConfig`), exposed via `ConfigResolver.getDiskMonitorThresholdPercent()` and editable through `PUT /settings/disk-monitor` (`UpdateDiskMonitorSettingsUseCase` on `SettingsService`). With SMTP unconfigured or the host root not mounted the watcher is inert; the latter case is swallowed and logged at debug.
-- **New pending access-request alert** ✅ — when `UserService.verify()` sees a Google identity for the first time, it auto-creates a `PENDING` `AccessEntry` and, only in that new-pending branch, notifies admins via the `ForNotifyingAdmins` driven port (`notifyNewPendingIdentity(email)`), implemented by `NotificationService`. The email content is rendered by the `domain.PendingIdentity` value object (subject `[Vaier] New access request awaiting approval`; body names the email and links to `vaier.<domain>/admin.html#users`), mirroring `PeerSnapshot`. Recipients are the Authelia `admins`, reusing the same SMTP path as the other alerts, so it stays silent when SMTP is unconfigured or there are no admins. Because `verify()` runs on the Traefik forward-auth hot path for every request to a social-gated service, the send is non-blocking and exception-safe: the notifier method is `@Async` (`@EnableAsync` on `VaierApplication`) and the call site in `UserService` swallows/logs any failure, so a misbehaving notifier can never add latency to or throw into the access decision. It does not fire for existing entries, repeat sign-ins by the same pending user, or allowed decisions. The cross-service cycle (NotificationService reads admins via `ForGettingUsers`, UserService notifies via `ForNotifyingAdmins`) is broken with `@Lazy` on the UserService dependency. Recipients are Authelia admins for now; once the console moves to social login this could also include `AccessEntry` ADMINs ([#305](https://github.com/getvaier/vaier/issues/305) step 3b).
+- **Host disk-pressure alerts** ✅ — Vaier monitors free space on its own host root filesystem and emails every **admin**-role **access entry** when it fills past a configurable threshold, reusing the same SMTP path as the machine up/down alerts. A `DiskUsageWatcher` (`@Scheduled(fixedDelay = 60000)`) reads host disk usage through the `ForReadingDiskUsage` driven port (`HostDiskUsageAdapter`, backed by `Files.getFileStore`), which reads the host root bind-mounted read-only into the Vaier container at `VAIER_HOST_ROOT_PATH` (default `/host`; `docker-compose.yml`'s `vaier` service mounts `- /:/host:ro` and passes the env var). All fullness decisions live on the `domain.DiskUsage` entity (`usedPercent`, `isAbove`, and its own email subject/body rendering); `HostMonitoringService` (`GetHostDiskUsageUseCase`) only orchestrates the read. An in-memory `domain.DiskPressureTracker` (mirroring `PeerConnectivityTracker`) emits a transition only on a boundary crossing — `CROSSED_ABOVE` sends the pressure email, `CROSSED_BELOW` the recovery email — so a poll that doesn't change state stays quiet, and the first reading after startup is a silent baseline. The emails go out via `NotifyAdminsOfDiskPressureUseCase` on `NotificationService`. The threshold is `diskMonitorThresholdPercent` in `vaier-config.yml` (default 85, valid 1–99, validated in `domain.VaierConfig`), exposed via `ConfigResolver.getDiskMonitorThresholdPercent()` and editable through `PUT /settings/disk-monitor` (`UpdateDiskMonitorSettingsUseCase` on `SettingsService`). With SMTP unconfigured or the host root not mounted the watcher is inert; the latter case is swallowed and logged at debug.
+- **New pending access-request alert** ✅ — when `UserService.verify()` sees a Google identity for the first time, it auto-creates a `PENDING` `AccessEntry` and, only in that new-pending branch, notifies admins via the `ForNotifyingAdmins` driven port (`notifyNewPendingIdentity(email)`), implemented by `NotificationService`. The email content is rendered by the `domain.PendingIdentity` value object (subject `[Vaier] New access request awaiting approval`; body names the email and links to `vaier.<domain>/admin.html#users`), mirroring `PeerSnapshot`. Recipients are the **admin**-role **access entries** (`accessStore.getEntries()` filtered by `AccessEntry::isAdmin`), reusing the same SMTP path as the other alerts, so it stays silent when SMTP is unconfigured or there are no admins. Because `verify()` runs on the Traefik forward-auth hot path for every request to a social-gated service, the send is non-blocking and exception-safe: the notifier method is `@Async` (`@EnableAsync` on `VaierApplication`) and the call site in `UserService` swallows/logs any failure, so a misbehaving notifier can never add latency to or throw into the access decision. It does not fire for existing entries, repeat sign-ins by the same pending user, or allowed decisions. The cross-service cycle (NotificationService reads admins via the access store, UserService notifies via `ForNotifyingAdmins`) is broken with `@Lazy` on the UserService dependency.
 
 **Known gotcha:** Gmail requires an **App Password** (not the account password) when 2FA is on. The pre-save verification catches this cleanly — save is rejected with the Gmail `534 5.7.9 Application-specific password required` message.
 
@@ -370,16 +359,16 @@ Vaier ships an SMTP notifier that powers Authelia password-reset emails today an
 
 The in-app wizard at `/setup.html` was deprecated on 2026-04-23 (a tester walking through the README found it unreachable when the four required env vars were populated, and not documented when they weren't). It was deleted on 2026-05-04 along with `SetupRedirectFilter`, `SetupRestController`, the three setup use case interfaces, and `SetupService`. Removal also retires the unauthenticated `/api/setup/*` surface that #145 flagged as a race-condition admin-claim window. First-run is now exclusively the env-var path documented in `README.md`.
 
-### 6.11 Zero-touch first-run DNS + Authelia boot ✅ (implemented 2026-04-23, closes [#163](https://github.com/getvaier/vaier/issues/163), [#164](https://github.com/getvaier/vaier/issues/164))
+### 6.11 Zero-touch first-run DNS boot ✅ (implemented 2026-04-23, closes [#163](https://github.com/getvaier/vaier/issues/163), [#164](https://github.com/getvaier/vaier/issues/164))
 
 - **Auto-creates `vaier.<domain>` on first boot.** Vaier resolves the server's public address in order: `VAIER_PUBLIC_HOST` (CNAME target) → `VAIER_PUBLIC_IP` (A target) → EC2 IMDSv2 `public-hostname` (CNAME). If none resolve and the record is already missing, Vaier logs a clear instruction and exits the lifecycle step without crash-looping — the rest of the stack stays up so the operator can fix .env and restart.
-- **`authelia-init` one-shot container** mirrors the `redis-init` pattern: writes a minimum-viable `configuration.yml` + `placeholder_users.yml` into `./authelia/config` before Authelia starts, so the Authelia container no longer crash-loops against its own default template on the first `docker compose up -d`. Vaier overwrites the placeholder config on its own first start and restarts Authelia.
+- **First-boot auth is now zero-touch via oauth2-proxy** — `oauth2-proxy-init` renders oauth2-proxy's config into `./oauth2/config` before oauth2-proxy starts, and the access store seeds the **configured administrator** (`VAIER_ADMIN_EMAIL`), so the operator signs in with Google on first boot. _(Superseded: the former `authelia-init`/`redis-init` one-shots that seeded a placeholder Authelia config were removed when Authelia and Redis left the stack.)_
 
 ### 6.12 Docker socket hardening ✅ (closes [#147](https://github.com/getvaier/vaier/issues/147))
 
 The Docker socket is no longer bind-mounted into Vaier or Traefik. A pinned `tecnativa/docker-socket-proxy:v0.4.2` sidecar holds the real socket and exposes a restricted HTTP API on `tcp://docker-proxy:2375` over `vaier-network`. Tecnativa's stock allowlist (`CONTAINERS`, `EVENTS`, `EXEC`, `IMAGES`, `PING`, `POST`, `ALLOW_RESTARTS`) covers GET access cleanly, but `CONTAINERS=1 + POST=1` would also permit `/containers/create` and `/containers/{id}/start` — leaving the privesc chain open. To close it, the `haproxy_template` Compose `configs:` entry overrides the upstream haproxy template with explicit `http-request deny` rules for `/containers/create`, `/containers/{id}/start`, `/images/create`, `/images/load`, and `/images/*/push` *before* the broad `CONTAINERS` allow. The template is embedded inline in `docker-compose.yml` so the stack ships as a single file — no separate config download. A smoke test confirms each denied path returns `HTTP/1.0 403` while `/containers/json`, `/_ping`, `/events`, `/images/{id}/json`, and `/containers/{id}/restart` still return 200/204. Net result: an attacker with RCE in Vaier cannot launch a `--privileged` container, pull a fresh malicious image, or alter swarm/network/volume state.
 
-The Vaier container's PID 1 (the Java process) runs as UID 1000. The `Dockerfile` ENTRYPOINT is `setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=+net_admin --ambient-caps=+net_admin -- java …` — `setpriv` (from `util-linux`) starts as root so it can manage capabilities, raises `CAP_NET_ADMIN` to ambient (so it transfers to `ip` invoked by `ProcessBuilder`), then drops to UID 1000 before exec'ing Java. A one-shot `vaier-init` container (busybox, mirroring `redis-init`/`authelia-init`) `chown`s the four bind-mounted config dirs (`vaier`, `traefik`, `authelia`, `wireguard`) to `1000:1000` on every start so the non-root process can read and write its own state. The `authelia` service runs with `PUID=1000`/`PGID=1000` (its image entrypoint does `chown -R "${PUID}:${PGID}" /config` on every start and PUID/PGID default to `0`) — without it, Authelia would re-root `./authelia/config` on each (re)start, locking the UID-1000 Vaier process out of the dir it shares with Authelia (bootstrap password file, users database, branding assets). `cap_add: NET_ADMIN` is retained at the container level so `VpnNetworkSetupAdapter` and `LanRouteAdapter` can install routes inside the Vaier container — file caps alone don't transfer reliably under Docker overlayfs, hence the ambient-cap path. (#151's keep-as-hedge rationale therefore stands.)
+The Vaier container's PID 1 (the Java process) runs as UID 1000. The `Dockerfile` ENTRYPOINT is `setpriv --reuid=1000 --regid=1000 --init-groups --inh-caps=+net_admin --ambient-caps=+net_admin -- java …` — `setpriv` (from `util-linux`) starts as root so it can manage capabilities, raises `CAP_NET_ADMIN` to ambient (so it transfers to `ip` invoked by `ProcessBuilder`), then drops to UID 1000 before exec'ing Java. A one-shot `vaier-init` container (busybox) `chown`s the bind-mounted config dirs (`vaier`, `traefik`, `authelia`, `wireguard`, `icons`) to `1000:1000` on every start so the non-root process can read and write its own state. (The `authelia`/`redis` services and their PUID/PGID re-root workaround are gone with Authelia's removal from the stack.) `cap_add: NET_ADMIN` is retained at the container level so `VpnNetworkSetupAdapter` and `LanRouteAdapter` can install routes inside the Vaier container — file caps alone don't transfer reliably under Docker overlayfs, hence the ambient-cap path. (#151's keep-as-hedge rationale therefore stands.)
 
 ### 6.13 Argv-style sinks for user-supplied lanCidr ✅ (closes [#195](https://github.com/getvaier/vaier/issues/195))
 
@@ -466,17 +455,18 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - Logout: `VaierHostnames.logoutUrl(AuthMode, target)` is mode-aware — Authelia portal logout vs
   oauth2-proxy `/oauth2/sign_out` (which clears the domain-wide cookie). The console itself stays
   Authelia-gated in this step (3b moves it).
-- oauth2-proxy is promoted to a first-class `docker-compose.yml` service, gated behind the `social`
-  profile so a Community deployment without social login is unaffected; the throwaway `whoami` is removed.
-  `social` is offered (UI + route generation) only when `VAIER_OIDC_GOOGLE_CLIENT_ID` is set
-  (`ConfigResolver.isSocialAuthAvailable`, surfaced on `GET /settings/config`).
-- UI: a per-service **auth-mode picker** (Public / Authelia / Social) on the service card replaces the
-  on/off auth toggle; the Social option appears only when configured, and a distinct badge names the
-  gateway in front of each service.
+- oauth2-proxy is promoted to a first-class `docker-compose.yml` service; the throwaway `whoami` is
+  removed. It was originally gated behind a `social` Compose profile, but **now that Authelia is
+  decommissioned oauth2-proxy is mandatory, always-on infrastructure** — the `social`/`COMPOSE_PROFILES`
+  profile is gone and a plain `docker compose up -d` starts it. `ConfigResolver.isSocialAuthAvailable`
+  (Google client id present, surfaced on `GET /settings/config`) still governs whether the auth-mode
+  picker offers Social.
+- UI: a per-service **auth-mode picker** (Public / Social) on the service card replaces the
+  on/off auth toggle; a distinct badge names the gateway in front of each service.
 
 **Delivered (display name capture, TDD-first):**
 - oauth2-proxy is migrated from CLI flags to an env-driven, secret-safe **alpha config** so it can
-  forward Google's `name` claim. An `oauth2-proxy-init` container (mirroring `authelia-init`/`redis-init`)
+  forward Google's `name` claim. An `oauth2-proxy-init` container
   renders `alpha.yaml` into a shared `./oauth2/config` volume — substituting only the client id, writing
   `$VAIER_OIDC_GOOGLE_CLIENT_SECRET` to a mode-0600 `client-secret` file referenced via `clientSecretFile`
   (never inlined) — and adds `X-Forwarded-Name` / `X-Auth-Request-Name` (claim `name`) to the header
@@ -520,8 +510,9 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   `ForPersistingReverseProxyRoutes` port and calls `setRouteAuthMode(dnsName, pathPrefix, SOCIAL)` for
   each Authelia route, which swaps the middleware chain and stands up the per-host `/oauth2/` helper
   router. `NONE` and `SOCIAL` routes are left untouched, so a second run flips nothing (there are no
-  Authelia routes left). Reversible while Authelia's container is still running; the container is removed
-  in a later step. No new domain concept — the mode decision stays on `ReverseProxyRoute.authMode()`.
+  Authelia routes left). Now that the migration is proven, **Authelia and Redis have been removed from
+  the running stack** — social login is the sole runtime auth gateway. No new domain concept — the mode
+  decision stays on `ReverseProxyRoute.authMode()`.
 
 **Delivered (role is the sole admin/user authority, TDD-first):** ✅
 - **Role** and **access groups** are now cleanly orthogonal — the role (`pending`/`user`/`admin`) is the
@@ -539,7 +530,7 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
   picker no longer suggests or accepts `admins`/`users`; admin-vs-user is set solely by the role control.
 
 **Delivered (last-admin protection, TDD-first):** ✅
-- With the console admin-only and no Authelia fallback after decommissioning, the access store must
+- With the console admin-only and Authelia decommissioned (no fallback), the access store must
   always retain at least one admin — otherwise the console would be permanently locked out for everyone.
 - Domain: `AccessRoster` (an immutable value object over the entries) owns the decision via
   `adminCount()` and `isOnlyAdmin(email)`; `LastAdminException` signals the refusal. The rule lives in
@@ -554,11 +545,19 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - UI: the **Users → Access** section disables Revoke and the demote-to-user control for the sole
   remaining admin, with an inline note explaining why.
 
-**Backlog (not in this slice):** fully decommissioning Authelia — the console can already run on social
-login via `VAIER_CONSOLE_AUTH_MODE`, so the remaining 3b work is removing Authelia from the stack — plus
-the unauthenticated "awaiting approval" page, migration off Authelia for existing
-deployments, and multi-provider login (GitHub, etc.). The **availability coupling** the spike flags —
-Vaier being in the request path for protected services — remains the open trade-off to accept or revisit.
+**Delivered (Authelia decommissioned from the running stack, this change):** ✅ `authelia`, `authelia-init`,
+`redis`, and `redis-init` are removed from `docker-compose.yml`; oauth2-proxy(+init) run unconditionally
+(no `social` profile); admin-notification recipients are now the **admin**-role **access entries**; and
+`login.<domain>` is no longer a mandatory/undeletable subdomain (only `vaier.<domain>` is).
+
+**Backlog (not in this slice):**
+- **Remove the dead Authelia Java code** — `AutheliaUserAdapter`, `AutheliaConfigAdapter`,
+  `AutheliaAssetsAdapter`, `BootstrapCredentialsFileAdapter`, the `AuthMode.AUTHELIA` enum value, the
+  `ForPersistingUsers` user-list surface, and the `./authelia/config` writes (the SMTP password should
+  move off `secrets.properties`) are all still present and pending cleanup now that no Authelia runs.
+- The unauthenticated "awaiting approval" page, migration off Authelia for existing deployments, and
+  multi-provider login (GitHub, etc.). The **availability coupling** the spike flags — Vaier being in the
+  request path for protected services — remains the open trade-off to accept or revisit.
 
 ---
 
@@ -571,11 +570,11 @@ Vaier being in the request path for protected services — remains the open trad
 3. In Vaier → Services, the container appears in the **Discovered** list automatically
 4. Developer clicks **+ Add**, enters a subdomain, toggles auth if needed, clicks **Add Service**
 5. Modal closes immediately; service moves to the **Processing** list with live progress steps
-6. Vaier creates: DNS CNAME → waits for propagation → Traefik route → (optional) Authelia middleware
+6. Vaier creates: DNS CNAME → waits for propagation → Traefik route → (optional) social-login middleware chain
 7. Processing card disappears; service appears in the **Active** list with live status
 8. All updates arrive via SSE — no page reload or manual polling required
 
-**Success:** zero manual DNS/Traefik/Authelia steps. The user always knows where their service is in the pipeline.
+**Success:** zero manual DNS/Traefik/auth steps. The user always knows where their service is in the pipeline.
 
 ### 7.2 Add a new VPN peer
 
@@ -592,16 +591,16 @@ Vaier being in the request path for protected services — remains the open trad
 
 ### 7.5 First-time setup
 
-1. User creates `.env` with `VAIER_DOMAIN`, `ACME_EMAIL`, `VAIER_AWS_KEY`, `VAIER_AWS_SECRET` (and optionally `VAIER_PUBLIC_HOST` / `VAIER_PUBLIC_IP` when not on EC2)
-2. `docker compose up -d` — `authelia-init` writes placeholder Authelia config, the stack comes up without Authelia crash-looping
-3. Vaier auto-creates `vaier.<domain>` (and `login.<domain>`) records in Route53, writes the real Authelia config, and bootstraps an admin user whose one-time password is written to `authelia/config/.bootstrap-admin-password`
-4. User reads the bootstrap password, logs in at `https://vaier.<domain>`, changes it, and deletes the file
+1. User creates `.env` with `VAIER_DOMAIN`, `ACME_EMAIL`, the Google OAuth credentials (`VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET`), `VAIER_ADMIN_EMAIL`, optionally `VAIER_AWS_KEY` / `VAIER_AWS_SECRET` (Route53 mode) and `VAIER_PUBLIC_HOST` / `VAIER_PUBLIC_IP` when not on EC2
+2. `docker compose up -d` — oauth2-proxy(+init) start unconditionally as the auth gateway (no `social` profile)
+3. Vaier auto-creates `vaier.<domain>` in Route53 and seeds the **configured administrator** (`VAIER_ADMIN_EMAIL`) as the first admin access entry
+4. User opens `https://vaier.<domain>`, signs in with Google as that admin, and lands in the console
 
 ## 8. Technical Constraints
 
-- **Stack is fixed:** WireGuard (linuxserver), Traefik, Authelia, Redis, AWS Route53
+- **Stack is fixed:** WireGuard (linuxserver), Traefik, oauth2-proxy, AWS Route53
 - **Sub-image versions are pinned** in `docker-compose.yml`; bumps are deliberate, tested, and released with a new Vaier version (no floating `:latest` tags for upstream images)
-- **No database:** all state is file-based (WireGuard/Traefik/Authelia configs) or cloud-based (Route53)
+- **No database:** all state is file-based (WireGuard/Traefik configs, the access store) or cloud-based (Route53)
 - **Single WireGuard server:** multi-server mesh is out of scope
 - **Java 21 / Spring Boot 3.5.5:** backend language and framework are fixed
 - **Docker socket required:** container discovery requires access to `/var/run/docker.sock` or TCP Docker API on peers
@@ -638,7 +637,7 @@ All original open questions have been resolved:
 
 | # | Question | Decision |
 |---|----------|----------|
-| OQ1 | Should the launchpad be unauthenticated or protected? | Launchpad is public; admin UI is protected by Authelia. A dedicated `/launchpad/services` endpoint returns only DNS address and host address (no ports, auth state, or internal details). |
+| OQ1 | Should the launchpad be unauthenticated or protected? | Launchpad is public; admin UI is protected by social login (Google via oauth2-proxy → Vaier `/authz/verify`). A dedicated `/launchpad/services` endpoint returns only DNS address and host address (no ports, auth state, or internal details). |
 | OQ2 | Non-Docker Hub registries in v1? | No — Docker Hub only. GHCR / self-hosted are stretch goals for v2. |
 | OQ3 | Pi-hole detection: automatic or env var? | N/A — Pi-hole removed from the project. |
 | OQ4 | Update notifications: push or UI only? | UI only in v1. Webhook/email is a v2 consideration. |

@@ -11,7 +11,7 @@ I am basically tired of maintaining a VPN server with reverse proxy pointing to 
 - **Create DNS records** with AWS Route53
 - **Manage DNS records** with AWS Route53
 - **Manage containers remotely** with Docker
-- **Manage users** with Authelia
+- **Manage users** with Google social login (oauth2-proxy) and Vaier's own access store
 - **Web interface for managing everything** with Vaier
 - **Self-generated dashboard for linking to all my services** with Vaier
 
@@ -33,7 +33,7 @@ Swagger UI: `http://localhost:8080/swagger-ui.html` (local) or `http://localhost
 
 - **Domain** (`domain/`) — Business logic, entities, and port interfaces. No Spring dependencies.
 - **Application** (`application/`) — Use case interfaces and service implementations that orchestrate domain logic.
-- **Infrastructure** (`adapter/driven/`) — Adapter implementations for external systems (AWS Route53, Docker API, WireGuard, Traefik, Authelia).
+- **Infrastructure** (`adapter/driven/`) — Adapter implementations for external systems (AWS Route53, Docker API, WireGuard, Traefik, oauth2-proxy).
 - **Web** (`rest/`) — REST controllers. DTOs are defined as inner Java `record` classes within controllers.
 
 ### Naming Conventions
@@ -59,11 +59,11 @@ Cross-domain orchestration (e.g., `VpnService.deletePeer` cascading into `Publis
 - **Traefik**: YAML dynamic config generation at `TRAEFIK_CONFIG_PATH`
 - **AWS Route53**: DNS zone/record CRUD via AWS SDK v2
 - **Docker**: Container discovery via Docker socket (`/var/run/docker.sock`)
-- **Authelia**: Authentication middleware, YAML-based user config
+- **oauth2-proxy**: Google authentication; Vaier authorizes via the `/authz/verify` forward-auth endpoint against its own `access.yml` store (#305)
 
 ### No Database
 
-All state is file-based (WireGuard/Traefik/Authelia YAML configs), cloud-based (Route53), or ephemeral (Redis for Authelia sessions). No SQL database or ORM.
+All state is file-based (WireGuard/Traefik YAML configs, the `access.yml` social-login store), cloud-based (Route53), or ephemeral (oauth2-proxy's own signed cookie session). No SQL database or ORM.
 
 ### Strict layer isolation
 
@@ -84,13 +84,14 @@ GitHub Actions:
 
 ## Docker Stack
 
-The `docker-compose.yml` runs six services on a custom bridge network (`172.20.0.0/16`):
+The `docker-compose.yml` runs these services on a custom bridge network (`172.20.0.0/16`):
 1. **WireGuard** — VPN server (UDP 51820)
 2. **Traefik** — Reverse proxy with Let's Encrypt (ports 80, 443, 8080)
-3. **Authelia** — Authentication middleware
-4. **Redis** — Session store for Authelia
-5. **Vaier** — This Spring Boot app (port 8888 externally, 8080 internally)
-6. **vaier-offline** — Tiny always-up nginx serving the branded offline page when the Vaier container itself is down (a low-priority Traefik fallback router for the Vaier host)
+3. **oauth2-proxy** — Authenticates users with Google; Vaier owns authorization via `/authz/verify` (#305). Always-on infrastructure.
+4. **Vaier** — This Spring Boot app (port 8888 externally, 8080 internally)
+5. **vaier-offline** — Tiny always-up nginx serving the branded offline page when the Vaier container itself is down (a low-priority Traefik fallback router for the Vaier host)
+
+Authelia and its Redis session store were decommissioned (#305) in favour of Google social login via oauth2-proxy.
 
 ### Sub-image version pinning
 

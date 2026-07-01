@@ -177,8 +177,10 @@ class GetLaunchpadServicesTest {
 
         List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
 
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).dnsAddress()).isEqualTo("app.example.com");
+        // Authelia is decommissioned: only the Vaier console router is mandatory infrastructure,
+        // so login.<domain> now surfaces as an ordinary launchpad tile alongside app.
+        assertThat(result).extracting(LaunchpadServiceUco::dnsAddress)
+            .containsExactlyInAnyOrder("login.example.com", "app.example.com");
     }
 
     @Test

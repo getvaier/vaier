@@ -917,4 +917,151 @@ class TraefikReverseProxyAdapterTest {
 
         assertThat(adapter.getReverseProxyRoutes()).isEmpty();
     }
+
+    // --- Authelia decommission: Traefik-object cleanup (#305) ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void removeAutheliaTraefikObjects_removesLoginRouterAutheliaServiceAndAuthMiddleware_leavingSocialIntact()
+            throws IOException {
+        // A config that still carries the three Authelia objects alongside a live social route,
+        // its per-host /oauth2/ helper router, the shared oauth2-proxy service and vaier-errors.
+        String preExisting = """
+            http:
+              routers:
+                authelia-router:
+                  rule: "Host(`login.example.com`)"
+                  entryPoints:
+                  - websecure
+                  service: authelia
+                app-router:
+                  rule: "Host(`app.example.com`)"
+                  entryPoints:
+                  - websecure
+                  service: app-service
+                  middlewares:
+                  - oauth2-signin
+                  - oauth2-authn
+                  - vaier-authz
+                  - vaier-errors
+                app-example-com-oauth2-router:
+                  rule: "Host(`app.example.com`) && PathPrefix(`/oauth2/`)"
+                  entryPoints:
+                  - websecure
+                  service: oauth2-proxy-svc
+              services:
+                authelia:
+                  loadBalancer:
+                    servers:
+                    - url: http://authelia:9091
+                app-service:
+                  loadBalancer:
+                    servers:
+                    - url: http://10.0.0.9:7000
+                oauth2-proxy-svc:
+                  loadBalancer:
+                    servers:
+                    - url: http://oauth2-proxy:4180
+              middlewares:
+                auth-middleware:
+                  forwardAuth:
+                    address: http://authelia:9091/api/verify
+                oauth2-authn:
+                  forwardAuth:
+                    address: http://oauth2-proxy:4180/oauth2/auth
+                vaier-errors:
+                  errors:
+                    status:
+                    - "502"
+                    service: vaier-error-pages
+            """;
+        Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
+
+        adapter.removeAutheliaTraefikObjects();
+
+        var http = http();
+        var routers = (java.util.Map<String, Object>) http.get("routers");
+        var services = (java.util.Map<String, Object>) http.get("services");
+        var middlewares = (java.util.Map<String, Object>) http.get("middlewares");
+
+        // Exactly the three Authelia objects are gone
+        assertThat(routers).doesNotContainKey("authelia-router");
+        assertThat(services).doesNotContainKey("authelia");
+        assertThat(middlewares).doesNotContainKey("auth-middleware");
+
+        // Social + shared infra left intact
+        assertThat(routers).containsKeys("app-router", "app-example-com-oauth2-router");
+        assertThat(services).containsKeys("app-service", "oauth2-proxy-svc");
+        assertThat(middlewares).containsKeys("oauth2-authn", "vaier-errors");
+    }
+
+    @Test
+    void removeAutheliaTraefikObjects_isIdempotentWhenAlreadyAbsent() throws IOException {
+        String preExisting = """
+            http:
+              routers:
+                app-router:
+                  rule: "Host(`app.example.com`)"
+                  entryPoints:
+                  - websecure
+                  service: app-service
+                  middlewares:
+                  - oauth2-signin
+                  - oauth2-authn
+                  - vaier-authz
+                  - vaier-errors
+              services:
+                app-service:
+                  loadBalancer:
+                    servers:
+                    - url: http://10.0.0.9:7000
+            """;
+        Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
+
+        adapter.removeAutheliaTraefikObjects();
+        // second run must be a no-op and never throw
+        adapter.removeAutheliaTraefikObjects();
+
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
+        assertThat(route.getDomainName()).isEqualTo("app.example.com");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void removeAutheliaTraefikObjects_removesConventionNamedLoginBackend_pointingAtAutheliaHost()
+            throws IOException {
+        // The login router's real backend follows the router-name convention
+        // (login-<domain>-service), not the literal name "authelia" — so a name-only match misses
+        // it and leaves it orphaned. It must be dropped by its Authelia backend URL instead.
+        String preExisting = """
+            http:
+              services:
+                login-example-com-service:
+                  loadBalancer:
+                    servers:
+                    - url: http://authelia:9091
+                oauth2-proxy-svc:
+                  loadBalancer:
+                    servers:
+                    - url: http://oauth2-proxy:4180
+                app-service:
+                  loadBalancer:
+                    servers:
+                    - url: http://10.0.0.9:7000
+            """;
+        Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
+
+        adapter.removeAutheliaTraefikObjects();
+
+        var services = (java.util.Map<String, Object>) http().get("services");
+        assertThat(services).doesNotContainKey("login-example-com-service");
+        assertThat(services).containsKeys("oauth2-proxy-svc", "app-service");
+    }
+
+    @Test
+    void removeAutheliaTraefikObjects_emptyConfig_doesNotThrow() {
+        adapter.removeAutheliaTraefikObjects();
+
+        assertThat(adapter.getReverseProxyRoutes()).isEmpty();
+    }
 }

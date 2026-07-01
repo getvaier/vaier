@@ -1,11 +1,12 @@
 package net.vaier.application.service;
 
-import net.vaier.domain.port.ForGettingUsers;
 import net.vaier.config.ConfigResolver;
-import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.AccessEntry;
 import net.vaier.domain.MachineType;
-import net.vaier.domain.User;
+import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.Role;
 import net.vaier.domain.VaierConfig;
+import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForSendingNotificationEmail;
@@ -30,7 +31,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
 
-    @Mock ForGettingUsers forGettingUsers;
+    @Mock ForPersistingAccessEntries accessStore;
     @Mock ForPersistingAppConfiguration configPersistence;
     @Mock ForReadingStoredSmtpPassword storedPasswordReader;
     @Mock ForSendingNotificationEmail emailSender;
@@ -48,8 +49,16 @@ class NotificationServiceTest {
                 .build();
     }
 
-    private User admin(String name, String email) {
-        return new User(name, name, email, List.of("admins"));
+    private AccessEntry admin(String email) {
+        return AccessEntry.builder().email(email).role(Role.ADMIN).groups(List.of()).build();
+    }
+
+    private AccessEntry user(String email) {
+        return AccessEntry.builder().email(email).role(Role.USER).groups(List.of()).build();
+    }
+
+    private AccessEntry pending(String email) {
+        return AccessEntry.builder().email(email).role(Role.PENDING).groups(List.of()).build();
     }
 
     private PeerSnapshot snapshot(boolean connected) {
@@ -57,13 +66,14 @@ class NotificationServiceTest {
     }
 
     @Test
-    void notifyAdmins_sendsEmailToEveryAdminUser() {
+    void notifyAdmins_sendsEmailToEveryAccessEntryAdmin_excludingUsersAndPendings() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("smtpPass"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(
-                admin("alice", "alice@example.com"),
-                admin("bob", "bob@example.com"),
-                new User("carol", "carol", "carol@example.com", List.of("users"))
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                admin("bob@example.com"),
+                user("carol@example.com"),
+                pending("dave@example.com")
         ));
 
         service.notifyAdmins(snapshot(false));
@@ -78,7 +88,7 @@ class NotificationServiceTest {
     void notifyAdmins_subjectIncludesPeerNameAndNewState_disconnected() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
 
         service.notifyAdmins(snapshot(false));
 
@@ -92,7 +102,7 @@ class NotificationServiceTest {
     void notifyAdmins_subjectIncludesPeerNameAndNewState_connected() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
 
         service.notifyAdmins(snapshot(true));
 
@@ -106,7 +116,7 @@ class NotificationServiceTest {
     void notifyAdmins_bodyIncludesPeerDetails_andLinkToVaier() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
         when(configResolver.getDomain()).thenReturn("example.com");
 
         service.notifyAdmins(snapshot(false));
@@ -145,14 +155,16 @@ class NotificationServiceTest {
     }
 
     @Test
-    void notifyAdmins_skipsWhenNoAdminUsers() {
+    void notifyAdmins_skipsCleanlyWhenNoAdminEmails() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(
-                new User("carol", "carol", "carol@example.com", List.of("users"))
+        when(accessStore.getEntries()).thenReturn(List.of(
+                user("carol@example.com"),
+                pending("dave@example.com")
         ));
 
-        service.notifyAdmins(snapshot(false));
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.notifyAdmins(snapshot(false)))
+                .doesNotThrowAnyException();
 
         verify(emailSender, never()).sendEmail(any(), anyInt(), any(), any(), any(),
                 anyList(), any(), any());
@@ -162,9 +174,9 @@ class NotificationServiceTest {
     void notifyAdmins_skipsAdminsWithBlankEmail() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(
-                admin("alice", "alice@example.com"),
-                admin("ghost", "")
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                admin("")
         ));
 
         service.notifyAdmins(snapshot(false));
@@ -185,9 +197,9 @@ class NotificationServiceTest {
     void notifyAdminsOfDiskPressure_sendsAlertToEveryAdminWithSubjectAndBody() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(
-                admin("alice", "alice@example.com"),
-                new User("carol", "carol", "carol@example.com", List.of("users"))));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                user("carol@example.com")));
         when(configResolver.getDomain()).thenReturn("example.com");
 
         service.notifyAdminsOfDiskPressure(diskUsage(100L, 10L), 85); // 90% used
@@ -208,7 +220,7 @@ class NotificationServiceTest {
     void notifyAdminsOfDiskRecovery_sendsRecoverySubject() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
 
         service.notifyAdminsOfDiskRecovery(diskUsage(100L, 50L), 85); // 50% used
 
@@ -232,7 +244,7 @@ class NotificationServiceTest {
     void notifyAdminsOfDiskPressure_swallowsSenderExceptions() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
         org.mockito.Mockito.doThrow(new RuntimeException("smtp down"))
                 .when(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
                         anyList(), any(), any());
@@ -248,9 +260,9 @@ class NotificationServiceTest {
     void notifyNewPendingIdentity_sendsAccessRequestEmailToEveryAdmin() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(
-                admin("alice", "alice@example.com"),
-                new User("carol", "carol", "carol@example.com", List.of("users"))));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                user("carol@example.com")));
         when(configResolver.getDomain()).thenReturn("example.com");
 
         service.notifyNewPendingIdentity("newcomer@example.com");
@@ -277,11 +289,11 @@ class NotificationServiceTest {
     }
 
     @Test
-    void notifyNewPendingIdentity_skipsWhenNoAdminUsers() {
+    void notifyNewPendingIdentity_skipsWhenNoAdminEmails() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(
-                new User("carol", "carol", "carol@example.com", List.of("users"))));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                user("carol@example.com")));
 
         service.notifyNewPendingIdentity("newcomer@example.com");
 
@@ -293,7 +305,7 @@ class NotificationServiceTest {
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
-        when(forGettingUsers.getUsers()).thenReturn(List.of(admin("alice", "alice@example.com")));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
         org.mockito.Mockito.doThrow(new RuntimeException("smtp down"))
                 .when(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
                         anyList(), any(), any());

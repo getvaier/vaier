@@ -1636,6 +1636,98 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         }
     }
 
+    /**
+     * Remove the leftover Authelia Traefik objects on startup now that Authelia is decommissioned:
+     * the {@code login.<domain>} portal router, the {@code authelia} backend service, and the
+     * {@code auth-middleware} forward-auth middleware. Idempotent and tightly scoped — it only ever
+     * touches those three, so social routers, the per-host {@code /oauth2/} helper routers,
+     * {@code oauth2-proxy-svc} and {@code vaier-errors} are left untouched. Mirrors the
+     * {@code backfill*OnStartup} pattern.
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void removeAutheliaTraefikObjectsOnStartup() {
+        try {
+            removeAutheliaTraefikObjects();
+        } catch (Exception e) {
+            log.warn("Authelia Traefik-object cleanup on startup failed", e);
+        }
+    }
+
+    public void removeAutheliaTraefikObjects() {
+        loadConfig();
+        if (config == null) return;
+        Map<String, Object> http = getNestedMap(config, "http");
+        if (http == null) return;
+
+        boolean changed = false;
+        String loginHost = ServiceNames.AUTH + "." + vaierDomain;
+
+        // The Authelia portal router — matched by its unique Host(`login.<domain>`) rule so we never
+        // remove a social/oauth2/service router, whatever it happens to be named.
+        Map<String, Object> routers = getNestedMap(http, "routers");
+        if (routers != null) {
+            List<String> loginRouters = new ArrayList<>();
+            for (Map.Entry<String, Object> e : routers.entrySet()) {
+                Map<String, Object> rc = castToMap(e.getValue());
+                if (rc != null && loginHost.equals(extractDomainFromRule(rc))) {
+                    loginRouters.add(e.getKey());
+                }
+            }
+            for (String name : loginRouters) {
+                routers.remove(name);
+                changed = true;
+            }
+        }
+
+        // The authelia backend service. Match both by its literal name and — more robustly — by any
+        // service whose loadBalancer server points at the Authelia host, since the login router's real
+        // backend follows the router-name convention (login-<domain>-service), not the name "authelia".
+        // That URL match never touches oauth2-proxy-svc / social backends / vaier, which target other hosts.
+        Map<String, Object> services = getNestedMap(http, "services");
+        if (services != null) {
+            List<String> autheliaServices = new ArrayList<>();
+            for (Map.Entry<String, Object> e : services.entrySet()) {
+                if (ServiceNames.AUTHELIA.equals(e.getKey()) || serviceTargetsAutheliaHost(e.getValue())) {
+                    autheliaServices.add(e.getKey());
+                }
+            }
+            for (String name : autheliaServices) {
+                services.remove(name);
+                changed = true;
+            }
+        }
+        Map<String, Object> middlewares = getNestedMap(http, "middlewares");
+        if (middlewares != null && middlewares.remove(ServiceNames.AUTH_MIDDLEWARE) != null) {
+            changed = true;
+        }
+
+        if (changed) {
+            log.info("Removed decommissioned Authelia Traefik objects (login router / authelia service / auth-middleware)");
+            saveConfig();
+        }
+    }
+
+    /**
+     * Whether a service definition's loadBalancer has any server URL pointing at the Authelia backend
+     * host ({@code authelia:9091} / host {@code authelia}). Catches the convention-named
+     * {@code login-<domain>-service} regardless of its key.
+     */
+    private boolean serviceTargetsAutheliaHost(Object serviceConfig) {
+        Map<String, Object> cfg = castToMap(serviceConfig);
+        if (cfg == null) return false;
+        Map<String, Object> loadBalancer = getNestedMap(cfg, "loadBalancer");
+        if (loadBalancer == null) return false;
+        List<Map<String, Object>> servers = getNestedList(loadBalancer, "servers");
+        if (servers == null) return false;
+        for (Map<String, Object> server : servers) {
+            Object url = server.get("url");
+            if (!(url instanceof String u)) continue;
+            AddressPort ap = parseUrl(u);
+            if (ServiceNames.AUTHELIA.equals(ap.address())) return true;
+        }
+        return false;
+    }
+
     public void backfillErrorPages() {
         loadConfig();
         if (config == null) return;

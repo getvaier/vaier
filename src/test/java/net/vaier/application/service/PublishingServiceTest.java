@@ -485,17 +485,20 @@ class PublishingServiceTest {
     }
 
     @Test
-    void getPublishedServices_autheliaInfrastructureRouter_isExcluded() {
+    void getPublishedServices_decommissionedLoginRouter_isNoLongerExcluded() {
+        // Authelia is decommissioned; login.<domain> is no longer mandatory infrastructure, so a
+        // leftover login route is now surfaced as an ordinary published service.
         setupOneRoute("login.example.com", "10.0.0.1", 8080);
         setupNoDnsRecords();
         setupEmptyVpnClients();
         setupEmptyVaierServerServices();
 
-        assertThat(service.getPublishedServices()).isEmpty();
+        assertThat(service.getPublishedServices()).hasSize(1);
+        assertThat(service.getPublishedServices().get(0).dnsAddress()).isEqualTo("login.example.com");
     }
 
     @Test
-    void getPublishedServices_mixOfInfraAndUserRoutes_returnsOnlyUserRoutes() {
+    void getPublishedServices_excludesOnlyTheVaierInfraRouter() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route(ServiceNames.VAIER + ".example.com", "vaier", 8080),
             route("login.example.com", "authelia", 9091),
@@ -505,8 +508,9 @@ class PublishingServiceTest {
         setupEmptyVpnClients();
         setupEmptyVaierServerServices();
 
-        assertThat(service.getPublishedServices()).hasSize(1);
-        assertThat(service.getPublishedServices().get(0).dnsAddress()).isEqualTo("app.example.com");
+        // Only the Vaier console is mandatory infrastructure now; login + app are ordinary services.
+        assertThat(service.getPublishedServices()).extracting("dnsAddress")
+            .containsExactlyInAnyOrder("login.example.com", "app.example.com");
     }
 
     @Test
@@ -1138,13 +1142,6 @@ class PublishingServiceTest {
     }
 
     @Test
-    void deleteService_rejectsAuthService() {
-        assertThrows(IllegalArgumentException.class, () -> service.deleteService("login.example.com"));
-
-        verifyNoInteractions(forPersistingReverseProxyRoutes, forPersistingDnsRecords);
-    }
-
-    @Test
     void deleteService_waitsForTraefikRouteToDisappearBeforeReturning() {
         // route present -> empty (transitional) -> empty (stable): needs 2 consecutive absences
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
@@ -1547,15 +1544,6 @@ class PublishingServiceTest {
         assertThrows(IllegalArgumentException.class, () ->
             service.updateService("vaier.example.com", null,
                 patch(true, null, null, null, null, null, null)));
-
-        verifyNoRouteWrites();
-    }
-
-    @Test
-    void updateService_rejectsAuthService() {
-        assertThrows(IllegalArgumentException.class, () ->
-            service.updateService("login.example.com", null,
-                patch(null, null, null, "/admin/", null, null, null)));
 
         verifyNoRouteWrites();
     }

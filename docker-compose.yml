@@ -210,7 +210,6 @@ services:
     restart: unless-stopped
     depends_on:
       - wireguard
-      - authelia
       - docker-proxy
     networks:
       - vaier-network
@@ -275,120 +274,6 @@ services:
       - wireguard
     restart: unless-stopped
 
-  redis-init:
-    image: busybox:1.37.0
-    container_name: redis-init
-    command:
-      - sh
-      - -c
-      - |
-        test -s /secrets/redis-password && exit 0
-        umask 077
-        od -An -tx1 -N 32 /dev/urandom | tr -d ' \n' > /secrets/redis-password
-    volumes:
-      - ./authelia/config:/secrets
-    restart: "no"
-
-  redis:
-    image: redis:8.6.2-alpine
-    container_name: redis
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$(cat /secrets/redis-password)\""]
-    depends_on:
-      redis-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    volumes:
-      - ./authelia/redis:/data
-      - ./authelia/config:/secrets:ro
-    networks:
-      - vaier-network
-
-  authelia-init:
-    image: busybox:1.37.0
-    container_name: authelia-init
-    command:
-      - sh
-      - -c
-      - |
-        set -e
-        umask 077
-        if [ ! -f /config/configuration.yml ]; then
-          cat > /config/configuration.yml <<'EOF'
-        # Placeholder Authelia config written by authelia-init so Authelia
-        # does not crash-loop on the first boot before Vaier takes over.
-        # Vaier overwrites this on first start and restarts the container.
-        server:
-          address: tcp://0.0.0.0:9091
-        log:
-          level: info
-        identity_validation:
-          reset_password:
-            jwt_secret: bootstrap-placeholder-jwt-secret-replace-on-first-run
-        authentication_backend:
-          file:
-            path: /config/placeholder_users.yml
-            watch: true
-        session:
-          secret: bootstrap-placeholder-session-secret-replace-on-first-run
-          cookies:
-            - domain: placeholder.local
-              authelia_url: https://login.placeholder.local
-        storage:
-          encryption_key: bootstrap-placeholder-storage-encryption-key-replace
-          local:
-            path: /config/db.sqlite
-        access_control:
-          default_policy: one_factor
-        notifier:
-          filesystem:
-            filename: /config/emails.txt
-        EOF
-        fi
-        if [ ! -f /config/placeholder_users.yml ]; then
-          cat > /config/placeholder_users.yml <<'EOF'
-        users:
-          placeholder:
-            disabled: true
-            displayname: Placeholder
-            password: "$$argon2id$$v=19$$m=65536,t=3,p=4$$BpLnfgDsc2WD8F2q$$o/vzA4myCqZZ36qUqYhEZkdTw7KPnhxcNVkB8WHc6VI"
-            email: placeholder@placeholder.local
-            groups: []
-        EOF
-        fi
-    volumes:
-      - ./authelia/config:/config
-    restart: "no"
-
-  authelia:
-    image: authelia/authelia:4.39.19
-    container_name: authelia
-    environment:
-      - TZ=Europe/Oslo
-      # Run Authelia as UID/GID 1000 (same as the vaier container). The image
-      # entrypoint does `chown -R "${PUID}:${PGID}" /config` on every start and
-      # PUID/PGID default to 0 — without this it re-roots ./authelia/config on
-      # each (re)start, locking the UID-1000 vaier process out of the dir it
-      # shares with Authelia (bootstrap password file, users database, assets).
-      - PUID=1000
-      - PGID=1000
-    volumes:
-      - ./authelia/config:/config
-    depends_on:
-      authelia-init:
-        condition: service_completed_successfully
-      redis:
-        condition: service_started
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      # HTTPS router for Authelia
-      - traefik.http.routers.authelia.rule=Host(`login.${VAIER_DOMAIN}`)
-      - traefik.http.routers.authelia.entrypoints=websecure
-      - traefik.http.routers.authelia.tls.certresolver=letsencrypt
-      - traefik.http.services.authelia.loadbalancer.server.port=9091
-    networks:
-      - vaier-network
-
   geoip-init:
     image: alpine:3.20
     container_name: geoip-init
@@ -436,15 +321,6 @@ services:
         for d in /vaier/config /traefik/config /authelia/config /wireguard/config /icons; do
           [ -d "$$d" ] && chown -R 1000:1000 "$$d"
         done
-    # authelia-init and redis-init both write files into ./authelia/config as root
-    # before this container's chown runs. Without these gates the chown can race
-    # ahead, leaving root-owned files inside a 1000-owned dir, which then
-    # AccessDenies AutheliaAssetsAdapter.publishAssets() and crash-loops vaier.
-    depends_on:
-      authelia-init:
-        condition: service_completed_successfully
-      redis-init:
-        condition: service_completed_successfully
     volumes:
       - ./vaier/config:/vaier/config
       - ./traefik/config:/traefik/config
@@ -476,8 +352,12 @@ services:
       VAIER_LICENSE: ${VAIER_LICENSE:-}
       # Presence of the Google client id enables the per-service "Social" auth mode (#305).
       VAIER_OIDC_GOOGLE_CLIENT_ID: ${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
-      # How the Vaier console itself is gated (authelia|social) — drives the console logout URL (#305 3b).
-      VAIER_CONSOLE_AUTH_MODE: ${VAIER_CONSOLE_AUTH_MODE:-authelia}
+      # Seeds/keeps this identity as an admin AccessEntry so the console is never locked out
+      # (self-heal in AccessFileAdapter, read via System.getenv). Must reach the container (#305).
+      VAIER_ADMIN_EMAIL: ${VAIER_ADMIN_EMAIL:-}
+      # How the Vaier console itself is gated — drives the console logout URL. Authelia is
+      # decommissioned, so social is the only real mode and the default (#305).
+      VAIER_CONSOLE_AUTH_MODE: ${VAIER_CONSOLE_AUTH_MODE:-social}
       WIREGUARD_CONFIG_PATH: /wireguard/config
       WIREGUARD_CONTAINER_NAME: wireguard
       TRAEFIK_CONFIG_PATH: /traefik/config
@@ -495,10 +375,6 @@ services:
         condition: service_started
       traefik:
         condition: service_started
-      authelia:
-        condition: service_started
-      redis-init:
-        condition: service_completed_successfully
       geoip-init:
         condition: service_completed_successfully
     volumes:
@@ -524,10 +400,8 @@ services:
       - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure
       - traefik.http.routers.vaier.tls.certresolver=letsencrypt
-      # #305 step 3b: the console is gated by the Social chain (Google) instead of Authelia.
-      # The oauth2-* middlewares live in the file provider (kept alive by social-gated services);
-      # rollback to Authelia = set this back to "vaier-auth,vaier-down". vaier-auth is left defined
-      # below for that rollback.
+      # #305: the console is gated by the Social chain (Google). The oauth2-* middlewares live in
+      # the file provider (kept alive by social-gated services + the startup backfill).
       - traefik.http.routers.vaier.middlewares=oauth2-signin@file,oauth2-authn@file,vaier-authz@file,vaier-down
       - traefik.http.routers.vaier.priority=100
       # /oauth2/* on the console host must reach oauth2-proxy (sign-in / callback / sign_out),
@@ -537,11 +411,6 @@ services:
       - traefik.http.routers.vaier-oauth2.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-oauth2.priority=300
       - traefik.http.routers.vaier-oauth2.service=oauth2-proxy
-      # Authelia middleware
-      - traefik.http.middlewares.vaier-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://login.${VAIER_DOMAIN}
-      - traefik.http.middlewares.vaier-auth.forwardauth.trustForwardHeader=true
-      - traefik.http.middlewares.vaier-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email
-      - traefik.http.middlewares.vaier-auth.forwardauth.maxResponseBodySize=65536
       - traefik.http.services.vaier.loadbalancer.server.port=8080
       # When the Vaier backend itself is unreachable (502/503/504), the vaier-down errors middleware
       # (defined on vaier-offline) serves the branded offline page instead of Traefik's bare "Bad
@@ -551,13 +420,9 @@ services:
       - vaier-network
 
   # --- #305 social login: oauth2-proxy authenticates with Google; Vaier owns authorization
-  # via /authz/verify. A first-class stack service, but GATED behind the `social` profile so a
-  # Community deployment that doesn't use social login is unaffected (the container simply never
-  # starts). Activate it by setting Google OAuth credentials AND opting into the profile, e.g. in
-  # .env:  VAIER_OIDC_GOOGLE_CLIENT_ID=..., VAIER_OIDC_GOOGLE_CLIENT_SECRET=..., COMPOSE_PROFILES=social
-  # (or `docker compose --profile social up -d`). With the profile off, the `social` auth mode is
-  # not offered in the UI and no social routes are generated, so nothing depends on this container.
-  # Per-service routes still gate via Authelia (or stay public) exactly as before.
+  # via /authz/verify. Now that Authelia is decommissioned this is mandatory infrastructure — it
+  # always starts with `docker compose up -d` (no `social` profile). Set the Google OAuth
+  # credentials in .env: VAIER_OIDC_GOOGLE_CLIENT_ID=..., VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
   # VAIER_OAUTH2_COOKIE_SECRET is auto-generated into .env (not operator-authored).
   #
   # oauth2-proxy-init renders oauth2-proxy's alpha config into the shared ./oauth2/config volume so
@@ -565,12 +430,10 @@ services:
   # mode-0600 client-secret file (referenced via clientSecretFile, never inlined), and (2) alpha.yaml
   # is rendered with only the client id substituted in. Both files are chowned to oauth2-proxy's
   # uid:gid (65532:65532 — the image's nonroot USER) so the non-root proxy can read them.
-  # Mirrors authelia-init / redis-init.
   # Re-rendered on every start so a rotated client id/secret is picked up.
   oauth2-proxy-init:
     image: alpine:3.20
     container_name: oauth2-proxy-init
-    profiles: ["social"]
     environment:
       - VAIER_OIDC_GOOGLE_CLIENT_ID=${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
       - VAIER_OIDC_GOOGLE_CLIENT_SECRET=${VAIER_OIDC_GOOGLE_CLIENT_SECRET:-}
@@ -619,7 +482,6 @@ services:
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
     container_name: oauth2-proxy
-    profiles: ["social"]
     command:
       # Flags kept as flags — not covered by alpha config, or conflicting with it.
       - --cookie-secret=${VAIER_OAUTH2_COOKIE_SECRET}

@@ -6,11 +6,11 @@ import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DiskUsage;
 import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.AccessEntry;
 import net.vaier.domain.PendingIdentity;
-import net.vaier.domain.User;
 import net.vaier.domain.VaierConfig;
-import net.vaier.domain.port.ForGettingUsers;
 import net.vaier.domain.port.ForNotifyingAdmins;
+import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
 import net.vaier.domain.port.ForSendingNotificationEmail;
@@ -29,18 +29,18 @@ public class NotificationService implements
 
     private static final int DEFAULT_SMTP_PORT = 587;
 
-    private final ForGettingUsers forGettingUsers;
+    private final ForPersistingAccessEntries accessStore;
     private final ForPersistingAppConfiguration configPersistence;
     private final ForReadingStoredSmtpPassword storedPasswordReader;
     private final ForSendingNotificationEmail emailSender;
     private final ConfigResolver configResolver;
 
-    public NotificationService(ForGettingUsers forGettingUsers,
+    public NotificationService(ForPersistingAccessEntries accessStore,
                                ForPersistingAppConfiguration configPersistence,
                                ForReadingStoredSmtpPassword storedPasswordReader,
                                ForSendingNotificationEmail emailSender,
                                ConfigResolver configResolver) {
-        this.forGettingUsers = forGettingUsers;
+        this.accessStore = accessStore;
         this.configPersistence = configPersistence;
         this.storedPasswordReader = storedPasswordReader;
         this.emailSender = emailSender;
@@ -71,9 +71,7 @@ public class NotificationService implements
     /**
      * Notify admins of a brand-new pending access entry. Runs asynchronously so it never adds
      * latency to the forward-auth path that triggers it, and is wrapped so any failure is logged
-     * rather than propagated. Recipients are the Authelia admins, consistent with the other alerts;
-     * once the console moves to social login this could also include AccessEntry ADMINs
-     * (#305 step 3b).
+     * rather than propagated. Recipients are the AccessEntry ADMINs, consistent with the other alerts.
      */
     @Async
     @Override
@@ -103,9 +101,9 @@ public class NotificationService implements
             return;
         }
 
-        List<String> recipients = forGettingUsers.getUsers().stream()
-                .filter(User::isAdmin)
-                .map(User::getEmail)
+        List<String> recipients = accessStore.getEntries().stream()
+                .filter(AccessEntry::isAdmin)
+                .map(AccessEntry::getEmail)
                 .filter(e -> e != null && !e.isBlank())
                 .toList();
 

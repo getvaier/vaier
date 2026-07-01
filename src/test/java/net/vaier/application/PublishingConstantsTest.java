@@ -12,8 +12,9 @@ class PublishingConstantsTest {
     }
 
     @Test
-    void isMandatory_trueForTheAutheliaLoginFqdn() {
-        assertThat(PublishingConstants.isMandatory("login.example.com", "example.com")).isTrue();
+    void isMandatory_falseForTheDecommissionedAutheliaLoginFqdn() {
+        // Authelia is decommissioned; login.<domain> is no longer Vaier infrastructure.
+        assertThat(PublishingConstants.isMandatory("login.example.com", "example.com")).isFalse();
     }
 
     @Test

@@ -10,19 +10,23 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `VAIER_AWS_KEY` | Yes | AWS access key for Route53 |
-| `VAIER_AWS_SECRET` | Yes | AWS secret key for Route53 |
+| `VAIER_AWS_KEY` | Route53 only | AWS access key for Route53; omit for manual DNS mode |
+| `VAIER_AWS_SECRET` | Route53 only | AWS secret key for Route53; omit for manual DNS mode |
 | `VAIER_DOMAIN` | Yes | Base domain (e.g. `yourdomain.com`) |
 | `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications |
+| `VAIER_OIDC_GOOGLE_CLIENT_ID` | Yes | Google OAuth 2.0 client id — oauth2-proxy uses it for sign-in. oauth2-proxy is now mandatory infrastructure and the sole runtime auth gateway (Authelia was decommissioned) |
+| `VAIER_OIDC_GOOGLE_CLIENT_SECRET` | Yes | Google OAuth 2.0 client secret. Written by `oauth2-proxy-init` to a mode-0600 client-secret file, never inlined |
+| `VAIER_ADMIN_EMAIL` | Yes | The Google address seeded as the first **admin** access entry, and restored to admin on startup whenever no admin remains, so the console can't lock everyone out |
+| `VAIER_OAUTH2_COOKIE_SECRET` | Auto | oauth2-proxy session cookie secret — generated automatically into `.env`, not operator-authored |
+| `VAIER_CONSOLE_AUTH_MODE` | No | How the Vaier console's logout link behaves: `authelia` (default) or `social`. With Authelia decommissioned the console is gated by the Social (Google) chain regardless; set this to `social` so logout ends the oauth2-proxy session rather than the (absent) Authelia portal session |
 | `VAIER_PUBLIC_HOST` | No | Public hostname of this server; used as the CNAME target for `vaier.<domain>` when not on EC2 |
 | `VAIER_PUBLIC_IP` | No | Public IPv4 of this server; used as an A-record target for `vaier.<domain>` when not on EC2 |
-| `VAIER_SERVER_LAN_CIDR` | No | CIDR Vaier treats as "the LAN this server sits on", so machines in it can be registered as LAN servers with no relay peer (see below). On EC2 the server's own **subnet** CIDR (a default-VPC subnet is a `/20`, one per AZ) is auto-detected from instance metadata; this env var **overrides** that, on EC2 too — most usefully to widen it to the whole VPC (e.g. `172.31.0.0/16`) so machines in any subnet/AZ qualify. Off EC2 it's the only way to set the value. _Not yet wired through in `docker-compose.yml` — see [#204](https://github.com/getvaier/vaier/issues/204)._ |
+| `VAIER_SERVER_LAN_CIDR` | No | CIDR Vaier treats as "the LAN this server sits on", so machines in it can be registered as LAN servers with no relay peer (see below). On EC2 the server's own **subnet** CIDR (a default-VPC subnet is a `/20`, one per AZ) is auto-detected from instance metadata; this env var **overrides** that, on EC2 too — most usefully to widen it to the whole VPC (e.g. `172.31.0.0/16`) so machines in any subnet/AZ qualify. Off EC2 it's the only way to set the value. Passed through in `docker-compose.yml` ([#204](https://github.com/getvaier/vaier/issues/204)). |
 | `WIREGUARD_CONFIG_PATH` | No | WireGuard config dir (default: `/wireguard/config`) |
 | `WIREGUARD_CONTAINER_NAME` | No | WireGuard container name (default: `wireguard`) |
 | `TRAEFIK_CONFIG_PATH` | No | Traefik dynamic config dir (default: `/traefik/config`) |
 | `TRAEFIK_API_URL` | No | Traefik API URL (default: `http://traefik:8080`) |
-| `AUTHELIA_CONFIG_PATH` | No | Authelia config dir (default: `/authelia/config`) |
-| `VAIER_CONSOLE_AUTH_MODE` | No | How the Vaier console itself is gated: `authelia` (default) or `social`. Drives the console logout link — `social` ends the session via oauth2-proxy's sign-out, `authelia` via the Authelia portal logout. Set to `social` once the console runs behind Google login. |
+| `AUTHELIA_CONFIG_PATH` | No | Legacy Authelia config dir (default: `/authelia/config`). Still written to by the not-yet-removed Authelia code (and holds the SMTP password); no Authelia runs against it since the service was removed from the stack |
 
 On EC2, the public hostname is detected from instance metadata. On other hosts, set `VAIER_PUBLIC_HOST` (CNAME target) or `VAIER_PUBLIC_IP` (A record target) in `.env`.
 
@@ -34,7 +38,7 @@ Vaier writes new secret files at mode `600` (`rw-------`). For an upgraded deplo
 
 ```bash
 chmod 600 .env production.env 2>/dev/null
-chmod -R go-rwx vaier/ authelia/ wireguard/ traefik/
+chmod -R go-rwx vaier/ authelia/ oauth2/ wireguard/ traefik/
 ```
 
 Files Vaier creates and protects:
@@ -42,10 +46,11 @@ Files Vaier creates and protects:
 | File | Contents |
 |------|----------|
 | `vaier/config/vaier-config.yml` | AWS Route53 credentials, SMTP settings |
-| `authelia/config/secrets.properties` | Authelia JWT/session/encryption secrets, SMTP password |
-| `authelia/config/users_database.yml` | Authelia users with Argon2 password hashes |
-| `authelia/config/redis-password` | Auto-generated Redis password (created by the `redis-init` container) |
-| `authelia/config/.bootstrap-admin-password` | One-time bootstrap admin password (delete after first login) |
+| `vaier/config/access.yml` | Access store — the known identities, their roles and access groups |
+| `oauth2/config/client-secret` | Google OAuth client secret (written mode-0600 by `oauth2-proxy-init`) |
+| `authelia/config/secrets.properties` | SMTP password (plus legacy Authelia secrets) — still read by the mailer |
+| `authelia/config/users_database.yml` | Legacy Authelia users with Argon2 password hashes (unused; Authelia no longer runs) |
+| `authelia/config/.bootstrap-admin-password` | Legacy one-time Authelia bootstrap admin password (no longer used to reach the console) |
 
 The `.env` file you create yourself — keep it at mode `600`.
 

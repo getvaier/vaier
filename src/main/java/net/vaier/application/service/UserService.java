@@ -52,10 +52,8 @@ public class UserService implements AddUserUseCase, DeleteUserUseCase,
     public UserService(ForPersistingUsers forPersistingUsers,
                        ForPersistingAccessEntries forPersistingAccessEntries,
                        ForResolvingServiceGroup forResolvingServiceGroup,
-                       // @Lazy breaks the construction-time cycle: NotificationService resolves admin
-                       // recipients via ForGettingUsers (this service), and this service notifies via
-                       // ForNotifyingAdmins (NotificationService). The lazy proxy is resolved on first
-                       // notification, never on the forward-auth hot path's critical timing.
+                       // @Lazy defers resolving NotificationService until the first notification, so
+                       // it never lands on the forward-auth hot path's critical construction timing.
                        @Lazy ForNotifyingAdmins forNotifyingAdmins,
                        ConfigResolver configResolver) {
         this.forPersistingUsers = forPersistingUsers;
