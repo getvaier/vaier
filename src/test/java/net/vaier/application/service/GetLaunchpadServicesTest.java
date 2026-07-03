@@ -207,6 +207,31 @@ class GetLaunchpadServicesTest {
     }
 
     @Test
+    void getLaunchpadServices_excludesTheOauth2AndDexInfrastructureRouters() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
+            route("oauth2.example.com", "oauth2-proxy", 4180),
+            route("dex.example.com", "dex", 5556),
+            route("app.example.com", "10.0.0.1", 8080)
+        ));
+        DnsZone zone = new DnsZone("example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of(
+            new DnsRecord("oauth2.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("dex.example.com", DnsRecordType.CNAME, 300L, List.of()),
+            new DnsRecord("app.example.com", DnsRecordType.CNAME, 300L, List.of())
+        ));
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        // oauth2 (sign-in gateway) and dex (OIDC broker) are Vaier infrastructure, so they never
+        // appear as launchpad tiles — only the ordinary app does.
+        assertThat(result).extracting(LaunchpadServiceUco::dnsAddress)
+            .containsExactly("app.example.com");
+    }
+
+    @Test
     void getLaunchpadServices_multipleRoutes_returnsOnlyDnsOk() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             route("published.example.com", "10.0.0.1", 8080),

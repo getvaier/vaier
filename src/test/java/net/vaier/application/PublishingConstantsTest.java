@@ -12,6 +12,18 @@ class PublishingConstantsTest {
     }
 
     @Test
+    void isMandatory_trueForTheOauth2ProxyFqdn() {
+        // oauth2.<domain> is Vaier infrastructure (the sign-in gateway), never an ordinary service.
+        assertThat(PublishingConstants.isMandatory("oauth2.example.com", "example.com")).isTrue();
+    }
+
+    @Test
+    void isMandatory_trueForTheDexBrokerFqdn() {
+        // dex.<domain> is Vaier infrastructure (the OIDC broker), never an ordinary service.
+        assertThat(PublishingConstants.isMandatory("dex.example.com", "example.com")).isTrue();
+    }
+
+    @Test
     void isMandatory_falseForTheDecommissionedAutheliaLoginFqdn() {
         // Authelia is decommissioned; login.<domain> is no longer Vaier infrastructure.
         assertThat(PublishingConstants.isMandatory("login.example.com", "example.com")).isFalse();
