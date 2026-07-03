@@ -488,6 +488,51 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - UI: the **Users** rows lead with the display name and demote the email to a caption, falling
   back to email-only when there's no name yet.
 
+**Delivered (last sign-in provider glyph, #305 follow-up, TDD-first):**
+- Config only (no Java) makes the Dex **connector** id reach Vaier: the provider requests the
+  `federated:id` scope (`scope: openid email profile federated:id`) so Dex emits
+  `federated_claims`, and oauth2-proxy's alpha config injects
+  `X-Auth-Request-Connector` from the nested claim `federated_claims.connector_id` (rendered by
+  `oauth2-proxy-init` and mirrored in `oauth2/config/alpha.yaml`). Dex needs no change.
+- Traefik (`TraefikReverseProxyAdapter`): the `oauth2-authn` middleware's `authResponseHeaders`
+  gains `X-Auth-Request-Connector` so the connector id reaches `/authz/verify`.
+- Domain: `AccessEntry` gains a nullable `provider` (the last sign-in provider) and owns the capture
+  decision — `resolvedProvider(incoming)`: a recognised connector (`google`/`github`,
+  case-insensitive, trimmed) refreshes it; a blank, absent, or unknown value never wipes a known one
+  and never affects the access decision (tolerant so unknown connectors can never break auth).
+- Web/app: `AuthzRestController.verify` reads an optional `X-Auth-Request-Connector` header and passes
+  it to `VerifyAccessUseCase.verify`; `UserService` stores/refreshes the provider on the entry
+  (preserving it across `grantRole`/`assignGroups`). `AccessFileAdapter` persists `provider` in
+  `access.yml` (back-compat: entries with no `provider` read as null). `GET /access` returns `provider`.
+- UI: the **Users** rows show a small monochrome provider glyph (Google or GitHub) beside the person's
+  role badge, with a "Signed in with …" tooltip; no glyph for a pre-approved entry that has never
+  signed in.
+
+**Delivered (provider photo avatars, #305 follow-up, TDD-first):**
+- Config only extends the provider-glyph plumbing to also capture the Dex `federated_claims.user_id`:
+  oauth2-proxy's alpha config injects `X-Auth-Request-Connector-Uid` from `federated_claims.user_id`
+  (`docker-compose.yml` heredoc + mirrored `oauth2/config/alpha.yaml`); the `federated:id` scope was
+  already requested. `TraefikReverseProxyAdapter` forwards `X-Auth-Request-Connector-Uid` on the
+  `oauth2-authn` middleware.
+- Domain/app/infra mirror `provider`: `AccessEntry` gains a nullable `providerUserId` +
+  `resolvedProviderUserId` (present non-blank refreshes, blank/absent never wipes); `UserService.verify`
+  widens to carry it and refreshes it in the same single upsert as name+provider (preserved across
+  `grantRole`/`assignGroups`); `AccessFileAdapter` persists `providerUserId` in `access.yml` (missing →
+  null); `AuthzRestController.verify` reads the optional header and `GET /access` returns `providerUserId`.
+- UI: the **Users** avatar resolves a real photo per entry — a GitHub sign-in with a known
+  `providerUserId` uses the GitHub account picture; otherwise a Gravatar keyed on the email's SHA-256
+  (`d=404`); on any load failure the `<img>` removes itself and the existing initials monogram shows
+  through. The provider glyph moves to a small corner badge on the avatar. Photos populate on next login.
+- No CSP is set anywhere in Vaier (no Spring header, no meta, no Traefik middleware), so no img-src
+  allow-list change was needed for the GitHub/Gravatar hosts.
+
+**Delivered (hide infrastructure hosts from the service list, #305 follow-up, TDD-first):**
+- `PublishingConstants.MANDATORY_SUBDOMAINS` expands from just `vaier` to `vaier`, `oauth2`, and `dex`
+  (new `ServiceNames.DEX`), so `oauth2.<domain>` and `dex.<domain>` — discovered as Traefik
+  docker-provider routers — are filtered out of the published-services list (and thus the launchpad and
+  Infrastructure page) and can't be deleted/edited via the publish API. `isMandatory` is
+  launchpad-filter + delete/edit-guard only; it never provisions DNS or routes, so no side effect.
+
 **Delivered in step 3b (console social-login polish, TDD-first):**
 - Display name plumbed to the console identity: `GET /authz/verify` emits a `Remote-Name` response header
   when the access entry has a known display name (pre-approved entries with no name yet omit it), and the

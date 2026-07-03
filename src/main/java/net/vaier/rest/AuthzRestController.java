@@ -68,8 +68,10 @@ public class AuthzRestController {
     public ResponseEntity<String> verify(
             @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
             @RequestHeader(value = "X-Forwarded-Host", required = false) String host,
-            @RequestHeader(value = "X-Auth-Request-Name", required = false) String name) {
-        AccessDecision decision = verifyAccessUseCase.verify(email, host, name);
+            @RequestHeader(value = "X-Auth-Request-Name", required = false) String name,
+            @RequestHeader(value = "X-Auth-Request-Connector", required = false) String provider,
+            @RequestHeader(value = "X-Auth-Request-Connector-Uid", required = false) String providerUserId) {
+        AccessDecision decision = verifyAccessUseCase.verify(email, host, name, provider, providerUserId);
         if (!decision.isAllowed()) {
             // Traefik forward-auth returns this body to the browser on a non-2xx, so a denied
             // (pending or not-in-group) identity sees the branded "awaiting approval" page.
@@ -110,7 +112,8 @@ public class AuthzRestController {
     public List<AccessEntryResponse> listAccess() {
         return listAccessEntriesUseCase.listAccessEntries().stream()
                 .map(e -> new AccessEntryResponse(e.getEmail(), e.getRole().wireValue(),
-                        e.getGroups() != null ? e.getGroups() : List.of(), e.getName()))
+                        e.getGroups() != null ? e.getGroups() : List.of(), e.getName(), e.getProvider(),
+                        e.getProviderUserId()))
                 .toList();
     }
 
@@ -147,7 +150,8 @@ public class AuthzRestController {
         return ResponseEntity.ok("Service access rule updated successfully");
     }
 
-    public record AccessEntryResponse(String email, String role, List<String> groups, String name) {}
+    public record AccessEntryResponse(String email, String role, List<String> groups, String name, String provider,
+                                      String providerUserId) {}
     public record GrantRoleRequest(String role) {}
     public record AssignGroupsRequest(List<String> groups) {}
     public record ServiceAccessRuleRequest(List<String> groups) {}

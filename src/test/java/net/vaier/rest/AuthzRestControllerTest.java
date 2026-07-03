@@ -42,10 +42,10 @@ class AuthzRestControllerTest {
     void verify_allowed_returns200WithIdentityHeaders() {
         AccessEntry entry = AccessEntry.builder()
                 .email("friend@example.com").role(Role.USER).groups(List.of("family", "media")).build();
-        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null))
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", null);
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getFirst("Remote-User")).isEqualTo("friend@example.com");
@@ -57,10 +57,10 @@ class AuthzRestControllerTest {
     void verify_allowed_emitsRemoteNameHeaderWhenTheEntryHasADisplayName() {
         AccessEntry entry = AccessEntry.builder()
                 .email("friend@example.com").role(Role.USER).name("Alice Smith").build();
-        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith"))
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", null, null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", "Alice Smith");
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", "Alice Smith", null, null);
 
         assertThat(response.getHeaders().getFirst("Remote-Name")).isEqualTo("Alice Smith");
     }
@@ -69,10 +69,10 @@ class AuthzRestControllerTest {
     void verify_allowed_omitsRemoteNameHeaderWhenTheEntryHasNoDisplayName() {
         AccessEntry entry = AccessEntry.builder()
                 .email("friend@example.com").role(Role.USER).build();
-        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null))
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", null);
+        ResponseEntity<String> response = controller.verify("friend@example.com", "plex.example.com", null, null, null);
 
         // Pre-approved entries have no name yet — don't emit an empty header.
         assertThat(response.getHeaders().containsKey("Remote-Name")).isFalse();
@@ -80,10 +80,10 @@ class AuthzRestControllerTest {
 
     @Test
     void verify_denied_returns403WithBrandedHtmlPage() {
-        when(verifyAccessUseCase.verify("p@example.com", "plex.example.com", null))
+        when(verifyAccessUseCase.verify("p@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.deny());
 
-        ResponseEntity<String> response = controller.verify("p@example.com", "plex.example.com", null);
+        ResponseEntity<String> response = controller.verify("p@example.com", "plex.example.com", null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         // Forward-auth returns this body to the browser, so it must be the branded Vaier page.
@@ -94,12 +94,32 @@ class AuthzRestControllerTest {
 
     @Test
     void verify_passesTheDisplayNameHeaderThroughToTheUseCase() {
-        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith"))
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", null, null))
                 .thenReturn(AccessDecision.deny());
 
-        controller.verify("friend@example.com", "plex.example.com", "Alice Smith");
+        controller.verify("friend@example.com", "plex.example.com", "Alice Smith", null, null);
 
-        verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith");
+        verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith", null, null);
+    }
+
+    @Test
+    void verify_passesTheConnectorHeaderThroughToTheUseCase() {
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", "github", null))
+                .thenReturn(AccessDecision.deny());
+
+        controller.verify("friend@example.com", "plex.example.com", "Alice Smith", "github", null);
+
+        verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith", "github", null);
+    }
+
+    @Test
+    void verify_passesTheConnectorUidHeaderThroughToTheUseCase() {
+        when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", "github", "98765"))
+                .thenReturn(AccessDecision.deny());
+
+        controller.verify("friend@example.com", "plex.example.com", "Alice Smith", "github", "98765");
+
+        verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith", "github", "98765");
     }
 
     // --- GET /access (admin) ---
@@ -129,6 +149,30 @@ class AuthzRestControllerTest {
 
         assertThat(result.get(0).name()).isEqualTo("Alice Smith");
         assertThat(result.get(1).name()).isNull();
+    }
+
+    @Test
+    void listAccess_includesTheLastSignInProvider() {
+        when(listAccessEntriesUseCase.listAccessEntries()).thenReturn(List.of(
+                AccessEntry.builder().email("a@example.com").role(Role.ADMIN).groups(List.of("admins")).provider("github").build(),
+                AccessEntry.builder().email("b@example.com").role(Role.PENDING).groups(List.of()).build()));
+
+        List<AuthzRestController.AccessEntryResponse> result = controller.listAccess();
+
+        assertThat(result.get(0).provider()).isEqualTo("github");
+        assertThat(result.get(1).provider()).isNull();
+    }
+
+    @Test
+    void listAccess_includesTheProviderUserId() {
+        when(listAccessEntriesUseCase.listAccessEntries()).thenReturn(List.of(
+                AccessEntry.builder().email("a@example.com").role(Role.ADMIN).groups(List.of("admins")).providerUserId("98765").build(),
+                AccessEntry.builder().email("b@example.com").role(Role.PENDING).groups(List.of()).build()));
+
+        List<AuthzRestController.AccessEntryResponse> result = controller.listAccess();
+
+        assertThat(result.get(0).providerUserId()).isEqualTo("98765");
+        assertThat(result.get(1).providerUserId()).isNull();
     }
 
     // --- PATCH /access/{email}/role ---

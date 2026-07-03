@@ -58,7 +58,7 @@ public class UserService implements
     // === Social-login authorization (AccessEntry domain) ===
 
     @Override
-    public AccessDecision verify(String email, String host, String name) {
+    public AccessDecision verify(String email, String host, String name, String provider, String providerUserId) {
         if (email == null || email.isBlank()) {
             return AccessDecision.deny();
         }
@@ -66,17 +66,21 @@ public class UserService implements
 
         Optional<AccessEntry> existing = forPersistingAccessEntries.findByEmail(normalised);
         if (existing.isEmpty()) {
-            // First sighting of a Google identity: record it as pending so it surfaces for the
-            // admin to action — capturing the display name it presented — then deny ("awaiting
-            // approval").
+            // First sighting of a social identity: record it as pending so it surfaces for the
+            // admin to action — capturing the display name, provider, and provider user id it
+            // presented — then deny ("awaiting approval").
             AccessEntry pending = AccessEntry.builder()
                     .email(normalised).role(Role.PENDING).groups(List.of()).build();
-            forPersistingAccessEntries.upsert(pending.toBuilder().name(pending.resolvedName(name)).build());
+            forPersistingAccessEntries.upsert(pending.toBuilder()
+                    .name(pending.resolvedName(name))
+                    .provider(pending.resolvedProvider(provider))
+                    .providerUserId(pending.resolvedProviderUserId(providerUserId))
+                    .build());
             notifyAdminsOfNewPendingIdentity(normalised);
             return AccessDecision.deny();
         }
 
-        AccessEntry entry = refreshName(existing.get(), name);
+        AccessEntry entry = refreshIdentity(existing.get(), name, provider, providerUserId);
         if (entry.isPending()) {
             return AccessDecision.deny();
         }
@@ -100,17 +104,24 @@ public class UserService implements
      * additionally swallow (log) any failure so a misbehaving notifier cannot break authorization.
      */
     /**
-     * Persist a refreshed display name when this sign-in brought a new one. The "what name should
-     * this entry carry" decision lives on {@link AccessEntry#resolvedName}; the service only writes
-     * the result through the port when it actually changed — so a blank/absent header never causes
-     * a wiping write.
+     * Persist a refreshed display name, last-used identity provider, and/or provider user id when
+     * this sign-in brought new ones. The capture decisions live on {@link AccessEntry#resolvedName},
+     * {@link AccessEntry#resolvedProvider} and {@link AccessEntry#resolvedProviderUserId}; the
+     * service only writes through the port when something actually changed — so a blank/absent/unknown
+     * header never causes a wiping write, and a single upsert covers all three fields.
      */
-    private AccessEntry refreshName(AccessEntry entry, String incomingName) {
-        String resolved = entry.resolvedName(incomingName);
-        if (java.util.Objects.equals(resolved, entry.getName())) {
+    private AccessEntry refreshIdentity(AccessEntry entry, String incomingName, String incomingProvider,
+                                        String incomingProviderUserId) {
+        String resolvedName = entry.resolvedName(incomingName);
+        String resolvedProvider = entry.resolvedProvider(incomingProvider);
+        String resolvedProviderUserId = entry.resolvedProviderUserId(incomingProviderUserId);
+        if (java.util.Objects.equals(resolvedName, entry.getName())
+                && java.util.Objects.equals(resolvedProvider, entry.getProvider())
+                && java.util.Objects.equals(resolvedProviderUserId, entry.getProviderUserId())) {
             return entry;
         }
-        AccessEntry updated = entry.toBuilder().name(resolved).build();
+        AccessEntry updated = entry.toBuilder().name(resolvedName).provider(resolvedProvider)
+                .providerUserId(resolvedProviderUserId).build();
         forPersistingAccessEntries.upsert(updated);
         return updated;
     }
@@ -160,7 +171,9 @@ public class UserService implements
         List<String> groups = current.map(AccessEntry::getGroups).orElse(List.of());
         forPersistingAccessEntries.upsert(AccessEntry.builder()
                 .email(normalised).role(role).groups(groups != null ? groups : List.of())
-                .name(current.map(AccessEntry::getName).orElse(null)).build());
+                .name(current.map(AccessEntry::getName).orElse(null))
+                .provider(current.map(AccessEntry::getProvider).orElse(null))
+                .providerUserId(current.map(AccessEntry::getProviderUserId).orElse(null)).build());
     }
 
     @Override
@@ -171,7 +184,9 @@ public class UserService implements
         Role role = current.map(AccessEntry::getRole).orElse(Role.PENDING);
         forPersistingAccessEntries.upsert(AccessEntry.builder()
                 .email(normalised).role(role).groups(normaliseGroups(groups))
-                .name(current.map(AccessEntry::getName).orElse(null)).build());
+                .name(current.map(AccessEntry::getName).orElse(null))
+                .provider(current.map(AccessEntry::getProvider).orElse(null))
+                .providerUserId(current.map(AccessEntry::getProviderUserId).orElse(null)).build());
     }
 
     // === Per-service access rules (serviceGroups store) ===

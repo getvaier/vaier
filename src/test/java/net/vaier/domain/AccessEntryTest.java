@@ -172,6 +172,73 @@ class AccessEntryTest {
         assertThat(e.resolvedName(header)).isNull();
     }
 
+    // --- resolvedProvider — the last-sign-in-provider capture decision (never wipes, tolerates junk) ---
+
+    @Test
+    void resolvedProvider_usesNormalisedHeaderWhenAKnownProvider() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
+        assertThat(e.resolvedProvider("  Google ")).isEqualTo("google");
+        assertThat(e.resolvedProvider("GITHUB")).isEqualTo("github");
+    }
+
+    @Test
+    void resolvedProvider_headerRefreshesAnExistingProvider() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).provider("google").build();
+        assertThat(e.resolvedProvider("github")).isEqualTo("github");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void resolvedProvider_keepsExistingProviderWhenHeaderBlank(String header) {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).provider("google").build();
+        assertThat(e.resolvedProvider(header)).isEqualTo("google");
+    }
+
+    @Test
+    void resolvedProvider_keepsExistingProviderWhenHeaderIsAnUnknownConnector() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).provider("google").build();
+        assertThat(e.resolvedProvider("gitlab")).isEqualTo("google");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   ", "gitlab"})
+    void resolvedProvider_nullWhenNoExistingProviderAndBlankOrUnknownHeader(String header) {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
+        assertThat(e.resolvedProvider(header)).isNull();
+    }
+
+    // --- resolvedProviderUserId — the provider user-id capture decision (never wipes a known id) ---
+
+    @Test
+    void resolvedProviderUserId_usesTrimmedHeaderWhenPresent() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
+        assertThat(e.resolvedProviderUserId("  12345 ")).isEqualTo("12345");
+    }
+
+    @Test
+    void resolvedProviderUserId_headerRefreshesAnExistingId() {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).providerUserId("111").build();
+        assertThat(e.resolvedProviderUserId("222")).isEqualTo("222");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void resolvedProviderUserId_keepsExistingIdWhenHeaderBlank(String header) {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).providerUserId("111").build();
+        assertThat(e.resolvedProviderUserId(header)).isEqualTo("111");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void resolvedProviderUserId_nullWhenNoExistingIdAndBlankHeader(String header) {
+        AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
+        assertThat(e.resolvedProviderUserId(header)).isNull();
+    }
+
     // --- Role.fromString — file values are lowercase, hand-edits may vary case ---
 
     @Test

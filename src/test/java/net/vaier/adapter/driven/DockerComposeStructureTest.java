@@ -223,6 +223,30 @@ class DockerComposeStructureTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void oauth2ProxyRender_extractsFederatedClaimsLeavesSoTheProviderHeadersPopulate() throws Exception {
+        // oauth2-proxy only injects a claim into a header if it is first extracted into the session
+        // via additionalClaims, stored under the FULL dotted key; the injection then does a flat
+        // lookup of that same key. Without the two federated_claims leaves here, X-Auth-Request-
+        // Connector[-Uid] ship empty and the Users provider badge + photo never populate. The strings
+        // in additionalClaims must be byte-identical to the claimSource.claim values.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> init = (Map<String, Object>) services.get("oauth2-proxy-init");
+        String render = String.join("\n", (List<String>) init.get("command"));
+
+        assertThat(render).as("federated:id scope is the Dex-side prerequisite for federated_claims")
+            .contains("scope: openid email profile federated:id");
+        assertThat(render).as("both federated_claims leaves must be extracted for injection")
+            .contains("additionalClaims: [name, federated_claims.connector_id, federated_claims.user_id]");
+        assertThat(render).as("connector header injected from the connector_id leaf")
+            .contains("X-Auth-Request-Connector, values: [{claimSource: {claim: federated_claims.connector_id}}]");
+        assertThat(render).as("connector uid header injected from the user_id leaf")
+            .contains("X-Auth-Request-Connector-Uid, values: [{claimSource: {claim: federated_claims.user_id}}]");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void wireguardMasquerade_usesInterfaceNameAgnosticRuleForVpnEgress() throws Exception {
         // The linuxserver/wireguard wg0.conf PostUp masquerades only on `-o eth+`. On a
         // Vaier server whose primary NIC is not named eth* (e.g. AWS EC2's ens5, or when

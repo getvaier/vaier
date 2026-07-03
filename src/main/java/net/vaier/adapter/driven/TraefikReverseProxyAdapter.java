@@ -1483,6 +1483,12 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             // The display-name claim oauth2-proxy forwards (X-Auth-Request-Name) must reach
             // /authz/verify so Vaier can capture it on the access entry.
             headers.add("X-Auth-Request-Name");
+            // The Dex connector id (X-Auth-Request-Connector: google/github) so /authz/verify can
+            // record which identity provider each user last signed in with.
+            headers.add("X-Auth-Request-Connector");
+            // The Dex federated user id (X-Auth-Request-Connector-Uid) so /authz/verify can build the
+            // provider avatar URL (e.g. the GitHub photo) for each user.
+            headers.add("X-Auth-Request-Connector-Uid");
             forwardAuth.put("authResponseHeaders", headers);
             Map<String, Object> authn = new LinkedHashMap<>();
             authn.put("forwardAuth", forwardAuth);

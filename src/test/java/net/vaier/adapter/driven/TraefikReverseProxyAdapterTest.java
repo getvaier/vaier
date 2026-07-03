@@ -169,7 +169,8 @@ class TraefikReverseProxyAdapterTest {
         var authn = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-authn")).get("forwardAuth");
         assertThat(authn.get("address")).isEqualTo("http://oauth2-proxy:4180/oauth2/auth");
         assertThat((List<String>) authn.get("authResponseHeaders"))
-            .containsExactly("X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Name");
+            .containsExactly("X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Name",
+                    "X-Auth-Request-Connector", "X-Auth-Request-Connector-Uid");
 
         var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
         assertThat(authz.get("address")).isEqualTo("http://vaier:8080/authz/verify");

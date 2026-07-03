@@ -155,6 +155,82 @@ class AccessFileAdapterTest {
                 .hasValueSatisfying(e -> assertThat(e.getName()).isNull());
     }
 
+    // --- last-sign-in provider persistence (back-compat: entries with no provider read as null) ---
+
+    @Test
+    void upsert_persistsTheProvider() throws Exception {
+        AccessFileAdapter a = adapter();
+        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                .groups(List.of("admins")).provider("github").build());
+
+        String contents = Files.readString(tempDir.resolve("access.yml"));
+        assertThat(contents).contains("provider: github");
+    }
+
+    @Test
+    void getEntries_roundTripsTheProvider() {
+        AccessFileAdapter a = adapter();
+        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                .groups(List.of("admins")).provider("github").build());
+
+        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
+
+        assertThat(fresh.findByEmail("you@gmail.com"))
+                .map(AccessEntry::getProvider).contains("github");
+    }
+
+    @Test
+    void getEntries_entryWithoutProviderReadsAsNullProvider() throws Exception {
+        // Back-compat: an entry written before providers existed has no `provider` key.
+        Files.writeString(tempDir.resolve("access.yml"), """
+            entries:
+              old@gmail.com:
+                role: user
+                groups: [family]
+            """);
+
+        assertThat(adapter().findByEmail("old@gmail.com"))
+                .hasValueSatisfying(e -> assertThat(e.getProvider()).isNull());
+    }
+
+    // --- provider user id persistence (back-compat: entries with no providerUserId read as null) ---
+
+    @Test
+    void upsert_persistsTheProviderUserId() throws Exception {
+        AccessFileAdapter a = adapter();
+        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                .groups(List.of("admins")).providerUserId("98765").build());
+
+        String contents = Files.readString(tempDir.resolve("access.yml"));
+        assertThat(contents).contains("providerUserId:").contains("98765");
+    }
+
+    @Test
+    void getEntries_roundTripsTheProviderUserId() {
+        AccessFileAdapter a = adapter();
+        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                .groups(List.of("admins")).providerUserId("98765").build());
+
+        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
+
+        assertThat(fresh.findByEmail("you@gmail.com"))
+                .map(AccessEntry::getProviderUserId).contains("98765");
+    }
+
+    @Test
+    void getEntries_entryWithoutProviderUserIdReadsAsNull() throws Exception {
+        // Back-compat: an entry written before provider user ids existed has no `providerUserId` key.
+        Files.writeString(tempDir.resolve("access.yml"), """
+            entries:
+              old@gmail.com:
+                role: user
+                groups: [family]
+            """);
+
+        assertThat(adapter().findByEmail("old@gmail.com"))
+                .hasValueSatisfying(e -> assertThat(e.getProviderUserId()).isNull());
+    }
+
     @Test
     void getEntries_unknownRoleTokenReadsAsPending() throws Exception {
         // access.yml can be hand-edited — a malformed role must never accidentally grant access.

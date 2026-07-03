@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
     <title>Users</title>
     <link rel="stylesheet" href="styles.css">
     <style>
@@ -174,6 +175,38 @@
         .role-badge.user    { color: var(--green);  border-color: rgba(78, 201, 176, 0.4); }
         .role-badge.pending { color: #ddb640;       border-color: #6b5a2a; }
 
+        /* The avatar stacks a photo over the monogram: the photo (GitHub / Gravatar) sits on top and,
+           if it fails to load, is removed to reveal the initials underneath. The provider glyph rides
+           the corner as a small badge — the photo says who, the glyph says which provider. */
+        .avatar { grid-area: mono; position: relative; width: 38px; height: 38px; }
+        .avatar .mono { position: absolute; inset: 0; }
+        .avatar-photo {
+            position: absolute;
+            inset: 0;
+            width: 38px;
+            height: 38px;
+            border-radius: 2px;
+            object-fit: cover;
+            background: var(--bg-card);
+        }
+
+        /* Which identity provider this person last signed in with. A quiet supporting mark, not a
+           focal point: monochrome, muted, on a small dark disc (the card colour — never a white
+           plate) so it stays legible in the corner of a photo. */
+        .provider-glyph {
+            position: absolute;
+            right: -3px;
+            bottom: -3px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            color: var(--text-muted);
+        }
+        .provider-glyph svg { width: 12px; height: 12px; fill: currentColor; display: block; }
+
         .person-actions {
             grid-area: actions;
             display: flex;
@@ -308,7 +341,7 @@
         <div class="users-head">
             <div class="users-head-text">
                 <h1>Users</h1>
-                <p>Everyone who can sign in with Google. New people land here awaiting approval.</p>
+                <p>Everyone who can sign in with Google or GitHub. New people land here awaiting approval.</p>
             </div>
             <div class="users-head-actions">
                 <span class="waiting-pill" id="waitingPill" style="display:none"></span>
@@ -318,7 +351,7 @@
 
         <!-- Grant access before the first sign-in. Kept collapsed so the roster stays the focus. -->
         <div class="preapprove-panel" id="preApprovePanel">
-            <p class="hint">Know someone's email? Grant them a role now — they're approved the moment they first sign in with Google.</p>
+            <p class="hint">Know someone's email? Grant them a role now — they're approved the moment they first sign in with Google or GitHub.</p>
             <form class="preapprove-form" id="preApproveForm">
                 <input type="email" class="form-input preapprove-email" id="preApproveEmail"
                        placeholder="name@email.com" autocomplete="off" aria-label="Email to pre-approve">
@@ -498,6 +531,31 @@
             return letters.toUpperCase();
         }
 
+        // SHA-256 hex of a string, for the Gravatar avatar hash. crypto.subtle needs a secure context
+        // (Vaier is served over HTTPS via Traefik). Returns null if unavailable so we fall back to
+        // initials rather than break the row.
+        async function sha256Hex(str) {
+            if (!crypto.subtle) return null;
+            const bytes = new TextEncoder().encode(str);
+            const digest = await crypto.subtle.digest('SHA-256', bytes);
+            return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // The avatar photo URL for an entry, or null to stay on the monogram:
+        //   1. a GitHub sign-in with a known provider user id → the GitHub account photo
+        //   2. otherwise Gravatar keyed on the email's SHA-256 (d=404 so a miss errors out and we
+        //      fall back to initials rather than showing Gravatar's default silhouette)
+        // emailHash is precomputed (see renderAccess) to keep the row template synchronous.
+        function avatarPhotoUrl(entry, emailHash) {
+            if (entry.provider === 'github' && entry.providerUserId) {
+                return `https://avatars.githubusercontent.com/u/${encodeURIComponent(entry.providerUserId)}?s=80`;
+            }
+            if (emailHash) {
+                return `https://www.gravatar.com/avatar/${emailHash}?s=80&d=404`;
+            }
+            return null;
+        }
+
         function displayMessage(message, type) {
             const el = document.getElementById('message');
             el.innerHTML = `<div class="${type}">${escapeHtml(message)}</div>`;
@@ -535,14 +593,41 @@
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 accessEntries = await r.json();
                 deriveGroups();
-                renderAccess();
+                await renderAccess();
             } catch (e) {
                 list.innerHTML = '<div class="error">Couldn\'t load users: ' + escapeHtml(e.message) + '</div>';
             }
         }
 
-        function renderAccess() {
+        // Monochrome provider marks (currentColor, dark disc badge) worn on the corner of the avatar.
+        // Only the two Dex connectors we recognise render a glyph; anything else (or an entry that has
+        // never signed in) renders nothing.
+        const PROVIDER_GLYPHS = {
+            google: {
+                label: 'Google',
+                svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972a6.033 6.033 0 1 1 0-12.064c1.498 0 2.866.549 3.921 1.453l2.814-2.814A9.969 9.969 0 0 0 12.545 2C7.021 2 2.543 6.477 2.543 12s4.478 10 10.002 10c8.396 0 10.249-7.85 9.426-11.748l-9.426-.013z"/></svg>'
+            },
+            github: {
+                label: 'GitHub',
+                svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222 0 1.606-.014 2.898-.014 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>'
+            }
+        };
+
+        function providerGlyph(provider) {
+            const g = provider && PROVIDER_GLYPHS[provider.toLowerCase()];
+            if (!g) return '';
+            return `<span class="provider-glyph" title="Signed in with ${g.label}">${g.svg}</span>`;
+        }
+
+        async function renderAccess() {
             const list = document.getElementById('roster');
+
+            // Precompute each email's Gravatar hash up front so the row template stays synchronous
+            // (no awaiting inside the innerHTML build). A hash failure leaves the entry on initials.
+            const emailHashes = {};
+            await Promise.all(accessEntries.map(async e => {
+                emailHashes[e.email] = await sha256Hex((e.email || '').trim().toLowerCase());
+            }));
 
             // Waiting pill — pending identities are time-sensitive; surface the count, hide it at zero.
             const pending = accessEntries.filter(e => e.role === 'pending').length;
@@ -551,7 +636,7 @@
             pill.style.display = pending ? '' : 'none';
 
             if (accessEntries.length === 0) {
-                list.innerHTML = '<div class="empty">No users yet.<br>People appear here the first time they sign in with Google — or pre-approve someone above.</div>';
+                list.innerHTML = '<div class="empty">No users yet.<br>People appear here the first time they sign in with Google or GitHub — or pre-approve someone above.</div>';
                 return;
             }
 
@@ -587,6 +672,18 @@
                 const monoStyle = `background:hsl(${hue},42%,20%);color:hsl(${hue},60%,72%)`;
                 const initials = escapeHtml(initialsFor(entry.name, entry.email));
 
+                // Photo over monogram: on any load failure (GitHub 404 / Gravatar d=404) the <img>
+                // removes itself, revealing the initials layer beneath. The provider glyph is a corner
+                // badge on the avatar rather than an inline mark.
+                const photoUrl = avatarPhotoUrl(entry, emailHashes[entry.email]);
+                const photo = photoUrl
+                    ? `<img class="avatar-photo" src="${photoUrl}" alt="" onerror="this.remove()">`
+                    : '';
+                const glyph = providerGlyph(entry.provider);
+                const avatar = `<div class="avatar">
+                        <div class="mono" style="${monoStyle}">${initials}</div>${photo}${glyph}
+                    </div>`;
+
                 const hasName = entry.name && entry.name.trim();
                 const identity = hasName
                     ? `<span class="person-name">${escapeHtml(entry.name)}</span>
@@ -601,7 +698,7 @@
 
                 html += `
                 <div class="person ${entry.role === 'pending' ? 'pending' : ''}" data-id="${id}">
-                    <div class="mono" style="${monoStyle}">${initials}</div>
+                    ${avatar}
                     <div class="identity"><div class="identity-line">${identity}</div></div>
                     ${rightCol}
                     <div class="groups-cell">

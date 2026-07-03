@@ -51,6 +51,8 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
     private static final String ROLE_KEY = "role";
     private static final String GROUPS_KEY = "groups";
     private static final String NAME_KEY = "name";
+    private static final String PROVIDER_KEY = "provider";
+    private static final String PROVIDER_USER_ID_KEY = "providerUserId";
 
     private final String filePath;
     private final Yaml dumper;
@@ -119,6 +121,8 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
             result.add(AccessEntry.builder().email(email).role(role)
                     .groups(readGroups(body.get(GROUPS_KEY)))
                     .name(asString(body.get(NAME_KEY)))
+                    .provider(asString(body.get(PROVIDER_KEY)))
+                    .providerUserId(asString(body.get(PROVIDER_USER_ID_KEY)))
                     .build());
         }
         return result;
@@ -140,6 +144,16 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
         // in the file until their first sign-in fills it in.
         if (entry.getName() != null && !entry.getName().isBlank()) {
             body.put(NAME_KEY, entry.getName());
+        }
+        // Only write the last-sign-in provider once we actually have one — pre-approved entries that
+        // have never signed in stay provider-less in the file until their first login fills it in.
+        if (entry.getProvider() != null && !entry.getProvider().isBlank()) {
+            body.put(PROVIDER_KEY, entry.getProvider());
+        }
+        // Only write the provider user id once we actually have one — pre-approved entries that have
+        // never signed in stay id-less in the file until their first login fills it in.
+        if (entry.getProviderUserId() != null && !entry.getProviderUserId().isBlank()) {
+            body.put(PROVIDER_USER_ID_KEY, entry.getProviderUserId());
         }
         entries.put(entry.getEmail(), body);
         write(root);

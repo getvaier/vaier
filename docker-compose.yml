@@ -475,11 +475,16 @@ services:
         - {name: X-Auth-Request-Preferred-Username, values: [{claimSource: {claim: preferred_username}}]}
         - {name: X-Auth-Request-Groups, values: [{claimSource: {claim: groups}}]}
         - {name: X-Auth-Request-Name, values: [{claimSource: {claim: name}}]}
+        - {name: X-Auth-Request-Connector, values: [{claimSource: {claim: federated_claims.connector_id}}]}
+        - {name: X-Auth-Request-Connector-Uid, values: [{claimSource: {claim: federated_claims.user_id}}]}
         providers:
         - id: dex
           provider: oidc
           clientID: vaier-oauth2
           clientSecretFile: /oauth2/config/client-secret
+          # federated:id makes Dex emit federated_claims (connector_id/user_id) so we can record which
+          # identity provider each user last signed in with; the rest are oauth2-proxy's defaults.
+          scope: openid email profile federated:id
           oidcConfig:
             issuerURL: https://dex.$${VAIER_DOMAIN}
             audienceClaims: [aud]
@@ -487,7 +492,12 @@ services:
             groupsClaim: groups
             userIDClaim: email
             insecureSkipNonce: true
-          additionalClaims: [name]
+          # oauth2-proxy only exposes a claim to header injection if it is first extracted into the
+          # session here. Extraction is dot-path aware and stores each value under the FULL dotted
+          # key, and the injectResponseHeaders lookup is a flat match on that same key — so the
+          # strings here must be byte-identical to the claimSource.claim values above. Without the
+          # two federated_claims leaves, X-Auth-Request-Connector[-Uid] ship empty.
+          additionalClaims: [name, federated_claims.connector_id, federated_claims.user_id]
           # connector_id is user-supplied by the sign-in buttons; oauth2-proxy only forwards a
           # user value when it matches an allow rule, so Dex jumps straight to the chosen provider
           # instead of showing its own chooser. No approval_prompt=force: forcing re-consent on every

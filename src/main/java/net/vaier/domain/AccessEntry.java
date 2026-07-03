@@ -36,6 +36,23 @@ public class AccessEntry {
     private final String name;
 
     /**
+     * The identity provider (Dex connector id: {@code google} / {@code github}) this identity last
+     * signed in with, or {@code null} until a sign-in fills it in (e.g. a pre-approved entry that
+     * has never authenticated). Surfaced as a small provider glyph in the access overview.
+     */
+    private final String provider;
+
+    /**
+     * The identity's stable id at its {@link #provider} (the Dex {@code federated_claims.user_id}:
+     * GitHub's numeric account id, Google's {@code sub}), or {@code null} until a sign-in fills it
+     * in. Used to build a provider avatar URL (e.g. the GitHub photo) in the access overview.
+     */
+    private final String providerUserId;
+
+    /** The Dex connector ids Vaier recognises as identity providers. */
+    private static final Set<String> KNOWN_PROVIDERS = Set.of("google", "github");
+
+    /**
      * The display name this entry should carry after an authentication that presented
      * {@code incomingName}. A present, non-blank name (trimmed) refreshes the stored name; an
      * absent or blank header never wipes an already-known name. So a pre-approved entry stays
@@ -46,6 +63,36 @@ public class AccessEntry {
             return incomingName.trim();
         }
         return name;
+    }
+
+    /**
+     * The identity provider this entry should carry after an authentication that presented
+     * {@code incomingProvider} (the Dex {@code connector_id} header). A recognised provider
+     * (case-insensitive, trimmed) refreshes the stored one; a blank, absent, or unrecognised value
+     * never wipes an already-known provider and never breaks the access decision. So a pre-approved
+     * entry stays provider-less until its first sign-in, and later sign-ins keep it current.
+     */
+    public String resolvedProvider(String incomingProvider) {
+        if (incomingProvider != null) {
+            String normalised = incomingProvider.trim().toLowerCase(java.util.Locale.ROOT);
+            if (KNOWN_PROVIDERS.contains(normalised)) {
+                return normalised;
+            }
+        }
+        return provider;
+    }
+
+    /**
+     * The provider user id this entry should carry after an authentication that presented
+     * {@code incomingProviderUserId} (the Dex {@code federated_claims.user_id} header). A present,
+     * non-blank value (trimmed) refreshes the stored id; an absent or blank header never wipes an
+     * already-known id. So a pre-approved entry stays id-less until its first sign-in.
+     */
+    public String resolvedProviderUserId(String incomingProviderUserId) {
+        if (incomingProviderUserId != null && !incomingProviderUserId.isBlank()) {
+            return incomingProviderUserId.trim();
+        }
+        return providerUserId;
     }
 
     /**
