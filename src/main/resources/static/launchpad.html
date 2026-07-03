@@ -259,12 +259,15 @@
                 `;
             } else {
                 // Anonymous: the launchpad root is public now, so a plain link back here wouldn't
-                // force a login. Send the visitor straight into the Google sign-in and return them
-                // to the launchpad once they're in. rd must be ABSOLUTE — oauth2-proxy resolves a
-                // relative rd against its callback host (oauth2.<domain>), which would dead-end on
-                // its static "Authenticated" page instead of coming back here.
+                // force a login. Send the visitor to the branded provider selector (sign_in.html:
+                // Continue with Google / GitHub) and return them to the launchpad once they're in.
+                // Use /oauth2/sign_in, NOT /oauth2/start — /start with no connector_id hands off to
+                // Dex's own unbranded picker; the sign-in page lets the visitor pick, then forwards
+                // connector_id so Dex jumps straight to that provider. rd must be ABSOLUTE —
+                // oauth2-proxy resolves a relative rd against its callback host (oauth2.<domain>),
+                // which would dead-end on its static "Authenticated" page instead of coming back here.
                 nav.innerHTML = '';
-                const signInUrl = '/oauth2/start?rd=' + encodeURIComponent(location.origin + '/launchpad.html');
+                const signInUrl = '/oauth2/sign_in?rd=' + encodeURIComponent(location.origin + '/launchpad.html');
                 user.innerHTML = `
                     <a href="${signInUrl}" class="topbar-item" title="Sign in">${ICON_LOGIN}<span class="link-label">Sign in</span></a>
                 `;

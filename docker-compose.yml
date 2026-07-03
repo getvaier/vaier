@@ -428,33 +428,40 @@ services:
     networks:
       - vaier-network
 
-  # --- #305 social login: oauth2-proxy authenticates with Google; Vaier owns authorization
-  # via /authz/verify. This is mandatory infrastructure — the sole auth gateway — so it
-  # always starts with `docker compose up -d` (no `social` profile). Set the Google OAuth
-  # credentials in .env: VAIER_OIDC_GOOGLE_CLIENT_ID=..., VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
-  # VAIER_OAUTH2_COOKIE_SECRET is auto-generated into .env (not operator-authored).
+  # --- #305 social login: oauth2-proxy is the forward-auth gatekeeper; Vaier owns authorization
+  # via /authz/verify. This is mandatory infrastructure — the sole auth gateway — so it always
+  # starts with `docker compose up -d` (no `social` profile). oauth2-proxy no longer talks to Google
+  # directly: it federates through the Dex identity broker (see the dex service below), which fans
+  # out to the Google and GitHub connectors. Identity stays keyed on email, so /authz/verify,
+  # access.yml and the Traefik chain are unchanged.
+  #
+  #   Traefik -> oauth2-proxy -> Dex -> Google / GitHub
+  #
+  # Set the upstream OAuth credentials in .env: VAIER_OIDC_GOOGLE_CLIENT_ID / *_SECRET and
+  # VAIER_OIDC_GITHUB_CLIENT_ID / *_SECRET. VAIER_DEX_CLIENT_SECRET (the oauth2-proxy<->Dex shared
+  # secret) and VAIER_OAUTH2_COOKIE_SECRET are auto-generated into .env (not operator-authored).
   #
   # oauth2-proxy-init renders oauth2-proxy's alpha config into the shared ./oauth2/config volume so
-  # the repo ships a generic, secret-free compose: (1) the Google client secret is written to a
-  # mode-0600 client-secret file (referenced via clientSecretFile, never inlined), and (2) alpha.yaml
-  # is rendered with only the client id substituted in. Both files are chowned to oauth2-proxy's
-  # uid:gid (65532:65532 — the image's nonroot USER) so the non-root proxy can read them.
-  # Re-rendered on every start so a rotated client id/secret is picked up.
+  # the repo ships a generic, secret-free compose: (1) the oauth2-proxy<->Dex shared secret is
+  # written to a mode-0600 client-secret file (referenced via clientSecretFile, never inlined), and
+  # (2) alpha.yaml is rendered with only VAIER_DOMAIN substituted into the Dex issuer URL. Both files
+  # are chowned to oauth2-proxy's uid:gid (65532:65532 — the image's nonroot USER) so the non-root
+  # proxy can read them. Re-rendered on every start so a rotated secret/domain is picked up.
   oauth2-proxy-init:
     image: alpine:3.20
     container_name: oauth2-proxy-init
     environment:
-      - VAIER_OIDC_GOOGLE_CLIENT_ID=${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
-      - VAIER_OIDC_GOOGLE_CLIENT_SECRET=${VAIER_OIDC_GOOGLE_CLIENT_SECRET:-}
+      - VAIER_DOMAIN=${VAIER_DOMAIN:-}
+      - VAIER_DEX_CLIENT_SECRET=${VAIER_DEX_CLIENT_SECRET:-}
     command:
       - sh
       - -c
       - |
         set -e
         umask 077
-        printf '%s' "$$VAIER_OIDC_GOOGLE_CLIENT_SECRET" > /oauth2/config/client-secret
-        # Unquoted heredoc: the shell substitutes only $${VAIER_OIDC_GOOGLE_CLIENT_ID}; the alpha
-        # body contains no other $$ so nothing else is interpolated.
+        printf '%s' "$$VAIER_DEX_CLIENT_SECRET" > /oauth2/config/client-secret
+        # Unquoted heredoc: the shell substitutes only $${VAIER_DOMAIN}; the alpha body contains no
+        # other $$ so nothing else is interpolated.
         cat > /oauth2/config/alpha.yaml <<EOF
         injectRequestHeaders:
         - {name: X-Forwarded-Groups, values: [{claimSource: {claim: groups}}]}
@@ -469,15 +476,24 @@ services:
         - {name: X-Auth-Request-Groups, values: [{claimSource: {claim: groups}}]}
         - {name: X-Auth-Request-Name, values: [{claimSource: {claim: name}}]}
         providers:
-        - id: google
-          provider: google
-          clientID: $${VAIER_OIDC_GOOGLE_CLIENT_ID}
+        - id: dex
+          provider: oidc
+          clientID: vaier-oauth2
           clientSecretFile: /oauth2/config/client-secret
-          loginURLParameters: [{name: approval_prompt, default: [force]}]
-          # 'name' is not a standard session field; declare it so oauth2-proxy extracts it from
-          # the id_token into the session, making X-Auth-Request-Name populate (needs >= v7.7).
+          oidcConfig:
+            issuerURL: https://dex.$${VAIER_DOMAIN}
+            audienceClaims: [aud]
+            emailClaim: email
+            groupsClaim: groups
+            userIDClaim: email
+            insecureSkipNonce: true
           additionalClaims: [name]
-          oidcConfig: {audienceClaims: [aud], emailClaim: email, groupsClaim: groups, insecureSkipNonce: true, userIDClaim: email}
+          # connector_id is user-supplied by the sign-in buttons; oauth2-proxy only forwards a
+          # user value when it matches an allow rule, so Dex jumps straight to the chosen provider
+          # instead of showing its own chooser. No approval_prompt=force: forcing re-consent on every
+          # login is what made users re-grant access each time — Dex's skipApprovalScreen handles it.
+          loginURLParameters:
+          - {name: connector_id, allow: [{value: google}, {value: github}]}
         server:
           BindAddress: 0.0.0.0:4180
         upstreamConfig:
@@ -502,8 +518,8 @@ services:
       - --redirect-url=https://oauth2.${VAIER_DOMAIN}/oauth2/callback
       # Brand the sign-in page in Vaier's dark theme (overrides only sign_in.html).
       - --custom-templates-dir=/templates
-      # Provider, client id/secret, upstream, header injection (incl. the Google name claim) and the
-      # bind address now come from the rendered alpha config — see oauth2-proxy-init.
+      # Provider (generic OIDC brokered by Dex), client id/secret, upstream, header injection (incl.
+      # the name claim) and the bind address now come from the rendered alpha config — see oauth2-proxy-init.
       - --alpha-config=/oauth2/config/alpha.yaml
     volumes:
       - ./oauth2/templates:/templates:ro
@@ -518,6 +534,84 @@ services:
       - traefik.http.routers.oauth2-proxy.entrypoints=websecure
       - traefik.http.routers.oauth2-proxy.tls.certresolver=letsencrypt
       - traefik.http.services.oauth2-proxy.loadbalancer.server.port=4180
+    networks:
+      - vaier-network
+
+  # --- #305 follow-up: Dex OIDC broker. Sits behind oauth2-proxy and federates Google + GitHub, so
+  # a user signs in with either provider while oauth2-proxy stays the single forward-auth gatekeeper
+  # and identity stays keyed on email. Mandatory infrastructure — no `social` profile.
+  #
+  # dex-init mirrors oauth2-proxy-init: it renders config.yaml from the operator credentials and
+  # chowns it to Dex's nonroot uid:gid (1001:1001) so Dex can read it. Re-rendered on every start so
+  # rotated credentials/domain are picked up. Unlike oauth2-proxy (which references its client secret
+  # via clientSecretFile), Dex has NO file-based secret option for connectors or for staticClients —
+  # so all three secrets are rendered directly into config.yaml, which is written mode-0600 (umask
+  # 077) and owned by Dex. It lives in the gitignored ./dex/config runtime volume and is never
+  # committed. This is the standard Dex pattern given its config schema.
+  dex-init:
+    image: alpine:3.20
+    container_name: dex-init
+    environment:
+      - VAIER_DOMAIN=${VAIER_DOMAIN:-}
+      - VAIER_OIDC_GOOGLE_CLIENT_ID=${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
+      - VAIER_OIDC_GOOGLE_CLIENT_SECRET=${VAIER_OIDC_GOOGLE_CLIENT_SECRET:-}
+      - VAIER_OIDC_GITHUB_CLIENT_ID=${VAIER_OIDC_GITHUB_CLIENT_ID:-}
+      - VAIER_OIDC_GITHUB_CLIENT_SECRET=${VAIER_OIDC_GITHUB_CLIENT_SECRET:-}
+      - VAIER_DEX_CLIENT_SECRET=${VAIER_DEX_CLIENT_SECRET:-}
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        umask 077
+        # Unquoted heredoc: the shell substitutes $${VAIER_DOMAIN}, the two client ids, and the three
+        # secrets; the config body contains no other $$ so nothing else is interpolated.
+        cat > /dex/config/config.yaml <<EOF
+        issuer: https://dex.$${VAIER_DOMAIN}
+        storage: {type: memory}
+        web: {http: 0.0.0.0:5556}
+        oauth2: {skipApprovalScreen: true}
+        frontend: {dir: /srv/dex/web, theme: vaier, issuer: Vaier}
+        staticClients:
+        - id: vaier-oauth2
+          name: Vaier
+          secret: $${VAIER_DEX_CLIENT_SECRET}
+          redirectURIs: [https://oauth2.$${VAIER_DOMAIN}/oauth2/callback]
+        connectors:
+        - type: google
+          id: google
+          name: Google
+          config: {clientID: $${VAIER_OIDC_GOOGLE_CLIENT_ID}, clientSecret: $${VAIER_OIDC_GOOGLE_CLIENT_SECRET}, redirectURI: https://dex.$${VAIER_DOMAIN}/callback}
+        - type: github
+          id: github
+          name: GitHub
+          config: {clientID: $${VAIER_OIDC_GITHUB_CLIENT_ID}, clientSecret: $${VAIER_OIDC_GITHUB_CLIENT_SECRET}, redirectURI: https://dex.$${VAIER_DOMAIN}/callback}
+        EOF
+        chown 1001:1001 /dex/config/config.yaml
+    volumes:
+      - ./dex/config:/dex/config
+    restart: "no"
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.45.1
+    container_name: dex
+    command: [dex, serve, /dex/config/config.yaml]
+    volumes:
+      - ./dex/config:/dex/config:ro
+      # Brand Dex's own screens (error, connector picker) in Vaier's dark theme. Only the theme dir is
+      # overlaid onto the image's built-in web assets; frontend.dir in config.yaml points Dex at the
+      # on-disk copy so it picks up this theme (see dex-init).
+      - ./dex/themes/vaier:/srv/dex/web/themes/vaier:ro
+    depends_on:
+      dex-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dex.rule=Host(`dex.${VAIER_DOMAIN}`)
+      - traefik.http.routers.dex.entrypoints=websecure
+      - traefik.http.routers.dex.tls.certresolver=letsencrypt
+      - traefik.http.services.dex.loadbalancer.server.port=5556
     networks:
       - vaier-network
 

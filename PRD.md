@@ -473,7 +473,7 @@ service). The same store gates **both** the Vaier console (admin-only) and per-s
 - oauth2-proxy is migrated from CLI flags to an env-driven, secret-safe **alpha config** so it can
   forward Google's `name` claim. An `oauth2-proxy-init` container
   renders `alpha.yaml` into a shared `./oauth2/config` volume — substituting only the client id, writing
-  `$VAIER_OIDC_GOOGLE_CLIENT_SECRET` to a mode-0600 `client-secret` file referenced via `clientSecretFile`
+  the broker client secret to a mode-0600 `client-secret` file referenced via `clientSecretFile`
   (never inlined) — and adds `X-Forwarded-Name` / `X-Auth-Request-Name` (claim `name`) to the header
   injection. oauth2-proxy keeps the flags alpha doesn't cover (cookie, whitelist, email-domain,
   reverse-proxy, redirect-url, custom-templates-dir) and adds `--alpha-config`.
@@ -645,10 +645,33 @@ Authelia config written, and no dead Authelia Java classes remain.
 - Known limitation: rules key on host (matching the forward-auth `X-Forwarded-Host`), so path-scoped
   services that share a host share one rule.
 
+**Delivered (GitHub sign-in via the Dex identity broker, TDD-first):** ✅ (#305 follow-up)
+- A user can now sign in with **Google or GitHub**. Rather than teach oauth2-proxy two providers, a **Dex**
+  OIDC broker is inserted behind it: `Traefik → oauth2-proxy → Dex → Google / GitHub`. oauth2-proxy stays
+  the single forward-auth gatekeeper and identity stays keyed on **email**, so `/authz/verify`, `access.yml`,
+  `UserService`, and the Traefik middleware chain are unchanged.
+- Any GitHub account is allowed (no org/team restriction) — the existing **pending → admin-approval** gate
+  does the gating. The same person on both providers currently yields two separate **access entries**
+  (identity linking is backlogged).
+- Compose: new `dex` service (`ghcr.io/dexidp/dex:v2.45.1`, port 5556, Traefik router `dex.<domain>`) and a
+  `dex-init` one-shot that renders `dex/config/config.yaml` and writes the three upstream secrets to
+  mode-0600 files (mirrors `oauth2-proxy-init`). Both are mandatory infrastructure — no `social` profile.
+  Dex has one **connector** per provider (`google`, `github`) and one static client for oauth2-proxy.
+- oauth2-proxy's `alpha.yaml` render is repointed from `provider: google` to a generic `provider: oidc`
+  brokered by Dex (`issuerURL: https://dex.<domain>`, `connector_id` login param), with the oauth2-proxy↔Dex
+  shared secret in the mode-0600 `client-secret` file.
+- Secrets: `VAIER_DEX_CLIENT_SECRET` (oauth2-proxy↔Dex) is auto-generated into `.env` like
+  `VAIER_OAUTH2_COOKIE_SECRET`; `VAIER_OIDC_GITHUB_CLIENT_ID` / `VAIER_OIDC_GITHUB_CLIENT_SECRET` are
+  operator-provided alongside the Google pair.
+- UI: the branded oauth2-proxy sign-in page now offers two buttons — **Continue with Google** (primary) and
+  **Continue with GitHub** (quieter outlined secondary) — each submitting its `connector_id`.
+
 **Backlog (not in this slice):**
-- The unauthenticated "awaiting approval" page, migration off Authelia for existing deployments, and
-  multi-provider login (GitHub, etc.). The **availability coupling** the spike flags — Vaier being in the
-  request path for protected services — remains the open trade-off to accept or revisit.
+- **Cross-provider identity linking** — treat the same person signing in via Google and via GitHub as one
+  **access entry** (today they are two, keyed on each provider's asserted email).
+- The unauthenticated "awaiting approval" page and migration off Authelia for existing deployments. The
+  **availability coupling** the spike flags — Vaier being in the request path for protected services —
+  remains the open trade-off to accept or revisit.
 
 ---
 

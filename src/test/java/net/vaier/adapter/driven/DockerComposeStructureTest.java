@@ -123,6 +123,104 @@ class DockerComposeStructureTest {
         assertThat(oauth2ProxyInit).as("oauth2-proxy-init must always start").doesNotContainKey("profiles");
     }
 
+    // --- #305 follow-up: Dex OIDC broker federates Google + GitHub behind oauth2-proxy ---
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dex_isMandatoryVersionPinnedInfrastructure_onPort5556() throws Exception {
+        // Dex is the identity broker behind oauth2-proxy (federates Google + GitHub). Like
+        // oauth2-proxy it is the sole auth path, so it is mandatory infrastructure (no profile),
+        // version-pinned (no floating :latest), and Traefik routes to it on Dex's HTTP port 5556.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> dex = (Map<String, Object>) services.get("dex");
+
+        assertThat(dex).as("dex service must exist").isNotNull();
+        assertThat((String) dex.get("image"))
+            .as("dex image must be version-pinned").contains("dexidp/dex:v2.45.1");
+        assertThat(dex).as("dex must always start — no profile gate").doesNotContainKey("profiles");
+
+        List<String> labels = (List<String>) dex.get("labels");
+        Map<String, String> byKey = new LinkedHashMap<>();
+        for (String label : labels) {
+            int eq = label.indexOf('=');
+            if (eq > 0) {
+                byKey.put(label.substring(0, eq), label.substring(eq + 1));
+            }
+        }
+        assertThat(byKey.get("traefik.http.services.dex.loadbalancer.server.port"))
+            .as("Traefik must route to Dex on its HTTP port 5556").isEqualTo("5556");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dexInit_isMandatoryInfrastructure_notBehindAProfile() throws Exception {
+        // dex-init renders Dex's config (mirrors oauth2-proxy-init). It must always run so Dex has
+        // a config on every start — no profile gate.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> dexInit = (Map<String, Object>) services.get("dex-init");
+
+        assertThat(dexInit).as("dex-init service must exist").isNotNull();
+        assertThat(dexInit).as("dex-init must always run — no profile gate").doesNotContainKey("profiles");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void oauth2ProxyAlphaRender_pointsAtTheDexIssuer_notGoogleDirect() throws Exception {
+        // oauth2-proxy no longer talks to Google directly — it federates through Dex via a generic
+        // OIDC provider. The rendered alpha.yaml lives in the gitignored runtime dir, so the
+        // committed source of truth is the heredoc oauth2-proxy-init renders it from.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> init = (Map<String, Object>) services.get("oauth2-proxy-init");
+        String render = String.join("\n", (List<String>) init.get("command"));
+
+        assertThat(render).as("provider must be generic oidc, brokered by Dex").contains("provider: oidc");
+        assertThat(render).as("issuer must be Dex").contains("issuerURL: https://dex.$${VAIER_DOMAIN}");
+        assertThat(render).as("must no longer talk to Google directly").doesNotContain("provider: google");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void oauth2ProxyRender_allowListsConnectorIdSoTheSelectorJumpsStraightToTheProvider() throws Exception {
+        // The two sign-in buttons pass connector_id=google|github. oauth2-proxy only forwards a
+        // user-supplied login param when it matches an `allow` rule — without it, Dex would show its
+        // own second chooser instead of jumping straight to the picked provider. Guard the allow-list.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> init = (Map<String, Object>) services.get("oauth2-proxy-init");
+        String render = String.join("\n", (List<String>) init.get("command"));
+
+        assertThat(render).as("connector_id must be an allow-listed login param")
+            .contains("name: connector_id, allow:");
+        assertThat(render).contains("value: google").contains("value: github");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dexRender_inlinesAllSecrets_becauseDexHasNoFileBasedSecretOption() throws Exception {
+        // Dex honours clientSecretFile on only a handful of connectors — NOT the google/github/oidc
+        // ones — and staticClients have no file option at all. Referencing a file silently yields an
+        // empty secret ("client_secret is missing"). So all three secrets render inline into the
+        // 0600, dex-owned, gitignored config.yaml. Guard against a regression back to file refs.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> dexInit = (Map<String, Object>) services.get("dex-init");
+        String render = String.join("\n", (List<String>) dexInit.get("command"));
+
+        assertThat(render).as("static client secret inlined").contains("secret: $${VAIER_DEX_CLIENT_SECRET}");
+        assertThat(render).as("google connector secret inlined").contains("clientSecret: $${VAIER_OIDC_GOOGLE_CLIENT_SECRET}");
+        assertThat(render).as("github connector secret inlined").contains("clientSecret: $${VAIER_OIDC_GITHUB_CLIENT_SECRET}");
+        assertThat(render).as("Dex connectors/clients cannot read a secret from a file")
+            .doesNotContain("clientSecretFile").doesNotContain("secretFile");
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void wireguardMasquerade_usesInterfaceNameAgnosticRuleForVpnEgress() throws Exception {

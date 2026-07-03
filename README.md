@@ -11,7 +11,7 @@
 
 **Self-hosted infrastructure management for homelab developers.**
 
-Vaier wires together WireGuard, Traefik, Google sign-in (via oauth2-proxy), and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — automatically.
+Vaier wires together WireGuard, Traefik, Google or GitHub sign-in (via oauth2-proxy), and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain, and Vaier handles DNS, reverse proxy, and HTTPS — automatically.
 
 ---
 
@@ -22,15 +22,15 @@ Vaier wires together WireGuard, Traefik, Google sign-in (via oauth2-proxy), and 
 | **VPN peer management** | Create, delete, and monitor WireGuard peers with downloadable configs (QR code, `.conf`, docker-compose, or setup script). |
 | **Service publishing** | Publish any container on a peer — or a bare host:port on a LAN server — as a public HTTPS subdomain in one click, managed from the machine's card on the Infrastructure page. Share one subdomain across several services via path prefixes (`host/auth/*`, `host/api/*`, …), ignore discovered containers you don't want to publish, and watch each publish progress live. Automatic rollback if the flow fails. |
 | **Smart launchpad** | A public, **viewer-adaptive** dashboard that links to your published services, switching to direct LAN URLs when you're on the same network. A logged-out visitor sees only your public services; sign in and it additionally shows every social-login service that identity is allowed to reach (admins see all) — so internal URLs never leak to strangers, while admin pages stay admin-only. Tiles show the path segment (for path-based routes) or the subdomain, with an optional operator-supplied display name. Hover a tile to see the Docker image and version behind the service — or point a service at a version endpoint so one running natively on a LAN machine reports its version too. Hide internal-only services per route, and mark tiles whose hosting machine is unreachable with a red "host offline" dot (VPN handshake age or LAN reachability probe). |
-| **Reverse proxy** | Traefik dynamic config generated automatically, with a per-service **auth mode** (public or **Social login** — Google via oauth2-proxy, with Vaier deciding who's approved) and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
+| **Reverse proxy** | Traefik dynamic config generated automatically, with a per-service **auth mode** (public or **Social login** — Google or GitHub via oauth2-proxy, with Vaier deciding who's approved) and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
-| **Access management** | Manage who can sign in from the **Users** page: each Google identity is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. |
+| **Access management** | Manage who can sign in from the **Users** page: each Google or GitHub identity is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. |
 | **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when the Vaier server's own disk fills past a configurable threshold, or when someone signs in for the first time and lands as a pending access request awaiting approval. |
 | **Host disk monitoring** | Vaier watches free space on its own host filesystem and emails all admins when usage crosses a configurable threshold (default 85%), with a recovery email once it drops back below. |
 | **Device category** | Each machine carries a **device category** (phone, laptop, desktop, server, NAS, printer, router, gateway, IoT, camera, media, or generic) that decides which icon it shows — independent of its VPN role. Vaier auto-detects it from the machine's name, scan hints, and type; you can pin an explicit category to override the guess, and clear it to fall back to auto-detection. Icon-only: it never changes routing. |
 | **Inline field help** | Advanced fields (LAN CIDR, path prefix, root redirect, the auth toggle, direct LAN URL, hide-from-launchpad, version endpoint) carry a small "?" you can hover for a one-line plain-language explanation — no need to read the docs to know what a field does. |
 | **Concepts page** | An in-app **Concepts** glossary in the admin shell explaining, in plain language, every term you meet in the UI — grouped by area, each with a short definition and a one-line "why it matters". Each entry is deep-linkable via its anchor (e.g. `concepts.html#lan-cidr`). |
-| **Consistent branding** | The oauth2-proxy sign-in and error pages share Vaier's dark theme so the Google auth hand-off feels seamless. |
+| **Consistent branding** | The oauth2-proxy sign-in and error pages — and the Dex broker's own screens — all share Vaier's dark theme, so the sign-in hand-off (Google or GitHub) feels seamless end to end. |
 | **LAN scanner** _(Enterprise)_ | When adding a **LAN server**, scan its relay's LAN right from the Add Machine dialog to discover hosts and pick one to fill in the address. Already-registered machines are filtered out, so only new hosts appear. Requires an Enterprise licence. |
 | **Version visibility** | The running Vaier version and edition (Community/Enterprise) are shown under *Settings → About*, so you always know which build is deployed. |
 
@@ -56,7 +56,7 @@ flowchart LR
     server <-->|WG tunnel| p2
 ```
 
-Every published service resolves via Route53 to the single Vaier server, terminates TLS at Traefik, optionally passes social-login authorization (Google via oauth2-proxy, then Vaier's own access check), and is proxied over WireGuard to the container running on a peer.
+Every published service resolves via Route53 to the single Vaier server, terminates TLS at Traefik, optionally passes social-login authorization (Google or GitHub via oauth2-proxy, then Vaier's own access check), and is proxied over WireGuard to the container running on a peer.
 
 ---
 
@@ -112,9 +112,11 @@ VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
 VAIER_AWS_KEY=AKIA...
 VAIER_AWS_SECRET=...
-# Google sign-in — how you and your users authenticate (see step 3b)
+# Social sign-in — how you and your users authenticate (see step 3b)
 VAIER_OIDC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
+VAIER_OIDC_GITHUB_CLIENT_ID=...
+VAIER_OIDC_GITHUB_CLIENT_SECRET=...
 VAIER_ADMIN_EMAIL=you@gmail.com
 EOF
 chmod 600 .env
@@ -130,9 +132,11 @@ If your domain isn't on Route53, or you'd rather Vaier never touched AWS, simply
 cat > .env <<'EOF'
 VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
-# Google sign-in — how you and your users authenticate (see step 3b)
+# Social sign-in — how you and your users authenticate (see step 3b)
 VAIER_OIDC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
+VAIER_OIDC_GITHUB_CLIENT_ID=...
+VAIER_OIDC_GITHUB_CLIENT_SECRET=...
 VAIER_ADMIN_EMAIL=you@gmail.com
 EOF
 chmod 600 .env
@@ -144,14 +148,27 @@ You then maintain DNS records yourself in whatever provider you use. **Before fi
 |--------|------|-------|
 | `vaier.yourdomain.com` | A or CNAME | the public IP/hostname of this server |
 | `oauth2.yourdomain.com` | CNAME | `vaier.yourdomain.com` |
+| `dex.yourdomain.com` | CNAME | `vaier.yourdomain.com` |
 
-(`oauth2.yourdomain.com` is where oauth2-proxy serves the Google sign-in flow.)
+(`oauth2.yourdomain.com` is where oauth2-proxy serves the sign-in flow; `dex.yourdomain.com` is the Dex identity broker behind it that federates Google and GitHub.)
 
 **Each time you publish a service**, also create a `<subdomain>.yourdomain.com` CNAME pointing at `vaier.yourdomain.com`. Vaier waits up to two minutes for the record to propagate, then activates the Traefik route automatically. If the record never appears the publish is rolled back.
 
-### 3b. Set up Google sign-in
+### 3b. Set up sign-in (Google and GitHub)
 
-Vaier delegates authentication to Google through oauth2-proxy (mandatory infrastructure — it always starts with the stack) and owns authorization itself. Create an OAuth 2.0 Web application client in the [Google Cloud console](https://console.cloud.google.com/apis/credentials), set its authorized redirect URI to `https://oauth2.yourdomain.com/oauth2/callback`, and put the resulting client id and secret in `.env` as `VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET` (already shown above). Set `VAIER_ADMIN_EMAIL` to the Google address that should become the first admin. The oauth2-proxy cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`) is generated automatically — you don't author it.
+Vaier delegates authentication to Google or GitHub and owns authorization itself. oauth2-proxy (mandatory infrastructure — it always starts with the stack) is the forward-auth gatekeeper; behind it, the **Dex** identity broker federates the two providers:
+
+```
+Traefik → oauth2-proxy → Dex ─┬→ Google
+                              └→ GitHub
+```
+
+Both providers hand the user back to **Dex** (not oauth2-proxy), so register their redirect URIs at Dex:
+
+- **Google** — create an OAuth 2.0 Web application client in the [Google Cloud console](https://console.cloud.google.com/apis/credentials), set its authorized redirect URI to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET`.
+- **GitHub** — register an OAuth App in [GitHub developer settings](https://github.com/settings/developers), set its authorization callback URL to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GITHUB_CLIENT_ID` / `VAIER_OIDC_GITHUB_CLIENT_SECRET`. Any GitHub account may sign in — Vaier's pending → admin-approval gate decides who's actually let in.
+
+Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin. The oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`) and the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`) are generated automatically — you don't author them.
 
 ### 4. Start the stack
 

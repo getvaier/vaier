@@ -1,0 +1,134 @@
+/* Vaier theme for Dex — matches the branded oauth2-proxy sign-in card (sign_in.html) so the broker's
+   own screens (error, connector picker) read as the same product. Overrides Dex's default theme
+   classes; layout classes live in static/main.css. Dark VS Code palette, cyan accent, mono wordmark. */
+
+:root {
+  --bg: #1e1e1e;
+  --bg-card: #252526;
+  --border: #3c3c3c;
+  --text: #d4d4d4;
+  --text-muted: #858585;
+  --accent: #4fc3f7;
+  --accent-hover: #81d4fa;
+  --danger: #f48fb1;
+  --mono: 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.theme-body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  padding: 1.5rem;
+}
+
+/* Dex's top navbar is redundant here — sign_in.html has no chrome, just a centered card. Hide it and
+   bring the mark into the card instead, so a hop through Dex looks continuous. */
+.theme-navbar { display: none; }
+
+.dex-container {
+  margin: 0 auto;
+  max-width: 360px;
+  min-width: 0;
+  width: 100%;
+  color: var(--text);
+}
+
+.theme-panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.45);
+  padding: 2.6rem 2rem 2rem;
+}
+
+/* The Vaier network-node mark, echoing the sign-in card. */
+.theme-panel::before {
+  content: '';
+  display: block;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 0.9rem;
+  background: url(logo.png) center / contain no-repeat;
+  filter: drop-shadow(0 0 11px rgba(79, 195, 247, 0.4));
+}
+
+.theme-panel::after {
+  content: 'Vaier';
+  display: block;
+  font-family: var(--mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  margin-bottom: 1.4rem;
+}
+
+.theme-heading {
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0 0 1.2rem;
+}
+
+/* Error page body copy. */
+.theme-panel p {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.theme-form-row { margin: 0.7rem auto; }
+
+/* Provider buttons (connector picker). Outlined accent, hover fills — the sign-in secondary style. */
+.theme-btn-provider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--accent);
+  box-shadow: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.theme-btn-provider:hover {
+  background-color: var(--accent);
+  color: #06222e;
+}
+
+.theme-btn-provider:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 2px;
+}
+
+.dex-btn-text {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* Inline login error strip (e.g. wrong password on the local connector). */
+.dex-error-box {
+  background-color: rgba(244, 143, 177, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+  margin: 1rem auto;
+  max-width: none;
+  padding: 0.5rem 0.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-btn-provider { transition: none; }
+}

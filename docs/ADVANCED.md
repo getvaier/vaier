@@ -14,10 +14,13 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 | `VAIER_AWS_SECRET` | Route53 only | AWS secret key for Route53; omit for manual DNS mode |
 | `VAIER_DOMAIN` | Yes | Base domain (e.g. `yourdomain.com`) |
 | `ACME_EMAIL` | Yes | Email for Let's Encrypt notifications |
-| `VAIER_OIDC_GOOGLE_CLIENT_ID` | Yes | Google OAuth 2.0 client id — oauth2-proxy uses it for sign-in. oauth2-proxy is mandatory infrastructure and the sole runtime auth gateway |
-| `VAIER_OIDC_GOOGLE_CLIENT_SECRET` | Yes | Google OAuth 2.0 client secret. Written by `oauth2-proxy-init` to a mode-0600 client-secret file, never inlined |
-| `VAIER_ADMIN_EMAIL` | Yes | The Google address seeded as the first **admin** access entry, and restored to admin on startup whenever no admin remains, so the console can't lock everyone out |
+| `VAIER_OIDC_GOOGLE_CLIENT_ID` | Yes | Google OAuth 2.0 client id — a **Dex** connector uses it for sign-in. Register its redirect URI at Dex (`https://dex.<domain>/callback`) |
+| `VAIER_OIDC_GOOGLE_CLIENT_SECRET` | Yes | Google OAuth 2.0 client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
+| `VAIER_OIDC_GITHUB_CLIENT_ID` | Yes | GitHub OAuth App client id — a **Dex** connector uses it for sign-in. Register its callback URL at Dex (`https://dex.<domain>/callback`). Any GitHub account may sign in; the pending → admin-approval gate decides access |
+| `VAIER_OIDC_GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth App client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
+| `VAIER_ADMIN_EMAIL` | Yes | The email seeded as the first **admin** access entry, and restored to admin on startup whenever no admin remains, so the console can't lock everyone out |
 | `VAIER_OAUTH2_COOKIE_SECRET` | Auto | oauth2-proxy session cookie secret — generated automatically into `.env`, not operator-authored |
+| `VAIER_DEX_CLIENT_SECRET` | Auto | oauth2-proxy↔Dex shared client secret — generated automatically into `.env`, not operator-authored |
 | `VAIER_PUBLIC_HOST` | No | Public hostname of this server; used as the CNAME target for `vaier.<domain>` when not on EC2 |
 | `VAIER_PUBLIC_IP` | No | Public IPv4 of this server; used as an A-record target for `vaier.<domain>` when not on EC2 |
 | `VAIER_SERVER_LAN_CIDR` | No | CIDR Vaier treats as "the LAN this server sits on", so machines in it can be registered as LAN servers with no relay peer (see below). On EC2 the server's own **subnet** CIDR (a default-VPC subnet is a `/20`, one per AZ) is auto-detected from instance metadata; this env var **overrides** that, on EC2 too — most usefully to widen it to the whole VPC (e.g. `172.31.0.0/16`) so machines in any subnet/AZ qualify. Off EC2 it's the only way to set the value. Passed through in `docker-compose.yml` ([#204](https://github.com/getvaier/vaier/issues/204)). |

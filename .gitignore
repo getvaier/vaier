@@ -41,6 +41,8 @@ traefik/
 /icons/
 # oauth2-proxy: templates/ are committed sources; config/ is the rendered alpha + client-secret.
 oauth2/config/
+# dex: config/ is runtime state — the rendered config.yaml plus the upstream/broker secret files.
+dex/config/
 
 # WireGuard
 wireguard-config/
