@@ -84,6 +84,33 @@ class AuthRestControllerTest {
     }
 
     @Test
+    void me_carriesTheResolvedViewersProviderAndProviderUserId() {
+        // The topbar avatar reuses the Users-card photo chain (GitHub id → Gravatar), so getMe must
+        // surface the viewer's captured provider identity.
+        when(resolveViewerUseCase.resolveViewer("alice@example.com"))
+                .thenReturn(Optional.of(AccessEntry.builder()
+                        .email("alice@example.com").role(Role.ADMIN).name("Alice")
+                        .provider("github").providerUserId("12345").build()));
+
+        ResponseEntity<AuthRestController.MeResponse> response =
+                controller.getMe("alice", "Alice", "alice@example.com");
+
+        assertThat(response.getBody().provider()).isEqualTo("github");
+        assertThat(response.getBody().providerUserId()).isEqualTo("12345");
+    }
+
+    @Test
+    void me_providerAndProviderUserIdNull_whenViewerAbsent() {
+        when(resolveViewerUseCase.resolveViewer("stranger@example.com")).thenReturn(Optional.empty());
+
+        ResponseEntity<AuthRestController.MeResponse> response =
+                controller.getMe("stranger", "Stranger", "stranger@example.com");
+
+        assertThat(response.getBody().provider()).isNull();
+        assertThat(response.getBody().providerUserId()).isNull();
+    }
+
+    @Test
     void me_displayName_fallsBackToStoredEntryNameWhenHeaderNameAbsent() {
         when(resolveViewerUseCase.resolveViewer("alice@example.com"))
                 .thenReturn(Optional.of(entry("alice@example.com", Role.ADMIN, "Alice Stored")));

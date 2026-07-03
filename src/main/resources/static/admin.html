@@ -114,6 +114,7 @@
         </div>
     </main>
 
+    <script src="avatar.js"></script>
     <script>
         const mainContent = document.getElementById('mainContent');
         const tabs = document.querySelectorAll('#adminTabs .topbar-item[data-page]');
@@ -158,10 +159,24 @@
                 // through .title/.textContent is safe in both the attribute and text
                 // contexts (escapeHtml would not escape the " that breaks out of title=).
                 // The name is display-only now — there is no self-service profile page.
-                const profile = document.createElement('span');
-                profile.className = 'display-name';
-                profile.title = name;
-                profile.textContent = name;
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'display-name';
+                nameSpan.title = name;
+                nameSpan.textContent = name;
+                // Show the user's photo when one resolves (same chain as the Users cards); the name
+                // rides along as tooltip/alt. On a load miss the photo swaps back to the name text.
+                let profile = nameSpan;
+                const photoUrl = await VaierAvatar.photoUrl({
+                    provider: me.provider, providerUserId: me.providerUserId, email: me.email, size: 48 });
+                if (photoUrl) {
+                    const img = document.createElement('img');
+                    img.className = 'topbar-avatar';
+                    img.src = photoUrl;
+                    img.alt = name;
+                    img.title = name;
+                    img.onerror = () => img.replaceWith(nameSpan);
+                    profile = img;
+                }
                 const logoutLink = document.createElement('a');
                 logoutLink.href = logout;
                 logoutLink.className = 'topbar-item';

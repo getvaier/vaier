@@ -48,8 +48,15 @@ public class AuthRestController {
         String console = hasDomain ? "https://" + hostnames.vaierServerFqdn() + "/" : null;
         String logoutUrl = hasDomain ? hostnames.oauth2SignOutUrl(console) : null;
         String loginUrl = console;
+
+        // The topbar renders the viewer's photo when it can, reusing the Users-card avatar chain
+        // (GitHub id → Gravatar on email). Both come from the captured access entry; null when the
+        // viewer is unknown or has never signed in with a recognised provider.
+        String provider = viewer.map(AccessEntry::getProvider).orElse(null);
+        String providerUserId = viewer.map(AccessEntry::getProviderUserId).orElse(null);
         return ResponseEntity.ok(
-            new MeResponse(username, resolvedName, email, isAdmin, logoutUrl, loginUrl));
+            new MeResponse(username, resolvedName, email, isAdmin, logoutUrl, loginUrl,
+                provider, providerUserId));
     }
 
     private static String firstNonBlank(String... values) {
@@ -62,5 +69,6 @@ public class AuthRestController {
     }
 
     public record MeResponse(String username, String displayname, String email, boolean isAdmin,
-                             String logoutUrl, String loginUrl) {}
+                             String logoutUrl, String loginUrl,
+                             String provider, String providerUserId) {}
 }

@@ -381,6 +381,7 @@
         </div>
     </div>
 
+    <script src="avatar.js"></script>
     <script>
         let allGroups = [];
         const pickers = new Map();
@@ -531,31 +532,6 @@
             return letters.toUpperCase();
         }
 
-        // SHA-256 hex of a string, for the Gravatar avatar hash. crypto.subtle needs a secure context
-        // (Vaier is served over HTTPS via Traefik). Returns null if unavailable so we fall back to
-        // initials rather than break the row.
-        async function sha256Hex(str) {
-            if (!crypto.subtle) return null;
-            const bytes = new TextEncoder().encode(str);
-            const digest = await crypto.subtle.digest('SHA-256', bytes);
-            return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-
-        // The avatar photo URL for an entry, or null to stay on the monogram:
-        //   1. a GitHub sign-in with a known provider user id → the GitHub account photo
-        //   2. otherwise Gravatar keyed on the email's SHA-256 (d=404 so a miss errors out and we
-        //      fall back to initials rather than showing Gravatar's default silhouette)
-        // emailHash is precomputed (see renderAccess) to keep the row template synchronous.
-        function avatarPhotoUrl(entry, emailHash) {
-            if (entry.provider === 'github' && entry.providerUserId) {
-                return `https://avatars.githubusercontent.com/u/${encodeURIComponent(entry.providerUserId)}?s=80`;
-            }
-            if (emailHash) {
-                return `https://www.gravatar.com/avatar/${emailHash}?s=80&d=404`;
-            }
-            return null;
-        }
-
         function displayMessage(message, type) {
             const el = document.getElementById('message');
             el.innerHTML = `<div class="${type}">${escapeHtml(message)}</div>`;
@@ -622,11 +598,13 @@
         async function renderAccess() {
             const list = document.getElementById('roster');
 
-            // Precompute each email's Gravatar hash up front so the row template stays synchronous
-            // (no awaiting inside the innerHTML build). A hash failure leaves the entry on initials.
-            const emailHashes = {};
+            // Precompute each entry's photo URL up front (the Gravatar hash is async) so the row
+            // template stays synchronous — no awaiting inside the innerHTML build. A miss leaves the
+            // entry on initials. Shared with the topbar via avatar.js.
+            const photoUrls = {};
             await Promise.all(accessEntries.map(async e => {
-                emailHashes[e.email] = await sha256Hex((e.email || '').trim().toLowerCase());
+                photoUrls[e.email] = await VaierAvatar.photoUrl({
+                    provider: e.provider, providerUserId: e.providerUserId, email: e.email, size: 80 });
             }));
 
             // Waiting pill — pending identities are time-sensitive; surface the count, hide it at zero.
@@ -675,7 +653,7 @@
                 // Photo over monogram: on any load failure (GitHub 404 / Gravatar d=404) the <img>
                 // removes itself, revealing the initials layer beneath. The provider glyph is a corner
                 // badge on the avatar rather than an inline mark.
-                const photoUrl = avatarPhotoUrl(entry, emailHashes[entry.email]);
+                const photoUrl = photoUrls[entry.email];
                 const photo = photoUrl
                     ? `<img class="avatar-photo" src="${photoUrl}" alt="" onerror="this.remove()">`
                     : '';

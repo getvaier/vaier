@@ -144,6 +144,19 @@ body {
     cursor: default;
 }
 
+/* The signed-in user's photo, shown in place of the name when one resolves (GitHub / Gravatar).
+   Round — a personal identity marker, distinct from the roster's square provider monograms. On a
+   load miss the script swaps it back for the .display-name text. */
+.topbar-user .topbar-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    display: block;
+}
+
 /* Page header — IDE tab/breadcrumb bar */
 .page-header {
     background: var(--bg-panel);

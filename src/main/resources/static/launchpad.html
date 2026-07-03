@@ -226,6 +226,7 @@
         </div>
     </div>
 
+    <script src="avatar.js"></script>
     <script>
         const ICON_LOGOUT   = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/><polyline points="10 11 14 8 10 5"/><line x1="14" y1="8" x2="5" y2="8"/></svg>';
         const ICON_LOGIN    = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3"/><polyline points="6 11 2 8 6 5"/><line x1="2" y1="8" x2="11" y2="8"/></svg>';
@@ -254,10 +255,34 @@
                     <a href="/admin.html#users" class="topbar-item">${ICON_USERS}<span class="link-label">Users</span></a>
                     <a href="/admin.html#settings" class="topbar-item">${ICON_SETTINGS}<span class="link-label">Settings</span></a>
                 ` : '';
-                user.innerHTML = `
-                    <span class="display-name" title="${name}">${name}</span>
-                    <a href="${logout}" class="topbar-item" title="Logout" aria-label="Logout">${ICON_LOGOUT}</a>
-                `;
+
+                // Build via the DOM so the photo can carry an onerror fallback and the provider-owned
+                // name is set through .title/.textContent (safe in both attribute and text contexts).
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'display-name';
+                nameSpan.title = name;
+                nameSpan.textContent = name;
+                // Show the user's photo when one resolves (same chain as the Users cards); the name
+                // rides along as tooltip/alt. On a load miss the photo swaps back to the name text.
+                let profile = nameSpan;
+                const photoUrl = await VaierAvatar.photoUrl({
+                    provider: me.provider, providerUserId: me.providerUserId, email: me.email, size: 48 });
+                if (photoUrl) {
+                    const img = document.createElement('img');
+                    img.className = 'topbar-avatar';
+                    img.src = photoUrl;
+                    img.alt = name;
+                    img.title = name;
+                    img.onerror = () => img.replaceWith(nameSpan);
+                    profile = img;
+                }
+                const logoutLink = document.createElement('a');
+                logoutLink.href = logout;
+                logoutLink.className = 'topbar-item';
+                logoutLink.title = 'Logout';
+                logoutLink.setAttribute('aria-label', 'Logout');
+                logoutLink.innerHTML = ICON_LOGOUT; // trusted constant SVG
+                user.replaceChildren(profile, logoutLink);
             } else {
                 // Anonymous: the launchpad root is public now, so a plain link back here wouldn't
                 // force a login. Send the visitor to the branded provider selector (sign_in.html:
