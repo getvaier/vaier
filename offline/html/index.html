@@ -3,14 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <!-- Auto-retry: when Vaier comes back, the operator's page reconnects on its own. -->
 <meta http-equiv="refresh" content="15">
 <title>Vaier is offline</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
 <style>
-:root{--bg:#1e1e1e;--bg-card:#2d2d30;--border:#3c3c3c;--text:#d4d4d4;--text-muted:#858585;--accent:#4fc3f7;--accent-hover:#81d4fa;--brand-ai:#39ff14;}
+:root{color-scheme:dark;--bg:#1e1e1e;--bg-card:#2d2d30;--border:#3c3c3c;--text:#d4d4d4;--text-muted:#858585;--accent:#4fc3f7;--accent-hover:#81d4fa;--brand-ai:#39ff14;}
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{height:100%;}
+html,body{height:100%;background:var(--bg);}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;display:flex;align-items:center;justify-content:center;padding:1.5rem;}
 .card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:2.5rem;max-width:520px;width:100%;text-align:center;}
 .brand{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--accent);font-weight:600;margin-bottom:1.5rem;}

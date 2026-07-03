@@ -3,6 +3,7 @@
    classes; layout classes live in static/main.css. Dark VS Code palette, cyan accent, mono wordmark. */
 
 :root {
+  color-scheme: dark;
   --bg: #1e1e1e;
   --bg-card: #252526;
   --border: #3c3c3c;
@@ -14,6 +15,9 @@
   --mono: 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
+
+/* Keep the root canvas dark so Dex's redirect hops don't flash white before styles apply. */
+html { background: #1e1e1e; }
 
 .theme-body {
   margin: 0;
