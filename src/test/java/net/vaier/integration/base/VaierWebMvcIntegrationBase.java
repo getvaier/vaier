@@ -255,6 +255,10 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected ResolveViewerUseCase resolveViewerUseCase;
 
+    // --- Viewer identity capture (write-through on /users/me) ---
+    @MockBean
+    protected CaptureViewerIdentityUseCase captureViewerIdentityUseCase;
+
     // --- Settings / version ---
     @MockBean
     protected GetAppVersionUseCase getAppVersionUseCase;

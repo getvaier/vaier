@@ -644,4 +644,63 @@ class UserServiceTest {
         verify(forPersistingAccessEntries).upsert(argThat(e ->
                 e.getEmail().equals("friend@example.com") && e.getRole() == Role.ADMIN));
     }
+
+    // === captureIdentity (launchpad /users/me write-through) ===
+
+    @Test
+    void captureIdentity_persistsTheNameAndProviderAnExistingViewerBrought() {
+        when(forPersistingAccessEntries.findByEmail("turid@example.com"))
+                .thenReturn(Optional.of(accessEntry("turid@example.com", Role.USER, List.of("smarthouse"))));
+
+        Optional<AccessEntry> result =
+                service.captureIdentity("turid@example.com", "Turid", "google", "sub-1");
+
+        verify(forPersistingAccessEntries).upsert(argThat(e ->
+                e.getEmail().equals("turid@example.com") && "Turid".equals(e.getName())
+                        && "google".equals(e.getProvider()) && "sub-1".equals(e.getProviderUserId())));
+        assertThat(result).get().extracting(AccessEntry::getName).isEqualTo("Turid");
+    }
+
+    @Test
+    void captureIdentity_normalisesTheEmailBeforeLookup() {
+        when(forPersistingAccessEntries.findByEmail("turid@example.com"))
+                .thenReturn(Optional.of(accessEntry("turid@example.com", Role.USER, List.of())));
+
+        service.captureIdentity("  Turid@Example.com  ", "Turid", "google", "sub-1");
+
+        verify(forPersistingAccessEntries).findByEmail("turid@example.com");
+    }
+
+    @Test
+    void captureIdentity_neverCreatesAPendingEntryForAnUnknownViewer() {
+        // First-sighting creation + admin notification stays on the /authz/verify path; the launchpad
+        // read must not turn every anonymous-ish visitor into a pending entry.
+        when(forPersistingAccessEntries.findByEmail("stranger@example.com")).thenReturn(Optional.empty());
+
+        Optional<AccessEntry> result =
+                service.captureIdentity("stranger@example.com", "Stranger", "google", "sub-9");
+
+        assertThat(result).isEmpty();
+        verify(forPersistingAccessEntries, never()).upsert(any());
+        verifyNoInteractions(forNotifyingAdmins);
+    }
+
+    @Test
+    void captureIdentity_doesNotWriteWhenNothingChanged() {
+        when(forPersistingAccessEntries.findByEmail("turid@example.com"))
+                .thenReturn(Optional.of(accessEntry("turid@example.com", Role.USER, List.of()).toBuilder()
+                        .name("Turid").provider("google").providerUserId("sub-1").build()));
+
+        service.captureIdentity("turid@example.com", "Turid", "google", "sub-1");
+
+        verify(forPersistingAccessEntries, never()).upsert(any());
+    }
+
+    @Test
+    void captureIdentity_blankEmailResolvesToEmptyWithoutTouchingTheStore() {
+        Optional<AccessEntry> result = service.captureIdentity("  ", "Turid", "google", "sub-1");
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(forPersistingAccessEntries);
+    }
 }

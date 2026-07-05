@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.application.AssignGroupsUseCase;
+import net.vaier.application.CaptureViewerIdentityUseCase;
 import net.vaier.application.GetServiceAccessRulesUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
@@ -33,7 +34,7 @@ import java.util.Optional;
 public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
         RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase,
-        ResolveViewerUseCase {
+        ResolveViewerUseCase, CaptureViewerIdentityUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
@@ -153,6 +154,20 @@ public class UserService implements
             return Optional.empty();
         }
         return forPersistingAccessEntries.findByEmail(normaliseEmail(email));
+    }
+
+    @Override
+    public Optional<AccessEntry> captureIdentity(String email, String name, String provider,
+                                                 String providerUserId) {
+        if (email == null || email.isBlank()) {
+            return Optional.empty();
+        }
+        // Refresh an existing viewer's captured identity from what this sign-in presented. First
+        // sighting of an unknown identity stays on the /authz/verify path (it decides pending vs
+        // approved and notifies admins) — here we only fill in the name/provider a known viewer
+        // brought, so merely loading the launchpad keeps their admin card current.
+        return forPersistingAccessEntries.findByEmail(normaliseEmail(email))
+                .map(entry -> refreshIdentity(entry, name, provider, providerUserId));
     }
 
     @Override

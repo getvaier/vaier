@@ -76,7 +76,7 @@ class AuthRestControllerIT extends VaierWebMvcIntegrationBase {
     @Test
     void getMe_reportsIsAdminFromTheResolvedAccessEntry() throws Exception {
         when(configResolver.getDomain()).thenReturn("example.com");
-        when(resolveViewerUseCase.resolveViewer("alice@example.com")).thenReturn(
+        when(captureViewerIdentityUseCase.captureIdentity("alice@example.com", null, null, null)).thenReturn(
             java.util.Optional.of(net.vaier.domain.AccessEntry.builder()
                 .email("alice@example.com").role(net.vaier.domain.Role.ADMIN).build()));
 
