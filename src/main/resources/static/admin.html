@@ -166,8 +166,15 @@
                 // Show the user's photo when one resolves (same chain as the Users cards); the name
                 // rides along as tooltip/alt. On a load miss the photo swaps back to the name text.
                 let profile = nameSpan;
-                const photoUrl = await VaierAvatar.photoUrl({
-                    provider: me.provider, providerUserId: me.providerUserId, email: me.email, size: 48 });
+                // The photo is a non-essential enhancement — never let it break the name + Logout
+                // controls. If avatar.js failed to load, the bare VaierAvatar reference throws a
+                // ReferenceError the catch swallows (it's a top-level const, not a window property,
+                // so window.VaierAvatar wouldn't see it); on any miss we keep the name text.
+                let photoUrl = null;
+                try {
+                    photoUrl = await VaierAvatar.photoUrl({
+                        provider: me.provider, providerUserId: me.providerUserId, email: me.email, size: 48 });
+                } catch (_) { /* keep the name text */ }
                 if (photoUrl) {
                     const img = document.createElement('img');
                     img.className = 'topbar-avatar';

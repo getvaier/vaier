@@ -40,6 +40,9 @@ class DockerComposeStructureTest {
         assertThat(rule).contains("Path(`/`)");
         assertThat(rule).contains("Path(`/launchpad.html`)");
         assertThat(rule).contains("Path(`/styles.css`)");
+        // avatar.js is loaded by the public launchpad shell; it must be anonymously reachable too,
+        // or a non-admin viewer 403s on it, VaierAvatar never loads, and the topbar breaks.
+        assertThat(rule).contains("Path(`/avatar.js`)");
         assertThat(rule).contains("PathPrefix(`/icon`)");
         assertThat(rule).contains("Path(`/launchpad/services`)");
 
@@ -62,9 +65,12 @@ class DockerComposeStructureTest {
         String mw = labels.get("traefik.http.routers.vaier-identity.middlewares");
         String priority = labels.get("traefik.http.routers.vaier-identity.priority");
 
-        // Exactly the two viewer-adaptive endpoints, nothing else.
+        // The viewer-adaptive endpoints: the two data/identity APIs plus the launchpad's live-update
+        // SSE stream. The SSE payload carries service subdomains, so it belongs behind oauth2-authn
+        // (authenticated non-admins get it; anonymous get a clean 401) — never on the public tier.
         assertThat(rule).contains("Path(`/launchpad/services-authenticated`)");
         assertThat(rule).contains("Path(`/users/me`)");
+        assertThat(rule).contains("Path(`/published-services/events`)");
 
         // oauth2-authn injects identity when a session exists and 401s anonymous — but NO
         // forced-login redirect (oauth2-signin) and NO admin gate (vaier-authz).
