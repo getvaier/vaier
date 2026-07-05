@@ -505,7 +505,10 @@
 
         load();
 
-        const _sse = new EventSource('/published-services/events');
+        // The launchpad's own public, signal-only stream: same event names, empty payload, and
+        // anonymously reachable — so a logged-out visitor gets live tile refreshes too (the full
+        // /published-services/events stream stays authenticated because its data carries subdomains).
+        const _sse = new EventSource('/launchpad/events');
         _sse.addEventListener('service-updated', () => load());
         let _sseConnected = false;
         _sse.onopen = () => { if (_sseConnected) load(); _sseConnected = true; };

@@ -45,6 +45,9 @@ class DockerComposeStructureTest {
         assertThat(rule).contains("Path(`/avatar.js`)");
         assertThat(rule).contains("PathPrefix(`/icon`)");
         assertThat(rule).contains("Path(`/launchpad/services`)");
+        // The launchpad's public live-update stream — signal-only, so anonymous viewers get live
+        // tile refreshes without the private-subdomain payload the full SSE stream carries.
+        assertThat(rule).contains("Path(`/launchpad/events`)");
 
         // But no admin surface may be whitelisted as public.
         assertThat(rule).doesNotContain("admin.html");

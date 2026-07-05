@@ -66,4 +66,37 @@ class SseEventPublisherTest {
         assertThatCode(() -> publisher.publish("topic", "event", "data"))
                 .doesNotThrowAnyException();
     }
+
+    @Test
+    void subscribeSignalOnly_returnsNonNullDistinctEmitters() {
+        SseEmitter e1 = publisher.subscribeSignalOnly("topic");
+        SseEmitter e2 = publisher.subscribeSignalOnly("topic");
+        assertThat(e1).isNotNull().isNotSameAs(e2);
+    }
+
+    @Test
+    void publish_deliversToBothFullAndSignalOnlySubscribers_withoutThrowing() {
+        publisher.subscribe("topic");
+        publisher.subscribeSignalOnly("topic");
+
+        assertThatCode(() -> publisher.publish("topic", "service-updated", "openhab.colina27"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void publish_withOnlySignalOnlySubscriber_doesNotThrow() {
+        publisher.subscribeSignalOnly("topic");
+
+        assertThatCode(() -> publisher.publish("topic", "service-updated", "openhab.colina27"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void afterSignalOnlyEmitterCompleted_publishDoesNotThrow() {
+        SseEmitter emitter = publisher.subscribeSignalOnly("topic");
+        emitter.complete();
+
+        assertThatCode(() -> publisher.publish("topic", "service-updated", "data"))
+                .doesNotThrowAnyException();
+    }
 }

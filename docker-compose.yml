@@ -390,7 +390,7 @@ services:
       # sign-in. Precisely whitelisted: the launchpad page + its static assets (styles.css, icons),
       # the anonymous services feed, and the LAN docker-setup script. Never admin.html or any admin
       # API — those fall through to the Tier 3 catch-all below.
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || Path(`/avatar.js`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/lan-servers/docker-setup.sh`))
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || Path(`/avatar.js`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/launchpad/events`) || Path(`/lan-servers/docker-setup.sh`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200

@@ -14,6 +14,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Optional;
@@ -36,12 +37,26 @@ class LaunchpadRestControllerTest {
     @Mock
     ResolveViewerUseCase resolveViewerUseCase;
 
+    @Mock
+    net.vaier.domain.port.ForSubscribingToEvents forSubscribingToEvents;
+
     @InjectMocks
     LaunchpadRestController controller;
 
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(controller, "trustedProxyCidr", "172.20.0.0/16");
+    }
+
+    @Test
+    void events_subscribesSignalOnly_soNoSubdomainLeaksToAnonymousViewers() {
+        SseEmitter emitter = new SseEmitter();
+        when(forSubscribingToEvents.subscribeSignalOnly("published-services")).thenReturn(emitter);
+
+        SseEmitter result = controller.events();
+
+        assertThat(result).isSameAs(emitter);
+        verify(forSubscribingToEvents).subscribeSignalOnly("published-services");
     }
 
     @Test

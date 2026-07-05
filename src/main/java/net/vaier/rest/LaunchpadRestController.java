@@ -7,11 +7,14 @@ import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.application.ResolveViewerUseCase;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.Cidr;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -22,6 +25,7 @@ public class LaunchpadRestController {
 
     private final GetLaunchpadServicesUseCase getLaunchpadServicesUseCase;
     private final ResolveViewerUseCase resolveViewerUseCase;
+    private final ForSubscribingToEvents forSubscribingToEvents;
 
     @Value("${launchpad.trusted-proxy-cidr:172.20.0.0/16}")
     private String trustedProxyCidr;
@@ -34,6 +38,17 @@ public class LaunchpadRestController {
     @GetMapping("/services")
     public List<LaunchpadServiceUco> getServices(HttpServletRequest request) {
         return getLaunchpadServicesUseCase.getLaunchpadServices(resolveCallerIp(request), (AccessEntry) null);
+    }
+
+    /**
+     * Public live-update stream for the launchpad. Emits the same publish/reachability event names as
+     * the admin's {@code /published-services/events} but with an empty payload, so an anonymously-loaded
+     * launchpad re-fetches its tiles when things change without ever being sent a (possibly private)
+     * service subdomain. Stays anonymously reachable, like {@link #getServices}.
+     */
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter events() {
+        return forSubscribingToEvents.subscribeSignalOnly("published-services");
     }
 
     /**

@@ -17,20 +17,39 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class SseEventPublisher implements ForPublishingEvents, ForSubscribingToEvents {
 
     private final ConcurrentHashMap<String, List<SseEmitter>> topicEmitters = new ConcurrentHashMap<>();
+    // Signal-only subscribers get the same event names with the data stripped (see subscribeSignalOnly).
+    private final ConcurrentHashMap<String, List<SseEmitter>> signalEmitters = new ConcurrentHashMap<>();
 
     @Override
     public SseEmitter subscribe(String topic) {
+        return register(topicEmitters, topic);
+    }
+
+    @Override
+    public SseEmitter subscribeSignalOnly(String topic) {
+        return register(signalEmitters, topic);
+    }
+
+    private SseEmitter register(ConcurrentHashMap<String, List<SseEmitter>> registry, String topic) {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-        topicEmitters.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(emitter);
-        emitter.onCompletion(() -> removeEmitter(topic, emitter));
-        emitter.onTimeout(() -> removeEmitter(topic, emitter));
-        emitter.onError(e -> removeEmitter(topic, emitter));
+        registry.computeIfAbsent(topic, k -> new CopyOnWriteArrayList<>()).add(emitter);
+        emitter.onCompletion(() -> removeEmitter(registry, topic, emitter));
+        emitter.onTimeout(() -> removeEmitter(registry, topic, emitter));
+        emitter.onError(e -> removeEmitter(registry, topic, emitter));
         return emitter;
     }
 
     @Override
     public void publish(String topic, String eventName, String data) {
-        List<SseEmitter> emitters = topicEmitters.getOrDefault(topic, List.of());
+        // Full subscribers get the event with its data; signal-only subscribers get the same event
+        // name with an empty payload, so the launchpad still knows to re-fetch but no subdomain leaks.
+        deliver(topicEmitters, topic, eventName, data);
+        deliver(signalEmitters, topic, eventName, "");
+    }
+
+    private void deliver(ConcurrentHashMap<String, List<SseEmitter>> registry, String topic,
+                         String eventName, String data) {
+        List<SseEmitter> emitters = registry.getOrDefault(topic, List.of());
         List<SseEmitter> dead = new ArrayList<>();
         for (SseEmitter emitter : new ArrayList<>(emitters)) {
             try {
@@ -45,8 +64,9 @@ public class SseEventPublisher implements ForPublishingEvents, ForSubscribingToE
         }
     }
 
-    private void removeEmitter(String topic, SseEmitter emitter) {
-        List<SseEmitter> emitters = topicEmitters.get(topic);
+    private void removeEmitter(ConcurrentHashMap<String, List<SseEmitter>> registry, String topic,
+                               SseEmitter emitter) {
+        List<SseEmitter> emitters = registry.get(topic);
         if (emitters != null) {
             emitters.remove(emitter);
         }
