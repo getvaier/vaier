@@ -144,6 +144,19 @@ class LanServerServiceTest {
     }
 
     @Test
+    void register_rejectsReservedVaierServerName() {
+        // #311: "Vaier server" is the reserved name of the Vaier-server singleton machine.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        assertThatThrownBy(() -> service.register(
+                net.vaier.domain.LanAnchor.VAIER_SERVER_NAME, "192.168.3.50", true, 2375))
+            .isInstanceOf(ConflictException.class);
+        verify(forPersistingLanServers, never()).save(any());
+    }
+
+    @Test
     void register_trimsSurroundingWhitespaceFromNameAndAddress() {
         // #284 review: the persisted identity must match the trimmed uniqueness-comparison rule,
         // and stay a clean /lan-servers/{name} path segment.

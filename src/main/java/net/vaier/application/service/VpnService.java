@@ -598,7 +598,10 @@ public class VpnService implements
             .map(ForGettingPeerConfigurations.PeerConfiguration::name);
         Stream<String> lanServerNames = forPersistingLanServers.getAll().stream()
             .map(LanServer::name);
-        return Stream.concat(peerNames, lanServerNames).toList();
+        // The Vaier server host is a machine too (#311); its canonical name is reserved so an
+        // operator can never create a peer that shadows it.
+        return Stream.concat(Stream.concat(peerNames, lanServerNames),
+            Stream.of(net.vaier.domain.LanAnchor.VAIER_SERVER_NAME)).toList();
     }
 
     private String findNextAvailableIp() throws IOException {

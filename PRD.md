@@ -753,6 +753,16 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   `Machine.defaultSshAccess`, an explicit nullable override is persisted (peer `# VAIER:` metadata /
   `lan-servers.yml`), and `PATCH /machines/{machine}/ssh-access` sets it. The SSH access flag is
   authoritative; the device category only seeds its default and never otherwise affects it.
+- **#311 — Vaier-server host as an SSH target ✅ (credential surface only).** The Vaier server host
+  itself now appears in Infrastructure as a singleton synthetic machine (`Machine.vaierServer`, reusing
+  `MachineType.UBUNTU_SERVER` + device category `SERVER` so no new `MachineType` and no routing ripple),
+  under the reserved name `"Vaier server"` (`LanAnchor.VAIER_SERVER_NAME`, rejected as an operator peer /
+  LAN-server name). It carries the same **SSH access** toggle and **host credential** control as any
+  machine — no delete/regenerate/publish. Its SSH-access override lives in `vaier-config.yml`
+  (`vaierServerSshAccess`, default on); the host credential uses the existing name-keyed vault unchanged.
+  `PATCH /machines/{name}/ssh-access` routes the Vaier-server write to the config store; a dedicated
+  `GET /machines/vaier-server` feeds its card. The terminal connection (address = container→host gateway
+  or `VAIER_HOST_SSH_ADDRESS`) is deferred to slice 2.
 - **#308 — Web terminal** (WebSocket + MINA sshd-core + xterm.js). 🔲
 - **#309 — Managed ed25519 keypair generation** (the `managed` flag). 🔲
 - **#310 — Saved snippets.** 🔲

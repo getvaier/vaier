@@ -99,6 +99,22 @@ public record Machine(
     }
 
     /**
+     * The Vaier server host itself as a singleton synthetic machine (#311) — the box running the
+     * whole stack, which is neither a WireGuard peer nor a LAN server. It carries the canonical
+     * {@link LanAnchor#VAIER_SERVER_NAME reserved name}, device category {@link DeviceCategory#SERVER},
+     * and defaults SSH-access on (it is a server). {@code sshAccessOverride} is the operator's pinned
+     * value from the Vaier config, or null to use the default. Its type reuses {@link MachineType#UBUNTU_SERVER}
+     * rather than a dedicated enum value so it never disturbs peer/LAN routing logic — Vaier never
+     * generates WireGuard config from a {@code Machine} projection. Every peer/LAN-only field is null.
+     */
+    public static Machine vaierServer(Boolean sshAccessOverride) {
+        return new Machine(
+            LanAnchor.VAIER_SERVER_NAME, MachineType.UBUNTU_SERVER,
+            null, null, null, null, null, null, null,
+            null, null, false, null, DeviceCategory.SERVER, sshAccessOverride);
+    }
+
+    /**
      * True when {@code candidate} collides with an existing machine name. Machine names are
      * unique across all of Vaier (#284) — every machine, whether a VPN peer or a LAN server,
      * has a distinct name, so an operator is never shown two machines wearing the same label

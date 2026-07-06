@@ -1,9 +1,16 @@
 package net.vaier.rest;
 
+import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.domain.AuthMethod;
+import net.vaier.domain.HostCredentialView;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
+
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -21,7 +28,9 @@ import static org.mockito.Mockito.when;
 class MachineRestControllerTest {
 
     @Mock GetMachinesUseCase getMachinesUseCase;
+    @Mock GetVaierServerUseCase getVaierServerUseCase;
     @Mock SetMachineSshAccessUseCase setMachineSshAccessUseCase;
+    @Mock GetHostCredentialUseCase getHostCredentialUseCase;
 
     @InjectMocks MachineRestController controller;
 
@@ -95,5 +104,33 @@ class MachineRestControllerTest {
         var response = controller.setSshAccess("nas", new MachineRestController.SshAccessRequest(true));
 
         assertThat(response.sshAccess()).isTrue();
+    }
+
+    // --- Vaier server singleton (#311) ---
+
+    @Test
+    void vaierServer_reportsEffectiveSshAccessAndCredentialPresence() {
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(null));
+        when(getHostCredentialUseCase.getHostCredential(LanAnchor.VAIER_SERVER_NAME))
+            .thenReturn(Optional.of(new HostCredentialView(LanAnchor.VAIER_SERVER_NAME, "root",
+                AuthMethod.PASSWORD, true)));
+
+        var response = controller.vaierServer();
+
+        assertThat(response.name()).isEqualTo(LanAnchor.VAIER_SERVER_NAME);
+        assertThat(response.sshAccess()).isTrue();  // server defaults on
+        assertThat(response.hasCredential()).isTrue();
+    }
+
+    @Test
+    void vaierServer_noCredentialStored_reportsHasCredentialFalse() {
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(false));
+        when(getHostCredentialUseCase.getHostCredential(LanAnchor.VAIER_SERVER_NAME))
+            .thenReturn(Optional.empty());
+
+        var response = controller.vaierServer();
+
+        assertThat(response.sshAccess()).isFalse();
+        assertThat(response.hasCredential()).isFalse();
     }
 }

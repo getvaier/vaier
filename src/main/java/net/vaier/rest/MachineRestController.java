@@ -1,7 +1,9 @@
 package net.vaier.rest;
 
 import lombok.RequiredArgsConstructor;
+import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.domain.Machine;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,7 +21,9 @@ import java.util.List;
 public class MachineRestController {
 
     private final GetMachinesUseCase getMachinesUseCase;
+    private final GetVaierServerUseCase getVaierServerUseCase;
     private final SetMachineSshAccessUseCase setMachineSshAccessUseCase;
+    private final GetHostCredentialUseCase getHostCredentialUseCase;
 
     @GetMapping
     public List<MachineResponse> list() {
@@ -27,6 +31,22 @@ public class MachineRestController {
             .map(MachineResponse::from)
             .toList();
     }
+
+    /**
+     * The Vaier server host as a machine (#311): its canonical name, effective SSH access, and
+     * whether a host credential is stored for it. Feeds the dedicated Vaier-server card's SSH-access
+     * toggle and credential control. Writes reuse {@code /machines/{name}/ssh-access} and
+     * {@code /machines/{name}/ssh-credential} with the returned {@code name}.
+     */
+    @GetMapping("/vaier-server")
+    public VaierServerResponse vaierServer() {
+        Machine server = getVaierServerUseCase.getVaierServerMachine();
+        boolean hasCredential = getHostCredentialUseCase.getHostCredential(server.name())
+            .map(v -> v.hasSecret()).orElse(false);
+        return new VaierServerResponse(server.name(), server.effectiveSshAccess(), hasCredential);
+    }
+
+    record VaierServerResponse(String name, boolean sshAccess, boolean hasCredential) {}
 
     /**
      * Sets whether Vaier offers SSH for a machine — the credential control now, the web terminal

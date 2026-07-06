@@ -9,10 +9,14 @@ import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.VaierConfig;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,22 +39,52 @@ class MachineServiceTest {
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForPersistingLanServers forPersistingLanServers;
+    @Mock ForPersistingAppConfiguration forPersistingAppConfiguration;
 
     MachineService service;
+
+    /** The domain (non-Vaier-server) machines from a getAllMachines() result. */
+    private static List<Machine> domainMachines(List<Machine> all) {
+        return all.stream().filter(m -> !LanAnchor.VAIER_SERVER_NAME.equals(m.name())).toList();
+    }
 
     @BeforeEach
     void setUp() {
         service = new MachineService(forGettingPeerConfigurations, forGettingVpnClients, forGettingLanServers,
-            forResolvingServerLanCidr, forUpdatingPeerConfigurations, forPersistingLanServers);
+            forResolvingServerLanCidr, forUpdatingPeerConfigurations, forPersistingLanServers,
+            forPersistingAppConfiguration);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
+        lenient().when(forPersistingAppConfiguration.load()).thenReturn(Optional.empty());
     }
 
     @Test
-    void getAllMachines_emptyWhenNothingRegistered() {
-        assertThat(service.getAllMachines()).isEmpty();
+    void getAllMachines_nothingRegistered_stillContainsOnlyTheVaierServer() {
+        List<Machine> all = service.getAllMachines();
+        assertThat(domainMachines(all)).isEmpty();
+        assertThat(all).extracting(Machine::name).contains(LanAnchor.VAIER_SERVER_NAME);
+    }
+
+    @Test
+    void getAllMachines_includesVaierServer_effectiveSshAccessDefaultsOn() {
+        Machine server = service.getAllMachines().stream()
+            .filter(m -> LanAnchor.VAIER_SERVER_NAME.equals(m.name()))
+            .findFirst().orElseThrow();
+
+        assertThat(server.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.SERVER);
+        assertThat(server.effectiveSshAccess()).isTrue();
+    }
+
+    @Test
+    void getAllMachines_vaierServer_honoursStoredOverride() {
+        lenient().when(forPersistingAppConfiguration.load())
+            .thenReturn(Optional.of(VaierConfig.builder().vaierServerSshAccess(false).build()));
+
+        Machine server = service.getVaierServerMachine();
+
+        assertThat(server.effectiveSshAccess()).isFalse();
     }
 
     @Test
@@ -63,7 +97,7 @@ class MachineServiceTest {
                 "1700000000", "100", "200")
         ));
 
-        List<Machine> machines = service.getAllMachines();
+        List<Machine> machines = domainMachines(service.getAllMachines());
 
         assertThat(machines).extracting(Machine::name, Machine::type, Machine::publicKey,
                 Machine::endpointIp, Machine::latestHandshake, Machine::transferRx, Machine::transferTx)
@@ -81,7 +115,7 @@ class MachineServiceTest {
             new VpnClient("pk-phone", "10.13.13.10/32", null, null, null, null, null)
         ));
 
-        List<Machine> machines = service.getAllMachines();
+        List<Machine> machines = domainMachines(service.getAllMachines());
 
         assertThat(machines).hasSize(1);
         assertThat(machines.get(0).type()).isEqualTo(MachineType.MOBILE_CLIENT);
@@ -95,7 +129,7 @@ class MachineServiceTest {
         ));
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
 
-        List<Machine> machines = service.getAllMachines();
+        List<Machine> machines = domainMachines(service.getAllMachines());
 
         assertThat(machines).hasSize(1);
         Machine m = machines.get(0);
@@ -116,7 +150,7 @@ class MachineServiceTest {
                 "192.168.3.0/24", "192.168.3.5")
         ));
 
-        Machine m = service.getAllMachines().get(0);
+        Machine m = domainMachines(service.getAllMachines()).get(0);
 
         assertThat(m.lanCidr()).isEqualTo("192.168.3.0/24");
         assertThat(m.lanAddress()).isEqualTo("192.168.3.5");
@@ -128,7 +162,7 @@ class MachineServiceTest {
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "relay")
         ));
 
-        List<Machine> machines = service.getAllMachines();
+        List<Machine> machines = domainMachines(service.getAllMachines());
 
         assertThat(machines).hasSize(1);
         Machine m = machines.get(0);
@@ -198,7 +232,7 @@ class MachineServiceTest {
             new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), null)
         ));
 
-        List<Machine> machines = service.getAllMachines();
+        List<Machine> machines = domainMachines(service.getAllMachines());
 
         assertThat(machines).extracting(Machine::name, Machine::type)
             .containsExactlyInAnyOrder(
@@ -241,5 +275,22 @@ class MachineServiceTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setMachineSshAccess("ghost", true))
             .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void setMachineSshAccess_vaierServer_writesToConfig_notPeerOrLanAdapter() {
+        lenient().when(forPersistingAppConfiguration.load())
+            .thenReturn(Optional.of(VaierConfig.builder().domain("example.com").build()));
+
+        boolean effective = service.setMachineSshAccess(LanAnchor.VAIER_SERVER_NAME, false);
+
+        assertThat(effective).isFalse();
+        ArgumentCaptor<VaierConfig> captor = ArgumentCaptor.forClass(VaierConfig.class);
+        org.mockito.Mockito.verify(forPersistingAppConfiguration).save(captor.capture());
+        assertThat(captor.getValue().getVaierServerSshAccess()).isFalse();
+        assertThat(captor.getValue().getDomain()).isEqualTo("example.com"); // other fields preserved
+        org.mockito.Mockito.verifyNoInteractions(forUpdatingPeerConfigurations);
+        org.mockito.Mockito.verify(forPersistingLanServers, org.mockito.Mockito.never())
+            .save(org.mockito.ArgumentMatchers.any());
     }
 }

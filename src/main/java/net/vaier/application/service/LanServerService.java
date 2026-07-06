@@ -249,7 +249,10 @@ public class LanServerService implements
         Stream<String> lanServerNames = lanServers.stream()
             .filter(s -> excludeLanServerName == null || !s.hasName(excludeLanServerName))
             .map(LanServer::name);
-        return Stream.concat(peerNames, lanServerNames).toList();
+        // The Vaier server host is a machine too (#311); its canonical name is reserved so an
+        // operator can never register a peer or LAN server that shadows it.
+        return Stream.concat(Stream.concat(peerNames, lanServerNames),
+            Stream.of(LanAnchor.VAIER_SERVER_NAME)).toList();
     }
 
     /**

@@ -61,6 +61,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
                 .smtpSender((String) data.get("smtpSender"))
                 .smtpPassword(cipher.decrypt((String) data.get("smtpPassword")))
                 .diskMonitorThresholdPercent((Integer) data.get("diskMonitorThresholdPercent"))
+                .vaierServerSshAccess((Boolean) data.get("vaierServerSshAccess"))
                 .build());
         } catch (Exception e) {
             log.warn("Failed to load vaier config from {}", configFilePath, e);
@@ -92,6 +93,10 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
         data.put("smtpSender", config.getSmtpSender());
         data.put("smtpPassword", cipher.encrypt(config.getSmtpPassword()));
         data.put("diskMonitorThresholdPercent", config.getDiskMonitorThresholdPercent());
+        // Vaier-server SSH-access override (#311); only written when the operator has pinned one.
+        if (config.getVaierServerSshAccess() != null) {
+            data.put("vaierServerSshAccess", config.getVaierServerSshAccess());
+        }
 
         try (FileWriter writer = new FileWriter(file)) {
             yaml.dump(data, writer);

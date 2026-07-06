@@ -171,4 +171,22 @@ class MachineTest {
             MachineType.UBUNTU_SERVER, null, null, null, null, null);
         assertThat(Machine.fromPeer(peer, null).effectiveSshAccess()).isTrue();
     }
+
+    // --- Vaier-server singleton (#311) ---
+
+    @Test
+    void vaierServer_hasCanonicalNameServerCategory_andDefaultsSshOn() {
+        Machine m = Machine.vaierServer(null);
+
+        assertThat(m.name()).isEqualTo(LanAnchor.VAIER_SERVER_NAME);
+        assertThat(m.type()).isEqualTo(MachineType.UBUNTU_SERVER);
+        assertThat(m.deviceCategory()).isEqualTo(DeviceCategory.SERVER);
+        assertThat(m.effectiveSshAccess()).isTrue();
+    }
+
+    @Test
+    void vaierServer_honoursExplicitOverride() {
+        assertThat(Machine.vaierServer(false).effectiveSshAccess()).isFalse();
+        assertThat(Machine.vaierServer(true).effectiveSshAccess()).isTrue();
+    }
 }

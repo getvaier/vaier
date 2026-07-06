@@ -1009,6 +1009,14 @@ class VpnServiceTest {
     }
 
     @Test
+    void createPeer_rejectsReservedVaierServerName() {
+        // #311: the Vaier-server singleton's name is reserved across all of Vaier.
+        assertThatThrownBy(() -> service.createPeer(net.vaier.domain.LanAnchor.VAIER_SERVER_NAME))
+            .isInstanceOf(ConflictException.class);
+        verify(forExecutingInContainer, never()).execute(any(), any(), any());
+    }
+
+    @Test
     void renamePeer_rejectsNameAlreadyUsedByAnotherMachine() {
         when(peerConfigProvider.getPeerConfigByName("laptp"))
             .thenReturn(Optional.of(new PeerConfiguration("laptp", "10.13.13.2", "config")));

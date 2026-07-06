@@ -19,6 +19,12 @@ public class VaierConfig {
     private String smtpSender;
     private String smtpPassword;
     private Integer diskMonitorThresholdPercent;
+    /**
+     * Whether Vaier offers SSH for the Vaier-server host itself (#311) — the explicit operator
+     * override, or null when unset (the effective value then falls back to the server default: on).
+     * The Vaier server is neither a peer nor a LAN server, so its SSH-access override lives here.
+     */
+    private Boolean vaierServerSshAccess;
 
     /** The default host-disk alert threshold when none is configured: notify above 85% used. */
     public static final int DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT = 85;
@@ -52,6 +58,16 @@ public class VaierConfig {
             .smtpUsername(newSmtpUsername)
             .smtpSender(newSmtpSender)
             .smtpPassword(newSmtpPassword)
+            .build();
+    }
+
+    /**
+     * A copy with the Vaier-server SSH-access override replaced (#311); every other field carries over
+     * unchanged. A null value clears the override, reverting the effective state to the default (on).
+     */
+    public VaierConfig withVaierServerSshAccess(Boolean sshAccess) {
+        return toBuilder()
+            .vaierServerSshAccess(sshAccess)
             .build();
     }
 

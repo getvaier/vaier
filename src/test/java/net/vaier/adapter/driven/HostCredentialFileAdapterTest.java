@@ -86,6 +86,17 @@ class HostCredentialFileAdapterTest {
     }
 
     @Test
+    void storesCredentialForTheVaierServerMachine_byItsCanonicalName() {
+        // #311: the vault is name-keyed, so the Vaier-server singleton stores like any other machine.
+        HostCredential credential = new HostCredential(net.vaier.domain.LanAnchor.VAIER_SERVER_NAME,
+            "root", AuthMethod.PASSWORD, "host-pw", null, false);
+
+        adapter.save(credential);
+
+        assertThat(adapter.getByMachine(net.vaier.domain.LanAnchor.VAIER_SERVER_NAME)).contains(credential);
+    }
+
+    @Test
     void roundTripsThroughFreshAdapter() {
         adapter.save(new HostCredential("nas", "admin", AuthMethod.PRIVATE_KEY, "keydata", "kp", false));
 

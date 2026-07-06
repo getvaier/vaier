@@ -821,8 +821,10 @@
                     return;
                 }
                 // Re-render so the SSH credential button appears/disappears with the new state.
+                // Covers all three machine kinds — peer, LAN server, and the Vaier-server singleton.
                 fetchLanServers();
                 fetchPeers();
+                fetchVaierServerSsh();
             } catch (e) {
                 checkbox.checked = !enabled;
                 alert(`Failed to update SSH access. Vaier could not be reached (${e.message}).`);
@@ -1233,8 +1235,15 @@
                         ${hostHtml}
                         ${lanCidrHtml}
                         ${placeHtml}
+                        ${sshAccessRowHtml('Vaier server', _vaierServerSsh.sshAccess)}
                         ${renderServicesSubsection('__hub__')}
                     </div>
+                    ${_vaierServerSsh.sshAccess ? `
+                    <div class="peer-actions-row">
+                        <div class="peer-actions-left">
+                            ${sshCredentialButtonHtml('Vaier server', _vaierServerSsh.sshAccess)}
+                        </div>
+                    </div>` : ''}
                 </div>
             </div>`;
         }
@@ -2267,6 +2276,22 @@
             return byHost;
         }
 
+        // The Vaier-server host's own SSH state (#311): effective SSH access + whether a host
+        // credential is stored. The server is a singleton machine with no peer/LAN entry, so it has a
+        // dedicated feed. Defaults to SSH-on until the fetch resolves (it's a server).
+        let _vaierServerSsh = { sshAccess: true, hasCredential: false };
+
+        async function fetchVaierServerSsh() {
+            try {
+                const res = await fetch('/machines/vaier-server');
+                if (!res.ok) return;
+                _vaierServerSsh = await res.json();
+                displayPeers(peers);
+            } catch (e) {
+                console.error('Failed to load Vaier server SSH state:', e);
+            }
+        }
+
         async function fetchServerLocation() {
             // Always fetch — the response carries both the Map tab's lat/lon and the Vaier-server
             // machine card's LAN CIDR (#204). Either group can be absent (null lat/lon when the
@@ -2416,6 +2441,7 @@
         fetchAppConfig();
         fetchPeers();
         fetchVaierServerServices();
+        fetchVaierServerSsh();
         fetchLanServers();
         fetchServerLocation();
         fetchPublishedServices();

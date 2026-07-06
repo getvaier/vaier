@@ -286,6 +286,29 @@ class VaierConfigFileAdapterTest {
         assertThat(adapter().load().orElseThrow().getAwsSecret()).isEqualTo("legacy-plain-aws");
     }
 
+    // --- Vaier-server SSH access (#311) ---
+
+    @Test
+    void load_roundTripsVaierServerSshAccess() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .vaierServerSshAccess(false)
+            .build();
+
+        adapter().save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getVaierServerSshAccess()).isFalse();
+    }
+
+    @Test
+    void load_vaierServerSshAccessNullWhenNotPresent() {
+        adapter().save(VaierConfig.builder().domain("example.com").build());
+
+        assertThat(adapter().load().orElseThrow().getVaierServerSshAccess()).isNull();
+    }
+
     @Test
     void load_smtpFieldsAreNullWhenNotPresent() {
         VaierConfig config = VaierConfig.builder()
