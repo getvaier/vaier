@@ -26,6 +26,9 @@ build/
 # Environment
 .env
 *.key
+# The credential-vault master key (#307). Covered by *.key above; listed explicitly so it's
+# obvious this never gets committed. Lives in the config dir (also ignored via /vaier/ below).
+vault.key
 *.conf
 *.pem
 

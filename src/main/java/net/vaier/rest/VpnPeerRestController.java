@@ -98,7 +98,7 @@ public class VpnPeerRestController {
             v.geoLocation().map(GeoLocation::city).orElse(null),
             v.geoLocation().map(GeoLocation::country).orElse(null),
             v.configOutOfDate(),
-            v.deviceCategory().name(), v.deviceCategoryOverridden());
+            v.deviceCategory().name(), v.deviceCategoryOverridden(), v.sshAccess());
     }
 
     @GetMapping("/server-location")
@@ -479,7 +479,8 @@ public class VpnPeerRestController {
             String country,
             boolean configOutOfDate,
             String deviceCategory,
-            boolean deviceCategoryOverridden
+            boolean deviceCategoryOverridden,
+            boolean sshAccess
     ) {}
 
     public record CreatePeerRequest(

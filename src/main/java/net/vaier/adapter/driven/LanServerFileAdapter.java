@@ -91,9 +91,10 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
                     String description = asString(m.get("description"));
                     net.vaier.domain.DeviceCategory deviceCategory =
                         parseDeviceCategory(asString(m.get("deviceCategory")));
+                    Boolean sshAccessOverride = m.get("sshAccessOverride") instanceof Boolean b2 ? b2 : null;
                     if (name != null && lanAddress != null) {
                         result.add(new LanServer(name, lanAddress, runsDocker, dockerPort, description,
-                            deviceCategory));
+                            deviceCategory, sshAccessOverride));
                     }
                 }
             }
@@ -142,6 +143,10 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
             }
             if (s.deviceCategory() != null) {
                 entry.put("deviceCategory", s.deviceCategory().name());
+            }
+            // Persist the SSH-access override only when the operator has pinned one; absent = smart default.
+            if (s.sshAccessOverride() != null) {
+                entry.put("sshAccessOverride", s.sshAccessOverride());
             }
             serialized.add(entry);
         }

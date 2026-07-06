@@ -730,6 +730,36 @@ Authelia config written, and no dead Authelia Java classes remain.
   **availability coupling** the spike flags — Vaier being in the request path for protected services —
   remains the open trade-off to accept or revisit.
 
+### 6.18 Web terminal 🟡 (in progress — epic [#306](https://github.com/getvaier/vaier/issues/306))
+
+A per-machine **web terminal**: open an SSH shell to any machine in the Vaier network straight from the
+admin UI, with Vaier holding the credentials — enough to replace Termius. Per-host, keyed on a machine
+(peer or LAN server), one **host credential** per machine, admin-only (behind the Tier-3 Social auth
+chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is a domain decision.
+
+**Slices:**
+- **#307 — Credential vault + host-credential CRUD ✅ (this slice).** A `HostCredential` (username,
+  `AuthMethod` = `PASSWORD` | `PRIVATE_KEY`, secret material, optional key passphrase) stored one-per-machine
+  in an encrypted-at-rest **credential vault** (`host-credentials.yml`). A `SecretCipher` (AES-256-GCM,
+  `enc:v1:` envelope, random IV per encryption) seals the secret/passphrase; its master key is either
+  `VAIER_VAULT_KEY` (base64 32 bytes) or a self-generated `vault.key` (mode 600) — no operator-authored
+  secret. The same cipher now also encrypts the existing reversible secrets in `vaier-config.yml`
+  (`awsSecret`, SMTP password); legacy plaintext still loads and is re-encrypted on the next save. New
+  `TerminalService` implements the narrow save/get/delete use cases; GET returns only a redacted
+  `HostCredentialView` (`username`, `authMethod`, `hasSecret`) — secret bytes never leave the process.
+  REST CRUD at `PUT|GET|DELETE /machines/{machine}/ssh-credential`, plus an **SSH credential** control on
+  each machine card. A per-machine **SSH access** flag gates that control: `DeviceCategory` seeds a smart
+  default (appliances like printers/phones off; servers/NAS/desktops/laptops on) via
+  `Machine.defaultSshAccess`, an explicit nullable override is persisted (peer `# VAIER:` metadata /
+  `lan-servers.yml`), and `PATCH /machines/{machine}/ssh-access` sets it. The SSH access flag is
+  authoritative; the device category only seeds its default and never otherwise affects it.
+- **#308 — Web terminal** (WebSocket + MINA sshd-core + xterm.js). 🔲
+- **#309 — Managed ed25519 keypair generation** (the `managed` flag). 🔲
+- **#310 — Saved snippets.** 🔲
+
+**Backlog:** **SFTP** (file transfer over the same session) is deferred — V1 scope is the interactive
+terminal plus saved snippets only.
+
 ---
 
 ## 7. End-to-End Workflows

@@ -6,20 +6,26 @@ import java.util.Collection;
 import java.util.Optional;
 
 public record LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
-                        String description, DeviceCategory deviceCategory) {
+                        String description, DeviceCategory deviceCategory, Boolean sshAccessOverride) {
 
     private static final int MIN_PORT = 1;
     private static final int MAX_PORT = 65535;
 
     /** Convenience constructor for a LAN server with no description and no device-category override. */
     public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
-        this(name, lanAddress, runsDocker, dockerPort, null, null);
+        this(name, lanAddress, runsDocker, dockerPort, null, null, null);
     }
 
     /** Convenience constructor for a LAN server with a description but no device-category override. */
     public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                      String description) {
-        this(name, lanAddress, runsDocker, dockerPort, description, null);
+        this(name, lanAddress, runsDocker, dockerPort, description, null, null);
+    }
+
+    /** Pre-ssh-access constructor: no SSH-access override, effective access is the smart default. */
+    public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                     String description, DeviceCategory deviceCategory) {
+        this(name, lanAddress, runsDocker, dockerPort, description, deviceCategory, null);
     }
 
     /** True when this LAN server is the one named {@code candidate} (exact match). */
@@ -52,7 +58,8 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (newName.indexOf('/') >= 0) {
             throw new IllegalArgumentException("LAN server name must not contain '/'");
         }
-        return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description, deviceCategory);
+        return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description,
+            deviceCategory, sshAccessOverride);
     }
 
     /**
@@ -62,7 +69,8 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
     public LanServer withDescription(String newDescription) {
         String normalized = (newDescription == null || newDescription.isBlank())
             ? null : newDescription.trim();
-        return new LanServer(name, lanAddress, runsDocker, dockerPort, normalized, deviceCategory);
+        return new LanServer(name, lanAddress, runsDocker, dockerPort, normalized, deviceCategory,
+            sshAccessOverride);
     }
 
     /**
@@ -70,7 +78,28 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
      * the override, reverting the effective category to auto-detection. Everything else carries over.
      */
     public LanServer withDeviceCategory(DeviceCategory newDeviceCategory) {
-        return new LanServer(name, lanAddress, runsDocker, dockerPort, description, newDeviceCategory);
+        return new LanServer(name, lanAddress, runsDocker, dockerPort, description, newDeviceCategory,
+            sshAccessOverride);
+    }
+
+    /**
+     * Returns a copy of this LAN server with its SSH-access override set. A null value clears the
+     * override, reverting the effective SSH access to the smart default. Everything else carries over.
+     */
+    public LanServer withSshAccessOverride(Boolean newSshAccessOverride) {
+        return new LanServer(name, lanAddress, runsDocker, dockerPort, description, deviceCategory,
+            newSshAccessOverride);
+    }
+
+    /**
+     * Whether Vaier offers SSH for this LAN server: the {@link #sshAccessOverride() override} when
+     * set, else the smart default seeded from the effective device category (a LAN server is always a
+     * {@link MachineType#LAN_SERVER}). Never null.
+     */
+    public boolean effectiveSshAccess() {
+        return sshAccessOverride != null
+            ? sshAccessOverride
+            : Machine.defaultSshAccess(effectiveDeviceCategory(), MachineType.LAN_SERVER);
     }
 
     /**

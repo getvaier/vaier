@@ -9,7 +9,10 @@ import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,13 +33,15 @@ class MachineServiceTest {
     @Mock ForGettingVpnClients forGettingVpnClients;
     @Mock ForGettingLanServers forGettingLanServers;
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
+    @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
+    @Mock ForPersistingLanServers forPersistingLanServers;
 
     MachineService service;
 
     @BeforeEach
     void setUp() {
         service = new MachineService(forGettingPeerConfigurations, forGettingVpnClients, forGettingLanServers,
-            forResolvingServerLanCidr);
+            forResolvingServerLanCidr, forUpdatingPeerConfigurations, forPersistingLanServers);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -199,5 +204,42 @@ class MachineServiceTest {
             .containsExactlyInAnyOrder(
                 tuple("alice", MachineType.UBUNTU_SERVER),
                 tuple("nas", MachineType.LAN_SERVER));
+    }
+
+    // --- SSH-access override (#307) ---
+
+    @Test
+    void setMachineSshAccess_lanServer_savesOverride_andReturnsEnabled() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+        lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of(nas));
+
+        boolean effective = service.setMachineSshAccess("nas", false);
+
+        assertThat(effective).isFalse();
+        org.mockito.Mockito.verify(forPersistingLanServers).save(nas.withSshAccessOverride(false));
+        org.mockito.Mockito.verifyNoInteractions(forUpdatingPeerConfigurations);
+    }
+
+    @Test
+    void setMachineSshAccess_peer_updatesByPeerId_andReturnsEnabled() {
+        lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
+        lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("alice-id", "alice", "10.13.13.2", "", MachineType.UBUNTU_SERVER,
+                null, null, null)
+        ));
+
+        boolean effective = service.setMachineSshAccess("alice", true);
+
+        assertThat(effective).isTrue();
+        org.mockito.Mockito.verify(forUpdatingPeerConfigurations).updateSshAccess("alice-id", true);
+    }
+
+    @Test
+    void setMachineSshAccess_unknownMachine_throwsNotFound() {
+        lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
+        lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setMachineSshAccess("ghost", true))
+            .isInstanceOf(NotFoundException.class);
     }
 }

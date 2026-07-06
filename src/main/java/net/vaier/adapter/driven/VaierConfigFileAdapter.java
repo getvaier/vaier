@@ -21,13 +21,19 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
 
     private static final String CONFIG_FILE_NAME = "vaier-config.yml";
     private final String configFilePath;
+    private final SecretCipher cipher;
 
     public VaierConfigFileAdapter() {
         this(System.getenv().getOrDefault("VAIER_CONFIG_PATH", "/vaier/config"));
     }
 
     public VaierConfigFileAdapter(String configDir) {
+        this(configDir, new SecretCipher(configDir));
+    }
+
+    public VaierConfigFileAdapter(String configDir, SecretCipher cipher) {
         this.configFilePath = configDir + "/" + CONFIG_FILE_NAME;
+        this.cipher = cipher;
     }
 
     @Override
@@ -45,13 +51,15 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
             return Optional.of(VaierConfig.builder()
                 .domain((String) data.get("domain"))
                 .awsKey((String) data.get("awsKey"))
-                .awsSecret((String) data.get("awsSecret"))
+                // awsSecret and smtpPassword are encrypted at rest (#307). decrypt() passes legacy
+                // plaintext through unchanged, so a pre-#307 config still loads (then re-encrypts on save).
+                .awsSecret(cipher.decrypt((String) data.get("awsSecret")))
                 .acmeEmail((String) data.get("acmeEmail"))
                 .smtpHost((String) data.get("smtpHost"))
                 .smtpPort((Integer) data.get("smtpPort"))
                 .smtpUsername((String) data.get("smtpUsername"))
                 .smtpSender((String) data.get("smtpSender"))
-                .smtpPassword((String) data.get("smtpPassword"))
+                .smtpPassword(cipher.decrypt((String) data.get("smtpPassword")))
                 .diskMonitorThresholdPercent((Integer) data.get("diskMonitorThresholdPercent"))
                 .build());
         } catch (Exception e) {
@@ -75,13 +83,14 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("domain", config.getDomain());
         data.put("awsKey", config.getAwsKey());
-        data.put("awsSecret", config.getAwsSecret());
+        // Encrypt the two reversible secrets at rest (#307); encrypt() returns null for a null input.
+        data.put("awsSecret", cipher.encrypt(config.getAwsSecret()));
         data.put("acmeEmail", config.getAcmeEmail());
         data.put("smtpHost", config.getSmtpHost());
         data.put("smtpPort", config.getSmtpPort());
         data.put("smtpUsername", config.getSmtpUsername());
         data.put("smtpSender", config.getSmtpSender());
-        data.put("smtpPassword", config.getSmtpPassword());
+        data.put("smtpPassword", cipher.encrypt(config.getSmtpPassword()));
         data.put("diskMonitorThresholdPercent", config.getDiskMonitorThresholdPercent());
 
         try (FileWriter writer = new FileWriter(file)) {

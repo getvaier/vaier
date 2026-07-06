@@ -25,8 +25,36 @@ public record Machine(
     String lanAddress,
     boolean runsDocker,
     Integer dockerPort,
-    DeviceCategory deviceCategory
+    DeviceCategory deviceCategory,
+    Boolean sshAccessOverride
 ) {
+
+    /**
+     * Whether Vaier offers SSH (the credential control now, the web terminal later) for a machine by
+     * default, before any operator override — the smart default seeded from what the machine is. True
+     * when the device is not an {@link DeviceCategory#isAppliance() appliance} and it is either
+     * {@link DeviceCategory#sshCapableByDefault() SSH-capable by category} or a
+     * {@link MachineType#isServerType() server-type} machine. An appliance category vetoes the
+     * server-type fallback, so a LAN server that is really a printer stays SSH-off.
+     */
+    public static boolean defaultSshAccess(DeviceCategory deviceCategory, MachineType type) {
+        return !deviceCategory.isAppliance()
+            && (deviceCategory.sshCapableByDefault() || type.isServerType());
+    }
+
+    /** This machine's SSH-access default from its own category and type. */
+    public boolean defaultSshAccess() {
+        return defaultSshAccess(deviceCategory, type);
+    }
+
+    /**
+     * Whether Vaier offers SSH for this machine: the operator's {@link #sshAccessOverride() override}
+     * when one is set, otherwise the {@link #defaultSshAccess() smart default}. The override — not the
+     * device category — is authoritative; the category only seeds the default.
+     */
+    public boolean effectiveSshAccess() {
+        return sshAccessOverride != null ? sshAccessOverride : defaultSshAccess();
+    }
 
     /**
      * Projects a VPN peer into a {@code Machine}. {@code client} is the peer's live WireGuard
@@ -47,7 +75,8 @@ public record Machine(
             peer.lanAddress(),
             peer.peerType().isServerType(),
             null,
-            peer.effectiveDeviceCategory()
+            peer.effectiveDeviceCategory(),
+            peer.sshAccess()
         );
     }
 
@@ -64,7 +93,8 @@ public record Machine(
             server.lanAddress(),
             server.runsDocker(),
             server.dockerPort(),
-            server.effectiveDeviceCategory()
+            server.effectiveDeviceCategory(),
+            server.sshAccessOverride()
         );
     }
 

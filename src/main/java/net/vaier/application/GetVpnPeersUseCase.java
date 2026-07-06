@@ -68,6 +68,7 @@ public interface GetVpnPeersUseCase {
         Optional<GeoLocation> geoLocation,
         boolean configOutOfDate,
         DeviceCategory deviceCategory,
-        boolean deviceCategoryOverridden
+        boolean deviceCategoryOverridden,
+        boolean sshAccess
     ) {}
 }

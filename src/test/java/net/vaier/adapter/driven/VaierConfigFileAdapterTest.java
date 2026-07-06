@@ -206,6 +206,86 @@ class VaierConfigFileAdapterTest {
         assertThat(adapter().readStoredPassword()).isEmpty();
     }
 
+    // --- at-rest secret encryption (#307) ---
+
+    @Test
+    void save_encryptsAwsSecretAndSmtpPasswordAtRest() throws IOException {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("AKID")
+            .awsSecret("the-aws-secret")
+            .acmeEmail("admin@example.com")
+            .smtpHost("smtp.example.com")
+            .smtpUsername("user@example.com")
+            .smtpPassword("the-smtp-password")
+            .build();
+
+        adapter().save(config);
+
+        String contents = Files.readString(tempDir.resolve("vaier-config.yml"));
+        assertThat(contents)
+            .doesNotContain("the-aws-secret")
+            .doesNotContain("the-smtp-password")
+            .contains("enc:v1:")
+            // non-secret fields stay in the clear.
+            .contains("AKID")
+            .contains("example.com");
+    }
+
+    @Test
+    void save_thenLoad_roundTripsEncryptedSecrets() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .awsKey("AKID")
+            .awsSecret("the-aws-secret")
+            .acmeEmail("admin@example.com")
+            .smtpPassword("the-smtp-password")
+            .build();
+
+        adapter().save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getAwsSecret()).isEqualTo("the-aws-secret");
+        assertThat(loaded.get().getSmtpPassword()).isEqualTo("the-smtp-password");
+    }
+
+    @Test
+    void load_legacyPlaintextSecrets_loadUnchanged() throws IOException {
+        // A pre-#307 config file has awsSecret/smtpPassword in the clear — they must still load.
+        Files.writeString(tempDir.resolve("vaier-config.yml"), """
+            domain: example.com
+            awsKey: AKID
+            awsSecret: legacy-plain-aws
+            acmeEmail: admin@example.com
+            smtpPassword: legacy-plain-smtp
+            """);
+
+        Optional<VaierConfig> loaded = adapter().load();
+
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getAwsSecret()).isEqualTo("legacy-plain-aws");
+        assertThat(loaded.get().getSmtpPassword()).isEqualTo("legacy-plain-smtp");
+    }
+
+    @Test
+    void legacyPlaintext_isEncryptedOnNextSave() throws IOException {
+        Files.writeString(tempDir.resolve("vaier-config.yml"), """
+            domain: example.com
+            awsKey: AKID
+            awsSecret: legacy-plain-aws
+            acmeEmail: admin@example.com
+            """);
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        VaierConfig loaded = adapterInstance.load().orElseThrow();
+        adapterInstance.save(loaded);
+
+        String contents = Files.readString(tempDir.resolve("vaier-config.yml"));
+        assertThat(contents).doesNotContain("legacy-plain-aws").contains("enc:v1:");
+        assertThat(adapter().load().orElseThrow().getAwsSecret()).isEqualTo("legacy-plain-aws");
+    }
+
     @Test
     void load_smtpFieldsAreNullWhenNotPresent() {
         VaierConfig config = VaierConfig.builder()

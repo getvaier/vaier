@@ -223,6 +223,11 @@ public class VpnService implements
         boolean deviceCategoryOverridden = rawCfg
             .map(ForGettingPeerConfigurations.PeerConfiguration::deviceCategoryOverridden)
             .orElse(false);
+        // The domain owns the effective SSH-access decision (override else smart default). For a peer
+        // with no on-disk config yet, derive the default from the live category + type.
+        boolean sshAccess = rawCfg
+            .map(ForGettingPeerConfigurations.PeerConfiguration::effectiveSshAccess)
+            .orElseGet(() -> net.vaier.domain.Machine.defaultSshAccess(deviceCategory, peerType));
         return new VpnPeerView(
             id, name, client.publicKey(), client.allowedIps(), peerIp,
             client.endpointIp(), client.endpointPort(), client.latestHandshake(),
@@ -230,7 +235,7 @@ public class VpnService implements
             peerType, isServer, isClient, isRelay,
             net.vaier.domain.PeerArtifact.forPeerType(peerType),
             lanCidr, lanAddress, description, geo, configOutOfDate,
-            deviceCategory, deviceCategoryOverridden);
+            deviceCategory, deviceCategoryOverridden, sshAccess);
     }
 
     /**

@@ -222,4 +222,37 @@ class DeviceCategoryTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> DeviceCategory.fromString("BANANA"))
             .isInstanceOf(IllegalArgumentException.class);
     }
+
+    // --- SSH-access seeding (#307) ---
+
+    @Test
+    void isAppliance_trueForNonShellDevices() {
+        for (DeviceCategory c : new DeviceCategory[]{
+                DeviceCategory.PHONE, DeviceCategory.PRINTER, DeviceCategory.ROUTER,
+                DeviceCategory.GATEWAY, DeviceCategory.IOT, DeviceCategory.CAMERA, DeviceCategory.MEDIA}) {
+            assertThat(c.isAppliance()).as(c.name()).isTrue();
+        }
+    }
+
+    @Test
+    void isAppliance_falseForShellCapableAndGeneric() {
+        for (DeviceCategory c : new DeviceCategory[]{
+                DeviceCategory.SERVER, DeviceCategory.NAS, DeviceCategory.DESKTOP,
+                DeviceCategory.LAPTOP, DeviceCategory.GENERIC}) {
+            assertThat(c.isAppliance()).as(c.name()).isFalse();
+        }
+    }
+
+    @Test
+    void sshCapableByDefault_trueOnlyForComputers() {
+        for (DeviceCategory c : new DeviceCategory[]{
+                DeviceCategory.SERVER, DeviceCategory.NAS, DeviceCategory.DESKTOP, DeviceCategory.LAPTOP}) {
+            assertThat(c.sshCapableByDefault()).as(c.name()).isTrue();
+        }
+        for (DeviceCategory c : new DeviceCategory[]{
+                DeviceCategory.PHONE, DeviceCategory.PRINTER, DeviceCategory.ROUTER, DeviceCategory.GATEWAY,
+                DeviceCategory.IOT, DeviceCategory.CAMERA, DeviceCategory.MEDIA, DeviceCategory.GENERIC}) {
+            assertThat(c.sshCapableByDefault()).as(c.name()).isFalse();
+        }
+    }
 }

@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import org.junit.jupiter.api.Test;
@@ -13,12 +14,14 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class MachineRestControllerTest {
 
     @Mock GetMachinesUseCase getMachinesUseCase;
+    @Mock SetMachineSshAccessUseCase setMachineSshAccessUseCase;
 
     @InjectMocks MachineRestController controller;
 
@@ -35,10 +38,10 @@ class MachineRestControllerTest {
             new Machine("alice", MachineType.UBUNTU_SERVER,
                 "pubkey", "10.13.13.2/32", "1.2.3.4", "51820",
                 "1700000000", "100", "200",
-                null, null, true, null, net.vaier.domain.DeviceCategory.SERVER),
+                null, null, true, null, net.vaier.domain.DeviceCategory.SERVER, null),
             new Machine("nas", MachineType.LAN_SERVER,
                 null, null, null, null, null, null, null,
-                "192.168.3.0/24", "192.168.3.50", true, 2375, net.vaier.domain.DeviceCategory.NAS)
+                "192.168.3.0/24", "192.168.3.50", true, 2375, net.vaier.domain.DeviceCategory.NAS, null)
         ));
 
         var response = controller.list();
@@ -53,5 +56,44 @@ class MachineRestControllerTest {
         assertThat(response.get(1).dockerPort()).isEqualTo(2375);
         assertThat(response.get(0).deviceCategory()).isEqualTo("SERVER");
         assertThat(response.get(1).deviceCategory()).isEqualTo("NAS");
+    }
+
+    @Test
+    void list_exposesEffectiveSshAccess() {
+        // A server defaults SSH-on; a phone client defaults SSH-off — both with no override.
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
+            new Machine("alice", MachineType.UBUNTU_SERVER,
+                null, null, null, null, null, null, null,
+                null, null, true, null, net.vaier.domain.DeviceCategory.SERVER, null),
+            new Machine("phone", MachineType.MOBILE_CLIENT,
+                null, null, null, null, null, null, null,
+                null, null, false, null, net.vaier.domain.DeviceCategory.PHONE, null)
+        ));
+
+        var response = controller.list();
+
+        assertThat(response.get(0).sshAccess()).isTrue();
+        assertThat(response.get(1).sshAccess()).isFalse();
+    }
+
+    // --- SSH access override (#307) ---
+
+    @Test
+    void setSshAccess_delegatesAndReturnsEffectiveState() {
+        when(setMachineSshAccessUseCase.setMachineSshAccess("nas", false)).thenReturn(false);
+
+        var response = controller.setSshAccess("nas", new MachineRestController.SshAccessRequest(false));
+
+        assertThat(response.sshAccess()).isFalse();
+        verify(setMachineSshAccessUseCase).setMachineSshAccess("nas", false);
+    }
+
+    @Test
+    void setSshAccess_enabledTrue_delegates() {
+        when(setMachineSshAccessUseCase.setMachineSshAccess("nas", true)).thenReturn(true);
+
+        var response = controller.setSshAccess("nas", new MachineRestController.SshAccessRequest(true));
+
+        assertThat(response.sshAccess()).isTrue();
     }
 }

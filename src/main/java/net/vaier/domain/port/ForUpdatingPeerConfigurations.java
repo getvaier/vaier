@@ -17,6 +17,13 @@ public interface ForUpdatingPeerConfigurations {
     void updateDeviceCategory(String peerId, String deviceCategory);
 
     /**
+     * Sets a peer's SSH-access override — whether Vaier offers SSH (credential control now, web
+     * terminal later) for the machine. Always writes an explicit boolean; the effective state then
+     * equals it rather than falling back to the smart default derived from the device type.
+     */
+    void updateSshAccess(String peerId, boolean enabled);
+
+    /**
      * Sets a peer's display name — the freely editable, operator-facing label. The peer's
      * {@code id} is never affected. A null or blank value clears the stored name, after which
      * the peer falls back to its id's humanised form for display.

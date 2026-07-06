@@ -203,6 +203,44 @@
         </div>
     </div>
 
+    <!-- SSH Credential Modal (#307, credential vault). Stores the one SSH login Vaier holds per
+         machine, encrypted at rest. GET only ever reports whether a secret exists, never its bytes. -->
+    <div id="sshCredentialModal" class="modal">
+        <div class="modal-content" style="max-width:560px;width:95%">
+            <div class="modal-header">SSH credential</div>
+            <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.5rem">
+                The login Vaier holds for <code style="color:var(--text);background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:2px" id="sshCredMachineLabel"></code>. Stored encrypted at rest; the web terminal uses it to open a shell.
+            </p>
+            <div id="sshCredStatus" style="font-size:0.78rem;margin-bottom:0.75rem;color:var(--text-dim)">Checking…</div>
+            <div class="form-group">
+                <label class="form-label" for="sshCredUsername">Username</label>
+                <input type="text" id="sshCredUsername" class="form-input" autocomplete="off" placeholder="e.g. root">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="sshCredAuthMethod">Authentication</label>
+                <select id="sshCredAuthMethod" class="form-input" onchange="onSshCredAuthMethodChange()">
+                    <option value="PASSWORD">Password</option>
+                    <option value="PRIVATE_KEY">Private key</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="sshCredSecret" id="sshCredSecretLabel">Password</label>
+                <input type="password" id="sshCredSecret" class="form-input" autocomplete="off" placeholder="Enter a new secret to save">
+                <textarea id="sshCredSecretKey" class="form-input" rows="6" style="display:none;font-family:var(--mono);resize:vertical"
+                          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----"></textarea>
+            </div>
+            <div class="form-group" id="sshCredPassphraseGroup" style="display:none">
+                <label class="form-label" for="sshCredPassphrase">Key passphrase <span style="color:var(--text-dim)">(optional)</span></label>
+                <input type="password" id="sshCredPassphrase" class="form-input" autocomplete="off" placeholder="Leave blank if the key has none">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideSshCredentialModal()">Cancel</button>
+                <button class="btn btn-danger" id="sshCredDeleteBtn" style="display:none" onclick="deleteSshCredential()">Delete</button>
+                <button class="btn btn-primary" id="sshCredSaveBtn" onclick="saveSshCredential()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Publish Service Modal (#infrastructure slice 2c/3b). data-mode switches between container mode
          (publish a discovered container, opened from a card's "+ Publish" row) and LAN mode (publish a
          bare host:port on a LAN host, opened from a LAN-server card's "+ Publish LAN port" button). -->

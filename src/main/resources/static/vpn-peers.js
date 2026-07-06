@@ -782,6 +782,153 @@
             document.getElementById('publishModal').classList.remove('active');
         }
 
+        // --- SSH access (#307) ---
+        // Per-machine flag: whether Vaier offers SSH (the credential control now, the web terminal
+        // later). The card shows the EFFECTIVE state (operator override, else the smart default the
+        // backend seeds from the device type); toggling PATCHes an explicit override.
+        function sshAccessRowHtml(machineName, effective) {
+            return `
+                <div class="detail-row">
+                    <span class="detail-label">SSH access</span>
+                    <span class="detail-value">
+                        <label class="ssh-access-toggle">
+                            <input type="checkbox" ${effective ? 'checked' : ''}
+                                   onchange="toggleSshAccess('${jsArg(machineName)}', this)">
+                            <span>Vaier can open an SSH session to this machine</span>
+                        </label>
+                    </span>
+                </div>`;
+        }
+
+        // The credential control only makes sense when SSH access is on — a printer or phone has no
+        // shell to log into. Hidden entirely when off.
+        function sshCredentialButtonHtml(machineName, sshAccessOn) {
+            if (!sshAccessOn) return '';
+            return `<button class="btn btn-small btn-secondary" onclick="showSshCredentialModal('${jsArg(machineName)}')" title="Store the SSH login Vaier holds for this machine (used by the web terminal)">SSH credential</button>`;
+        }
+
+        async function toggleSshAccess(machineName, checkbox) {
+            const enabled = checkbox.checked;
+            checkbox.disabled = true;
+            try {
+                const r = await fetch(`/machines/${encodeURIComponent(machineName)}/ssh-access`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled }),
+                });
+                if (!r.ok) {
+                    checkbox.checked = !enabled; // revert the optimistic flip
+                    alert(`Failed to update SSH access (HTTP ${r.status}).`);
+                    return;
+                }
+                // Re-render so the SSH credential button appears/disappears with the new state.
+                fetchLanServers();
+                fetchPeers();
+            } catch (e) {
+                checkbox.checked = !enabled;
+                alert(`Failed to update SSH access. Vaier could not be reached (${e.message}).`);
+            } finally {
+                checkbox.disabled = false;
+            }
+        }
+
+        // --- SSH credential vault (#307) ---
+        // One host credential per machine, encrypted at rest server-side. The GET only ever reports
+        // whether a secret exists (never its bytes), so the secret fields always start blank and a
+        // save replaces whatever is stored.
+        function showSshCredentialModal(machineName) {
+            const modal = document.getElementById('sshCredentialModal');
+            modal.dataset.machine = machineName;
+            document.getElementById('sshCredMachineLabel').textContent = machineName;
+            document.getElementById('sshCredUsername').value = '';
+            document.getElementById('sshCredAuthMethod').value = 'PASSWORD';
+            document.getElementById('sshCredSecret').value = '';
+            document.getElementById('sshCredSecretKey').value = '';
+            document.getElementById('sshCredPassphrase').value = '';
+            document.getElementById('sshCredDeleteBtn').style.display = 'none';
+            document.getElementById('sshCredStatus').textContent = 'Checking…';
+            onSshCredAuthMethodChange();
+            modal.classList.add('active');
+            loadSshCredentialStatus(machineName);
+            document.getElementById('sshCredUsername').focus();
+        }
+
+        async function loadSshCredentialStatus(machineName) {
+            const statusEl = document.getElementById('sshCredStatus');
+            try {
+                const r = await fetch(`/machines/${encodeURIComponent(machineName)}/ssh-credential`);
+                if (r.status === 404) { statusEl.textContent = 'No credential stored yet.'; return; }
+                if (!r.ok) { statusEl.textContent = `Could not load status (HTTP ${r.status}).`; return; }
+                const view = await r.json();
+                // Prefill the known-safe fields; the secret is never returned, so it stays blank.
+                document.getElementById('sshCredUsername').value = view.username || '';
+                document.getElementById('sshCredAuthMethod').value = view.authMethod || 'PASSWORD';
+                onSshCredAuthMethodChange();
+                document.getElementById('sshCredDeleteBtn').style.display = view.hasSecret ? '' : 'none';
+                const method = (view.authMethod || '').toLowerCase().replace('_', ' ');
+                statusEl.innerHTML = `Stored: <strong>${escapeHtml(view.username || '')}</strong> · ${escapeHtml(method)}. Enter a new secret to replace it.`;
+            } catch (e) {
+                statusEl.textContent = `Could not reach Vaier (${e.message}).`;
+            }
+        }
+
+        function onSshCredAuthMethodChange() {
+            const isKey = document.getElementById('sshCredAuthMethod').value === 'PRIVATE_KEY';
+            document.getElementById('sshCredSecret').style.display = isKey ? 'none' : '';
+            document.getElementById('sshCredSecretKey').style.display = isKey ? '' : 'none';
+            document.getElementById('sshCredSecretLabel').textContent = isKey ? 'Private key (PEM)' : 'Password';
+            document.getElementById('sshCredPassphraseGroup').style.display = isKey ? '' : 'none';
+        }
+
+        function currentSshSecretValue() {
+            return document.getElementById('sshCredAuthMethod').value === 'PRIVATE_KEY'
+                ? document.getElementById('sshCredSecretKey').value
+                : document.getElementById('sshCredSecret').value;
+        }
+
+        function hideSshCredentialModal() {
+            document.getElementById('sshCredentialModal').classList.remove('active');
+        }
+
+        async function saveSshCredential() {
+            const modal = document.getElementById('sshCredentialModal');
+            const machine = modal.dataset.machine;
+            const username = document.getElementById('sshCredUsername').value.trim();
+            const authMethod = document.getElementById('sshCredAuthMethod').value;
+            const secret = currentSshSecretValue();
+            const passphrase = document.getElementById('sshCredPassphrase').value;
+            if (!username) { alert('Enter a username.'); return; }
+            if (!secret || !secret.trim()) {
+                alert('Enter the ' + (authMethod === 'PRIVATE_KEY' ? 'private key' : 'password') + '.');
+                return;
+            }
+            const saveBtn = document.getElementById('sshCredSaveBtn');
+            saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+            try {
+                const r = await fetch(`/machines/${encodeURIComponent(machine)}/ssh-credential`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, authMethod, secret, passphrase: passphrase || null }),
+                });
+                if (!r.ok) { alert(`Failed to save the credential (HTTP ${r.status}).`); return; }
+                hideSshCredentialModal();
+            } catch (e) {
+                alert(`Failed to save. Vaier could not be reached (${e.message}).`);
+            } finally {
+                saveBtn.disabled = false; saveBtn.textContent = 'Save';
+            }
+        }
+
+        async function deleteSshCredential() {
+            const machine = document.getElementById('sshCredentialModal').dataset.machine;
+            if (!confirm(`Delete the stored SSH credential for ${machine}?`)) return;
+            try {
+                const r = await fetch(`/machines/${encodeURIComponent(machine)}/ssh-credential`, { method: 'DELETE' });
+                if (!r.ok && r.status !== 204) { alert(`Failed to delete (HTTP ${r.status}).`); return; }
+                hideSshCredentialModal();
+            } catch (e) {
+                alert(`Failed to delete. Vaier could not be reached (${e.message}).`);
+            }
+        }
+
         // Turn a failed publish response into a one-line explanation. On a 400/409 the backend sends
         // an ApiError envelope { message }; otherwise fall back to status-keyed guidance.
         async function explainPublishError(response) {
@@ -1020,6 +1167,7 @@
                             <span class="detail-label">Device category</span>
                             ${deviceCategorySelectHtml('lan-cat-' + id, 'lan', server.name, server.deviceCategory, server.deviceCategoryOverridden)}
                         </div>
+                        ${sshAccessRowHtml(server.name, server.sshAccess)}
                         <div class="detail-row">
                             <span class="detail-label">LAN address</span>
                             <span class="detail-value">${escapeHtml(portText)}</span>
@@ -1035,6 +1183,7 @@
                         <div class="peer-actions-left">
                             ${scriptBtn}
                             ${publishLanBtn}
+                            ${sshCredentialButtonHtml(server.name, server.sshAccess)}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeleteLanServer('${jsArg(server.name)}')">Delete</button>
                     </div>
@@ -1214,6 +1363,7 @@
                             <span class="detail-label">Device category</span>
                             ${deviceCategorySelectHtml('peer-cat-' + id, 'peer', peer.id, peer.deviceCategory, peer.deviceCategoryOverridden)}
                         </div>
+                        ${sshAccessRowHtml(peer.name, peer.sshAccess)}
                         ${isServer ? `
                         <div class="detail-row">
                             <span class="detail-label">LAN CIDR</span>
@@ -1246,6 +1396,7 @@
                                     title="Reissue — re-render this peer's config from the current logic, keeping its keypair so the live tunnel is untouched. Use it to recover a lost config or refresh one that's out of date (⚠), then reinstall the delivered config on the peer.">Reissue config</button>
                             <button class="btn btn-small btn-secondary" onclick="confirmRegeneratePeer('${peer.id}')"
                                     title="Regenerate — rotate the WireGuard keypair and deliver a fresh config once. Use it only to replace a compromised config; the old config stops working immediately and must be reinstalled on the peer.">Regenerate</button>
+                            ${sshCredentialButtonHtml(peer.name, peer.sshAccess)}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.id}')">Delete</button>
                     </div>

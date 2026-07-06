@@ -70,7 +70,7 @@ class VpnPeerRestControllerTest {
             type, type.isServerType(), type.isVpnPeer() && !type.isServerType(), false,
             net.vaier.domain.PeerArtifact.forPeerType(type),
             null, null, description, geo, false,
-            net.vaier.domain.DeviceCategory.detect(name, type, null), false);
+            net.vaier.domain.DeviceCategory.detect(name, type, null), false, type.isServerType());
     }
 
     @Test
@@ -294,7 +294,7 @@ class VpnPeerRestControllerTest {
                 MachineType.UBUNTU_SERVER, true, false, false,
                 net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
                 null, null, null, Optional.empty(), true,
-                net.vaier.domain.DeviceCategory.SERVER, false)
+                net.vaier.domain.DeviceCategory.SERVER, false, true)
         ));
 
         assertThat(controller.listPeers().getBody().get(0).configOutOfDate()).isTrue();
@@ -364,7 +364,7 @@ class VpnPeerRestControllerTest {
                 MachineType.UBUNTU_SERVER, true, false, false,
                 net.vaier.domain.PeerArtifact.forPeerType(MachineType.UBUNTU_SERVER),
                 null, null, null, Optional.empty(), true,
-                net.vaier.domain.DeviceCategory.NAS, true)
+                net.vaier.domain.DeviceCategory.NAS, true, true)
         ));
 
         var peer = controller.listPeers().getBody().get(0);

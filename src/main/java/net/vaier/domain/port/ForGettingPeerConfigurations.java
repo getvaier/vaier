@@ -1,6 +1,7 @@
 package net.vaier.domain.port;
 
 import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 
@@ -38,28 +39,37 @@ public interface ForGettingPeerConfigurations {
         String lanCidr,
         String lanAddress,
         String description,
-        DeviceCategory deviceCategory
+        DeviceCategory deviceCategory,
+        Boolean sshAccess
     ) {
         public PeerConfiguration(String id, String ipAddress, String configContent) {
             this(id, PeerId.display(id), ipAddress, configContent, MachineType.UBUNTU_SERVER,
-                null, null, null, null);
+                null, null, null, null, null);
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null, null);
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null, null, null);
         }
 
         /** Pre-device-category constructor: no override, effective category is auto-detected. */
         public PeerConfiguration(String id, String name, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress,
                                  String description) {
-            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null);
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null, null);
+        }
+
+        /** Pre-ssh-access constructor: no SSH-access override, effective access is the smart default. */
+        public PeerConfiguration(String id, String name, String ipAddress, String configContent,
+                                 MachineType peerType, String lanCidr, String lanAddress,
+                                 String description, DeviceCategory deviceCategory) {
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description,
+                deviceCategory, null);
         }
 
         /**
@@ -77,6 +87,16 @@ public interface ForGettingPeerConfigurations {
         /** True when an explicit device-category override is pinned (rather than auto-detected). */
         public boolean deviceCategoryOverridden() {
             return deviceCategory != null;
+        }
+
+        /**
+         * Whether Vaier offers SSH for this peer: the {@link #sshAccess() override} when set, else the
+         * smart default seeded from the effective device category and peer type. Never null.
+         */
+        public boolean effectiveSshAccess() {
+            return sshAccess != null
+                ? sshAccess
+                : Machine.defaultSshAccess(effectiveDeviceCategory(), peerType);
         }
 
         /**

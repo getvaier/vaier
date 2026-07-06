@@ -33,8 +33,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record VaierMetadata(String peerType, String lanCidr, String lanAddress, String description,
-                                 String name, String deviceCategory) {
-        VaierMetadata() { this(null, null, null, null, null, null); }
+                                 String name, String deviceCategory, Boolean sshAccess) {
+        VaierMetadata() { this(null, null, null, null, null, null, null); }
     }
 
     /**
@@ -62,7 +62,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
             return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
                     configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
-                    meta.description(), parseDeviceCategory(meta.deviceCategory())));
+                    meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess()));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -100,7 +100,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
                 return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
                         configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
-                        meta.description(), parseDeviceCategory(meta.deviceCategory())));
+                        meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess()));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -201,7 +201,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(lanAddress);
         rewriteVaierMetadata(peerId, "lanAddress", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                normalized, existing.description(), existing.name(), existing.deviceCategory()));
+                normalized, existing.description(), existing.name(), existing.deviceCategory(),
+                existing.sshAccess()));
     }
 
     @Override
@@ -209,7 +210,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(lanCidr);
         rewriteVaierMetadata(peerId, "lanCidr", normalized,
             existing -> new VaierMetadata(existing.peerType(), normalized,
-                existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory()));
+                existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory(),
+                existing.sshAccess()));
     }
 
     @Override
@@ -217,7 +219,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(description);
         rewriteVaierMetadata(peerId, "description", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), normalized, existing.name(), existing.deviceCategory()));
+                existing.lanAddress(), normalized, existing.name(), existing.deviceCategory(),
+                existing.sshAccess()));
     }
 
     @Override
@@ -225,7 +228,8 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(name);
         rewriteVaierMetadata(peerId, "name", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), existing.description(), normalized, existing.deviceCategory()));
+                existing.lanAddress(), existing.description(), normalized, existing.deviceCategory(),
+                existing.sshAccess()));
     }
 
     @Override
@@ -233,7 +237,18 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         String normalized = blankToNull(deviceCategory);
         rewriteVaierMetadata(peerId, "deviceCategory", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
-                existing.lanAddress(), existing.description(), existing.name(), normalized));
+                existing.lanAddress(), existing.description(), existing.name(), normalized,
+                existing.sshAccess()));
+    }
+
+    @Override
+    public void updateSshAccess(String peerId, boolean enabled) {
+        // Always writes an explicit override (true/false); the effective state then equals it,
+        // never falling back to the smart default until the field is cleared out-of-band.
+        rewriteVaierMetadata(peerId, "sshAccess", String.valueOf(enabled),
+            existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
+                existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory(),
+                enabled));
     }
 
     @Override
@@ -272,7 +287,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata withType = new VaierMetadata(
                 existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
                 existing.lanCidr(), existing.lanAddress(), existing.description(), existing.name(),
-                existing.deviceCategory());
+                existing.deviceCategory(), existing.sshAccess());
             VaierMetadata updated = mutator.apply(withType);
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
 

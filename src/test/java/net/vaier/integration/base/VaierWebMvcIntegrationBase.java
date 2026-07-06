@@ -232,6 +232,19 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetMachinesUseCase getMachinesUseCase;
 
+    @MockBean
+    protected SetMachineSshAccessUseCase setMachineSshAccessUseCase;
+
+    // --- Host credential (web terminal, credential vault) use cases ---
+    @MockBean
+    protected SaveHostCredentialUseCase saveHostCredentialUseCase;
+
+    @MockBean
+    protected GetHostCredentialUseCase getHostCredentialUseCase;
+
+    @MockBean
+    protected DeleteHostCredentialUseCase deleteHostCredentialUseCase;
+
     // --- Server location use case ---
     @MockBean
     protected GetServerLocationUseCase getServerLocationUseCase;

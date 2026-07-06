@@ -118,4 +118,57 @@ class MachineTest {
     void nameIsTaken_ignoresNullAndBlankExistingNames() {
         assertThat(Machine.nameIsTaken("nas", java.util.Arrays.asList(null, "", "  "))).isFalse();
     }
+
+    // --- SSH-access default derivation (#307) ---
+
+    @Test
+    void defaultSshAccess_serverTypeWithServerCategory_true() {
+        assertThat(Machine.defaultSshAccess(DeviceCategory.SERVER, MachineType.UBUNTU_SERVER)).isTrue();
+    }
+
+    @Test
+    void defaultSshAccess_nas_true() {
+        assertThat(Machine.defaultSshAccess(DeviceCategory.NAS, MachineType.LAN_SERVER)).isTrue();
+    }
+
+    @Test
+    void defaultSshAccess_lanServerPrinter_false_applianceVetoesServerType() {
+        assertThat(Machine.defaultSshAccess(DeviceCategory.PRINTER, MachineType.LAN_SERVER)).isFalse();
+    }
+
+    @Test
+    void defaultSshAccess_mobileClientPhone_false() {
+        assertThat(Machine.defaultSshAccess(DeviceCategory.PHONE, MachineType.MOBILE_CLIENT)).isFalse();
+    }
+
+    @Test
+    void defaultSshAccess_serverTypeWithGenericCategory_true_serverFallback() {
+        assertThat(Machine.defaultSshAccess(DeviceCategory.GENERIC, MachineType.UBUNTU_SERVER)).isTrue();
+    }
+
+    @Test
+    void defaultSshAccess_genericClient_false() {
+        assertThat(Machine.defaultSshAccess(DeviceCategory.GENERIC, MachineType.MOBILE_CLIENT)).isFalse();
+    }
+
+    @Test
+    void effectiveSshAccess_overrideWinsOverDefault() {
+        // A server that would default to true, pinned off.
+        PeerConfiguration peer = new PeerConfiguration("srv", "srv", "10.13.13.2", "",
+            MachineType.UBUNTU_SERVER, null, null, null, null, false);
+        Machine machine = Machine.fromPeer(peer, null);
+        assertThat(machine.effectiveSshAccess()).isFalse();
+
+        // A printer that would default to false, pinned on.
+        Machine forced = Machine.fromLanServer(
+            new LanServer("p", "192.168.1.9", false, null, null, DeviceCategory.PRINTER, true), null);
+        assertThat(forced.effectiveSshAccess()).isTrue();
+    }
+
+    @Test
+    void effectiveSshAccess_noOverride_usesDefault() {
+        PeerConfiguration peer = new PeerConfiguration("srv", "srv", "10.13.13.2", "",
+            MachineType.UBUNTU_SERVER, null, null, null, null, null);
+        assertThat(Machine.fromPeer(peer, null).effectiveSshAccess()).isTrue();
+    }
 }

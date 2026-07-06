@@ -214,4 +214,35 @@ class LanServerFileAdapterTest {
         assertThat(loaded.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.CAMERA);
         assertThat(loaded.description()).isEqualTo("Front door");
     }
+
+    // --- SSH access override (#307) ---
+
+    @Test
+    void save_withSshAccessOverride_roundTripsThroughFreshAdapter() {
+        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, null, null, false));
+
+        LanServerFileAdapter fresh = new LanServerFileAdapter(tempDir.toString());
+        LanServer loaded = fresh.getAll().get(0);
+        assertThat(loaded.sshAccessOverride()).isFalse();
+        assertThat(loaded.effectiveSshAccess()).isFalse();
+    }
+
+    @Test
+    void getAll_lanServerWithoutSshAccessOverride_readsNull_andUsesDefault() {
+        // A NAS with no override defaults to SSH-on.
+        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, null,
+            net.vaier.domain.DeviceCategory.NAS));
+
+        LanServer loaded = adapter.getAll().get(0);
+        assertThat(loaded.sshAccessOverride()).isNull();
+        assertThat(loaded.effectiveSshAccess()).isTrue();
+    }
+
+    @Test
+    void save_withoutOverride_doesNotWriteSshAccessKey() throws Exception {
+        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+
+        String contents = Files.readString(tempDir.resolve("lan-servers.yml"));
+        assertThat(contents).doesNotContain("sshAccessOverride");
+    }
 }

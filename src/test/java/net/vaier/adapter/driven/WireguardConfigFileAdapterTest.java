@@ -626,6 +626,45 @@ class WireguardConfigFileAdapterTest {
             .hasMessageContaining("ghost");
     }
 
+    // --- SSH access override (#307) ---
+
+    @Test
+    void updateSshAccess_writesOverrideIntoMetadata_andReadsBack() throws IOException {
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}");
+
+        adapter.updateSshAccess("apalveien5", false);
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.sshAccess()).isFalse();
+        assertThat(result.effectiveSshAccess()).isFalse();
+        // Other metadata carries over untouched.
+        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+    }
+
+    @Test
+    void updateSshAccess_true_readsBackTrue() throws IOException {
+        createPeerConfWithVaierMetadata("phone", "10.13.13.10",
+                "{\"peerType\":\"MOBILE_CLIENT\"}");
+
+        adapter.updateSshAccess("phone", true);
+
+        PeerConfiguration result = adapter.getPeerConfigByName("phone").orElseThrow();
+        assertThat(result.sshAccess()).isTrue();
+        assertThat(result.effectiveSshAccess()).isTrue();
+    }
+
+    @Test
+    void getPeerConfig_legacyWithoutSshAccess_readsNullOverride_andUsesDefault() throws IOException {
+        // A pre-#307 config has no sshAccess key: override is null, effective = smart default (server → on).
+        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
+                "{\"peerType\":\"UBUNTU_SERVER\"}");
+
+        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
+        assertThat(result.sshAccess()).isNull();
+        assertThat(result.effectiveSshAccess()).isTrue();
+    }
+
     // helpers
 
     private void createPeerConf(String peerName, String ip) throws IOException {

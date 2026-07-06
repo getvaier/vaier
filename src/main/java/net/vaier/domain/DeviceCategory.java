@@ -114,6 +114,31 @@ public enum DeviceCategory {
     }
 
     /**
+     * True for device kinds that don't run a general-purpose OS shell — a phone, printer, router,
+     * gateway, IoT device, camera, or media box. An appliance never offers SSH by default and vetoes
+     * the server-type SSH-access fallback (a LAN server that's really a printer stays SSH-off).
+     * Presentation-derived only: this seeds the SSH-access default, it is not the authoritative flag.
+     */
+    public boolean isAppliance() {
+        return switch (this) {
+            case PHONE, PRINTER, ROUTER, GATEWAY, IOT, CAMERA, MEDIA -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * True for the computer-like categories that host an SSH daemon in the common case — server, NAS,
+     * desktop, laptop. Seeds the SSH-access default; {@link #GENERIC} is deliberately excluded so a
+     * generic client stays SSH-off unless its machine type is a server type.
+     */
+    public boolean sshCapableByDefault() {
+        return switch (this) {
+            case SERVER, NAS, DESKTOP, LAPTOP -> true;
+            default -> false;
+        };
+    }
+
+    /**
      * Parses a stored/override category name (trimmed, case-insensitive), or {@code null} when the
      * value is null or blank (meaning "no override"). Throws {@link IllegalArgumentException} for a
      * non-blank value that is not a valid category — callers surface that as a 400.

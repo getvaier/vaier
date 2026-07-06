@@ -172,7 +172,8 @@ public class LanServerRestController {
         MachineStatus status,
         Long lastSeen,
         String deviceCategory,
-        boolean deviceCategoryOverridden
+        boolean deviceCategoryOverridden,
+        boolean sshAccess
     ) {
         static LanServerResponse from(LanServerView view, String reachability, MachineStatus status, Long lastSeen) {
             return new LanServerResponse(
@@ -186,7 +187,8 @@ public class LanServerRestController {
                 status,
                 lastSeen,
                 view.server().effectiveDeviceCategory().name(),
-                view.server().deviceCategoryOverridden());
+                view.server().deviceCategoryOverridden(),
+                view.server().effectiveSshAccess());
         }
     }
 }

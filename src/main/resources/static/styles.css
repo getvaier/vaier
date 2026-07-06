@@ -427,6 +427,24 @@ body {
     word-break: break-all;
 }
 
+/* SSH-access toggle inside a machine card's detail row (#307). Sits in a .detail-value, so it
+   overrides the mono/break-all inherited there for a legible inline checkbox + label. */
+.ssh-access-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-family: var(--font, inherit);
+    color: var(--text-muted);
+    word-break: normal;
+}
+
+.ssh-access-toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+    margin: 0;
+}
+
 /* Status dots */
 .status-dot {
     width: 7px;
