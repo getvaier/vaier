@@ -807,6 +807,13 @@
             return `<button class="btn btn-small btn-secondary" onclick="showSshCredentialModal('${jsArg(machineName)}')" title="Store the SSH login Vaier holds for this machine (used by the web terminal)">SSH credential</button>`;
         }
 
+        // Open-an-SSH-shell button (#308), shown only when SSH access is on. If no credential is stored
+        // the connection closes with a nudge to add one rather than a dead shell.
+        function terminalButtonHtml(machineName, sshAccessOn) {
+            if (!sshAccessOn) return '';
+            return `<button class="btn btn-small btn-primary" onclick="openTerminal('${jsArg(machineName)}')" title="Open an SSH shell to this machine">▸ Terminal</button>`;
+        }
+
         async function toggleSshAccess(machineName, checkbox) {
             const enabled = checkbox.checked;
             checkbox.disabled = true;
@@ -929,6 +936,201 @@
             } catch (e) {
                 alert(`Failed to delete. Vaier could not be reached (${e.message}).`);
             }
+        }
+
+        // --- Web terminal (#308) ---
+        // Each Terminal button spawns an INDEPENDENT floating window bound to its own WebSocket + SSH
+        // session, so several shells (even two to the same host) stay live at once. A local xterm.js
+        // talks to /machines/{name}/terminal: keystrokes go out as binary frames, a JSON text frame
+        // carries resize, and remote output arrives as binary frames. Vaier authenticates server-side
+        // from the credential vault — no secret ever reaches the browser.
+        const _terminals = new Map();   // id -> { el, term, fit, ws, machine, resizeObs, raf }
+        let _termSeq = 0;
+        let _termZ = 3001;
+
+        // Distinct WebSocket close codes → operator-legible reasons (mirrors TerminalWebSocketHandler).
+        const TERMINAL_CLOSE_REASONS = {
+            4401: 'No SSH credential is stored for this machine.',
+            4402: 'Authentication failed — check the stored SSH credential.',
+            4403: 'The host key changed and was refused. If you rebuilt this host, clear its pinned key and reconnect.',
+            4404: 'Machine not found.',
+            4408: 'Could not reach the host (connection refused or timed out).',
+            4500: 'The terminal failed to open. Check the Vaier logs.',
+        };
+
+        function openTerminal(machineName) {
+            const id = ++_termSeq;
+            const el = buildTerminalWindow(id, machineName);
+            document.getElementById('terminalWindows').appendChild(el);
+
+            const term = new Terminal({
+                cursorBlink: true, fontFamily: 'var(--mono, monospace)', fontSize: 13,
+                theme: { background: '#000000' }, scrollback: 5000,
+            });
+            const fit = new FitAddon.FitAddon();
+            term.loadAddon(fit);
+            term.open(el.querySelector('.term-window-body'));
+
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${proto}//${window.location.host}/machines/${encodeURIComponent(machineName)}/terminal`);
+            ws.binaryType = 'arraybuffer';
+
+            const state = { el, term, fit, ws, machine: machineName, resizeObs: null, raf: 0 };
+            _terminals.set(id, state);
+
+            setTimeout(() => fitTerminal(id), 0);
+
+            ws.onopen = () => { fitTerminal(id); sendTerminalResize(id); term.focus(); };
+            ws.onmessage = (ev) => { if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data)); };
+            term.onData((data) => { if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data)); });
+            term.onResize(() => sendTerminalResize(id));
+            ws.onclose = (ev) => {
+                setTerminalDot(id, ev.code === 1000 ? 'closed' : 'error');
+                if (ev.code === 1000) {
+                    setTerminalStatus(id, 'Session ended.', false);
+                } else {
+                    const reason = TERMINAL_CLOSE_REASONS[ev.code] || (ev.reason || 'The terminal connection closed.');
+                    setTerminalStatus(id, reason, true, ev.code, machineName);
+                }
+            };
+            ws.onerror = () => { /* the close handler reports the reason */ };
+
+            // Reflow the PTY whenever the window is dragged-resized from its corner.
+            const resizeObs = new ResizeObserver(() => {
+                cancelAnimationFrame(state.raf);
+                state.raf = requestAnimationFrame(() => { fitTerminal(id); sendTerminalResize(id); });
+            });
+            resizeObs.observe(el);
+            state.resizeObs = resizeObs;
+
+            raiseTerminal(id);
+        }
+
+        function buildTerminalWindow(id, machineName) {
+            const el = document.createElement('div');
+            el.className = 'term-window';
+            el.id = 'term-window-' + id;
+            // Cascade so successive windows don't cover each other exactly.
+            const offset = (_terminals.size % 6) * 34;
+            el.style.left = (90 + offset) + 'px';
+            el.style.top = (70 + offset) + 'px';
+            el.style.zIndex = ++_termZ;
+
+            const header = document.createElement('div');
+            header.className = 'term-window-header';
+            const dot = document.createElement('span');
+            dot.className = 'term-window-dot';
+            const title = document.createElement('span');
+            title.className = 'term-window-title';
+            title.textContent = machineName;                 // textContent — never inject a name as HTML
+            const close = document.createElement('button');
+            close.className = 'term-window-close';
+            close.textContent = '✕';
+            close.title = 'Close terminal';
+            close.onclick = () => closeTerminalWindow(id);
+            header.append(dot, title, close);
+
+            const status = document.createElement('div');
+            status.className = 'term-window-status';
+            status.style.display = 'none';
+
+            const body = document.createElement('div');
+            body.className = 'term-window-body';
+
+            el.append(header, status, body);
+            el.addEventListener('mousedown', () => raiseTerminal(id));
+            makeDraggable(el, header);
+            return el;
+        }
+
+        function fitTerminal(id) {
+            const s = _terminals.get(id);
+            if (!s) return;
+            try { s.fit.fit(); } catch (e) { /* window not laid out yet */ }
+        }
+
+        function sendTerminalResize(id) {
+            const s = _terminals.get(id);
+            if (!s || s.ws.readyState !== WebSocket.OPEN) return;
+            s.ws.send(JSON.stringify({ type: 'resize', cols: s.term.cols, rows: s.term.rows }));
+        }
+
+        function raiseTerminal(id) {
+            const s = _terminals.get(id);
+            if (s) s.el.style.zIndex = ++_termZ;
+        }
+
+        function setTerminalDot(id, kind) {
+            const s = _terminals.get(id);
+            if (!s) return;
+            const dot = s.el.querySelector('.term-window-dot');
+            dot.classList.remove('error', 'closed');
+            if (kind) dot.classList.add(kind);
+        }
+
+        // The per-window status line: a plain notice, or an error with a contextual action
+        // ("Add SSH credential" on 4401, "Clear pinned key & retry" on 4403).
+        function setTerminalStatus(id, message, isError, code, machineName) {
+            const s = _terminals.get(id);
+            if (!s) return;
+            const el = s.el.querySelector('.term-window-status');
+            if (!message) { el.style.display = 'none'; el.textContent = ''; el.classList.remove('error'); return; }
+            el.classList.toggle('error', !!isError);
+            el.textContent = message + ' ';
+            if (code === 4401 && machineName) {
+                el.appendChild(makeStatusButton('Add SSH credential', () => {
+                    closeTerminalWindow(id); showSshCredentialModal(machineName);
+                }));
+            } else if (code === 4403 && machineName) {
+                el.appendChild(makeStatusButton('Clear pinned key & retry', async () => {
+                    await fetch(`/machines/${encodeURIComponent(machineName)}/host-key`, { method: 'DELETE' });
+                    closeTerminalWindow(id);
+                    openTerminal(machineName);
+                }));
+            }
+            el.style.display = 'flex';
+            fitTerminal(id);   // the status line changed the body height
+        }
+
+        function makeStatusButton(label, onClick) {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-small btn-secondary';
+            btn.textContent = label;
+            btn.onclick = onClick;
+            return btn;
+        }
+
+        function closeTerminalWindow(id) {
+            const s = _terminals.get(id);
+            if (!s) return;
+            if (s.resizeObs) try { s.resizeObs.disconnect(); } catch (e) { /* ignore */ }
+            if (s.ws) try { s.ws.close(); } catch (e) { /* ignore */ }
+            if (s.term) try { s.term.dispose(); } catch (e) { /* ignore */ }
+            if (s.el && s.el.parentNode) s.el.parentNode.removeChild(s.el);
+            _terminals.delete(id);
+        }
+
+        // Drag a window by its title bar. The corner resize handle (CSS `resize`) is separate.
+        function makeDraggable(el, handle) {
+            handle.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.term-window-close')) return;
+                e.preventDefault();
+                const startX = e.clientX, startY = e.clientY;
+                const rect = el.getBoundingClientRect();
+                const origLeft = rect.left, origTop = rect.top;
+                const onMove = (me) => {
+                    const nx = Math.max(0, Math.min(window.innerWidth - 80, origLeft + (me.clientX - startX)));
+                    const ny = Math.max(0, Math.min(window.innerHeight - 40, origTop + (me.clientY - startY)));
+                    el.style.left = nx + 'px';
+                    el.style.top = ny + 'px';
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
         }
 
         // Turn a failed publish response into a one-line explanation. On a 400/409 the backend sends
@@ -1186,6 +1388,7 @@
                             ${scriptBtn}
                             ${publishLanBtn}
                             ${sshCredentialButtonHtml(server.name, server.sshAccess)}
+                            ${terminalButtonHtml(server.name, server.sshAccess)}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeleteLanServer('${jsArg(server.name)}')">Delete</button>
                     </div>
@@ -1242,6 +1445,7 @@
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
                             ${sshCredentialButtonHtml('Vaier server', _vaierServerSsh.sshAccess)}
+                            ${terminalButtonHtml('Vaier server', _vaierServerSsh.sshAccess)}
                         </div>
                     </div>` : ''}
                 </div>
@@ -1406,6 +1610,7 @@
                             <button class="btn btn-small btn-secondary" onclick="confirmRegeneratePeer('${peer.id}')"
                                     title="Regenerate — rotate the WireGuard keypair and deliver a fresh config once. Use it only to replace a compromised config; the old config stops working immediately and must be reinstalled on the peer.">Regenerate</button>
                             ${sshCredentialButtonHtml(peer.name, peer.sshAccess)}
+                            ${terminalButtonHtml(peer.name, peer.sshAccess)}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.id}')">Delete</button>
                     </div>

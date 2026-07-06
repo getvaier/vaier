@@ -522,6 +522,9 @@ services:
       - --cookie-secret=${VAIER_OAUTH2_COOKIE_SECRET}
       - --cookie-domain=.${VAIER_DOMAIN}
       - --cookie-secure=true
+      # Lax SameSite: defence-in-depth against cross-site use of the auth cookie (e.g. a WebSocket
+      # upgrade from another origin). Safe for the top-level Google/Dex sign-in redirect flow.
+      - --cookie-samesite=lax
       - --whitelist-domain=.${VAIER_DOMAIN}
       - --email-domain=*
       - --reverse-proxy=true

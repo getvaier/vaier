@@ -28,6 +28,7 @@
         <aws.sdk.version>2.23.9</aws.sdk.version>
         <docker.java.version>3.3.4</docker.java.version>
         <springdoc.version>2.7.0</springdoc.version>
+        <sshd.version>2.15.0</sshd.version>
     </properties>
 
     <dependencies>
@@ -142,6 +143,19 @@
             <groupId>com.maxmind.geoip2</groupId>
             <artifactId>geoip2</artifactId>
             <version>4.2.1</version>
+        </dependency>
+
+        <!-- WebSocket (web terminal, #308) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!-- SSH client for the web terminal (#308). Apache MINA sshd — JSch is unmaintained. -->
+        <dependency>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-core</artifactId>
+            <version>${sshd.version}</version>
         </dependency>
     </dependencies>
 

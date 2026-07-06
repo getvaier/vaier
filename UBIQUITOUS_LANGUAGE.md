@@ -309,6 +309,9 @@ is delegated to an external **identity provider**; Vaier owns **authorization** 
 |------|------------|
 | **Host credential** | The single SSH login Vaier holds for a machine: a username, an **auth method** (password or private key), the secret material, and an optional key passphrase. Exactly one per machine. |
 | **Credential vault** | The encrypted-at-rest store for host credentials. Secret material is sealed with a symmetric cipher before it is written to disk and never leaves the process in the clear. |
+| **Web terminal** | A live, in-browser SSH shell to a machine, opened from its Infrastructure card. Vaier authenticates server-side from the credential vault; the browser only exchanges keystrokes and screen output, never the secret. |
+| **SSH address** | Where Vaier opens the SSH connection for a machine: a VPN peer's tunnel IP, a LAN server's LAN address, or — for the Vaier server host — the container's gateway host IP (or `VAIER_HOST_SSH_ADDRESS`). |
+| **Host-key pin** | The SSH host-key fingerprint Vaier records for a machine on first connect (trust-on-first-use). A later connect that presents a different fingerprint is refused as a **host-key mismatch**; clearing the pin lets a legitimately rebuilt host be re-pinned. |
 
 ---
 

@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
@@ -31,6 +32,7 @@ class MachineRestControllerTest {
     @Mock GetVaierServerUseCase getVaierServerUseCase;
     @Mock SetMachineSshAccessUseCase setMachineSshAccessUseCase;
     @Mock GetHostCredentialUseCase getHostCredentialUseCase;
+    @Mock ClearHostKeyUseCase clearHostKeyUseCase;
 
     @InjectMocks MachineRestController controller;
 
@@ -132,5 +134,15 @@ class MachineRestControllerTest {
 
         assertThat(response.sshAccess()).isFalse();
         assertThat(response.hasCredential()).isFalse();
+    }
+
+    // --- clear host key (#308) ---
+
+    @Test
+    void clearHostKey_returns204AndDelegates() {
+        var response = controller.clearHostKey("nas");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(clearHostKeyUseCase).clearHostKey("nas");
     }
 }

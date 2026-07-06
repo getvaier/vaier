@@ -1,11 +1,14 @@
 package net.vaier.rest;
 
 import lombok.RequiredArgsConstructor;
+import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.domain.Machine;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +27,7 @@ public class MachineRestController {
     private final GetVaierServerUseCase getVaierServerUseCase;
     private final SetMachineSshAccessUseCase setMachineSshAccessUseCase;
     private final GetHostCredentialUseCase getHostCredentialUseCase;
+    private final ClearHostKeyUseCase clearHostKeyUseCase;
 
     @GetMapping
     public List<MachineResponse> list() {
@@ -59,6 +63,16 @@ public class MachineRestController {
         boolean enabled = request != null && request.enabled();
         boolean effective = setMachineSshAccessUseCase.setMachineSshAccess(machine, enabled);
         return new SshAccessResponse(effective);
+    }
+
+    /**
+     * Forget the pinned SSH host key for a machine (#308), so the next terminal connect re-pins on
+     * first use. Use after a host is legitimately rebuilt and a host-key mismatch is refusing connects.
+     */
+    @DeleteMapping("/{machine}/host-key")
+    public ResponseEntity<Void> clearHostKey(@PathVariable String machine) {
+        clearHostKeyUseCase.clearHostKey(machine);
+        return ResponseEntity.noContent().build();
     }
 
     record SshAccessRequest(boolean enabled) {}

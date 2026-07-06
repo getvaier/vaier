@@ -763,7 +763,22 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   `PATCH /machines/{name}/ssh-access` routes the Vaier-server write to the config store; a dedicated
   `GET /machines/vaier-server` feeds its card. The terminal connection (address = container→host gateway
   or `VAIER_HOST_SSH_ADDRESS`) is deferred to slice 2.
-- **#308 — Web terminal** (WebSocket + MINA sshd-core + xterm.js). 🔲
+- **#308 — Web terminal ✅.** A live in-browser SSH shell per machine: a **Terminal** button on every
+  SSH-capable card (peers, LAN servers, the Vaier server) opens a locally-vendored xterm.js
+  (`static/vendor/xterm/5.3.0`) over a WebSocket at `/machines/{name}/terminal`. The `TerminalService`
+  resolves the machine's **SSH address** (peer tunnel IP / LAN address / Vaier host gateway or
+  `VAIER_HOST_SSH_ADDRESS`), loads its vault credential, and opens the session via the driven port
+  `ForOpeningSshSessions` (adapter `MinaSshSessionAdapter`, Apache MINA sshd-core 2.15.0 — JSch is
+  unmaintained). Host-key **trust-on-first-use**: `ForTrackingHostKeys` (`ssh-known-hosts.yml`) pins a
+  fingerprint on first connect and the domain `HostKeyTrust` decision refuses a later mismatch
+  (`HostKeyMismatchException`); `DELETE /machines/{name}/host-key` clears a pin. The WebSocket relays
+  keystrokes (binary) and resize (JSON control) to the shell and streams output back, closing with a
+  distinct code per failure (no credential / auth / host-key mismatch / not found / connect). The path
+  is non-whitelisted, so the oauth2 forward-auth runs on the upgrade (Traefik passes WebSockets through
+  by default). Each Terminal button spawns an independent, draggable, resizable floating window bound to
+  its own WebSocket + SSH session, so several shells (even two to the same host) coexist and closing or
+  erroring one leaves the others live; the adapter holds no shared session state. Resizing a window runs
+  the xterm fit addon and sends the resize control frame so the remote PTY reflows.
 - **#309 — Managed ed25519 keypair generation** (the `managed` flag). 🔲
 - **#310 — Saved snippets.** 🔲
 
