@@ -347,7 +347,7 @@ Vaier ships an SMTP notifier that carries Vaier's admin alert emails (machine up
 - **Server machine up/down alerts** ([#173](https://github.com/getvaier/vaier/issues/173)): two 30s schedulers — one watching WireGuard handshake age for `UBUNTU_SERVER`/`WINDOWS_SERVER` peers, one watching the LAN reachability TCP probe for `LAN_SERVER` machines. Mobile/Windows clients are excluded — their disconnects are routine user behaviour. On a state change either watcher emails every **admin**-role **access entry** with subject `[Vaier] <name> is now <connected|disconnected>` and a body containing the machine's name, type, last handshake (or last-seen timestamp for LAN servers), LAN address, and a link back to `vaier.<domain>/vpn-peers.html`. Per-machine state is in-memory; the first observation after Vaier startup is treated as a baseline so a restart never produces a notification storm. No quiet-hours setting — alerts fire 24/7.
 - **Reachability debounce for LAN servers**: a probe result must hold for 3 consecutive 30s cycles (≈60s of consistency) before the published cache flips and an email goes out. Dampens both the WireGuard tunnel warmup window after a Vaier restart (no false-down email when it takes one cycle for the relay handshake to complete) and ordinary network flapping (a single transient timeout never propagates). The UI shows the icon as grey ("warming up") until the first state confirms.
 - **Last-seen timestamp inside the card** ([#173](https://github.com/getvaier/vaier/issues/173)): every machine's expanded card has a "Last Seen" detail row derived from the latest handshake (or the latest successful LAN reachability probe), updated live by the `peers-stats` SSE stream so the value stays current without a manual refresh. The header row itself signals liveness through the machine-icon colour rather than a separate widget.
-- **Host disk-pressure alerts** ✅ — Vaier monitors free space on its own host root filesystem and emails every **admin**-role **access entry** when it fills past a configurable threshold, reusing the same SMTP path as the machine up/down alerts. A `DiskUsageWatcher` (`@Scheduled(fixedDelay = 60000)`) reads host disk usage through the `ForReadingDiskUsage` driven port (`HostDiskUsageAdapter`, backed by `Files.getFileStore`), which reads the host root bind-mounted read-only into the Vaier container at `VAIER_HOST_ROOT_PATH` (default `/host`; `docker-compose.yml`'s `vaier` service mounts `- /:/host:ro` and passes the env var). All fullness decisions live on the `domain.DiskUsage` entity (`usedPercent`, `isAbove`, and its own email subject/body rendering); `HostMonitoringService` (`GetHostDiskUsageUseCase`) only orchestrates the read. An in-memory `domain.DiskPressureTracker` (mirroring `PeerConnectivityTracker`) emits a transition only on a boundary crossing — `CROSSED_ABOVE` sends the pressure email, `CROSSED_BELOW` the recovery email — so a poll that doesn't change state stays quiet, and the first reading after startup is a silent baseline. The emails go out via `NotifyAdminsOfDiskPressureUseCase` on `NotificationService`. The threshold is `diskMonitorThresholdPercent` in `vaier-config.yml` (default 85, valid 1–99, validated in `domain.VaierConfig`), exposed via `ConfigResolver.getDiskMonitorThresholdPercent()` and editable through `PUT /settings/disk-monitor` (`UpdateDiskMonitorSettingsUseCase` on `SettingsService`). With SMTP unconfigured or the host root not mounted the watcher is inert; the latter case is swallowed and logged at debug.
+- **Host disk-pressure alerts** ✅ — originally a dedicated local watcher reading the Vaier host's own filesystem directly; fully retired in favour of a single alerting path for the whole fleet. See **#316** below: the Vaier host is now covered by `RemoteDiskWatcher` over SSH-to-self exactly like any other machine, so it no longer double-notifies alongside a local watcher. The entire local host-disk-reading stack was removed once the watcher was gone and nothing else consumed it — `DiskUsageWatcher`, `NotifyAdminsOfDiskPressureUseCase`, `GetHostDiskUsageUseCase`, `HostMonitoringService`, the `ForReadingDiskUsage` port and its `HostDiskUsageAdapter` (which read the host root via `Files.getFileStore` over the `VAIER_HOST_ROOT_PATH` bind mount), and the `domain.DiskUsage` value object are all deleted. What survives is the threshold config — `diskMonitorThresholdPercent` in `vaier-config.yml` (default 85, valid 1–99, validated in `domain.VaierConfig`), exposed via `ConfigResolver.getDiskMonitorThresholdPercent()` and editable through `PUT /settings/disk-monitor` (`UpdateDiskMonitorSettingsUseCase` on `SettingsService`) — which now governs remote disk pressure across the fleet.
 - **New pending access-request alert** ✅ — when `UserService.verify()` sees a Google identity for the first time, it auto-creates a `PENDING` `AccessEntry` and, only in that new-pending branch, notifies admins via the `ForNotifyingAdmins` driven port (`notifyNewPendingIdentity(email)`), implemented by `NotificationService`. The email content is rendered by the `domain.PendingIdentity` value object (subject `[Vaier] New access request awaiting approval`; body names the email and links to `vaier.<domain>/admin.html#users`), mirroring `PeerSnapshot`. Recipients are the **admin**-role **access entries** (`accessStore.getEntries()` filtered by `AccessEntry::isAdmin`), reusing the same SMTP path as the other alerts, so it stays silent when SMTP is unconfigured or there are no admins. Because `verify()` runs on the Traefik forward-auth hot path for every request to a social-gated service, the send is non-blocking and exception-safe: the notifier method is `@Async` (`@EnableAsync` on `VaierApplication`) and the call site in `UserService` swallows/logs any failure, so a misbehaving notifier can never add latency to or throw into the access decision. It does not fire for existing entries, repeat sign-ins by the same pending user, or allowed decisions. The cross-service cycle (NotificationService reads admins via the access store, UserService notifies via `ForNotifyingAdmins`) is broken with `@Lazy` on the UserService dependency.
 
 **Known gotcha:** Gmail requires an **App Password** (not the account password) when 2FA is on. The pre-save verification catches this cleanly — save is rejected with the Gmail `534 5.7.9 Application-specific password required` message.
@@ -356,7 +356,6 @@ Vaier ships an SMTP notifier that carries Vaier's admin alert emails (machine up
 - Monitor host CPU and memory pressure alongside disk, with their own thresholds and alerts.
 - Per-mount monitoring (not just the host root) — e.g. a separate data volume — each with its own threshold.
 - An in-UI disk widget (a usage gauge on the Machines page / Settings) so the operator sees current host disk usage without waiting for an alert email.
-- Extend disk monitoring to server peers and Docker-enabled LAN servers, not just the Vaier server itself.
 
 ---
 
@@ -816,18 +815,24 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
     no consumer wiring or UI yet (slices 3–5). Short-lived client per call, closed in a `finally`.
   - **#315 — Per-host SSH port** (retire hard-coded port 22). 🔲
   - **#316 — Remote disk-pressure alert** (`df` over SSH) ✅. The first alert built on the exec keystone:
-    a `RemoteDiskWatcher` (`@Scheduled`, sibling of `DiskUsageWatcher`) runs `df -P /` over SSH on every
-    `Machine` that both has `effectiveSshAccess()` and a stored **host credential**, parses the Use%
-    column, and feeds a per-machine `RemoteDiskPressureTracker` so it alerts only on threshold crossings
-    (into pressure and back), never per poll. Notifies via `NotifyAdminsOfRemoteDiskPressureUseCase` on
-    `NotificationService`, reusing admin-recipient resolution + SMTP gating; skips silently when SMTP is
-    unconfigured. The watcher depends only on the new `RunRemoteCommandUseCase` (implemented on
-    `TerminalService`, reusing `openTerminal`'s address + credential + host-key-pin assembly), never on
-    the SSH ports directly. Error path is honest: a machine with no credential / SSH off is skipped, and
-    an unreachable host or a `df` that times out, exits non-zero, or returns unparseable output is
-    degraded (logged, tracker untouched), never treated as a full disk. TOFU gap closed: `CommandResult`
-    gained a `hostKeyFingerprint` field so the exec path pins an unpinned host on first use exactly like
-    the terminal.
+    a `RemoteDiskWatcher` (`@Scheduled`) runs `df -P /` over SSH on every `Machine` that both has
+    `effectiveSshAccess()` and a stored **host credential**, parses the Use% column, and feeds a
+    per-machine `RemoteDiskPressureTracker` so it alerts only on threshold crossings (into pressure and
+    back), never per poll. Notifies via `NotifyAdminsOfRemoteDiskPressureUseCase` on `NotificationService`,
+    reusing admin-recipient resolution + SMTP gating; skips silently when SMTP is unconfigured. The
+    watcher depends only on the new `RunRemoteCommandUseCase` (implemented on `TerminalService`, reusing
+    `openTerminal`'s address + credential + host-key-pin assembly), never on the SSH ports directly. Error
+    path is honest: a machine with no credential / SSH off is skipped, and an unreachable host or a `df`
+    that times out, exits non-zero, or returns unparseable output is degraded (logged, tracker untouched),
+    never treated as a full disk. TOFU gap closed: `CommandResult` gained a `hostKeyFingerprint` field so
+    the exec path pins an unpinned host on first use exactly like the terminal. **Superseded the original
+    local host watcher**: once `RemoteDiskWatcher` could reach the Vaier host itself over SSH-to-self, the
+    old `DiskUsageWatcher` (and its `NotifyAdminsOfDiskPressureUseCase` port) were deleted outright to stop
+    double-notifying admins for the same host — the Vaier host is now just another `Machine` in the fleet
+    this watcher covers. With that watcher gone, the whole orphaned local host-disk-reading stack went too
+    (`GetHostDiskUsageUseCase`, `HostMonitoringService`, the `ForReadingDiskUsage` port + `HostDiskUsageAdapter`,
+    and the `domain.DiskUsage` value object) — nothing read the host disk directly anymore. `df` over SSH is
+    now the entire disk story; see the disk-pressure-alerts entry above.
   - **#317 — Docker health over SSH + close the `apalveien5` 2375 hole.** 🔲
 
 **Backlog:** **SFTP** (file transfer over the same session) is deferred — V1 scope is the interactive

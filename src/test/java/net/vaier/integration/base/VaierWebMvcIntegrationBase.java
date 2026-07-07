@@ -259,13 +259,6 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected NotifyAdminsOfPeerTransitionUseCase notifyAdminsOfPeerTransitionUseCase;
 
-    // --- Host monitoring use cases ---
-    @MockBean
-    protected GetHostDiskUsageUseCase getHostDiskUsageUseCase;
-
-    @MockBean
-    protected NotifyAdminsOfDiskPressureUseCase notifyAdminsOfDiskPressureUseCase;
-
     // --- Launchpad use cases ---
     @MockBean
     protected GetLaunchpadServicesUseCase getLaunchpadServicesUseCase;

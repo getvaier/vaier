@@ -17,11 +17,12 @@ import java.util.Optional;
 
 /**
  * Polls the root-filesystem fullness of every SSH-accessible machine that Vaier holds a credential for
- * and emails admins when one crosses the disk-alert threshold — the remote-host sibling of
- * {@link DiskUsageWatcher}, which watches only Vaier's own disk. It runs a bounded {@code df} over SSH
- * via {@link RunRemoteCommandUseCase} (never touching the SSH ports directly), and a per-machine
- * {@link RemoteDiskPressureTracker} makes it alert only on threshold crossings — into pressure and back
- * to normal — so no machine is re-alerted every poll and a restart never produces noise.
+ * and emails admins when one crosses the disk-alert threshold. This covers the Vaier host itself
+ * (via SSH-to-self) as well as every other machine, so there is a single disk-alert path for the
+ * whole fleet. It runs a bounded {@code df} over SSH via {@link RunRemoteCommandUseCase} (never
+ * touching the SSH ports directly), and a per-machine {@link RemoteDiskPressureTracker} makes it
+ * alert only on threshold crossings — into pressure and back to normal — so no machine is
+ * re-alerted every poll and a restart never produces noise.
  *
  * <p>Machines without SSH access or without a stored credential are skipped silently, so Vaier never
  * mounts a failed-auth storm. A machine that is unreachable, whose {@code df} times out or exits

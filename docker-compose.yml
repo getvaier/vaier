@@ -359,7 +359,6 @@ services:
       TRAEFIK_CONFIG_PATH: /traefik/config
       TRAEFIK_API_URL: http://traefik:8080
       VAIER_CONFIG_PATH: /vaier/config
-      VAIER_HOST_ROOT_PATH: /host
       DOCKER_HOST: tcp://docker-proxy:2375
     depends_on:
       vaier-init:
@@ -380,8 +379,6 @@ services:
       # Resolved service icons — read-write so a resolved icon is fetched online once then served
       # from disk across restarts (icon.cache.path).
       - ./icons:/icons
-      # Host root, read-only — lets Vaier monitor real host disk free space (VAIER_HOST_ROOT_PATH)
-      - /:/host:ro
     restart: unless-stopped
     labels:
       - traefik.enable=true

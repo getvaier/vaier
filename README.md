@@ -25,8 +25,8 @@ Vaier wires together WireGuard, Traefik, Google or GitHub sign-in (via oauth2-pr
 | **Reverse proxy** | Traefik dynamic config generated automatically, with a per-service **auth mode** (public or **Social login** — Google or GitHub via oauth2-proxy, with Vaier deciding who's approved) and root-path redirect. When a service's backend is down, visitors get Vaier's branded **offline page** (naming the service, with retry and back-to-launchpad links) instead of Traefik's bare gateway error. A standalone page server stands in even when **Vaier itself** is down, so the control panel host shows the branded page rather than "Bad gateway". |
 | **DNS management** | Full CRUD for AWS Route53 zones and records. |
 | **Access management** | Manage who can sign in from the **Users** page: each Google or GitHub identity is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. Each person's card shows their provider photo (GitHub picture, else Gravatar, else a coloured monogram) with a small corner glyph for the identity provider (Google or GitHub) they last signed in with. |
-| **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when the Vaier server's own disk — or any SSH-reachable machine behind the VPN — fills past a configurable threshold, or when someone signs in for the first time and lands as a pending access request awaiting approval. |
-| **Disk monitoring** | Vaier watches free space on its own host filesystem *and* on every SSH-capable machine it holds a credential for (via `df` over SSH), emailing all admins when usage crosses a configurable threshold (default 85%), with a recovery email once it drops back below. |
+| **Email notifications** | SMTP-powered password resets and admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when any SSH-reachable machine behind the VPN — including the Vaier host itself — fills past a configurable threshold, or when someone signs in for the first time and lands as a pending access request awaiting approval. |
+| **Disk monitoring** | Vaier watches free space on every SSH-capable machine it holds a credential for, including the Vaier host itself via SSH-to-self (via `df` over SSH), emailing all admins when usage crosses a configurable threshold (default 85%), with a recovery email once it drops back below. |
 | **Device category** | Each machine carries a **device category** (phone, laptop, desktop, server, NAS, printer, router, gateway, IoT, camera, media, or generic) that decides which icon it shows — independent of its VPN role. Vaier auto-detects it from the machine's name, scan hints, and type; you can pin an explicit category to override the guess, and clear it to fall back to auto-detection. Icon-only: it never changes routing. |
 | **Inline field help** | Advanced fields (LAN CIDR, path prefix, root redirect, the auth toggle, direct LAN URL, hide-from-launchpad, version endpoint) carry a small "?" you can hover for a one-line plain-language explanation — no need to read the docs to know what a field does. |
 | **Concepts page** | An in-app **Concepts** glossary in the admin shell explaining, in plain language, every term you meet in the UI — grouped by area, each with a short definition and a one-line "why it matters". Each entry is deep-linkable via its anchor (e.g. `concepts.html#lan-cidr`). |
@@ -282,24 +282,13 @@ For publishing services from non-peer LAN machines (NAS, printers, extra Docker 
 
 ## Host disk monitoring
 
-Vaier polls the free space on its own host filesystem once a minute and emails every admin user when the disk fills past a threshold — useful for catching a runaway log or image cache before it takes the server down. A **recovery** email follows once usage drops back below the threshold, and Vaier only emails on a boundary crossing (not on every poll), so a disk hovering just over the line won't spam you.
+Vaier watches disk usage on every SSH-capable machine it holds a credential for — every machine behind the VPN, and the Vaier host itself, watched over SSH-to-self exactly like any other machine — running `df` over SSH on a periodic cadence and emailing every admin user when a machine's usage fills past a threshold. A **recovery** email follows once usage drops back below the threshold, and Vaier only emails on a boundary crossing (not on every poll), so a disk hovering just over the line won't spam you.
 
 This reuses the same SMTP configuration as the up/down machine alerts (Settings → *Email notifications*), so it needs no extra mail setup. With SMTP unconfigured, monitoring is silent.
 
 **Threshold** — the alert fires when usage rises above the configured percentage (default **85%**). Adjust it in Settings; valid range is 1–99.
 
-**Requirements** — Vaier reads the host root filesystem through a read-only bind mount. The bundled `docker-compose.yml` already wires this up on the `vaier` service:
-
-```yaml
-    environment:
-      VAIER_HOST_ROOT_PATH: /host   # where the host root is mounted inside the container
-    volumes:
-      - /:/host:ro                  # host root, read-only
-```
-
-If you run Vaier without that mount, disk monitoring is inert (it has nothing to read) but the rest of Vaier is unaffected.
-
-**Remote hosts too** — Vaier also watches disk usage on the machines *behind* the VPN, not just its own host. On a slower cadence it runs `df` over SSH on every SSH-capable machine it holds a **credential** for (the same vault the web terminal uses) and emails admins when one crosses the same threshold, with a matching recovery email. It alerts per machine only on a boundary crossing, and a host that's unreachable or whose `df` fails is quietly skipped — never mistaken for a full disk. Machines without a stored credential or with SSH access turned off are left alone, so there's no failed-auth noise.
+**Requirements** — a machine is watched only once it has a stored **host credential** (the same vault the web terminal uses) and SSH access enabled. A host that's unreachable or whose `df` fails is quietly skipped — never mistaken for a full disk. Machines without a stored credential or with SSH access turned off are left alone, so there's no failed-auth noise. To have the Vaier host itself watched, store a host credential for it just like any other machine.
 
 ---
 

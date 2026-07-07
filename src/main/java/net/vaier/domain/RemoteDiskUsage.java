@@ -3,15 +3,15 @@ package net.vaier.domain;
 import java.util.Optional;
 
 /**
- * A point-in-time reading of a remote machine's root-filesystem fullness, parsed from a {@code df -P /}
- * run over SSH. The counterpart to {@link DiskUsage} (the Vaier host's own disk): it owns the business
- * decisions of how to read {@code df} output ({@link #parse(String, String)}), whether the disk crosses
- * the alert threshold ({@link #isAbove(int)}), and its own rendering into the admin
+ * A point-in-time reading of a machine's root-filesystem fullness, parsed from a {@code df -P /}
+ * run over SSH — for any machine in the fleet, including the Vaier host reached via SSH-to-self. It owns
+ * the business decisions of how to read {@code df} output ({@link #parse(String, String)}), whether the
+ * disk crosses the alert threshold ({@link #isAbove(int)}), and its own rendering into the admin
  * remote-disk-pressure email — the notification service only sequences the SMTP send.
  *
- * <p>Unlike {@link DiskUsage}, which computes a percentage from raw byte counts, this reads the
- * already-computed <b>Capacity</b> (Use%) column {@code df} reports, because that is what the remote
- * command returns; carrying the machine name lets the alert name the host that is under pressure.
+ * <p>It reads the already-computed <b>Capacity</b> (Use%) column {@code df} reports, because that is
+ * what the remote command returns; carrying the machine name lets the alert name the host that is under
+ * pressure.
  *
  * @param machineName the machine the reading is for
  * @param usedPercent percentage of the root filesystem in use (0–100)

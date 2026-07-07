@@ -1,11 +1,9 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.NotifyAdminsOfDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.config.ConfigResolver;
-import net.vaier.domain.DiskUsage;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.AccessEntry;
@@ -26,7 +24,6 @@ import java.util.Optional;
 @Slf4j
 public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
-        NotifyAdminsOfDiskPressureUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
         ForNotifyingAdmins {
 
@@ -55,20 +52,6 @@ public class NotificationService implements
         sendToAdmins(snapshot.notificationSubject(),
                 snapshot.notificationBody(configResolver.getDomain()),
                 "peer " + snapshot.name());
-    }
-
-    @Override
-    public void notifyAdminsOfDiskPressure(DiskUsage usage, int thresholdPercent) {
-        sendToAdmins(usage.pressureSubject(),
-                usage.pressureBody(thresholdPercent, configResolver.getDomain()),
-                "disk pressure on " + usage.path());
-    }
-
-    @Override
-    public void notifyAdminsOfDiskRecovery(DiskUsage usage, int thresholdPercent) {
-        sendToAdmins(usage.recoverySubject(),
-                usage.pressureBody(thresholdPercent, configResolver.getDomain()),
-                "disk recovery on " + usage.path());
     }
 
     @Override
