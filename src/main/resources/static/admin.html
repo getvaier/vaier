@@ -7,6 +7,7 @@
     <title>Vaier Admin</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="vendor/xterm/5.3.0/xterm.css">
     <style>
         html, body { height: 100%; overflow: hidden; }
         body { display: flex; flex-direction: column; }
@@ -92,6 +93,15 @@
                 </svg>
                 <span class="link-label">Concepts</span>
             </button>
+            <button class="topbar-item" id="terminalTab" data-hash="terminal">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="1" y="2.5" width="14" height="11" rx="1"/>
+                    <path d="M4 6l2.2 2L4 10"/>
+                    <line x1="8.5" y1="10.5" x2="11.5" y2="10.5"/>
+                </svg>
+                <span class="link-label">Terminal</span>
+                <span class="term-tab-badge" id="terminalBadge" style="display:none">0</span>
+            </button>
         </nav>
         <div class="topbar-user" id="topbarUser"></div>
     </div>
@@ -114,26 +124,78 @@
         </div>
     </main>
 
+    <section class="term-panel" id="terminalPanel" style="display:none">
+        <div class="term-dock-bar">
+            <div class="term-dock-tabs" id="terminalTabs"></div>
+        </div>
+        <div class="term-dock-panes" id="terminalPanes">
+            <div class="term-empty" id="terminalEmpty">
+                No shells open. Open one from a machine's <strong>Terminal</strong> button on Infrastructure.
+            </div>
+        </div>
+    </section>
+
     <script src="avatar.js"></script>
+    <script src="vendor/xterm/5.3.0/xterm.js"></script>
+    <script src="vendor/xterm/5.3.0/xterm-addon-fit.js"></script>
+    <script src="terminal-dock.js"></script>
     <script>
         const mainContent = document.getElementById('mainContent');
+        const terminalPanel = document.getElementById('terminalPanel');
+        const terminalTab = document.getElementById('terminalTab');
+        const terminalBadge = document.getElementById('terminalBadge');
         const tabs = document.querySelectorAll('#adminTabs .topbar-item[data-page]');
 
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const page = tab.getAttribute('data-page');
-                const hash = tab.getAttribute('data-hash');
-                tabs.forEach(t => t.classList.toggle('active', t === tab));
-                mainContent.innerHTML = `<iframe src="${page}"></iframe>`;
-                if (window.location.hash !== '#' + hash) {
-                    history.replaceState(null, '', '#' + hash);
-                }
-            });
-        });
+        function clearActive() {
+            document.querySelectorAll('#adminTabs .topbar-item').forEach(t => t.classList.remove('active'));
+        }
+
+        // A section (Infrastructure/Users/…) loads into the iframe; the Terminal panel is a sibling that
+        // persists across these switches, so its live SSH sessions are never torn down by navigation.
+        function showSection(tab) {
+            const page = tab.getAttribute('data-page');
+            const hash = tab.getAttribute('data-hash');
+            clearActive();
+            tab.classList.add('active');
+            terminalPanel.style.display = 'none';
+            mainContent.style.display = '';
+            mainContent.innerHTML = `<iframe src="${page}"></iframe>`;
+            if (window.location.hash !== '#' + hash) {
+                history.replaceState(null, '', '#' + hash);
+            }
+        }
+
+        function showTerminal() {
+            clearActive();
+            terminalTab.classList.add('active');
+            mainContent.style.display = 'none';
+            terminalPanel.style.display = 'flex';
+            if (window.TerminalDock) TerminalDock.refitActive();
+            if (window.location.hash !== '#terminal') {
+                history.replaceState(null, '', '#terminal');
+            }
+        }
+
+        tabs.forEach(tab => tab.addEventListener('click', () => showSection(tab)));
+        terminalTab.addEventListener('click', showTerminal);
+
+        // Opened from a machine card's Terminal button in the Infrastructure iframe (window.parent).
+        window.vaierOpenTerminal = function (machineName) {
+            showTerminal();
+            if (window.TerminalDock) TerminalDock.open(machineName);
+        };
+
+        if (window.TerminalDock) {
+            TerminalDock.onChange = (n) => {
+                terminalBadge.textContent = n;
+                terminalBadge.style.display = n > 0 ? 'inline-flex' : 'none';
+            };
+        }
 
         function loadFromHash() {
             let hash = window.location.hash.slice(1);
             if (!hash) return;
+            if (hash === 'terminal') { showTerminal(); return; }
             // The old #services and #vpn sections merged into #infrastructure (slice 3); keep old
             // links/bookmarks working by aliasing them, and the click() rewrites the hash.
             if (hash === 'services' || hash === 'vpn') hash = 'infrastructure';

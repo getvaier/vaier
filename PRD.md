@@ -775,10 +775,16 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   keystrokes (binary) and resize (JSON control) to the shell and streams output back, closing with a
   distinct code per failure (no credential / auth / host-key mismatch / not found / connect). The path
   is non-whitelisted, so the oauth2 forward-auth runs on the upgrade (Traefik passes WebSockets through
-  by default). Each Terminal button spawns an independent, draggable, resizable floating window bound to
-  its own WebSocket + SSH session, so several shells (even two to the same host) coexist and closing or
-  erroring one leaves the others live; the adapter holds no shared session state. Resizing a window runs
-  the xterm fit addon and sends the resize control frame so the remote PTY reflows.
+  by default). The terminal is its own first-class **Terminal** tab in the admin shell (`admin.html` +
+  `terminal-dock.js`), a sibling of the section iframe rather than content inside one — so its live SSH
+  sessions survive navigating to Infrastructure/Users/Settings and back (a badge on the tab counts them).
+  A machine card's Terminal button (in the Infrastructure iframe) reaches the shell via
+  `window.parent.vaierOpenTerminal`, which opens a shell as a tab and switches to the Terminal section.
+  Each tab is bound to its own WebSocket + SSH session, so several shells (even two to the same host)
+  coexist and closing or erroring one leaves the others live; the adapter holds no shared session state.
+  Only the active tab's pane renders; switching tabs re-fits its PTY (xterm can only measure a visible
+  pane). The panel fills the content area under the topbar, so it is full-screen on a phone with no
+  dragging — which is what made the earlier floating-window and in-page-dock designs unusable there.
 - **#309 — Managed ed25519 keypair generation** (the `managed` flag). 🔲
 - **#310 — Saved snippets.** 🔲
 

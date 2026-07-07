@@ -10,11 +10,8 @@
     <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.css">
     <link rel="stylesheet" href="vendor/leaflet-markercluster/MarkerCluster.Default.css">
     <link rel="stylesheet" href="vpn-peers.css">
-    <link rel="stylesheet" href="vendor/xterm/5.3.0/xterm.css">
     <script src="vendor/leaflet/leaflet.js"></script>
     <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
-    <script src="vendor/xterm/5.3.0/xterm.js"></script>
-    <script src="vendor/xterm/5.3.0/xterm-addon-fit.js"></script>
 </head>
 <body>
     <div class="container">
@@ -244,10 +241,9 @@
         </div>
     </div>
 
-    <!-- Web Terminal windows (#308). Each Terminal button spawns an independent, draggable, resizable
-         floating window bound to its own WebSocket + SSH session, so several shells stay live at once.
-         The container is click-through; only the windows capture pointer events. -->
-    <div id="terminalWindows"></div>
+    <!-- The web terminal lives in the admin shell (admin.html) as its own Terminal tab, so its SSH
+         sessions survive navigating away from Infrastructure. A machine's Terminal button here calls up
+         to the shell (openTerminalForMachine → window.parent.vaierOpenTerminal). Nothing renders here. -->
 
     <!-- Publish Service Modal (#infrastructure slice 2c/3b). data-mode switches between container mode
          (publish a discovered container, opened from a card's "+ Publish" row) and LAN mode (publish a
