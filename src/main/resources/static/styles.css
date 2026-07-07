@@ -483,6 +483,25 @@ body {
     max-width: 15rem;
     border-right: 1px solid var(--border, #2a2a2a);
     color: var(--text-muted);
+    user-select: none;
+    cursor: grab;
+}
+.term-tab.dragging { opacity: 0.5; cursor: grabbing; }
+
+/* The chip that follows the pointer while dragging a tab into the split. */
+.term-drag-ghost {
+    position: fixed;
+    z-index: 4000;
+    pointer-events: none;
+    transform: translate(10px, 10px);
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    background: var(--bg-card, #1a1a1a);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    font-family: var(--mono, monospace);
+    font-size: 0.78rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .term-tab.is-active {
     background: var(--bg-card, #1a1a1a);
@@ -528,10 +547,33 @@ body {
     flex: 1;
     min-height: 0;
     background: #000;
+    display: flex;            /* the split grid: a vertical stack of rows */
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* One row of the split grid — the panes inside it tile left-to-right as columns. */
+.term-row {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
+}
+
+/* Where a dragged tab would land, previewed over the target pane's half. */
+.term-drop-indicator {
+    position: absolute;
+    z-index: 5;
+    display: none;
+    pointer-events: none;
+    background: var(--accent);
+    opacity: 0.22;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
 }
 
 .term-empty {
-    height: 100%;
+    flex: 1 1 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -543,11 +585,69 @@ body {
 
 .term-pane {
     display: none;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
     flex-direction: column;
-    position: absolute;
-    inset: 0;
+    position: relative;
 }
-.term-pane.is-active { display: flex; }
+.term-pane.is-visible { display: flex; }
+.term-pane.is-focused.show-head { box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* A column's header — shown only while split, so each pane is labelled and can be dropped from view. */
+.term-pane-head {
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.55rem;
+    background: var(--bg-input, #111);
+    border-bottom: 1px solid var(--border, #2a2a2a);
+    flex-shrink: 0;
+}
+.term-pane.show-head .term-pane-head { display: flex; }
+.term-pane-head-name {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono, monospace);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.term-pane.is-focused .term-pane-head-name { color: var(--text); }
+.term-pane-head-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+}
+.term-pane-head-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+
+/* The drag handle between two split columns. */
+.term-split-divider {
+    flex: 0 0 6px;
+    align-self: stretch;
+    cursor: col-resize;
+    background: var(--bg-input, #111);
+    position: relative;
+    touch-action: none;
+}
+.term-split-divider::before {
+    content: "";
+    position: absolute;
+    inset: 0 2px;
+    border-radius: 2px;
+}
+.term-split-divider:hover::before { background: var(--accent); opacity: 0.5; }
+
+/* Divider between two stacked rows — full width, drag vertically. */
+.term-split-divider.horizontal { cursor: ns-resize; }
+.term-split-divider.horizontal::before { inset: 2px 0; }
 
 .term-window-dot {
     width: 8px;
@@ -582,6 +682,18 @@ body {
     background: #000;
     padding: 0.3rem 0.1rem 0.1rem 0.4rem;
     overflow: hidden;
+}
+
+/* A touch drag inside the terminal scrolls its scrollback, not the page. terminal-dock.js drives the
+   scroll from the finger (xterm's viewport is a sibling of its text layer, so a touch on the text has no
+   scrollable ancestor but the page); touch-action:none here stops the browser doing anything with the
+   gesture, so the page can never move. */
+.term-window-body,
+.term-window-body .xterm,
+.term-window-body .xterm-viewport,
+.term-window-body .xterm-screen {
+    touch-action: none;
+    overscroll-behavior: contain;
 }
 
 /* The live-shell count badge on the Terminal nav tab. */

@@ -782,9 +782,20 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   `window.parent.vaierOpenTerminal`, which opens a shell as a tab and switches to the Terminal section.
   Each tab is bound to its own WebSocket + SSH session, so several shells (even two to the same host)
   coexist and closing or erroring one leaves the others live; the adapter holds no shared session state.
-  Only the active tab's pane renders; switching tabs re-fits its PTY (xterm can only measure a visible
-  pane). The panel fills the content area under the topbar, so it is full-screen on a phone with no
-  dragging — which is what made the earlier floating-window and in-page-dock designs unusable there.
+  On desktop the pane area is a **2-D split grid** (rows of columns): clicking a tab focuses a shell alone;
+  dragging a tab (pointer-based, not native DnD, which won't start from the tab's button) onto a pane's
+  left/right edge adds a column or its top/bottom edge adds a row, with a drop-zone preview; draggable
+  dividers on both axes resize adjacent rows/columns (flex-grow weights, min 140px wide / 90px tall).
+  Dragging the sole on-screen shell splits it against the most-recently-focused other shell. On a phone
+  the grid collapses to a single full-screen pane at a smaller font (10px vs 13px, re-fitting on rotate),
+  touch scrolling is driven from the finger via `term.scrollLines` with `touch-action: none` so the
+  scrollback scrolls instead of the page (xterm's viewport is a sibling of its text layer), and the shell
+  binds its height to `visualViewport` so the soft keyboard never covers the prompt. Only visible panes
+  render and re-fit; hidden shells keep running. A dropped WebSocket **auto-reconnects** with exponential
+  backoff (to 8s, up to 8 attempts, then a manual Reconnect action) unless the close is clean (`1000`) or
+  permanent (no credential / auth / host-key mismatch / not found); term input is bound to the session's
+  current socket so a reconnect is seamless. The panel fills the content area under the topbar — which is
+  what made the earlier floating-window and in-page-dock designs unusable on mobile.
 - **#309 — Managed ed25519 keypair generation** (the `managed` flag). 🔲
 - **#310 — Saved snippets.** 🔲
 
