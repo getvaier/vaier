@@ -801,9 +801,26 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   what made the earlier floating-window and in-page-dock designs unusable on mobile.
 - **#309 — Managed ed25519 keypair generation** (the `managed` flag). 🔲
 - **#310 — Saved snippets.** 🔲
+- **#313 — Remote SSH exec → host telemetry & alerts** (umbrella). Turn the SSH capability into a
+  remote-sensing input for the alerting pipeline: run a command on a host, read the result in code, and
+  feed threshold-crossing alerts. Reuses the credential vault, host-key TOFU, and SSH-address resolution.
+  - **#314 — Non-interactive SSH exec port ✅ (keystone).** New driven port
+    `ForRunningSshCommands.run(SshTarget, command) → CommandResult` (a domain record: `exitCode`,
+    `stdout`, `stderr`, `timedOut`). Backed by the existing `MinaSshSessionAdapter`, which now also
+    implements it via an exec channel (`createExecChannel`, not a PTY shell) — the shell and exec paths
+    share one copy of the connect + host-key TOFU + auth logic (`establish`). Safety rails: a hard,
+    constructor-injectable run **timeout** (default 20s; on expiry `timedOut=true`, everything closed,
+    returns promptly — never hangs) and a **bounded** stdout/stderr cap (default 1 MiB) so a chatty
+    command can't OOM Vaier. A non-zero exit is a normal result, not an exception; connect/auth/host-key
+    failures surface as the same domain SSH exceptions as the terminal path. Internal capability only —
+    no consumer wiring or UI yet (slices 3–5). Short-lived client per call, closed in a `finally`.
+  - **#315 — Per-host SSH port** (retire hard-coded port 22). 🔲
+  - **#316 — Remote disk-pressure alert** (`df` over SSH). 🔲
+  - **#317 — Docker health over SSH + close the `apalveien5` 2375 hole.** 🔲
 
 **Backlog:** **SFTP** (file transfer over the same session) is deferred — V1 scope is the interactive
-terminal plus saved snippets only.
+terminal plus saved snippets only. Further remote-telemetry watchers (reboot detection, systemd service
+health, load/temperature) are backlog under #313.
 
 ---
 
