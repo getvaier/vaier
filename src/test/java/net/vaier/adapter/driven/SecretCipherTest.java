@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Base64;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,11 +107,12 @@ class SecretCipherTest {
     void decrypt_tamperedCiphertext_throws() {
         SecretCipher cipher = cipher();
         String encrypted = cipher.encrypt("authentic");
-        // Flip a character in the base64 body (after the enc:v1: prefix).
-        char[] chars = encrypted.toCharArray();
-        int idx = encrypted.length() - 3;
-        chars[idx] = chars[idx] == 'A' ? 'B' : 'A';
-        String tampered = new String(chars);
+        // Decode the envelope body, flip a bit in the last byte (inside the GCM tag), and re-encode.
+        // Mutating a decoded byte guarantees a real content change — flipping a base64 character
+        // instead can hit low bits discarded by the final padded quartet, leaving the plaintext intact.
+        byte[] body = Base64.getDecoder().decode(encrypted.substring(SecretCipher.PREFIX.length()));
+        body[body.length - 1] ^= 0x01;
+        String tampered = SecretCipher.PREFIX + Base64.getEncoder().encodeToString(body);
 
         assertThatThrownBy(() -> cipher.decrypt(tampered)).isInstanceOf(RuntimeException.class);
     }
