@@ -5,6 +5,7 @@ import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase.LaunchpadServiceUco;
 import net.vaier.application.ResolveViewerUseCase;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.LaunchpadLiveness;
 import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.Role;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,8 +63,8 @@ class LaunchpadRestControllerTest {
     @Test
     void getServices_returnsLaunchpadServices() {
         var services = List.of(
-            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, null, "app", "app", "host=app.example.com", "media server"),
-            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, null, "db", "db", "host=db.example.com", "database host")
+            new LaunchpadServiceUco("app.example.com", null, "10.0.0.1", LaunchpadVisibility.VISIBLE_ACTIVE, LaunchpadLiveness.LIVE, null, "app", "app", "host=app.example.com", "media server"),
+            new LaunchpadServiceUco("db.example.com", null, "10.0.0.2", LaunchpadVisibility.VISIBLE_ACTIVE, LaunchpadLiveness.LIVE, null, "db", "db", "host=db.example.com", "database host")
         );
         // getServices passes a null (anonymous) viewer.
         when(getLaunchpadServicesUseCase.getLaunchpadServices(any(), isNull())).thenReturn(services);

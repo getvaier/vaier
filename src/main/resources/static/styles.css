@@ -3,24 +3,38 @@
        navigations and auth redirects don't flash white before this stylesheet's body background
        applies. Pair with the html background below and a color-scheme meta tag in each page head. */
     color-scheme: dark;
-    --bg:           #1e1e1e;
-    --bg-panel:     #252526;
-    --bg-card:      #2d2d30;
-    --bg-hover:     #2a2d2e;
-    --bg-input:     #3c3c3c;
-    --border:       #3c3c3c;
-    --border-hi:    #555;
-    --text:         #d4d4d4;
-    --text-muted:   #858585;
-    --text-dim:     #5a5a5a;
-    --accent:       #4fc3f7;
-    --accent-hover: #81d4fa;
-    --brand-ai:     #39ff14;
+    /* Vaier's own "night-ops" palette — a cool blue-black, deliberately off the VS Code Dark+
+       defaults this used to borrow. Surfaces step up in luminance (bg → panel → card → hover)
+       so cards read as objects, and a single signature cyan carries brand + primary action. */
+    --bg:           #0e1116;
+    --bg-panel:     #141a22;
+    --bg-card:      #19212c;
+    --bg-hover:     #212b38;
+    --bg-input:     #222c39;
+    --border:       #263143;
+    --border-hi:    #35455c;
+    --text:         #dfe6ef;
+    --text-muted:   #8b98aa;
+    --text-dim:     #586576;
+    --accent:       #4cc9e6;
+    --accent-hover: #7fdcef;
+    --brand-ai:     #4cc9e6;
     --green:        #4ec9b0;
     --red:          #f48771;
     --orange:       #ce9178;
     --yellow:       #dcdcaa;
     --mono:         'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+    /* Display face — used with restraint on the wordmark, page chrome, and the launchpad hero.
+       Self-hosted (no CDN) so it works offline and under a strict CSP. */
+    --display:      'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+@font-face {
+    font-family: 'Space Grotesk';
+    font-style: normal;
+    font-weight: 300 700;
+    font-display: swap;
+    src: url('/fonts/space-grotesk.woff2') format('woff2');
 }
 
 * {
@@ -69,19 +83,20 @@ body {
     align-items: center;
     gap: 8px;
     margin-right: 0.75rem;
-    color: var(--accent);
-    font-size: 0.88rem;
-    font-weight: 500;
-    letter-spacing: 0.02em;
+    color: var(--text);
+    font-family: var(--display);
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.005em;
     text-decoration: none;
     flex-shrink: 0;
 }
 
-.topbar-brand:hover { text-decoration: none; color: var(--accent); }
-.topbar-brand svg { flex-shrink: 0; }
+.topbar-brand:hover { text-decoration: none; color: var(--text); }
+.topbar-brand svg { flex-shrink: 0; color: var(--accent); filter: drop-shadow(0 0 5px rgba(76, 201, 230, 0.5)); }
 
-/* The "ai" in V-ai-er, lifted out in a fluorescent accent with a soft glow. */
-.brand-ai { color: var(--brand-ai); text-shadow: 0 0 6px rgba(57, 255, 20, 0.55); }
+/* The "ai" in V-ai-er, lifted out in the signature cyan with a soft glow — the mesh node made type. */
+.brand-ai { color: var(--brand-ai); text-shadow: 0 0 8px rgba(76, 201, 230, 0.45); }
 
 .topbar-nav {
     display: flex;
@@ -176,6 +191,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    font-family: var(--display);
     font-size: 0.72rem;
     font-weight: 600;
     color: var(--text-muted);
@@ -250,7 +266,7 @@ body {
 .btn-primary { color: var(--accent); }
 .btn-primary:hover {
     color: var(--accent);
-    background: rgba(79, 195, 247, 0.12);
+    background: rgba(76, 201, 230, 0.12);
     border-color: var(--accent);
 }
 
@@ -311,6 +327,7 @@ body {
 
 /* Section label */
 .section-label {
+    font-family: var(--display);
     font-size: 0.68rem;
     font-weight: 700;
     color: var(--text-dim);
@@ -756,7 +773,7 @@ body {
 }
 
 .modal-content {
-    background: #2d2d30;
+    background: var(--bg-card);
     border: 1px solid var(--border-hi);
     border-radius: 3px;
     padding: 1.5rem;

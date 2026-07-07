@@ -162,6 +162,59 @@ class GetLaunchpadServicesTest {
         assertThat(result.get(0).visibility()).isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
     }
 
+    // --- launchpad liveness dot (issue #208) ---
+
+    @Test
+    void getLaunchpadServices_runningLocalService_livenessIsLive() {
+        setupOneRoute("app.example.com", "my-container", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        when(forGettingServerInfo.getServicesWithExposedPorts(any(Server.class))).thenReturn(
+            List.of(new DockerService("id", "my-container", "image", "latest",
+                List.of(new DockerService.PortMapping(8080, 8080, "tcp", "0.0.0.0")), List.of(), "running"))
+        );
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).liveness()).isEqualTo(LaunchpadLiveness.LIVE);
+        assertThat(result.get(0).visibility()).isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+    }
+
+    @Test
+    void getLaunchpadServices_unreachableHost_livenessIsOffline() {
+        setupOneRoute("app.example.com", "10.0.0.1", 8080);
+        setupDnsRecord("app.example.com", DnsRecordType.CNAME);
+        setupEmptyVpnClients();
+        setupEmptyLocalServices();
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).liveness()).isEqualTo(LaunchpadLiveness.OFFLINE);
+        assertThat(result.get(0).visibility()).isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
+    }
+
+    @Test
+    void getLaunchpadServices_unprobedLanHost_livenessIsPendingButStillActive() {
+        // Relay tunnel up but no reachability probe has landed yet (empty snapshot) → host UNKNOWN.
+        // The dot must read PENDING (grey) while the tile stays VISIBLE_ACTIVE/clickable.
+        ReverseProxyRoute lan = ReverseProxyRoute.lanRoute(
+            "route", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(lan));
+        setupDnsRecord("nas.example.com", DnsRecordType.CNAME);
+        String recentHandshake = String.valueOf(System.currentTimeMillis() / 1000 - 60);
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            new VpnClient("pk", "10.13.13.5/32", "1.2.3.4", "51820", recentHandshake, "0", "0")));
+        setupEmptyLocalServices();
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("apalveien5", "10.13.13.5", "", MachineType.UBUNTU_SERVER,
+                "192.168.3.0/24", "192.168.3.5")));
+
+        List<LaunchpadServiceUco> result = service.getLaunchpadServices(null);
+
+        assertThat(result.get(0).liveness()).isEqualTo(LaunchpadLiveness.PENDING);
+        assertThat(result.get(0).visibility()).isEqualTo(LaunchpadVisibility.VISIBLE_ACTIVE);
+    }
+
     @Test
     void getLaunchpadServices_excludesServicesWithNonExistingDns() {
         setupOneRoute("app.example.com", "10.0.0.1", 8080);

@@ -1,6 +1,7 @@
 package net.vaier.application;
 
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.LaunchpadLiveness;
 import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.Role;
 import java.util.List;
@@ -35,7 +36,11 @@ public interface GetLaunchpadServicesUseCase {
      *       or first DNS label). The launchpad never re-derives this from {@code dnsAddress} /
      *       {@code pathPrefix}.</li>
      *   <li>{@code visibility} — tri-state outcome (NOT_VISIBLE entries are filtered out by the
-     *       use case and never appear in this list).</li>
+     *       use case and never appear in this list). Governs the tile's link and dim behaviour.</li>
+     *   <li>{@code liveness} — presentation tri-state for the tile's status dot, derived from the
+     *       host reachability signal alone: LIVE (green, confirmed reachable), PENDING (grey, not
+     *       yet probed — e.g. at startup), OFFLINE (red, confirmed unreachable). Distinct from
+     *       {@code visibility}, which keeps an un-probed host clickable.</li>
      *   <li>{@code iconQuery} — pre-built query string the client appends to {@code /icon}.
      *       Path-based siblings get distinct queries so they don't collide on the icon cache.</li>
      *   <li>{@code peerName} — the display name of the machine hosting the service: a VPN peer's
@@ -49,8 +54,8 @@ public interface GetLaunchpadServicesUseCase {
      * derive the subdomain sub-line and the browser-tab target.
      */
     record LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
-                               LaunchpadVisibility visibility, String url, String displayName,
-                               String subdomain, String iconQuery, String peerName,
+                               LaunchpadVisibility visibility, LaunchpadLiveness liveness, String url,
+                               String displayName, String subdomain, String iconQuery, String peerName,
                                String image, String version) {
 
         /**
@@ -58,9 +63,9 @@ public interface GetLaunchpadServicesUseCase {
          * a bare LAN host:port has no Docker image, so {@code image} and {@code version} are null.
          */
         public LaunchpadServiceUco(String dnsAddress, String pathPrefix, String hostAddress,
-                                   LaunchpadVisibility visibility, String url, String displayName,
-                                   String subdomain, String iconQuery, String peerName) {
-            this(dnsAddress, pathPrefix, hostAddress, visibility, url, displayName, subdomain,
+                                   LaunchpadVisibility visibility, LaunchpadLiveness liveness, String url,
+                                   String displayName, String subdomain, String iconQuery, String peerName) {
+            this(dnsAddress, pathPrefix, hostAddress, visibility, liveness, url, displayName, subdomain,
                 iconQuery, peerName, null, null);
         }
     }

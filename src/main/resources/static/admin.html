@@ -93,7 +93,7 @@
                 </svg>
                 <span class="link-label">Concepts</span>
             </button>
-            <button class="topbar-item" id="terminalTab" data-hash="terminal">
+            <button class="topbar-item" id="terminalTab" data-hash="terminal" style="display:none">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="1" y="2.5" width="14" height="11" rx="1"/>
                     <path d="M4 6l2.2 2L4 10"/>
@@ -179,6 +179,9 @@
         tabs.forEach(tab => tab.addEventListener('click', () => showSection(tab)));
         terminalTab.addEventListener('click', showTerminal);
 
+        const infraTab = document.querySelector('#adminTabs .topbar-item[data-hash="infrastructure"]');
+        function goInfrastructure() { if (infraTab) showSection(infraTab); }
+
         // Opened from a machine card's Terminal button in the Infrastructure iframe (window.parent).
         window.vaierOpenTerminal = function (machineName) {
             showTerminal();
@@ -189,13 +192,26 @@
             TerminalDock.onChange = (n) => {
                 terminalBadge.textContent = n;
                 terminalBadge.style.display = n > 0 ? 'inline-flex' : 'none';
+                // The Terminal tab only exists while shells are open — it's a live dock, not a
+                // standing section. When the last shell closes, retire the tab; and if the user
+                // was sitting on the (now empty) Terminal panel, fall back to Infrastructure.
+                terminalTab.style.display = n > 0 ? '' : 'none';
+                if (n === 0 && terminalPanel.style.display !== 'none') {
+                    goInfrastructure();
+                }
             };
         }
 
         function loadFromHash() {
             let hash = window.location.hash.slice(1);
             if (!hash) return;
-            if (hash === 'terminal') { showTerminal(); return; }
+            // #terminal only resolves while shells are open (the tab is transient). A stale
+            // bookmark/reload to #terminal with no live shells lands on Infrastructure instead.
+            if (hash === 'terminal') {
+                if (window.TerminalDock && TerminalDock.count() > 0) showTerminal();
+                else goInfrastructure();
+                return;
+            }
             // The old #services and #vpn sections merged into #infrastructure (slice 3); keep old
             // links/bookmarks working by aliasing them, and the click() rewrites the hash.
             if (hash === 'services' || hash === 'vpn') hash = 'infrastructure';

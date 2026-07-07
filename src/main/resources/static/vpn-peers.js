@@ -1159,10 +1159,10 @@
                         <div class="peer-name-block">
                             <div class="peer-name-row">
                                 <span class="peer-name">${escapeHtml(server.name)}</span>
-                                ${capabilitySlotsHtml([null, dockerSlot])}
                             </div>
                             ${server.description ? `<div class="peer-desc" title="${escapeHtml(server.description)}">${escapeHtml(server.description)}</div>` : ''}
                         </div>
+                        ${capabilitySlotsHtml([null, dockerSlot])}
                     </div>
                     <div class="peer-header-right">
                         ${headerTerminalButtonHtml(server.name, server.sshAccess)}
@@ -1368,10 +1368,10 @@
                             <div class="peer-name-row">
                                 <span class="peer-name">${escapeHtml(peer.name)}</span>
                                 ${peer.configOutOfDate ? `<span class="config-stale-warn" title="Out-of-date config — this peer's installed config no longer matches what Vaier would generate now (config logic or server inputs such as the endpoint, VPN subnet, or server LAN CIDR have changed). What to do: click Reissue config below (keys preserved), then reinstall the delivered config on the peer.">⚠</span>` : ''}
-                                ${capabilitySlotsHtml([relaySlot, dockerSlot])}
                             </div>
                             ${peer.description ? `<div class="peer-desc" title="${escapeHtml(peer.description)}">${escapeHtml(peer.description)}</div>` : ''}
                         </div>
+                        ${capabilitySlotsHtml([relaySlot, dockerSlot])}
                     </div>
                     <div class="peer-header-right">
                         ${headerTerminalButtonHtml(peer.name, peer.sshAccess)}

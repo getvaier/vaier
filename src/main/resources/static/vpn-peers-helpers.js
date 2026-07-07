@@ -84,7 +84,8 @@ function machineIconSvg(kind) {
 function capabilityIconSvg(kind) {
     if (kind === 'docker') {
         // Stylised Docker logo: stacked containers + whale body underneath.
-        return `<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        // viewBox cropped to the drawn content so it fills the icon box like the relay glyph.
+        return `<svg width="100%" height="100%" viewBox="1 3 14 10.7" fill="currentColor" preserveAspectRatio="xMidYMid meet">
             <rect x="2.5" y="6.5" width="2.5" height="2.5"/>
             <rect x="5.5" y="6.5" width="2.5" height="2.5"/>
             <rect x="8.5" y="6.5" width="2.5" height="2.5"/>
@@ -94,7 +95,8 @@ function capabilityIconSvg(kind) {
     }
     if (kind === 'relay') {
         // "Share/hub" — three nodes connected to a central forwarding point.
-        return `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        // viewBox cropped to the drawn content so it matches the docker glyph's fill.
+        return `<svg width="100%" height="100%" viewBox="3 2 18 20" fill="currentColor" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet">
             <circle cx="18" cy="5" r="2.5"/>
             <circle cx="6" cy="12" r="2.5"/>
             <circle cx="18" cy="19" r="2.5"/>
@@ -129,15 +131,13 @@ function capabilityIconHtml(kind, title) {
 
 // Renders a fixed-column strip of capability icons. Each slot is either an
 // {kind,title,label} object or null; null slots render as empty placeholders so that
-// the docker icon (etc.) lines up vertically across every machine card. The label
-// appears next to the icon on desktop and is hidden on mobile via CSS.
+// the docker icon (etc.) lines up vertically across every machine card. Icons are
+// icon-only — the capability name rides along as the icon's hover title (slot.title),
+// so the header row stays uncluttered.
 function capabilitySlotsHtml(slots) {
     const cells = slots.map(slot => {
         if (!slot) return '<div class="cap-slot"></div>';
-        const label = slot.label
-            ? `<span class="cap-label">${slot.label}</span>`
-            : '';
-        return `<div class="cap-slot">${capabilityIconHtml(slot.kind, slot.title)}${label}</div>`;
+        return `<div class="cap-slot">${capabilityIconHtml(slot.kind, slot.title)}</div>`;
     }).join('');
     return `<div class="machine-caps">${cells}</div>`;
 }

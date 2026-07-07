@@ -808,6 +808,31 @@ class ReverseProxyRouteTest {
             .isEqualTo(LaunchpadVisibility.VISIBLE_INACTIVE);
     }
 
+    // --- launchpadLiveness (dot-presentation tri-state derived from host state, issue #208) ---
+
+    @Test
+    void launchpadLiveness_hostStateOk_isLive() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadLiveness(State.OK)).isEqualTo(LaunchpadLiveness.LIVE);
+    }
+
+    @Test
+    void launchpadLiveness_hostStateUnreachable_isOffline() {
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadLiveness(State.UNREACHABLE)).isEqualTo(LaunchpadLiveness.OFFLINE);
+    }
+
+    @Test
+    void launchpadLiveness_hostStateUnknown_isPending() {
+        // A host we haven't probed yet must read grey (PENDING), not green — the whole point
+        // of the separate liveness tri-state (LaunchpadVisibility keeps UNKNOWN as ACTIVE).
+        ReverseProxyRoute route = route("app.example.com", "10.0.0.1", 8080);
+
+        assertThat(route.launchpadLiveness(State.UNKNOWN)).isEqualTo(LaunchpadLiveness.PENDING);
+    }
+
     // --- backingContainer (issue #210) ---
 
     @Test

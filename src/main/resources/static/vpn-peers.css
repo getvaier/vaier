@@ -135,11 +135,12 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             color: var(--text-dim);
             flex-shrink: 0;
         }
+        .machine-icon-cap svg { display: block; width: 100%; height: 100%; }
         .machine-icon-cap.cap-relay  { color: #2496ed; }
         .machine-icon-cap.cap-docker { color: #2496ed; }
 
@@ -164,27 +165,25 @@
         /* Larger pin reserved for the Vaier server marker. */
         .map-marker.large     { width: 36px; height: 36px; border-width: 3px; }
 
-        /* Fixed-column capability strip — empty slots keep icons aligned across cards. */
+        /* Fixed-column capability strip — icon-only, empty slots keep icons aligned
+           across cards (the docker column lines up whether or not a card has a relay icon). */
         .machine-caps {
             display: grid;
-            grid-template-columns: 90px 90px;
-            gap: 0.5rem;
-            margin-left: auto;
+            grid-template-columns: 22px 22px;
+            gap: 0.55rem;
+            /* Push right within the header's left column, but keep a clear gap to the
+               terminal button that sits in the adjacent (right) column. */
+            margin: 0 1rem 0 auto;
             flex-shrink: 0;
             align-items: center;
+            justify-items: center;
         }
         .machine-caps > .cap-slot {
             display: flex;
             align-items: center;
-            gap: 0.35rem;
-            min-width: 0;
-        }
-        .cap-label {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
         }
         /* "Auto-detected: <category>" caption beside the device-type selector. */
         .device-cat-auto {
@@ -283,8 +282,8 @@
             letter-spacing: 0.02em;
             padding: 0.3rem 0.5rem;
             color: var(--accent);
-            background: rgba(79, 195, 247, 0.12);
-            border: 1px solid rgba(79, 195, 247, 0.5);
+            background: rgba(76, 201, 230, 0.12);
+            border: 1px solid rgba(76, 201, 230, 0.5);
             border-radius: 4px;
             cursor: pointer;
             transition: color 0.12s, border-color 0.12s, background 0.12s;
@@ -455,7 +454,7 @@
         .pub-noauth { background: rgba(244, 135, 113, 0.15); color: var(--red); }
         /* Social login gets its own accent so the operator reads which login a tile leads to at a
            glance, not just "gated or not" (#305). */
-        .pub-social { background: rgba(79, 195, 247, 0.15); color: var(--accent); }
+        .pub-social { background: rgba(76, 201, 230, 0.15); color: var(--accent); }
         /* A Social service whose access rule names specific groups (#access rules). */
         .pub-restricted { background: rgba(255, 213, 79, 0.15); color: var(--yellow); }
 
@@ -467,7 +466,7 @@
         }
         .groups-picker .chip {
             display: inline-flex; align-items: center; gap: 0.3rem;
-            padding: 0.1rem 0.4rem; background: rgba(79, 195, 247, 0.15); color: var(--accent);
+            padding: 0.1rem 0.4rem; background: rgba(76, 201, 230, 0.15); color: var(--accent);
             border-radius: 2px; font-family: var(--mono); font-size: 0.75rem;
         }
         .groups-picker .chip-remove {
@@ -701,6 +700,7 @@
 
         /* Section headers */
         .section-header {
+            font-family: var(--display);
             font-size: 0.68rem;
             font-weight: 600;
             letter-spacing: 0.08em;
@@ -735,8 +735,7 @@
         @media (max-width: 600px) {
             .peer-header { padding: 0.6rem 0.75rem; }
             .peer-body { padding: 0 0.75rem 0.75rem; }
-            .machine-caps { grid-template-columns: 20px 20px; gap: 0.4rem; }
-            .cap-label { display: none; }
+            .machine-caps { grid-template-columns: 22px 22px; gap: 0.45rem; }
             .toast-stack {
                 left: 0.5rem;
                 right: 0.5rem;

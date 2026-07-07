@@ -362,6 +362,21 @@ public class ReverseProxyRoute {
     }
 
     /**
+     * Presentation tri-state for the launchpad tile's status dot, derived purely from the host
+     * reachability signal. Unlike {@link #launchpadVisibility} — which keeps an un-probed host
+     * ACTIVE/clickable — the dot must not go green until reachability is actually confirmed:
+     * OK → {@link LaunchpadLiveness#LIVE} (green), UNREACHABLE → {@link LaunchpadLiveness#OFFLINE}
+     * (red), UNKNOWN → {@link LaunchpadLiveness#PENDING} (grey, no signal yet — e.g. at startup).
+     */
+    public LaunchpadLiveness launchpadLiveness(Server.State hostState) {
+        return switch (hostState) {
+            case OK -> LaunchpadLiveness.LIVE;
+            case UNREACHABLE -> LaunchpadLiveness.OFFLINE;
+            case UNKNOWN -> LaunchpadLiveness.PENDING;
+        };
+    }
+
+    /**
      * Launchpad-rendering state for a specific {@code viewer}. The launchpad is a public,
      * viewer-adaptive dashboard: a public route (auth mode {@link AuthMode#NONE}) is shown to
      * everyone; a social-gated route is shown only when the viewer is a known, approved identity
