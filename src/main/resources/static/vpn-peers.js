@@ -807,11 +807,15 @@
             return `<button class="btn btn-small btn-secondary" onclick="showSshCredentialModal('${jsArg(machineName)}')" title="Store the SSH login Vaier holds for this machine (used by the web terminal)">SSH credential</button>`;
         }
 
-        // Open-an-SSH-shell button (#308), shown only when SSH access is on. If no credential is stored
-        // the connection closes with a nudge to add one rather than a dead shell.
-        function terminalButtonHtml(machineName, sshAccessOn) {
+        // Compact quick-launch terminal, sat in the card header so a shell is one click away without
+        // first expanding the card. stopPropagation keeps the click from toggling the card open/closed.
+        // Hidden when SSH access is off, mirroring the full button in the actions row.
+        function headerTerminalButtonHtml(machineName, sshAccessOn) {
             if (!sshAccessOn) return '';
-            return `<button class="btn btn-small btn-primary" onclick="openTerminalForMachine('${jsArg(machineName)}')" title="Open an SSH shell to this machine">▸ Terminal</button>`;
+            return `<button type="button" class="hdr-terminal-btn"
+                            onclick="event.stopPropagation();openTerminalForMachine('${jsArg(machineName)}')"
+                            aria-label="Open a terminal to ${escapeHtml(machineName)}"
+                            title="Open a terminal to this machine">&gt;_</button>`;
         }
 
         async function toggleSshAccess(machineName, checkbox) {
@@ -1160,7 +1164,10 @@
                             ${server.description ? `<div class="peer-desc" title="${escapeHtml(server.description)}">${escapeHtml(server.description)}</div>` : ''}
                         </div>
                     </div>
-                    <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    <div class="peer-header-right">
+                        ${headerTerminalButtonHtml(server.name, server.sshAccess)}
+                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    </div>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
@@ -1207,7 +1214,6 @@
                             ${scriptBtn}
                             ${publishLanBtn}
                             ${sshCredentialButtonHtml(server.name, server.sshAccess)}
-                            ${terminalButtonHtml(server.name, server.sshAccess)}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeleteLanServer('${jsArg(server.name)}')">Delete</button>
                     </div>
@@ -1250,7 +1256,10 @@
                         <span class="peer-name">Vaier server</span>
                         ${capabilitySlotsHtml([null, { kind: 'docker', title: 'Vaier server Docker engine', label: 'Docker' }])}
                     </div>
-                    <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    <div class="peer-header-right">
+                        ${headerTerminalButtonHtml('Vaier server', _vaierServerSsh.sshAccess)}
+                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    </div>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
@@ -1264,7 +1273,6 @@
                     <div class="peer-actions-row">
                         <div class="peer-actions-left">
                             ${sshCredentialButtonHtml('Vaier server', _vaierServerSsh.sshAccess)}
-                            ${terminalButtonHtml('Vaier server', _vaierServerSsh.sshAccess)}
                         </div>
                     </div>` : ''}
                 </div>
@@ -1365,7 +1373,10 @@
                             ${peer.description ? `<div class="peer-desc" title="${escapeHtml(peer.description)}">${escapeHtml(peer.description)}</div>` : ''}
                         </div>
                     </div>
-                    <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    <div class="peer-header-right">
+                        ${headerTerminalButtonHtml(peer.name, peer.sshAccess)}
+                        <span class="peer-chevron ${isExpanded ? 'open' : ''}" id="chevron-${id}">▼</span>
+                    </div>
                 </div>
                 <div class="peer-body ${isExpanded ? 'open' : ''}" id="body-${id}">
                     <div class="peer-details">
@@ -1429,7 +1440,6 @@
                             <button class="btn btn-small btn-secondary" onclick="confirmRegeneratePeer('${peer.id}')"
                                     title="Regenerate — rotate the WireGuard keypair and deliver a fresh config once. Use it only to replace a compromised config; the old config stops working immediately and must be reinstalled on the peer.">Regenerate</button>
                             ${sshCredentialButtonHtml(peer.name, peer.sshAccess)}
-                            ${terminalButtonHtml(peer.name, peer.sshAccess)}
                         </div>
                         <button class="btn btn-small btn-danger" onclick="confirmDeletePeer('${peer.id}')">Delete</button>
                     </div>
