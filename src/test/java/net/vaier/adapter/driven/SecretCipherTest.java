@@ -70,6 +70,18 @@ class SecretCipherTest {
     }
 
     @Test
+    void construction_touchesNoFilesystem_soWiringNeverDependsOnAWritableConfigDir() {
+        // The full-context smoke test builds every bean with the default config dir (/vaier/config),
+        // which is not writable on a CI runner. Resolving/generating the key must therefore be lazy:
+        // merely constructing the cipher must not create (or require) the key file (#308 CI failure).
+        Path keyFile = tempDir.resolve("vault.key");
+
+        new SecretCipher(tempDir.toString());
+
+        assertThat(Files.exists(keyFile)).isFalse();
+    }
+
+    @Test
     void keyFile_isWrittenWith0600Perms_onFirstUse() throws Exception {
         cipher().encrypt("anything");
 

@@ -24,9 +24,11 @@ import org.springframework.stereotype.Component;
  * <em>not</em> {@code enc:v1:}-prefixed is treated as legacy plaintext and returned unchanged, which
  * makes migrating existing plaintext secrets transparent (they get re-encrypted on the next save).
  *
- * <p>Master key resolution: (a) env {@code VAIER_VAULT_KEY} (Base64 of exactly 32 bytes) when set and
- * valid; else (b) {@code ${configDir}/vault.key}; else (c) a fresh 32-byte key generated with
- * {@link SecureRandom}, written Base64 to {@code ${configDir}/vault.key} with 0600 permissions.
+ * <p>Master key resolution (lazy — happens on the first encrypt/decrypt of an envelope, never in the
+ * constructor, so building this bean touches no filesystem): (a) env {@code VAIER_VAULT_KEY} (Base64 of
+ * exactly 32 bytes) when set and valid; else (b) {@code ${configDir}/vault.key}; else (c) a fresh
+ * 32-byte key generated with {@link SecureRandom}, written Base64 to {@code ${configDir}/vault.key}
+ * with 0600 permissions.
  */
 @Component
 @Slf4j
@@ -42,15 +44,37 @@ public class SecretCipher {
     private static final String KEY_FILE_NAME = "vault.key";
     private static final String ENV_KEY = "VAIER_VAULT_KEY";
 
-    private final SecretKeySpec key;
+    private final String configDir;
     private final SecureRandom random = new SecureRandom();
+    private volatile SecretKeySpec key;
 
     public SecretCipher() {
         this(System.getenv().getOrDefault("VAIER_CONFIG_PATH", "/vaier/config"));
     }
 
     public SecretCipher(String configDir) {
-        this.key = resolveKey(configDir);
+        this.configDir = configDir;
+    }
+
+    /**
+     * The master key, resolved (and generated + persisted if needed) on first use. Resolution is lazy
+     * so that merely constructing this bean never touches the filesystem — wiring the application
+     * context must not depend on {@code ${configDir}} being writable (the smoke test builds every bean
+     * with the default {@code /vaier/config}, which a CI runner cannot create). Double-checked locking
+     * keeps concurrent encrypt/decrypt from generating two different keys.
+     */
+    private SecretKeySpec key() {
+        SecretKeySpec resolved = key;
+        if (resolved == null) {
+            synchronized (this) {
+                resolved = key;
+                if (resolved == null) {
+                    resolved = resolveKey(configDir);
+                    key = resolved;
+                }
+            }
+        }
+        return resolved;
     }
 
     /**
@@ -65,7 +89,7 @@ public class SecretCipher {
             byte[] iv = new byte[IV_LENGTH_BYTES];
             random.nextBytes(iv);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            cipher.init(Cipher.ENCRYPT_MODE, key(), new GCMParameterSpec(GCM_TAG_BITS, iv));
             byte[] ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
             byte[] combined = new byte[iv.length + ciphertext.length];
             System.arraycopy(iv, 0, combined, 0, iv.length);
@@ -94,7 +118,7 @@ public class SecretCipher {
             byte[] iv = Arrays.copyOfRange(combined, 0, IV_LENGTH_BYTES);
             byte[] ciphertext = Arrays.copyOfRange(combined, IV_LENGTH_BYTES, combined.length);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(GCM_TAG_BITS, iv));
             return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("Failed to decrypt secret (authentication failed)", e);
