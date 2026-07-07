@@ -40,7 +40,9 @@ import net.vaier.domain.port.ForGeneratingDockerComposeFiles;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForPersistingLanServers;
+import net.vaier.domain.port.ForTrackingHostKeys;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingPublicHost;
@@ -110,6 +112,8 @@ public class VpnService implements
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     private final ForPersistingLanServers forPersistingLanServers;
+    private final ForPersistingHostCredentials forPersistingHostCredentials;
+    private final ForTrackingHostKeys forTrackingHostKeys;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -127,7 +131,9 @@ public class VpnService implements
                       ForExecutingInContainer forExecutingInContainer,
                       ForResolvingServerLanCidr forResolvingServerLanCidr,
                       ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval,
-                      ForPersistingLanServers forPersistingLanServers) {
+                      ForPersistingLanServers forPersistingLanServers,
+                      ForPersistingHostCredentials forPersistingHostCredentials,
+                      ForTrackingHostKeys forTrackingHostKeys) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
@@ -145,6 +151,8 @@ public class VpnService implements
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.forTrackingPeerConfigRetrieval = forTrackingPeerConfigRetrieval;
         this.forPersistingLanServers = forPersistingLanServers;
+        this.forPersistingHostCredentials = forPersistingHostCredentials;
+        this.forTrackingHostKeys = forTrackingHostKeys;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -568,8 +576,11 @@ public class VpnService implements
     public void renamePeer(String peerId, String newName) {
         // The id is immutable — "renaming" sets the editable display name only. No config files
         // move, so live tunnels and published services are untouched.
-        peerConfigProvider.getPeerConfigByName(peerId)
+        var peerConfig = peerConfigProvider.getPeerConfigByName(peerId)
             .orElseThrow(() -> new PeerNotFoundException("Peer not found: " + peerId));
+        // The SSH vault + host-key store are keyed by the peer's *display name*, so capture the current
+        // one before the rename to migrate that state to the new label (#312).
+        String oldName = peerConfig.name();
 
         // #284: the resulting *effective* display label must be free across every other machine.
         // Clearing the name (blank newName) reverts the peer to its humanised-id fallback, which is
@@ -580,7 +591,29 @@ public class VpnService implements
         }
 
         forUpdatingPeerConfigurations.updateName(peerId, newName);
+        // #312: carry the name-keyed SSH credential + pinned host key to the new display name.
+        migrateSshState(oldName, effectiveLabel);
         log.info("Set display name of peer {} to '{}'", peerId, newName);
+    }
+
+    /**
+     * Carries a machine's name-keyed SSH state — its vault credential and pinned host key — from
+     * {@code oldName} to {@code newName} on rename (#312). Write-new-then-delete-old so a failure can
+     * never leave a live credential under a name the machine no longer has. A no-op when the name is
+     * unchanged (so we don't delete what we just wrote) or when no state exists. Driven ports only.
+     */
+    private void migrateSshState(String oldName, String newName) {
+        if (oldName == null || newName == null || oldName.equals(newName)) {
+            return;
+        }
+        forPersistingHostCredentials.getByMachine(oldName).ifPresent(cred -> {
+            forPersistingHostCredentials.save(cred.reKeyedTo(newName));
+            forPersistingHostCredentials.deleteByMachine(oldName);
+        });
+        forTrackingHostKeys.getFingerprint(oldName).ifPresent(fingerprint -> {
+            forTrackingHostKeys.pin(newName, fingerprint);
+            forTrackingHostKeys.clear(oldName);
+        });
     }
 
     /**

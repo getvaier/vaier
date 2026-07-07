@@ -44,6 +44,17 @@ class HostCredentialTest {
     }
 
     @Test
+    void reKeyedTo_changesOnlyTheMachineName() {
+        HostCredential original = new HostCredential("old-nas", "admin", AuthMethod.PRIVATE_KEY,
+            "-----BEGIN KEY-----", "keypass", false);
+
+        HostCredential reKeyed = original.reKeyedTo("new-nas");
+
+        assertThat(reKeyed).isEqualTo(new HostCredential("new-nas", "admin", AuthMethod.PRIVATE_KEY,
+            "-----BEGIN KEY-----", "keypass", false));
+    }
+
+    @Test
     void toView_redactsSecretAndPassphrase_butReportsSecretPresence() {
         HostCredential c = new HostCredential("nas", "admin", AuthMethod.PRIVATE_KEY,
             "-----BEGIN KEY-----", "keypass", false);

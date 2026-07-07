@@ -41,6 +41,8 @@ class LanServerServiceTest {
     @Mock private ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     @Mock private DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     @Mock private PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
+    @Mock private net.vaier.domain.port.ForPersistingHostCredentials forPersistingHostCredentials;
+    @Mock private net.vaier.domain.port.ForTrackingHostKeys forTrackingHostKeys;
 
     @InjectMocks private LanServerService service;
 
@@ -445,6 +447,51 @@ class LanServerServiceTest {
         service.rename("nas", "media-nas");
 
         verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
+    }
+
+    @Test
+    void rename_migratesSshCredentialAndHostKeyPinToNewName() {
+        // #312: the vault + host-key store are keyed by machine name, so a rename must carry them over.
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
+        var cred = new net.vaier.domain.HostCredential("nas", "root",
+            net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false);
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(java.util.Optional.of(cred));
+        when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(java.util.Optional.of("SHA256:abc"));
+
+        service.rename("nas", "media-nas");
+
+        // write-new-then-delete-old for both stores.
+        verify(forPersistingHostCredentials).save(cred.reKeyedTo("media-nas"));
+        verify(forPersistingHostCredentials).deleteByMachine("nas");
+        verify(forTrackingHostKeys).pin("media-nas", "SHA256:abc");
+        verify(forTrackingHostKeys).clear("nas");
+    }
+
+    @Test
+    void rename_withNoSshState_isACleanNoOp() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(java.util.Optional.empty());
+        when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(java.util.Optional.empty());
+
+        service.rename("nas", "media-nas");
+
+        verify(forPersistingHostCredentials, never()).save(any());
+        verify(forPersistingHostCredentials, never()).deleteByMachine(any());
+        verify(forTrackingHostKeys, never()).pin(any(), any());
+        verify(forTrackingHostKeys, never()).clear(any());
+    }
+
+    @Test
+    void rename_noOpSameName_leavesSshStateIntact() {
+        when(forPersistingLanServers.getAll())
+            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", false, null)));
+
+        service.rename("nas", "nas");
+
+        verify(forPersistingHostCredentials, never()).deleteByMachine(any());
+        verify(forTrackingHostKeys, never()).clear(any());
     }
 
     @Test

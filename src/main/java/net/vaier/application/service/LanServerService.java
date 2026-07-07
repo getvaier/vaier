@@ -22,9 +22,11 @@ import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import net.vaier.domain.port.ForTrackingHostKeys;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -53,6 +55,8 @@ public class LanServerService implements
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final DeletePublishedServiceUseCase deletePublishedServiceUseCase;
     private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
+    private final ForPersistingHostCredentials forPersistingHostCredentials;
+    private final ForTrackingHostKeys forTrackingHostKeys;
 
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
@@ -71,13 +75,17 @@ public class LanServerService implements
                             // registered LAN server. Registering or renaming a server changes that
                             // mapping, so the cache must be dropped (#300). Same port the reachability
                             // service uses; @Lazy keeps it consistent with the cascade dependency above.
-                            @Lazy PublishedServicesCacheInvalidator publishedServicesCacheInvalidator) {
+                            @Lazy PublishedServicesCacheInvalidator publishedServicesCacheInvalidator,
+                            ForPersistingHostCredentials forPersistingHostCredentials,
+                            ForTrackingHostKeys forTrackingHostKeys) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.deletePublishedServiceUseCase = deletePublishedServiceUseCase;
         this.publishedServicesCacheInvalidator = publishedServicesCacheInvalidator;
+        this.forPersistingHostCredentials = forPersistingHostCredentials;
+        this.forTrackingHostKeys = forTrackingHostKeys;
     }
 
     @Override
@@ -201,6 +209,9 @@ public class LanServerService implements
         // save() upserts by name, so write the new entry then drop the old one.
         forPersistingLanServers.save(renamed);
         forPersistingLanServers.deleteByName(currentName);
+        // #312: the SSH credential vault and pinned host key are keyed by machine name — carry them
+        // to the new name so a rename doesn't orphan them.
+        migrateSshState(currentName, renamed.name());
         // The published-services view caches each LAN route's resolved lanServerName; the rename
         // changed it, so drop the cache or the renamed machine card serves stale (old-name) data
         // and appears to lose its services until the name is changed back (#300).
@@ -234,6 +245,26 @@ public class LanServerService implements
             .flatMap(server -> LanServerSetupScript.forHost(server,
                 forGettingPeerConfigurations.getAllPeerConfigs(),
                 forResolvingServerLanCidr.resolve().orElse(null), vpnSubnet));
+    }
+
+    /**
+     * Carries a machine's name-keyed SSH state — its vault credential and pinned host key — from
+     * {@code oldName} to {@code newName} on rename (#312). Write-new-then-delete-old so a failure can
+     * never leave a live credential under a name the machine no longer has. A no-op when the name is
+     * unchanged (so we don't delete what we just wrote) or when no state exists. Driven ports only.
+     */
+    private void migrateSshState(String oldName, String newName) {
+        if (oldName == null || newName == null || oldName.equals(newName)) {
+            return;
+        }
+        forPersistingHostCredentials.getByMachine(oldName).ifPresent(cred -> {
+            forPersistingHostCredentials.save(cred.reKeyedTo(newName));
+            forPersistingHostCredentials.deleteByMachine(oldName);
+        });
+        forTrackingHostKeys.getFingerprint(oldName).ifPresent(fingerprint -> {
+            forTrackingHostKeys.pin(newName, fingerprint);
+            forTrackingHostKeys.clear(oldName);
+        });
     }
 
     /**

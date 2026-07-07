@@ -28,6 +28,16 @@ public record HostCredential(String machineName, String username, AuthMethod aut
         return new HostCredentialView(machineName, username, authMethod, secret != null && !secret.isBlank());
     }
 
+    /**
+     * A copy of this credential re-keyed to {@code newMachineName}; every other field carries over
+     * unchanged. Used when a machine is renamed — the vault is keyed by machine name, so the stored
+     * credential must move to the new name. Mirrors {@code LanServer.renamedTo}: the "how to re-key"
+     * rule lives on the entity.
+     */
+    public HostCredential reKeyedTo(String newMachineName) {
+        return new HostCredential(newMachineName, username, authMethod, secret, passphrase, managed);
+    }
+
     private static void requireNonBlank(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " must not be blank");

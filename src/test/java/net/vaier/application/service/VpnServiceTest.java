@@ -71,6 +71,8 @@ class VpnServiceTest {
     @Mock ForResolvingServerLanCidr forResolvingServerLanCidr;
     @Mock net.vaier.domain.port.ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
     @Mock ForPersistingLanServers forPersistingLanServers;
+    @Mock net.vaier.domain.port.ForPersistingHostCredentials forPersistingHostCredentials;
+    @Mock net.vaier.domain.port.ForTrackingHostKeys forTrackingHostKeys;
 
     @InjectMocks VpnService service;
 
@@ -1027,6 +1029,55 @@ class VpnServiceTest {
         assertThatThrownBy(() -> service.renamePeer("laptp", "nas"))
             .isInstanceOf(ConflictException.class);
         verify(forUpdatingPeerConfigurations, never()).updateName(any(), any());
+    }
+
+    // --- renamePeer migrates name-keyed SSH state (#312) ---
+
+    @Test
+    void renamePeer_migratesSshCredentialAndHostKeyPinToNewName() {
+        // The peer "alice" has a stored credential + pinned host key, keyed by its display name.
+        when(peerConfigProvider.getPeerConfigByName("alice"))
+            .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
+        var cred = new net.vaier.domain.HostCredential("alice", "root",
+            net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false);
+        when(forPersistingHostCredentials.getByMachine("alice")).thenReturn(Optional.of(cred));
+        when(forTrackingHostKeys.getFingerprint("alice")).thenReturn(Optional.of("SHA256:abc"));
+
+        service.renamePeer("alice", "wonderland");
+
+        verify(forUpdatingPeerConfigurations).updateName("alice", "wonderland");
+        verify(forPersistingHostCredentials).save(cred.reKeyedTo("wonderland"));
+        verify(forPersistingHostCredentials).deleteByMachine("alice");
+        verify(forTrackingHostKeys).pin("wonderland", "SHA256:abc");
+        verify(forTrackingHostKeys).clear("alice");
+    }
+
+    @Test
+    void renamePeer_withNoSshState_isACleanNoOp() {
+        when(peerConfigProvider.getPeerConfigByName("alice"))
+            .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
+        when(forPersistingHostCredentials.getByMachine("alice")).thenReturn(Optional.empty());
+        when(forTrackingHostKeys.getFingerprint("alice")).thenReturn(Optional.empty());
+
+        service.renamePeer("alice", "wonderland");
+
+        verify(forUpdatingPeerConfigurations).updateName("alice", "wonderland");
+        verify(forPersistingHostCredentials, never()).save(any());
+        verify(forPersistingHostCredentials, never()).deleteByMachine(any());
+        verify(forTrackingHostKeys, never()).pin(any(), any());
+        verify(forTrackingHostKeys, never()).clear(any());
+    }
+
+    @Test
+    void renamePeer_noOpSameName_leavesSshStateIntact() {
+        // "alice" (peerId) already displays as "alice"; renaming to the same effective label is a no-op.
+        when(peerConfigProvider.getPeerConfigByName("alice"))
+            .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
+
+        service.renamePeer("alice", "alice");
+
+        verify(forPersistingHostCredentials, never()).deleteByMachine(any());
+        verify(forTrackingHostKeys, never()).clear(any());
     }
 
     @Test
