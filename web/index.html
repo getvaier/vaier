@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vaier — Self-hosted infrastructure for homelab developers</title>
-    <meta name="description" content="Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain — Vaier handles DNS, reverse proxy, and HTTPS automatically.">
+    <meta name="description" content="Vaier wires together WireGuard, Traefik, Google or GitHub sign-in (via oauth2-proxy), and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a subdomain — Vaier handles DNS, reverse proxy, and HTTPS automatically.">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
     <link rel="stylesheet" href="styles.css">
     <style>
@@ -409,9 +409,9 @@
         </div>
         <h1>Self-hosted infrastructure<br/>for <span class="accent">homelab developers</span>.</h1>
         <p class="lede">
-            Vaier wires together WireGuard, Traefik, Authelia, and AWS Route53 into a single web UI.
-            Add a Docker container on any VPN peer, pick a subdomain — Vaier handles DNS,
-            reverse proxy, and HTTPS automatically.
+            Vaier wires together WireGuard, Traefik, Google or GitHub sign-in (via oauth2-proxy),
+            and AWS Route53 into a single web UI. Add a Docker container on any VPN peer, pick a
+            subdomain — Vaier handles DNS, reverse proxy, and HTTPS automatically.
         </p>
         <div class="hero-actions">
             <a href="#quickstart" class="btn btn-primary btn-large">Get started</a>
@@ -436,8 +436,8 @@
                 <h3>Six tools, six config files, six places to mess up</h3>
                 <p>
                     You spin up a container on a homelab box. Now you need a WireGuard peer, a Route53
-                    CNAME, a Traefik dynamic-config entry, a Let's Encrypt cert, an Authelia rule, and
-                    a bookmark somewhere you'll actually find later. Every new service repeats the
+                    CNAME, a Traefik dynamic-config entry, a Let's Encrypt cert, a forward-auth rule,
+                    and a bookmark somewhere you'll actually find later. Every new service repeats the
                     whole dance. Every drift is silent.
                 </p>
             </div>
@@ -447,8 +447,8 @@
                 <p>
                     Vaier discovers containers on every connected peer, lets you pick a subdomain,
                     creates the DNS record, generates the Traefik route, provisions the cert,
-                    optionally gates it behind Authelia, and rolls back the entire flow if anything
-                    fails. Your homelab now feels like a PaaS.
+                    optionally gates it behind Google or GitHub sign-in, and rolls back the entire
+                    flow if anything fails. Your homelab now feels like a PaaS.
                 </p>
             </div>
         </div>
@@ -467,6 +467,15 @@
                 </svg>
                 <h3>VPN peer management</h3>
                 <p>Create, delete, and monitor WireGuard peers. Download QR codes, <code>.conf</code> files, docker-compose, or setup scripts — whichever fits the peer type.</p>
+            </div>
+            <div class="feature">
+                <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                    <path d="m6 9 3 3-3 3"/>
+                    <line x1="13" y1="15" x2="17" y2="15"/>
+                </svg>
+                <h3>Web terminal</h3>
+                <p>Open a real SSH shell to any machine — peers, LAN servers, or the Vaier host — right from its card. Tabs survive navigation, tile into a split grid, and reconnect on their own. Credentials stay server-side; the browser never sees the secret.</p>
             </div>
             <div class="feature">
                 <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -491,7 +500,7 @@
                     <circle cx="12" cy="12" r="2.5"/>
                 </svg>
                 <h3>Reverse proxy on autopilot</h3>
-                <p>Traefik dynamic config is generated for you, with per-service Authelia toggle and root-path redirect built in.</p>
+                <p>Traefik dynamic config is generated for you, with a per-service auth mode — public or social sign-in — and a branded offline page when a backend is down.</p>
             </div>
             <div class="feature">
                 <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -508,8 +517,8 @@
                     <circle cx="17" cy="6" r="2.5"/>
                     <path d="M22 15c0-2.5-2-4.5-4.5-4.5"/>
                 </svg>
-                <h3>User management</h3>
-                <p>Manage Authelia users and groups directly from the Vaier UI — no YAML editing required.</p>
+                <h3>Access management</h3>
+                <p>Every Google or GitHub identity is an access entry with a role — pending, user, or admin — and free-form per-service groups. Approve newcomers and gate services from the UI, no YAML.</p>
             </div>
             <div class="feature">
                 <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -525,7 +534,7 @@
                     <path d="M3 9h18M9 3v18"/>
                 </svg>
                 <h3>Consistent branding</h3>
-                <p>Authelia login pages share Vaier's dark theme — the auth hand-off feels like one app, not two.</p>
+                <p>The oauth2-proxy sign-in and the Dex broker screens share Vaier's dark theme — the Google/GitHub hand-off feels like one app, not three.</p>
             </div>
         </div>
     </section>
@@ -558,7 +567,7 @@
                 <g transform="translate(220,110)">
                     <rect width="220" height="60" rx="4" fill="#2d2d30" stroke="#4fc3f7" stroke-width="1.5"/>
                     <text x="110" y="26" text-anchor="middle" fill="#4fc3f7" font-family="-apple-system, Segoe UI, sans-serif" font-size="13" font-weight="600">Vaier server</text>
-                    <text x="110" y="44" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">Traefik · Authelia · WireGuard</text>
+                    <text x="110" y="44" text-anchor="middle" fill="#858585" font-family="SF Mono, Consolas, monospace" font-size="10">Traefik · oauth2-proxy · WireGuard</text>
                 </g>
 
                 <g transform="translate(540,40)">
@@ -592,8 +601,9 @@
             </svg>
             <p class="diagram-caption">
                 Every published service resolves via DNS to the single Vaier server, terminates TLS at
-                Traefik, optionally passes Authelia, and is proxied over WireGuard to the container
-                running on a peer. The peers never need a public IP.
+                Traefik, optionally passes social-login authorization (Google or GitHub via
+                oauth2-proxy, then Vaier's own access check), and is proxied over WireGuard to the
+                container running on a peer. The peers never need a public IP.
             </p>
         </div>
     </section>
@@ -632,26 +642,29 @@
             <div class="step">
                 <div class="step-num">04</div>
                 <div class="step-body">
-                    <h3>Pick a DNS mode and start the stack</h3>
-                    <p>Drop in <code>.env</code> with at minimum <code>VAIER_DOMAIN</code> and <code>ACME_EMAIL</code>. Add <code>VAIER_AWS_KEY</code> and <code>VAIER_AWS_SECRET</code> if you want Route53 automation, or leave them out and maintain DNS yourself.</p>
+                    <h3>Configure sign-in, DNS, and secrets</h3>
+                    <p>Register a Google (and optionally GitHub) OAuth client with the callback URL <code>https://dex.yourdomain.com/callback</code>, then drop the ids into <code>.env</code>. Set <code>VAIER_ADMIN_EMAIL</code> to the account that becomes the first admin. Add <code>VAIER_AWS_KEY</code> / <code>VAIER_AWS_SECRET</code> for Route53 automation, or leave them out and maintain DNS yourself.</p>
 <pre class="code"><span class="cmd">cat</span> &gt; .env &lt;&lt;EOF
 <span class="var">VAIER_DOMAIN</span>=<span class="str">yourdomain.com</span>
 <span class="var">ACME_EMAIL</span>=<span class="str">you@yourdomain.com</span>
+<span class="var">VAIER_ADMIN_EMAIL</span>=<span class="str">you@gmail.com</span>
+<span class="var">VAIER_OIDC_GOOGLE_CLIENT_ID</span>=<span class="str">...apps.googleusercontent.com</span>
+<span class="var">VAIER_OIDC_GOOGLE_CLIENT_SECRET</span>=<span class="str">...</span>
+<span class="comment"># optional: Route53 DNS automation</span>
 <span class="var">VAIER_AWS_KEY</span>=<span class="str">AKIA...</span>
 <span class="var">VAIER_AWS_SECRET</span>=<span class="str">...</span>
 EOF
-<span class="cmd">chmod</span> 600 .env
-<span class="cmd">docker</span> compose up -d</pre>
+<span class="cmd">chmod</span> 600 .env</pre>
+                    <p>Point three records at the server: <code>vaier</code>, <code>oauth2</code>, and <code>dex</code> under <code>yourdomain.com</code>. With Route53 credentials Vaier creates them for you; otherwise add the CNAMEs yourself before first boot.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">05</div>
                 <div class="step-body">
-                    <h3>Sign in and own your homelab</h3>
-                    <p>Read the bootstrap admin password, log in at <code>https://vaier.yourdomain.com</code>, change it, and delete the file. From there you create peers, publish containers, and watch a dashboard fill itself in.</p>
-<pre class="code"><span class="cmd">cat</span> authelia/config/.bootstrap-admin-password
-<span class="comment"># log in at https://vaier.yourdomain.com, change the password, then:</span>
-<span class="cmd">rm</span> authelia/config/.bootstrap-admin-password</pre>
+                    <h3>Start the stack and sign in</h3>
+                    <p>Bring everything up, open <code>https://vaier.yourdomain.com</code>, and sign in with the Google account you set as <code>VAIER_ADMIN_EMAIL</code> — Vaier seeds it as the first admin, so you land straight in the console. Anyone else who signs in lands as a <strong>pending</strong> request until you approve them on the Users page.</p>
+<pre class="code"><span class="cmd">docker</span> compose up -d
+<span class="comment"># then open https://vaier.yourdomain.com and sign in with Google</span></pre>
                 </div>
             </div>
         </div>
@@ -676,9 +689,9 @@ EOF
                 <div class="label">// the small team</div>
                 <h3>A handful of users, real auth, real DNS.</h3>
                 <p>
-                    Add teammates as Authelia users, gate sensitive services behind SSO, and let
-                    everyone find the apps via the launchpad. No spreadsheets of URLs. No "what's
-                    the password for X" pings.
+                    Approve teammates by their Google or GitHub identity, gate sensitive services by
+                    access group, and let everyone find the apps via the launchpad. No spreadsheets of
+                    URLs. No passwords to hand out — no "what's the password for X" pings.
                 </p>
             </div>
         </div>
