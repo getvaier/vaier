@@ -815,7 +815,19 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
     failures surface as the same domain SSH exceptions as the terminal path. Internal capability only —
     no consumer wiring or UI yet (slices 3–5). Short-lived client per call, closed in a `finally`.
   - **#315 — Per-host SSH port** (retire hard-coded port 22). 🔲
-  - **#316 — Remote disk-pressure alert** (`df` over SSH). 🔲
+  - **#316 — Remote disk-pressure alert** (`df` over SSH) ✅. The first alert built on the exec keystone:
+    a `RemoteDiskWatcher` (`@Scheduled`, sibling of `DiskUsageWatcher`) runs `df -P /` over SSH on every
+    `Machine` that both has `effectiveSshAccess()` and a stored **host credential**, parses the Use%
+    column, and feeds a per-machine `RemoteDiskPressureTracker` so it alerts only on threshold crossings
+    (into pressure and back), never per poll. Notifies via `NotifyAdminsOfRemoteDiskPressureUseCase` on
+    `NotificationService`, reusing admin-recipient resolution + SMTP gating; skips silently when SMTP is
+    unconfigured. The watcher depends only on the new `RunRemoteCommandUseCase` (implemented on
+    `TerminalService`, reusing `openTerminal`'s address + credential + host-key-pin assembly), never on
+    the SSH ports directly. Error path is honest: a machine with no credential / SSH off is skipped, and
+    an unreachable host or a `df` that times out, exits non-zero, or returns unparseable output is
+    degraded (logged, tracker untouched), never treated as a full disk. TOFU gap closed: `CommandResult`
+    gained a `hostKeyFingerprint` field so the exec path pins an unpinned host on first use exactly like
+    the terminal.
   - **#317 — Docker health over SSH + close the `apalveien5` 2375 hole.** 🔲
 
 **Backlog:** **SFTP** (file transfer over the same session) is deferred — V1 scope is the interactive

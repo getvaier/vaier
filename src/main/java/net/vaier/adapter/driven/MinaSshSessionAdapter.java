@@ -96,7 +96,7 @@ public class MinaSshSessionAdapter implements ForOpeningSshSessions, ForRunningS
             // -1 stands for "unknown": a timeout, or a server that never sent an exit status. A known
             // non-zero exit is a normal result and is surfaced as-is, never thrown.
             int exitCode = (timedOut || exit == null) ? -1 : exit;
-            return new CommandResult(exitCode, out.text(), err.text(), timedOut);
+            return new CommandResult(exitCode, out.text(), err.text(), timedOut, conn.fingerprint());
         } catch (IOException e) {
             throw new SshConnectException(
                 "Could not run a command on " + target.host() + " (" + rootMessage(e) + ")", e);

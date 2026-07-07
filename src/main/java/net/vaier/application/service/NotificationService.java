@@ -3,8 +3,10 @@ package net.vaier.application.service;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.NotifyAdminsOfDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
+import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.DiskUsage;
+import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.PendingIdentity;
@@ -25,6 +27,7 @@ import java.util.Optional;
 public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfDiskPressureUseCase,
+        NotifyAdminsOfRemoteDiskPressureUseCase,
         ForNotifyingAdmins {
 
     private static final int DEFAULT_SMTP_PORT = 587;
@@ -66,6 +69,20 @@ public class NotificationService implements
         sendToAdmins(usage.recoverySubject(),
                 usage.pressureBody(thresholdPercent, configResolver.getDomain()),
                 "disk recovery on " + usage.path());
+    }
+
+    @Override
+    public void notifyAdminsOfRemoteDiskPressure(RemoteDiskUsage usage, int thresholdPercent) {
+        sendToAdmins(usage.pressureSubject(),
+                usage.pressureBody(thresholdPercent, configResolver.getDomain()),
+                "remote disk pressure on " + usage.machineName());
+    }
+
+    @Override
+    public void notifyAdminsOfRemoteDiskRecovery(RemoteDiskUsage usage, int thresholdPercent) {
+        sendToAdmins(usage.recoverySubject(),
+                usage.pressureBody(thresholdPercent, configResolver.getDomain()),
+                "remote disk recovery on " + usage.machineName());
     }
 
     /**

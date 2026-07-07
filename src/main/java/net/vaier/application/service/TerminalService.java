@@ -6,7 +6,9 @@ import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.DeleteHostCredentialUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
+import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.application.SaveHostCredentialUseCase;
+import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.LanAnchor;
@@ -22,6 +24,7 @@ import net.vaier.domain.port.ForOpeningSshSessions.SshSession;
 import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingVaierServerSshAddress;
+import net.vaier.domain.port.ForRunningSshCommands;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +45,7 @@ public class TerminalService implements
     GetHostCredentialUseCase,
     DeleteHostCredentialUseCase,
     OpenTerminalSessionUseCase,
+    RunRemoteCommandUseCase,
     ClearHostKeyUseCase {
 
     private final ForPersistingHostCredentials forPersistingHostCredentials;
@@ -49,6 +53,7 @@ public class TerminalService implements
     private final ForPersistingLanServers forPersistingLanServers;
     private final ForResolvingVaierServerSshAddress forResolvingVaierServerSshAddress;
     private final ForOpeningSshSessions forOpeningSshSessions;
+    private final ForRunningSshCommands forRunningSshCommands;
     private final ForTrackingHostKeys forTrackingHostKeys;
 
     @Override
@@ -68,28 +73,55 @@ public class TerminalService implements
 
     @Override
     public SshSession openTerminal(String machineName, SshOutputListener onOutput) {
-        String host = resolveSshAddress(machineName);
-        HostCredential credential = forPersistingHostCredentials.getByMachine(machineName)
-            .orElseThrow(() -> new NoHostCredentialException(machineName));
-        String pinned = forTrackingHostKeys.getFingerprint(machineName).orElse(null);
-
-        SshTarget target = SshTarget.on(host, credential, pinned);
+        SshTarget target = buildTarget(machineName);
         // The adapter enforces host-key trust via the domain HostKeyTrust decision and throws
         // HostKeyMismatchException on a changed key; other failures surface as SshAuth/SshConnect.
         SshSession session = forOpeningSshSessions.open(target, onOutput);
 
-        // Trust-on-first-use: if nothing was pinned, record the fingerprint the host presented.
-        if (pinned == null && session.hostKeyFingerprint() != null) {
-            forTrackingHostKeys.pin(machineName, session.hostKeyFingerprint());
-        }
-        log.info("Opened terminal session to {} ({})", machineName, host);
+        pinOnFirstUse(machineName, target, session.hostKeyFingerprint());
+        log.info("Opened terminal session to {} ({})", machineName, target.host());
         return session;
+    }
+
+    @Override
+    public CommandResult run(String machineName, String command) {
+        SshTarget target = buildTarget(machineName);
+        // Same host-key trust as the shell path: a changed key throws HostKeyMismatchException.
+        CommandResult result = forRunningSshCommands.run(target, command);
+
+        pinOnFirstUse(machineName, target, result.hostKeyFingerprint());
+        return result;
     }
 
     @Override
     public void clearHostKey(String machineName) {
         forTrackingHostKeys.clear(machineName);
         log.info("Cleared pinned host key for {}", machineName);
+    }
+
+    /**
+     * Assemble the {@link SshTarget} for a machine — the one copy of the resolve-address + load-vault-
+     * credential + read-pinned-fingerprint logic shared by {@link #openTerminal} and {@link #run}, so
+     * both connect and TOFU-pin identically. The returned target carries the previously pinned
+     * fingerprint (null when the host has never been pinned), which the callers use to decide whether to
+     * pin on first use.
+     */
+    private SshTarget buildTarget(String machineName) {
+        String host = resolveSshAddress(machineName);
+        HostCredential credential = forPersistingHostCredentials.getByMachine(machineName)
+            .orElseThrow(() -> new NoHostCredentialException(machineName));
+        String pinned = forTrackingHostKeys.getFingerprint(machineName).orElse(null);
+        return SshTarget.on(host, credential, pinned);
+    }
+
+    /**
+     * Trust-on-first-use: if the target had nothing pinned and the connect presented a fingerprint,
+     * record it so later connects can enforce it. Shared by the shell and exec paths.
+     */
+    private void pinOnFirstUse(String machineName, SshTarget target, String presentedFingerprint) {
+        if (target.pinnedFingerprint() == null && presentedFingerprint != null) {
+            forTrackingHostKeys.pin(machineName, presentedFingerprint);
+        }
     }
 
     /**

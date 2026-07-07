@@ -101,6 +101,16 @@ class ForRunningSshCommandsAdapterTest {
     }
 
     @Test
+    void run_reportsPresentedHostKeyFingerprint_forTofuPinning() throws Exception {
+        int port = startServer();
+
+        CommandResult result = adapter.run(target(port, null), "echo hello");
+
+        assertThat(result.hostKeyFingerprint()).isNotBlank();
+        assertThat(result.hostKeyFingerprint()).startsWith("SHA256:");
+    }
+
+    @Test
     void run_pinnedFingerprintMismatch_throwsHostKeyMismatchException() throws Exception {
         int port = startServer();
 

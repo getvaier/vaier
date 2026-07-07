@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import net.vaier.domain.AuthMethod;
+import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.LanAnchor;
@@ -17,6 +18,7 @@ import net.vaier.domain.port.ForOpeningSshSessions.SshSession;
 import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingVaierServerSshAddress;
+import net.vaier.domain.port.ForRunningSshCommands;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +46,7 @@ class TerminalServiceTest {
     @Mock ForPersistingLanServers forPersistingLanServers;
     @Mock ForResolvingVaierServerSshAddress forResolvingVaierServerSshAddress;
     @Mock ForOpeningSshSessions forOpeningSshSessions;
+    @Mock ForRunningSshCommands forRunningSshCommands;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
     @Mock SshOutputListener onOutput;
     @Mock SshSession sshSession;
@@ -160,5 +163,54 @@ class TerminalServiceTest {
     void clearHostKey_clearsViaPort() {
         service.clearHostKey("nas");
         verify(forTrackingHostKeys).clear("nas");
+    }
+
+    // --- remote command (slice 3 keystone reuse) ---
+
+    @Test
+    void run_resolvesTarget_fromSameAddressCredentialAndPinLogic() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
+        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        when(forRunningSshCommands.run(any(), any()))
+            .thenReturn(new CommandResult(0, "hello", "", false, "SHA256:pinned"));
+
+        CommandResult result = service.run("nuc", "echo hello");
+
+        assertThat(result.stdout()).isEqualTo("hello");
+        ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
+        verify(forRunningSshCommands).run(target.capture(), org.mockito.ArgumentMatchers.eq("echo hello"));
+        assertThat(target.getValue().host()).isEqualTo("10.13.13.9");
+        assertThat(target.getValue().pinnedFingerprint()).isEqualTo("SHA256:pinned");
+        verify(forTrackingHostKeys, never()).pin(any(), any()); // already pinned → no re-pin
+    }
+
+    @Test
+    void run_firstUseUnpinnedHost_pinsPresentedFingerprint() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
+        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.empty());
+        when(forRunningSshCommands.run(any(), any()))
+            .thenReturn(new CommandResult(0, "ok", "", false, "SHA256:fresh"));
+
+        service.run("nuc", "echo ok");
+
+        ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
+        verify(forRunningSshCommands).run(target.capture(), any());
+        assertThat(target.getValue().pinnedFingerprint()).isNull();
+        verify(forTrackingHostKeys).pin("nuc", "SHA256:fresh"); // TOFU pin on first use
+    }
+
+    @Test
+    void run_noCredential_throwsNoHostCredential_andDoesNotRun() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.run("nuc", "echo hi"))
+            .isInstanceOf(NoHostCredentialException.class);
+        verify(forRunningSshCommands, never()).run(any(), any());
     }
 }
