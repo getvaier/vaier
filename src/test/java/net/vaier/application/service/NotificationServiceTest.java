@@ -234,6 +234,48 @@ class NotificationServiceTest {
                 anyList(), any(), any());
     }
 
+    // --- disk-fill forecast (early-warning alert) ---
+
+    @Test
+    void notifyAdminsOfDiskFillForecast_sendsEarlyWarningToEveryAdmin() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                user("carol@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfDiskFillForecast(
+                new net.vaier.domain.DiskFillForecast("nas", 80, 1.0, java.time.Duration.ofHours(18)));
+
+        ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                recipients.capture(), subject.capture(), body.capture());
+        assertThat(recipients.getValue()).containsExactly("alice@example.com");
+        assertThat(subject.getValue()).contains("nas").contains("18h");
+        assertThat(body.getValue()).contains("nas").contains("80%").contains("vaier.example.com");
+    }
+
+    @Test
+    void notifyAdminsOfDiskFillForecastCleared_sendsAllClearToEveryAdmin() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfDiskFillForecastCleared(
+                new net.vaier.domain.DiskFillForecastCleared("nas", 60));
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                anyList(), subject.capture(), body.capture());
+        assertThat(subject.getValue()).contains("nas");
+        assertThat(body.getValue()).contains("60%");
+    }
+
     @Test
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));

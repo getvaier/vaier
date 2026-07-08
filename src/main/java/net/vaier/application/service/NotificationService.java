@@ -1,9 +1,12 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.DiskFillForecast;
+import net.vaier.domain.DiskFillForecastCleared;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.AccessEntry;
@@ -25,6 +28,7 @@ import java.util.Optional;
 public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
+        NotifyAdminsOfDiskFillForecastUseCase,
         ForNotifyingAdmins {
 
     private static final int DEFAULT_SMTP_PORT = 587;
@@ -66,6 +70,20 @@ public class NotificationService implements
         sendToAdmins(usage.recoverySubject(),
                 usage.pressureBody(thresholdPercent, configResolver.getDomain()),
                 "remote disk recovery on " + usage.machineName());
+    }
+
+    @Override
+    public void notifyAdminsOfDiskFillForecast(DiskFillForecast forecast) {
+        sendToAdmins(forecast.forecastSubject(),
+                forecast.forecastBody(configResolver.getDomain()),
+                "disk-fill forecast on " + forecast.machineName());
+    }
+
+    @Override
+    public void notifyAdminsOfDiskFillForecastCleared(DiskFillForecastCleared cleared) {
+        sendToAdmins(cleared.clearedSubject(),
+                cleared.clearedBody(configResolver.getDomain()),
+                "disk-fill forecast cleared on " + cleared.machineName());
     }
 
     /**
