@@ -143,9 +143,30 @@
         const status = document.createElement('div');
         status.className = 'term-window-status';
         status.style.display = 'none';
+
+        // A per-pane action row above the viewport — a left-aligned menu line that stays with the shell and
+        // will hold future terminal actions. Send password leads it (the key sends the machine's stored
+        // password straight from Vaier into the shell; it never touches the browser).
+        const toolbar = document.createElement('div');
+        toolbar.className = 'term-pane-toolbar';
+        const sendPw = document.createElement('button');
+        sendPw.type = 'button';
+        sendPw.className = 'term-toolbar-btn';
+        sendPw.title = 'Send stored password';
+        sendPw.setAttribute('aria-label', 'Send the stored password to ' + machineName);
+        const sendPwGlyph = document.createElement('span');
+        sendPwGlyph.className = 'term-toolbar-btn-glyph';
+        sendPwGlyph.setAttribute('aria-hidden', 'true');
+        sendPwGlyph.textContent = '🔑';
+        const sendPwLabel = document.createElement('span');
+        sendPwLabel.textContent = 'Send password';
+        sendPw.append(sendPwGlyph, sendPwLabel);
+        sendPw.onclick = (e) => { e.stopPropagation(); sendPassword(id); };
+        toolbar.appendChild(sendPw);
+
         const body = document.createElement('div');
         body.className = 'term-window-body';
-        pane.append(head, status, body);
+        pane.append(head, status, toolbar, body);
         return pane;
     }
 
@@ -165,13 +186,6 @@
         label.className = 'term-tab-label';
         label.append(dot, name);
         label.onclick = () => focus(id);
-        const sendPw = document.createElement('button');
-        sendPw.type = 'button';
-        sendPw.className = 'term-tab-sendpw';
-        sendPw.title = 'Send stored password';
-        sendPw.setAttribute('aria-label', 'Send the stored password to ' + machineName);
-        sendPw.textContent = '🔑';
-        sendPw.onclick = (e) => { e.stopPropagation(); sendPassword(id); };
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'term-tab-close';
@@ -179,7 +193,7 @@
         close.setAttribute('aria-label', 'Close shell to ' + machineName);
         close.textContent = '✕';
         close.onclick = (e) => { e.stopPropagation(); closeShell(id); };
-        tab.append(label, sendPw, close);
+        tab.append(label, close);
         return tab;
     }
 
@@ -392,7 +406,7 @@
 
     function onTabDragStart(e, id, tab) {
         if (e.button !== 0 || isPhone()) return;
-        if (e.target.closest('.term-tab-close') || e.target.closest('.term-tab-sendpw')) return;
+        if (e.target.closest('.term-tab-close')) return;
         const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
         let moved = false, ghost = null;
         const move = (me) => {

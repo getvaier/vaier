@@ -559,22 +559,6 @@ body {
 }
 .term-tab-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
 
-/* The key sends the machine's stored password straight from Vaier into the shell — it never touches the
-   browser. Sits with the close control, dimmed until hovered, matching the tab's quiet chrome. */
-.term-tab-sendpw {
-    background: none;
-    border: none;
-    font-size: 0.72rem;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0.3rem 0.3rem;
-    border-radius: 4px;
-    flex-shrink: 0;
-    opacity: 0.55;
-    filter: grayscale(0.4);
-}
-.term-tab-sendpw:hover { opacity: 1; filter: none; background: rgba(255, 255, 255, 0.07); }
-
 .term-dock-panes {
     position: relative;
     flex: 1;
@@ -708,6 +692,36 @@ body {
 }
 
 .term-window-status.error { color: var(--red, #e06c75); }
+
+/* A per-pane action row above the terminal viewport — a left-aligned menu line that holds shell actions
+   (Send password leads it) and can grow to hold more. A fixed-height row so the body below still flexes to
+   fill the pane; shares the pane head's surface and border. */
+.term-pane-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.4rem;
+    background: var(--bg-input, #111);
+    border-bottom: 1px solid var(--border, #2a2a2a);
+    flex-shrink: 0;
+}
+.term-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+}
+.term-toolbar-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.term-toolbar-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.term-toolbar-btn-glyph { font-size: 0.8rem; filter: grayscale(0.4); }
+.term-toolbar-btn:hover .term-toolbar-btn-glyph { filter: none; }
 
 .term-window-body {
     flex: 1;
