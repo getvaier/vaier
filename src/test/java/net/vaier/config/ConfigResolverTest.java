@@ -223,6 +223,18 @@ class ConfigResolverTest {
     }
 
     @Test
+    void exposesBackupScheduleHour() {
+        // Defaults to 2am when unset.
+        when(configPersistence.load()).thenReturn(Optional.empty());
+        assertThat(new ConfigResolver(configPersistence, key -> null).getBackupScheduleHour()).isEqualTo(2);
+
+        // Uses the configured value when present.
+        VaierConfig config = VaierConfig.builder().backupScheduleHour(5).build();
+        when(configPersistence.load()).thenReturn(Optional.of(config));
+        assertThat(new ConfigResolver(configPersistence, key -> null).getBackupScheduleHour()).isEqualTo(5);
+    }
+
+    @Test
     void treatsBlankPersistedValueAsMissing() {
         VaierConfig config = VaierConfig.builder()
             .domain("   ")

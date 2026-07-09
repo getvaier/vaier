@@ -19,7 +19,7 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
     void getConfig_returnsAppSettings() throws Exception {
         AppSettingsResult settings = new AppSettingsResult(
                 "example.com", "****MPLE", "admin@example.com",
-                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false);
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false, 2);
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         mockMvc.perform(get("/settings/config"))
@@ -30,7 +30,8 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(jsonPath("$.smtpHost").value("smtp.example.com"))
                .andExpect(jsonPath("$.smtpPort").value(587))
                .andExpect(jsonPath("$.dnsProvider").value("ROUTE53"))
-               .andExpect(jsonPath("$.diskMonitorThresholdPercent").value(85));
+               .andExpect(jsonPath("$.diskMonitorThresholdPercent").value(85))
+               .andExpect(jsonPath("$.backupScheduleHour").value(2));
     }
 
     @Test

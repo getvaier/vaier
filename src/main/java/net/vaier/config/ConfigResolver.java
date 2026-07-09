@@ -23,6 +23,7 @@ public class ConfigResolver {
     private String smtpUsername;
     private String smtpSender;
     private int diskMonitorThresholdPercent;
+    private int backupScheduleHour;
     private String googleClientId;
 
     @Autowired
@@ -47,6 +48,7 @@ public class ConfigResolver {
         this.smtpUsername = config.getSmtpUsername();
         this.smtpSender = config.getSmtpSender();
         this.diskMonitorThresholdPercent = config.effectiveDiskMonitorThresholdPercent();
+        this.backupScheduleHour = config.effectiveBackupScheduleHour();
         this.googleClientId = envLookup.apply("VAIER_OIDC_GOOGLE_CLIENT_ID");
         if (domain != null) {
             log.info("Configuration resolved for domain: {} (DNS provider: {})", domain, getDnsProvider());
@@ -68,6 +70,8 @@ public class ConfigResolver {
     public String getSmtpUsername() { return smtpUsername; }
     public String getSmtpSender() { return smtpSender; }
     public int getDiskMonitorThresholdPercent() { return diskMonitorThresholdPercent; }
+    /** The hour of day (0–23) at which Vaier-owned nightly fleet-backup scheduling fires due jobs. */
+    public int getBackupScheduleHour() { return backupScheduleHour; }
     /**
      * Whether social login (#305) is configured: true once a Google OAuth client id is present. When
      * false, the {@code social} auth mode isn't offered in the UI and oauth2-proxy need not run.

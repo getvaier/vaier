@@ -276,6 +276,60 @@ class NotificationServiceTest {
         assertThat(body.getValue()).contains("60%");
     }
 
+    // --- fleet-backup failure / recovery alerts ---
+
+    private net.vaier.domain.BackupRun failedRun() {
+        net.vaier.domain.BackupJob job = new net.vaier.domain.BackupJob("colina-home", "Colina 27",
+            "nas-borg", List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+        return net.vaier.domain.BackupRun.fromExitCode(job, "run-1",
+            java.time.Instant.parse("2026-07-08T02:00:00Z"),
+            java.time.Instant.parse("2026-07-08T02:05:00Z"), 2, "borg failed");
+    }
+
+    private net.vaier.domain.BackupRun succeededRun() {
+        net.vaier.domain.BackupJob job = new net.vaier.domain.BackupJob("colina-home", "Colina 27",
+            "nas-borg", List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+        return net.vaier.domain.BackupRun.fromExitCode(job, "run-2",
+            java.time.Instant.parse("2026-07-08T02:00:00Z"),
+            java.time.Instant.parse("2026-07-08T02:40:00Z"), 0, "12 files, 3 GB");
+    }
+
+    @Test
+    void notifyAdminsOfBackupFailureSendsToAdmins() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                user("carol@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfBackupFailure(failedRun());
+
+        ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                recipients.capture(), subject.capture(), body.capture());
+        assertThat(recipients.getValue()).containsExactly("alice@example.com");
+        assertThat(subject.getValue()).isEqualTo("[Vaier] Backup failed: colina-home on Colina 27");
+        assertThat(body.getValue()).contains("colina-home").contains("vaier.example.com");
+    }
+
+    @Test
+    void notifyAdminsOfBackupRecoverySendsAllClearToAdmins() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfBackupRecovery(succeededRun());
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                anyList(), subject.capture(), any());
+        assertThat(subject.getValue()).isEqualTo("[Vaier] Backup recovered: colina-home on Colina 27");
+    }
+
     @Test
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));

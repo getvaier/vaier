@@ -205,6 +205,31 @@ class SettingsServiceTest {
         verify(configPersistence, never()).save(any());
     }
 
+    // --- updateBackupScheduleHour ---
+
+    @Test
+    void updateBackupScheduleHourPersistsAndReloads() {
+        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
+
+        service.updateBackupScheduleHour(5);
+
+        ArgumentCaptor<VaierConfig> captor = ArgumentCaptor.forClass(VaierConfig.class);
+        verify(configPersistence).save(captor.capture());
+        assertThat(captor.getValue().getBackupScheduleHour()).isEqualTo(5);
+        // Existing fields carry over on the read-modify-write.
+        assertThat(captor.getValue().getDomain()).isEqualTo("example.com");
+        assertThat(captor.getValue().getAwsKey()).isEqualTo("AKID");
+        verify(configResolver).reload();
+    }
+
+    @Test
+    void updateBackupScheduleHour_rejectsOutOfRange() {
+        assertThatThrownBy(() -> service.updateBackupScheduleHour(24))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(configPersistence, never()).save(any());
+    }
+
     // --- updateAwsCredentials ---
 
     @Test

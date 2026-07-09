@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>Fleet Backup</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="backups.css">
+</head>
+<body>
+    <div class="container">
+        <div id="bk-message"></div>
+
+        <!-- Enterprise gate replaces the whole page when the licence isn't Enterprise. -->
+        <div id="bk-gate" style="display:none"></div>
+
+        <!-- Everything below is hidden until the Enterprise check passes. -->
+        <div id="bk-app" style="display:none">
+            <div class="bk-intro">
+                <h1>Fleet Backup</h1>
+                <p>Back up your machines to a borg repository on the NAS. Define a backup repository once,
+                   then give each machine a backup job — run it on demand or let Vaier run it on the nightly
+                   schedule. Vaier emails admins when a run fails. Restore isn't available here yet.</p>
+            </div>
+
+            <!-- Backup repositories -->
+            <div class="bk-section">
+                <div class="bk-section-head">
+                    <div class="section-label">Backup repositories</div>
+                    <button class="btn btn-primary" id="newRepoBtn">+ New repository</button>
+                </div>
+                <div class="bk-list" id="repoList"><div class="loading">Loading repositories…</div></div>
+            </div>
+
+            <!-- Backup jobs -->
+            <div class="bk-section">
+                <div class="bk-section-head">
+                    <div class="section-label">Backup jobs</div>
+                    <button class="btn btn-primary" id="newJobBtn">+ New job</button>
+                </div>
+                <div class="bk-list" id="jobList"><div class="loading">Loading jobs…</div></div>
+            </div>
+
+            <!-- Nightly schedule -->
+            <div class="bk-section">
+                <div class="section-label" style="margin-bottom:0.7rem">Nightly schedule</div>
+                <div class="bk-schedule-card">
+                    <div class="bk-schedule-info">
+                        <div class="bk-schedule-title">Run enabled jobs each night</div>
+                        <div class="bk-schedule-desc">Vaier runs every enabled backup job once a day at this
+                            hour (server local time). A failed run emails all admins.</div>
+                    </div>
+                    <div class="bk-schedule-control">
+                        <label class="form-label" for="scheduleHour" style="margin:0">Hour</label>
+                        <select class="form-input" id="scheduleHour"></select>
+                        <button class="btn btn-primary" id="saveScheduleBtn">Save</button>
+                        <span class="bk-note" id="scheduleNote"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Repository create/edit modal -->
+    <div id="repoModal" class="modal">
+        <div class="modal-content" style="max-width:560px;width:95%">
+            <div class="modal-header" id="repoModalTitle">New backup repository</div>
+            <div id="repoModalError" style="display:none"></div>
+            <div class="form-group">
+                <label class="form-label" for="repoName">Name</label>
+                <input type="text" id="repoName" class="form-input" placeholder="e.g. nas-primary" autocomplete="off">
+                <div class="bk-field-note" id="repoNameNote">A short identifier, unique across repositories.</div>
+            </div>
+            <div class="bk-form-row">
+                <div class="form-group" style="flex:2;margin-bottom:1rem">
+                    <label class="form-label" for="repoNasHost">NAS host</label>
+                    <input type="text" id="repoNasHost" class="form-input" placeholder="e.g. nas.apalveien5" autocomplete="off">
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="repoSshPort">SSH port</label>
+                    <input type="number" id="repoSshPort" class="form-input" min="1" max="65535" placeholder="8022">
+                </div>
+            </div>
+            <div class="bk-form-row">
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="repoBorgUser">Borg user</label>
+                    <input type="text" id="repoBorgUser" class="form-input" placeholder="borg" autocomplete="off">
+                </div>
+                <div class="form-group" style="flex:2;margin-bottom:1rem">
+                    <label class="form-label" for="repoPath">Repository path</label>
+                    <input type="text" id="repoPath" class="form-input" placeholder="e.g. /mnt/backups/fleet" autocomplete="off">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="repoPassphrase">Passphrase</label>
+                <input type="password" id="repoPassphrase" class="form-input" autocomplete="new-password" placeholder="Enter a passphrase">
+                <div class="bk-field-note">Encrypts the repository. Stored encrypted at rest; never shown back.</div>
+            </div>
+            <div class="form-checkbox" style="margin-top:0.2rem">
+                <input type="checkbox" id="repoAppendOnly">
+                <label for="repoAppendOnly">Append-only (clients can add archives but not prune or delete)</label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="repoCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="repoSaveBtn">Save repository</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job create/edit modal -->
+    <div id="jobModal" class="modal">
+        <div class="modal-content" style="max-width:620px;width:95%">
+            <div class="modal-header" id="jobModalTitle">New backup job</div>
+            <div id="jobModalError" style="display:none"></div>
+            <div class="form-group">
+                <label class="form-label" for="jobName">Name</label>
+                <input type="text" id="jobName" class="form-input" placeholder="e.g. apalveien5-nightly" autocomplete="off">
+                <div class="bk-field-note" id="jobNameNote">A short identifier, unique across jobs.</div>
+            </div>
+            <div class="bk-form-row">
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="jobMachine">Machine</label>
+                    <select id="jobMachine" class="form-input"></select>
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="jobRepository">Backup repository</label>
+                    <select id="jobRepository" class="form-input"></select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="jobSourcePaths">Source paths</label>
+                <textarea id="jobSourcePaths" class="form-input bk-paths" placeholder="/etc&#10;/var/lib/docker/volumes&#10;/home"></textarea>
+                <div class="bk-field-note">One path per line — the directories to back up on the machine.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="jobExcludes">Excludes <span style="color:var(--text-dim)">(optional)</span></label>
+                <textarea id="jobExcludes" class="form-input bk-paths" placeholder="*.tmp&#10;/var/cache"></textarea>
+                <div class="bk-field-note">One pattern per line — paths or globs to skip.</div>
+            </div>
+            <label class="form-label">Retention</label>
+            <div class="bk-form-row" style="margin-top:0.35rem">
+                <div class="form-group">
+                    <label class="form-label" for="jobKeepDaily">Keep daily</label>
+                    <input type="number" id="jobKeepDaily" class="form-input" min="0" value="7">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="jobKeepWeekly">Keep weekly</label>
+                    <input type="number" id="jobKeepWeekly" class="form-input" min="0" value="4">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="jobKeepMonthly">Keep monthly</label>
+                    <input type="number" id="jobKeepMonthly" class="form-input" min="0" value="6">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="jobCompression">Compression</label>
+                    <input type="text" id="jobCompression" class="form-input" value="zstd,6">
+                </div>
+            </div>
+            <div class="form-checkbox" style="margin-top:0.4rem">
+                <input type="checkbox" id="jobEnabled" checked>
+                <label for="jobEnabled">Enabled (included in the nightly run)</label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="jobCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="jobSaveBtn">Save job</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Archive browser modal -->
+    <div id="archivesModal" class="modal">
+        <div class="modal-content" style="max-width:640px;width:95%">
+            <div class="modal-header" id="archivesModalTitle">Archives</div>
+            <div id="archivesBody"><div class="loading">Loading archives…</div></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="archivesCloseBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Provisioning modal (readiness check + init result share this shell) -->
+    <div id="provisionModal" class="modal">
+        <div class="modal-content" style="max-width:560px;width:95%">
+            <div class="modal-header" id="provisionModalTitle">Host readiness</div>
+            <div id="provisionBody"><div class="loading">Checking…</div></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="provisionCloseBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic delete confirmation -->
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="confirmTitle">Delete</div>
+            <p style="font-size:0.85rem;color:var(--text-muted)" id="confirmText"></p>
+            <p style="font-size:0.78rem;color:var(--red);margin-top:0.35rem">This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="confirmCancelBtn">Cancel</button>
+                <button class="btn btn-danger" id="confirmOkBtn">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="backups.js"></script>
+</body>
+</html>

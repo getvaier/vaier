@@ -69,6 +69,27 @@ class VaierConfigTest {
     }
 
     @Test
+    void backupScheduleHourDefaultsAndValidatesRange() {
+        // Defaults to 2am when unset.
+        assertThat(VaierConfig.builder().build().effectiveBackupScheduleHour()).isEqualTo(2);
+        // Uses the configured value when present.
+        assertThat(VaierConfig.builder().backupScheduleHour(5).build().effectiveBackupScheduleHour())
+            .isEqualTo(5);
+        // The wither replaces the hour and carries every other field over.
+        VaierConfig updated = fullConfig().withBackupScheduleHour(23);
+        assertThat(updated.getBackupScheduleHour()).isEqualTo(23);
+        assertThat(updated.getDomain()).isEqualTo("vaier.net");
+        assertThat(updated.getSmtpHost()).isEqualTo("smtp.example.com");
+        // 0 and 23 are the valid bounds.
+        assertThat(fullConfig().withBackupScheduleHour(0).getBackupScheduleHour()).isEqualTo(0);
+        // Out-of-range hours are rejected.
+        assertThatThrownBy(() -> fullConfig().withBackupScheduleHour(-1))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> fullConfig().withBackupScheduleHour(24))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void withAwsCredentials_replacesCredentialsAndCarriesEveryOtherFieldOver() {
         VaierConfig updated = fullConfig().withAwsCredentials("AKIANEWKEY999", "newsecret");
 

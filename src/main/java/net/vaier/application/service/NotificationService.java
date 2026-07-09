@@ -1,10 +1,12 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.NotifyAdminsOfBackupFailureUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.BackupRun;
 import net.vaier.domain.DiskFillForecast;
 import net.vaier.domain.DiskFillForecastCleared;
 import net.vaier.domain.RemoteDiskUsage;
@@ -29,6 +31,7 @@ public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
         NotifyAdminsOfDiskFillForecastUseCase,
+        NotifyAdminsOfBackupFailureUseCase,
         ForNotifyingAdmins {
 
     private static final int DEFAULT_SMTP_PORT = 587;
@@ -84,6 +87,20 @@ public class NotificationService implements
         sendToAdmins(cleared.clearedSubject(),
                 cleared.clearedBody(configResolver.getDomain()),
                 "disk-fill forecast cleared on " + cleared.machineName());
+    }
+
+    @Override
+    public void notifyAdminsOfBackupFailure(BackupRun run) {
+        sendToAdmins(run.failureSubject(),
+                run.failureBody(configResolver.getDomain()),
+                "backup failure for job " + run.jobName());
+    }
+
+    @Override
+    public void notifyAdminsOfBackupRecovery(BackupRun run) {
+        sendToAdmins(run.recoverySubject(),
+                run.recoveryBody(configResolver.getDomain()),
+                "backup recovery for job " + run.jobName());
     }
 
     /**

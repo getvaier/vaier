@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.config.ConfigResolver;
@@ -25,6 +26,7 @@ public class SettingsService implements
     UpdateAwsCredentialsUseCase,
     UpdateSmtpSettingsUseCase,
     UpdateDiskMonitorSettingsUseCase,
+    UpdateBackupSettingsUseCase,
     TestSmtpCredentialsUseCase {
 
     private final ForPersistingAppConfiguration configPersistence;
@@ -61,7 +63,8 @@ public class SettingsService implements
         return configPersistence.load()
             .map(this::toResult)
             .orElse(new AppSettingsResult(null, null, null, null, null, null, null, dnsProviderName(),
-                VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT, configResolver.isSocialAuthAvailable()));
+                VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT, configResolver.isSocialAuthAvailable(),
+                VaierConfig.DEFAULT_BACKUP_SCHEDULE_HOUR));
     }
 
     @Override
@@ -70,6 +73,14 @@ public class SettingsService implements
         configPersistence.save(current.withDiskMonitorThreshold(thresholdPercent));
         configResolver.reload();
         log.info("Host disk monitor threshold updated to {}%", thresholdPercent);
+    }
+
+    @Override
+    public void updateBackupScheduleHour(int hour) {
+        VaierConfig current = configPersistence.load().orElse(VaierConfig.builder().build());
+        configPersistence.save(current.withBackupScheduleHour(hour));
+        configResolver.reload();
+        log.info("Fleet-backup nightly schedule hour updated to {}", hour);
     }
 
     private String dnsProviderName() {
@@ -116,7 +127,8 @@ public class SettingsService implements
             config.getSmtpSender(),
             dnsProviderName(),
             config.effectiveDiskMonitorThresholdPercent(),
-            configResolver.isSocialAuthAvailable()
+            configResolver.isSocialAuthAvailable(),
+            config.effectiveBackupScheduleHour()
         );
     }
 

@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ class SettingsRestControllerTest {
     @Mock UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
     @Mock TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
     @Mock UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
+    @Mock UpdateBackupSettingsUseCase updateBackupSettingsUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -45,13 +47,14 @@ class SettingsRestControllerTest {
     @Test
     void getConfig_returnsCurrentSettings() {
         AppSettingsResult settings = new AppSettingsResult("example.com", "****MPLE", "admin@example.com",
-                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false);
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false, 2);
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         ResponseEntity<AppSettingsResult> response = controller.getConfig();
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isEqualTo(settings);
+        assertThat(response.getBody().backupScheduleHour()).isEqualTo(2);
     }
 
     @Test
@@ -130,6 +133,26 @@ class SettingsRestControllerTest {
 
         ResponseEntity<?> response = controller.updateDiskMonitor(
                 new SettingsRestController.UpdateDiskMonitorRequest(0));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+    }
+
+    @Test
+    void updateBackupSchedule_returns200AndDelegates() {
+        ResponseEntity<?> response = controller.updateBackupSchedule(
+                new SettingsRestController.UpdateBackupScheduleRequest(5));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(updateBackupSettingsUseCase).updateBackupScheduleHour(5);
+    }
+
+    @Test
+    void updateBackupSchedule_returns400OnInvalidValue() {
+        doThrow(new IllegalArgumentException("out of range"))
+                .when(updateBackupSettingsUseCase).updateBackupScheduleHour(org.mockito.ArgumentMatchers.anyInt());
+
+        ResponseEntity<?> response = controller.updateBackupSchedule(
+                new SettingsRestController.UpdateBackupScheduleRequest(24));
 
         assertThat(response.getStatusCode().value()).isEqualTo(400);
     }

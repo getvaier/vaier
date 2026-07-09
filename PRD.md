@@ -302,6 +302,8 @@ Manage who can sign in and what they can reach, from the **Users** page — a si
 
 Export and import the full Vaier configuration as a snapshot.
 
+> **Not the same as Fleet Backup (§6.19).** This section is the **Backup snapshot** — an export of *Vaier's own configuration*. It is a separate feature from **Fleet backup** (§6.19), which backs up the *fleet's machines* to a NAS borg repository. The two share no vocabulary; don't conflate them.
+
 **V1 decision:** removed from scope. The earlier V1 implementation shipped a plaintext JSON export containing every peer's WireGuard private key and an import path with shell-injection ([#141](https://github.com/getvaier/vaier/issues/141)) and path-traversal ([#142](https://github.com/getvaier/vaier/issues/142)) risk. Rather than patch those in V1, the REST endpoints and UI have been removed and the feature is re-planned for V2 with encryption-at-rest and hardened restore.
 
 **V2 goals (see #153):**
@@ -840,6 +842,32 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
 **Backlog:** **SFTP** (file transfer over the same session) is deferred — V1 scope is the interactive
 terminal plus saved snippets only. Further remote-telemetry watchers (reboot detection, systemd service
 health, load/temperature) are backlog under #313.
+
+---
+
+### 6.19 Fleet Backup ✅ (Enterprise — admin UI shipped)
+
+Back up the data on the machines in the fleet to a [borg](https://www.borgbackup.org/) repository on a NAS. Enterprise-gated: the whole REST surface is `@RequiresEnterprise` (Community instances get `402 Payment Required` and the **Backups** tab renders in a locked gate state); the UI reads `GET /license` to decide.
+
+> **Not §6.7/#153.** This is **Fleet backup** — backing up the *fleet's machines* to a NAS. It is explicitly **not** the §6.7/#153 **Backup snapshot** feature, which is an export of *Vaier's own configuration*. The two are separate features with no shared vocabulary (see the distinct terms in `UBIQUITOUS_LANGUAGE.md` §15).
+
+Domain: `BackupRepository`, `BackupJob`, `BackupRun` + `BackupRunStatus`, `Archive`, `BackupFailureTracker`. Application: `BackupService` implements the use cases (`GetBackupRepositoriesUseCase`, `SaveBackupRepositoryUseCase`, `DeleteBackupRepositoryUseCase`, `GetBackupJobsUseCase`, `SaveBackupJobUseCase`, `DeleteBackupJobUseCase`, `RunBackupJobUseCase`, `GetBackupRunsUseCase`, `ListArchivesUseCase`, `CheckBackupPrerequisitesUseCase`, `InitBackupRepositoryUseCase`, `NotifyAdminsOfBackupFailureUseCase`). Driven ports `ForPersistingBackupRepositories` / `ForPersistingBackupJobs` / `ForRecordingBackupRuns` are file-backed (`Backup*FileAdapter`) — no database, consistent with the rest of Vaier. The rest layer's `BackupRunner` / `BackupProvisioner` drive borg over SSH; `BackupRunner` also carries the nightly scheduler. `Slice 9` shipped the admin web UI (`admin.html` → `backups.html`/`.js`/`.css`, reached at the `#backups` hash) over the eight backend slices.
+
+**What's implemented (V1):**
+- **Backup repository ✅** — the NAS borg store, configured once: NAS host, borg SSH port (`domain` default `8022`, the borg-server container's sshd — not the NAS host's own SSH), borg user (default `borg`), repository path, an encrypting **passphrase** (stored encrypted at rest via the same cipher as the credential vault / `awsSecret`, never returned to the browser), and an **append-only** flag (documents the hardening choice; V1 ships a delete-capable key so nightly prune/compact work). `BackupRepository.borgRepoUrl()` renders the `ssh://user@host:port/path` URL. CRUD via `GET/PUT/DELETE /backup-repositories[/{name}]`.
+- **Backup job ✅** — a per-machine spec: `machineName` (a VPN peer's canonical name), `repositoryName`, `sourcePaths` (≥1), `excludes`, retention (`keepDaily`/`keepWeekly`/`keepMonthly`, at least one > 0), `compression` (default `zstd,6`), and `enabled`. The job owns the archive-naming convention (`archiveNameTemplate()` / `archiveGlob()`) so prune/list scope to just this job's archives in a fleet-shared repository. CRUD via `GET/PUT/DELETE /backup-jobs[/{name}]`.
+- **On-demand run ✅** — `POST /backup-jobs/{name}/runs` starts a **backup run** now; `GET /backup-jobs/{name}/runs` lists a job's runs. A run has a `BackupRunStatus` (`RUNNING` → terminal `SUCCESS`/`FAILED`, or `UNKNOWN` when a result can no longer be resolved). The exit-code→status rule (`0` = SUCCESS, non-zero = FAILED) is a domain decision on `BackupRun.fromExitCode`. The passphrase 0600 file and each run's `.rc`/`.log` state live in a per-host **work dir** — `~/.vaier-backup` on the target host (`rest.BackupWorkDirResolver` resolves the SSH user's `$HOME` over SSH and caches it), falling back to `/tmp/vaier-backup` when `$HOME` can't be resolved. It is the SSH user's own home, not a root-owned `/var/lib` path the non-root borg user could not create; the absolute path is resolved in the orchestration and passed into every `BorgCommand`, because borg runs `BORG_PASSCOMMAND` without a shell so an embedded `$HOME` would never expand.
+- **Nightly schedule ✅** — Vaier runs every *enabled* job once a day at a configurable hour. The hour lives on the **ungated Settings** surface (not `@RequiresEnterprise`), like the disk-pressure threshold: `backupScheduleHour` in `vaier-config.yml` (`domain.VaierConfig`, default `2`, valid `0–23`), carried on `GET /settings/config`, updated via `PUT /settings/backup-schedule` (`UpdateBackupSettingsUseCase` on `SettingsService`). `BackupRunner` gates its scheduled sweep on the current hour matching `ConfigResolver.getBackupScheduleHour()`.
+- **Failure email alerts ✅** — a failed run emails every **admin**-role **access entry** via `NotifyAdminsOfBackupFailureUseCase` (on `BackupService`), reusing the same `sendToAdmins` SMTP path as the other alerts (silent when SMTP is unconfigured). `BackupFailureTracker` keeps it from re-paging on repeat failures of the same job.
+- **Guided provisioning ✅** — `GET /backup-repositories/{name}/provision/check` reports host readiness for a machine: whether borg is installed and its version (`borgInstalled` / `borgVersion`), whether that version is supported (`borgSupported`), and whether the machine can reach the NAS (`nas.reachable`). `POST /backup-repositories/{name}/provision/init` runs `borg init` from a machine that references the repository (`initialized` / `alreadyExisted`).
+- **Archive browsing ✅** — `GET /backup-repositories/{name}/archives` lists the borg archives (point-in-time snapshots) in a repository, each a `domain.Archive` (name, id, time). `Archive.parseList` reads `borg list --json` in the domain and, like `RemoteDiskUsage.parse`, never throws — bad input yields an empty list.
+- **Admin UI ✅ (Slice 9)** — the **Backups** tab (`backups.html`), reached at `#backups`, is where repositories and jobs are configured, runs are triggered and read, provisioning is driven, and archives are browsed. Locked gate state on Community.
+
+**Backlog (deferred):**
+- **Restore from the UI** — browsing archives exists, but there is no in-UI restore/extract yet; recovery is via the borg CLI for now.
+- **`borg check` weekly integrity verification** — a scheduled repository consistency check, separate from the nightly create/prune.
+- **Per-archive size** via `borg info` — surface each archive's original/compressed/dedup size in the archive list.
+- **True append-only hardening** — a separate management key so the client key can be genuinely append-only while prune/compact run under the management key (V1's `appendOnly` flag only documents the intent; the shipped key is delete-capable).
 
 ---
 

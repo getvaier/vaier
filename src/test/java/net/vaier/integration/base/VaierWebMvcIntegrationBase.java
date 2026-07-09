@@ -184,6 +184,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
 
+    @MockBean
+    protected net.vaier.application.UpdateBackupSettingsUseCase updateBackupSettingsUseCase;
+
     // --- Docker/server use cases ---
     @MockBean
     protected GetServerInfoUseCase getServerInfoUseCase;
@@ -285,6 +288,40 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
+
+    // --- Fleet backup (Enterprise) CRUD use cases ---
+    @MockBean
+    protected SaveBackupRepositoryUseCase saveBackupRepositoryUseCase;
+
+    @MockBean
+    protected GetBackupRepositoriesUseCase getBackupRepositoriesUseCase;
+
+    @MockBean
+    protected DeleteBackupRepositoryUseCase deleteBackupRepositoryUseCase;
+
+    @MockBean
+    protected SaveBackupJobUseCase saveBackupJobUseCase;
+
+    @MockBean
+    protected GetBackupJobsUseCase getBackupJobsUseCase;
+
+    @MockBean
+    protected DeleteBackupJobUseCase deleteBackupJobUseCase;
+
+    @MockBean
+    protected GetBackupRunsUseCase getBackupRunsUseCase;
+
+    @MockBean
+    protected RunBackupJobUseCase runBackupJobUseCase;
+
+    @MockBean
+    protected ListArchivesUseCase listArchivesUseCase;
+
+    @MockBean
+    protected CheckBackupPrerequisitesUseCase checkBackupPrerequisitesUseCase;
+
+    @MockBean
+    protected InitBackupRepositoryUseCase initBackupRepositoryUseCase;
 
     // --- Offline page ---
     @MockBean

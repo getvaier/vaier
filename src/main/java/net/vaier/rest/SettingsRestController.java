@@ -5,6 +5,7 @@ import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAwsCredentialsUseCase;
+import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import org.springframework.http.ResponseEntity;
@@ -25,19 +26,22 @@ public class SettingsRestController {
     private final UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase;
     private final TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
     private final UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
+    private final UpdateBackupSettingsUseCase updateBackupSettingsUseCase;
 
     public SettingsRestController(GetAppSettingsUseCase getAppSettingsUseCase,
                                   GetAppVersionUseCase getAppVersionUseCase,
                                   UpdateAwsCredentialsUseCase updateAwsCredentialsUseCase,
                                   UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase,
                                   TestSmtpCredentialsUseCase testSmtpCredentialsUseCase,
-                                  UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase) {
+                                  UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase,
+                                  UpdateBackupSettingsUseCase updateBackupSettingsUseCase) {
         this.getAppSettingsUseCase = getAppSettingsUseCase;
         this.getAppVersionUseCase = getAppVersionUseCase;
         this.updateAwsCredentialsUseCase = updateAwsCredentialsUseCase;
         this.updateSmtpSettingsUseCase = updateSmtpSettingsUseCase;
         this.testSmtpCredentialsUseCase = testSmtpCredentialsUseCase;
         this.updateDiskMonitorSettingsUseCase = updateDiskMonitorSettingsUseCase;
+        this.updateBackupSettingsUseCase = updateBackupSettingsUseCase;
     }
 
     @GetMapping("/config")
@@ -83,6 +87,21 @@ public class SettingsRestController {
         }
     }
 
+    /**
+     * The nightly fleet-backup schedule hour is a plain scheduling preference (like the disk-alert
+     * threshold), so it lives here on the ungated settings endpoint rather than on the enterprise-gated
+     * {@code BackupRestController}. {@code GET /settings/config} carries the current value.
+     */
+    @PutMapping("/backup-schedule")
+    public ResponseEntity<?> updateBackupSchedule(@RequestBody UpdateBackupScheduleRequest request) {
+        try {
+            updateBackupSettingsUseCase.updateBackupScheduleHour(request.backupScheduleHour());
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(ApiError.of("BAD_REQUEST", e.getMessage()));
+        }
+    }
+
     @PostMapping("/smtp/test")
     public ResponseEntity<?> testSmtp(@RequestBody TestSmtpRequest request) {
         try {
@@ -102,4 +121,5 @@ public class SettingsRestController {
     public record TestSmtpRequest(String smtpHost, int smtpPort, String smtpUsername,
                                   String smtpPassword, String smtpSender, String recipient) {}
     public record UpdateDiskMonitorRequest(int diskMonitorThresholdPercent) {}
+    public record UpdateBackupScheduleRequest(int backupScheduleHour) {}
 }

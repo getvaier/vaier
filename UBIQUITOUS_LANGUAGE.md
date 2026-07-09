@@ -322,10 +322,22 @@ is delegated to an external **identity provider**; Vaier owns **authorization** 
 
 ---
 
-## 15. Out-of-language
+## 15. Fleet backup
+
+| Term | Definition |
+|------|------------|
+| **Fleet backup** | The feature by which Vaier backs up data from the machines in the fleet to a **backup repository** on the NAS, using borg. Enterprise-only. Not to be confused with **Backup snapshot**, which is Vaier's own configuration export. |
+| **Backup repository** | A borg repository on the NAS that a **fleet backup** pushes into, reached over SSH and unlocked by an encrypting passphrase held encrypted at rest. Distinct from a **Backup snapshot** (Vaier's own-config export). |
+| **Backup job** | A per-machine **fleet backup** specification: which machine's data to back up, into which **backup repository**, from which source paths, with which excludes, retention, compression, and whether it is enabled. |
+| **Backup run** | One execution of a **backup job** — on demand or on the nightly schedule — carrying a status (running, success, failed, or unknown) and an outcome. |
+| **Archive** | One borg point-in-time snapshot inside a **backup repository**, with a name and a time. Not to be confused with a **Backup snapshot**, which is Vaier's own configuration export. |
+
+---
+
+## 16. Out-of-language
 
 Terms that look like they belong here but don't — these are explicitly **not** Vaier vocabulary because the underlying concept is out of scope:
 
 - Cloudflare, nginx, Caddy, Keycloak, Vault, Kubernetes, Portainer, Coolify, Pi-hole — listed only to record that they were considered and rejected.
-- "Backup snapshot" / "export" — V1 has no backup feature; V2 will (see #153).
+- "Backup snapshot" / "export" — Vaier's own configuration export, still out of scope; V2 will add it (see #153). Distinct from **Fleet backup** (§15), which backs up the fleet's machines to a NAS and does exist.
 - "Multi-server", "WireGuard mesh" — single Vaier server, period.

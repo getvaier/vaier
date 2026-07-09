@@ -20,6 +20,11 @@ public class VaierConfig {
     private String smtpPassword;
     private Integer diskMonitorThresholdPercent;
     /**
+     * The hour of day (0–23, in the Vaier server's clock zone) at which Vaier-owned nightly fleet-backup
+     * scheduling fires due jobs, or null when unset (the effective value then falls back to the default).
+     */
+    private Integer backupScheduleHour;
+    /**
      * Whether Vaier offers SSH for the Vaier-server host itself (#311) — the explicit operator
      * override, or null when unset (the effective value then falls back to the server default: on).
      * The Vaier server is neither a peer nor a LAN server, so its SSH-access override lives here.
@@ -28,6 +33,9 @@ public class VaierConfig {
 
     /** The default host-disk alert threshold when none is configured: notify above 85% used. */
     public static final int DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT = 85;
+
+    /** The default nightly fleet-backup schedule hour when none is configured: 2am. */
+    public static final int DEFAULT_BACKUP_SCHEDULE_HOUR = 2;
 
     public static void validateForSetup(String domain, String awsKey, String awsSecret, String acmeEmail) {
         requireNonBlank(domain, "domain");
@@ -89,6 +97,25 @@ public class VaierConfig {
     private static void validateThreshold(int thresholdPercent) {
         if (thresholdPercent < 1 || thresholdPercent > 99) {
             throw new IllegalArgumentException("diskMonitorThresholdPercent must be between 1 and 99");
+        }
+    }
+
+    /** A copy with the nightly backup schedule hour replaced; every other field carries over unchanged. */
+    public VaierConfig withBackupScheduleHour(int hour) {
+        validateBackupScheduleHour(hour);
+        return toBuilder()
+            .backupScheduleHour(hour)
+            .build();
+    }
+
+    /** The effective nightly backup schedule hour: the configured value, or {@link #DEFAULT_BACKUP_SCHEDULE_HOUR}. */
+    public int effectiveBackupScheduleHour() {
+        return backupScheduleHour != null ? backupScheduleHour : DEFAULT_BACKUP_SCHEDULE_HOUR;
+    }
+
+    private static void validateBackupScheduleHour(int hour) {
+        if (hour < 0 || hour > 23) {
+            throw new IllegalArgumentException("backupScheduleHour must be between 0 and 23");
         }
     }
 

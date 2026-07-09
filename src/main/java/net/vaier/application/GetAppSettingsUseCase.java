@@ -14,6 +14,8 @@ public interface GetAppSettingsUseCase {
         String dnsProvider,
         int diskMonitorThresholdPercent,
         /** Whether the per-service {@code social} auth mode is offered (Google OAuth configured, #305). */
-        boolean socialAuthAvailable
+        boolean socialAuthAvailable,
+        /** The hour of day (0–23) at which Vaier-owned nightly fleet-backup scheduling fires due jobs. */
+        int backupScheduleHour
     ) {}
 }

@@ -151,6 +151,29 @@ class VaierConfigFileAdapterTest {
     }
 
     @Test
+    void load_roundTripsBackupScheduleHour() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .backupScheduleHour(5)
+            .build();
+
+        VaierConfigFileAdapter adapterInstance = adapter();
+        adapterInstance.save(config);
+
+        Optional<VaierConfig> loaded = adapter().load();
+
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getBackupScheduleHour()).isEqualTo(5);
+    }
+
+    @Test
+    void load_backupScheduleHourNullWhenNotPresent() {
+        adapter().save(VaierConfig.builder().domain("example.com").build());
+
+        assertThat(adapter().load().orElseThrow().getBackupScheduleHour()).isNull();
+    }
+
+    @Test
     void load_diskMonitorThresholdNullWhenNotPresent() {
         VaierConfig config = VaierConfig.builder()
             .domain("example.com")
