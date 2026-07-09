@@ -99,9 +99,16 @@ public class BackupServerFileAdapter implements ForPersistingBackupServers {
             log.warn("Skipping malformed backup-server entry in {}", FILE_NAME);
             return null;
         }
-        // borgUser/baseRepoPath default in the record's compact constructor when blank.
-        return new BackupServer(name, machineName, host, sshPort, borgUser, baseRepoPath, serverDataPath,
-            managed);
+        // borgUser/baseRepoPath default in the record's compact constructor when blank. Name/host/path
+        // fields are identifier/safe-path validated at construction: a pre-fix entry carrying an unsafe
+        // value is skipped with a warning rather than aborting the load of every other server.
+        try {
+            return new BackupServer(name, machineName, host, sshPort, borgUser, baseRepoPath, serverDataPath,
+                managed);
+        } catch (IllegalArgumentException e) {
+            log.warn("Skipping invalid backup-server entry in {}: {}", FILE_NAME, e.getMessage());
+            return null;
+        }
     }
 
     private void writeAll(List<BackupServer> servers) {

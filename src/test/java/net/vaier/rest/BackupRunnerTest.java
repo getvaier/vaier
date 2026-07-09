@@ -133,7 +133,7 @@ class BackupRunnerTest {
         verify(runner).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains(
             "nohup sh -c \""));
         verify(runner).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains(
-            "ssh://borg@192.168.3.3:8022/./colina::'{hostname}-{now:%Y-%m-%dT%H:%M:%S}'"));
+            "'ssh://borg@192.168.3.3:8022/./colina'::'{hostname}-{now:%Y-%m-%dT%H:%M:%S}'"));
         // The run is recorded RUNNING; polling resolves it later.
         assertThat(run.status()).isEqualTo(BackupRunStatus.RUNNING);
         assertThat(runs.getAll()).hasSize(1);

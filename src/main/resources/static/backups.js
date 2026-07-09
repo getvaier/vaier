@@ -475,6 +475,24 @@
         });
     }
 
+    // A repository/server name is a shell/path token server-side, so it is confined to [A-Za-z0-9_-]
+    // (BackupRepository.name / BackupServer.name). Slug the field as the operator types — spaces and other
+    // characters become hyphens — so "NUC 02" is accepted as "NUC-02" and a name that would be rejected
+    // (400) can never be submitted. The replacement is 1:1, so the caret position is preserved.
+    function slugName(raw) {
+        return raw.replace(/[^A-Za-z0-9_-]/g, '-');
+    }
+
+    function liveSlugName(ev) {
+        const el = ev.target;
+        const caret = el.selectionStart;
+        const slugged = slugName(el.value);
+        if (slugged !== el.value) {
+            el.value = slugged;
+            el.setSelectionRange(caret, caret);
+        }
+    }
+
     // Live preview of where a new/edited repository will point, mirroring the server's derivation
     // (base/<name>) unless a custom path overrides it.
     function updateDerivedPath() {
@@ -986,6 +1004,7 @@
         document.getElementById('newServerBtn').addEventListener('click', () => openServerModal(null));
         document.getElementById('serverCancelBtn').addEventListener('click', () => closeModal('serverModal'));
         document.getElementById('serverSaveBtn').addEventListener('click', saveServer);
+        document.getElementById('serverName').addEventListener('input', liveSlugName);
 
         document.getElementById('setupCloseBtn').addEventListener('click', () => closeModal('setupModal'));
 
@@ -1001,6 +1020,7 @@
         document.getElementById('repoCancelBtn').addEventListener('click', () => closeModal('repoModal'));
         document.getElementById('repoSaveBtn').addEventListener('click', saveRepo);
         document.getElementById('repoServer').addEventListener('change', updateDerivedPath);
+        document.getElementById('repoName').addEventListener('input', liveSlugName);
         document.getElementById('repoName').addEventListener('input', updateDerivedPath);
         document.getElementById('repoPath').addEventListener('input', updateDerivedPath);
         document.getElementById('repoPathToggle').addEventListener('click', () =>

@@ -784,8 +784,10 @@ class BackupProvisionerTest {
 
         String cmd = captureAuthorizeCommand();
 
-        assertThat(cmd).contains(
-            "--restrict-to-path /home/borg/backups/alpha --restrict-to-path /home/borg/backups/beta");
+        // Sorted for a deterministic line: alpha before beta. Both are restrict paths on this machine's
+        // entry. (The single-quoting of each path is asserted in BorgCommandTest; here we check selection.)
+        assertThat(cmd).contains("/home/borg/backups/alpha").contains("/home/borg/backups/beta");
+        assertThat(cmd.indexOf("/home/borg/backups/alpha")).isLessThan(cmd.indexOf("/home/borg/backups/beta"));
         // Deduped: alpha (referenced by two jobs) is restricted once per entry, not twice. The entry itself
         // is embedded twice in the command (the grep idempotency check + the printf append), so a deduped
         // alpha appears exactly 2x; a duplicate would show 4x.
@@ -808,7 +810,7 @@ class BackupProvisionerTest {
 
         String cmd = captureAuthorizeCommand();
 
-        assertThat(cmd).contains("--restrict-to-path /home/borg/backups/alpha");
+        assertThat(cmd).contains("/home/borg/backups/alpha");
         assertThat(cmd).doesNotContain("/home/borg/backups/beta");
         assertThat(cmd).doesNotContain("gamma");
     }
@@ -834,8 +836,10 @@ class BackupProvisionerTest {
             .filter(c -> c.contains("authorized_keys")).findFirst().orElseThrow();
 
         assertThat(result.authorized()).isTrue();
-        // Restricted to the base path, never an unrestricted key and never a bare --restrict-to-path.
-        assertThat(authorize).contains("--restrict-to-path /home/borg/backups\"");
+        // Restricted to the repository ROOT (base path), never a repo subpath and never an unrestricted key.
+        assertThat(authorize).contains("--restrict-to-path");
+        assertThat(authorize).contains("/home/borg/backups");
+        assertThat(authorize).doesNotContain("/home/borg/backups/");   // the root, not a repo subpath
         assertThat(authorize).doesNotContain("--restrict-to-path \"");
         assertThat(result.message()).containsIgnoringCase("re-authorize");
     }

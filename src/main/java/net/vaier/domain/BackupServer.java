@@ -45,9 +45,29 @@ public record BackupServer(
     /** The base repository path new repositories derive under; no leading slash (the URL inserts it). */
     public static final String DEFAULT_BASE_REPO_PATH = "home/borg/backups";
 
+    /**
+     * The identifier charset a server {@code name} is confined to. Like {@link BackupRepository#name()}, a
+     * server name is a shell/path token (it seeds the derived repo path and the provisioning run id), so
+     * anything outside {@code [A-Za-z0-9_-]} is rejected at construction. Mirrors {@link PeerId}, not shared.
+     */
+    private static final String NAME_PATTERN = "[A-Za-z0-9_-]+";
+
+    /** The safe charset for a path field ({@code baseRepoPath}, {@code serverDataPath}): {@code /} and {@code .} are legal, metacharacters are not. */
+    private static final String PATH_PATTERN = "[A-Za-z0-9._/-]+";
+
+    /** The safe charset for {@code host}: a hostname or IPv4 literal, no spaces or metacharacters (it is interpolated into {@code /dev/tcp/<host>/<port>}). */
+    private static final String HOST_PATTERN = "[A-Za-z0-9.-]+";
+
+    /** The safe charset for {@code borgUser}: an SSH username, letters/digits and {@code . _ -}. */
+    private static final String USER_PATTERN = "[A-Za-z0-9._-]+";
+
     public BackupServer {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Backup server name must not be blank");
+        }
+        if (!name.matches(NAME_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup server name must contain only [A-Za-z0-9_-]: " + name);
         }
         if (machineName == null || machineName.isBlank()) {
             throw new IllegalArgumentException("Backup server machineName must not be blank");
@@ -55,12 +75,53 @@ public record BackupServer(
         if (host == null || host.isBlank()) {
             throw new IllegalArgumentException("Backup server host must not be blank");
         }
+        if (!host.matches(HOST_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup server host must be a hostname/IP (no spaces or shell metacharacters): " + host);
+        }
         if (sshPort < 1 || sshPort > 65535) {
             throw new IllegalArgumentException("Backup server sshPort must be 1..65535, was " + sshPort);
         }
         // Default the conventional fields in the compact constructor, mirroring BackupJob's compression.
         borgUser = (borgUser == null || borgUser.isBlank()) ? DEFAULT_BORG_USER : borgUser;
         baseRepoPath = (baseRepoPath == null || baseRepoPath.isBlank()) ? DEFAULT_BASE_REPO_PATH : baseRepoPath;
+        // Validate the settable path/user fields AFTER defaulting, so the defaults are trusted and only a
+        // hand-edited or operator-supplied value has to clear the safe charset.
+        if (!borgUser.matches(USER_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup server borgUser must contain only [A-Za-z0-9._-]: " + borgUser);
+        }
+        if (!baseRepoPath.matches(PATH_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup server baseRepoPath must contain only [A-Za-z0-9._/-]: " + baseRepoPath);
+        }
+        // serverDataPath may be blank (validated elsewhere before it is used as a path); when present it is
+        // a real host path and must be free of spaces and shell metacharacters.
+        if (serverDataPath != null && !serverDataPath.isBlank() && !serverDataPath.matches(PATH_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup server serverDataPath must contain only [A-Za-z0-9._/-]: " + serverDataPath);
+        }
+    }
+
+    /**
+     * Slugs raw operator input into a valid server {@code name}, mirroring
+     * {@link BackupRepository#sanitizedName} (and {@link PeerId#sanitized}) so the UI can offer the same
+     * live-slug on the server-name field. Self-contained; not shared across concepts.
+     *
+     * @throws IllegalArgumentException if the input is null or slugs to nothing
+     */
+    public static String sanitizedName(String raw) {
+        if (raw == null) {
+            throw new IllegalArgumentException("Backup server name is required");
+        }
+        String cleaned = raw.trim()
+            .replaceAll("[^A-Za-z0-9_-]", "-")
+            .replaceAll("-{2,}", "-")
+            .replaceAll("^-|-$", "");
+        if (cleaned.isBlank()) {
+            throw new IllegalArgumentException("Backup server name is empty after sanitisation");
+        }
+        return cleaned;
     }
 
     /** The {@code ssh://<borgUser>@<host>:<sshPort>} prefix a repository's borg URL is built on. */

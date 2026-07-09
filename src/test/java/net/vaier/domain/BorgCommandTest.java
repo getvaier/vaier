@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BorgCommandTest {
 
@@ -44,7 +45,8 @@ class BorgCommandTest {
             .contains("borg create --json --stats --compression zstd,6 --exclude-caches")
             .contains("--exclude '*.tmp'")
             .contains("--exclude '/var/cache'")
-            .contains("ssh://borg@192.168.3.3:8022/./colina::'{hostname}-{now:%Y-%m-%dT%H:%M:%S}'")
+            // The repo URL and the archive template are adjacent single-quoted tokens: 'URL'::'ARCHIVE'.
+            .contains("'ssh://borg@192.168.3.3:8022/./colina'::'{hostname}-{now:%Y-%m-%dT%H:%M:%S}'")
             .contains("'/home/geir'")
             .contains("'/etc'");
         // Sources come after the repo::archive target.
@@ -108,9 +110,9 @@ class BorgCommandTest {
         // another host's archives, and carries the job's retention counts.
         assertThat(exec).contains("borg prune --list --glob-archives '{hostname}-*' "
             + "--keep-daily 7 --keep-weekly 4 --keep-monthly 6 "
-            + "ssh://borg@192.168.3.3:8022/./colina");
-        // Compact targets the same repo URL (borg >= 1.2).
-        assertThat(exec).contains("borg compact ssh://borg@192.168.3.3:8022/./colina");
+            + "'ssh://borg@192.168.3.3:8022/./colina'");
+        // Compact targets the same repo URL (borg >= 1.2), single-quoted.
+        assertThat(exec).contains("borg compact 'ssh://borg@192.168.3.3:8022/./colina'");
         // The passphrase never appears; the redacted twin equals exec.
         assertThat(exec).contains(expectedPasscommand()).doesNotContain("s3cr3t");
         assertThat(cmd.redacted()).isEqualTo(exec);
@@ -125,12 +127,46 @@ class BorgCommandTest {
         // borg list --json on the repo URL. Runs over the normal 20 s exec (listing is fast), not detached.
         assertThat(exec).startsWith("sh -c \"");
         assertThat(exec).contains(expectedPasscommand());
-        assertThat(exec).contains("borg list --json ssh://borg@192.168.3.3:8022/./colina");
+        assertThat(exec).contains("borg list --json 'ssh://borg@192.168.3.3:8022/./colina'");
         assertThat(exec.indexOf("export BORG_PASSCOMMAND")).isLessThan(exec.indexOf("borg list"));
         assertThat(exec).doesNotContain("BORG_PASSPHRASE").doesNotContain("s3cr3t");
 
         // No secret -> redacted twin equals exec.
         assertThat(cmd.redacted()).isEqualTo(exec).doesNotContain("s3cr3t");
+    }
+
+    @Test
+    void repoUrlIsSingleQuotedInEveryCommandSite() {
+        // Defense in depth: even though names/paths are validated at construction, every borg command
+        // single-quotes the repo URL so a hand-edited YAML value can never break out of its argument.
+        String q = "'ssh://borg@192.168.3.3:8022/./colina'";
+        assertThat(BorgCommand.listArchives(server(), repo(), WORK_DIR).exec())
+            .contains("borg list --json " + q);
+        assertThat(BorgCommand.serverAuthProbe(server(), repo(), WORK_DIR))
+            .contains("borg info " + q);
+        assertThat(BorgCommand.init(server(), repo(), WORK_DIR).exec())
+            .contains("--make-parent-dirs " + q);
+        String run = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR).exec();
+        assertThat(run).contains("borg compact " + q);       // compact site
+        assertThat(run).contains("--keep-monthly 6 " + q);   // prune site
+        assertThat(run).contains(q + "::'{hostname}");        // create site: 'URL'::'ARCHIVE'
+        // The synchronous create renders the same 'URL'::'ARCHIVE' shape.
+        assertThat(BorgCommand.create(server(), job(), repo(), WORK_DIR).exec())
+            .contains(q + "::'{hostname}");
+    }
+
+    @Test
+    void aRepositoryOrServerNameCannotCarryAShellInjection() {
+        // The guard is construction-time validation: a name that would inject a command (`a; rm -rf ~`, a
+        // command substitution) is rejected outright, so no such value can ever reach a borg command line —
+        // the URL/path single-quoting is the belt on top of that braces.
+        assertThatThrownBy(() -> new BackupRepository("a; rm -rf ~", "nas-borg", null, "s3cr3t", false))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new BackupRepository("a$(touch pwned)", "nas-borg", null, "s3cr3t", false))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new BackupServer("a; rm -rf ~", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -181,7 +217,7 @@ class BorgCommandTest {
         assertThat(init.exec())
             .contains(expectedPasscommand())
             .contains("borg init --encryption=repokey-blake2 --make-parent-dirs "
-                + "ssh://borg@192.168.3.3:8022/./colina");
+                + "'ssh://borg@192.168.3.3:8022/./colina'");
         assertThat(init.exec()).doesNotContain("BORG_PASSPHRASE").doesNotContain("s3cr3t");
         assertThat(init.redacted()).isEqualTo(init.exec());
     }
@@ -246,8 +282,9 @@ class BorgCommandTest {
         // `restrict` (no pty/forwarding/shell), then the public key — paths kept in the order supplied.
         String entry = BorgCommand.restrictedKeyEntry(PUBKEY, List.of("/a", "/b"));
 
+        // Each path is single-quoted so a space/metacharacter in a path can never mis-scope the restriction.
         assertThat(entry).isEqualTo(
-            "command=\"borg serve --restrict-to-path /a --restrict-to-path /b\",restrict " + PUBKEY);
+            "command=\"borg serve --restrict-to-path '/a' --restrict-to-path '/b'\",restrict " + PUBKEY);
     }
 
     @Test
@@ -273,14 +310,15 @@ class BorgCommandTest {
         assertThat(cmd).contains(".bak-vaier");
         // Normalises a missing trailing newline with awk 1 (the landmine: a naive >> concatenates keys).
         assertThat(cmd).contains("awk 1 ");
-        // Idempotency now compares the exact FULL restricted entry, not a bare key.
-        assertThat(cmd).contains("grep -qxF '" + entry + "'");
+        // Idempotency now compares the exact FULL restricted entry, not a bare key. The entry now embeds
+        // single quotes (around the restrict paths), so it is shell-quoted via the '\'' idiom in the command.
+        assertThat(cmd).contains("grep -qxF " + sq(entry));
         // Locks the file to 0600.
         assertThat(cmd).contains("chmod 600");
         // Echoes a marker the orchestrator parses: ALREADY when present, ADDED when appended.
         assertThat(cmd).contains("ALREADY").contains("ADDED");
         // The restricted entry it writes appears verbatim (single-quoted) in the command.
-        assertThat(cmd).contains("'" + entry + "'");
+        assertThat(cmd).contains(sq(entry));
     }
 
     @Test
@@ -326,8 +364,8 @@ class BorgCommandTest {
             java.nio.file.Path.of(srv.authorizedKeysPath()));
         long forThisKey = lines.stream().filter(l -> l.contains(BLOB)).count();
         assertThat(forThisKey).isEqualTo(1);
-        // The surviving entry is the widened one.
-        assertThat(lines).anyMatch(l -> l.contains("--restrict-to-path /home/borg/backups/media"));
+        // The surviving entry is the widened one (paths single-quoted in the written authorized_keys line).
+        assertThat(lines).anyMatch(l -> l.contains("--restrict-to-path '/home/borg/backups/media'"));
     }
 
     private static boolean bashAvailable() {
@@ -336,6 +374,11 @@ class BorgCommandTest {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Mirror of BorgCommand.singleQuote, for asserting the shell-quoted form of an entry in tests. */
+    private static String sq(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
     }
 
     private static void runBash(String command) throws Exception {
@@ -394,8 +437,10 @@ class BorgCommandTest {
         // as a run/list, so it validates auth AND the per-repo restriction at once.
         String probe = BorgCommand.serverAuthProbe(server(), repo(), WORK_DIR);
 
+        // The single quotes around the URL survive dqEmbed (it escapes $ " \ `, not '), exactly like the
+        // already-single-quoted BORG_PASSCOMMAND export next to it.
         assertThat(probe).isEqualTo(
-            "sh -c \"" + expectedPasscommand() + "; borg info ssh://borg@192.168.3.3:8022/./colina\"");
+            "sh -c \"" + expectedPasscommand() + "; borg info 'ssh://borg@192.168.3.3:8022/./colina'\"");
         // Explicitly: it is NOT the retired ssh 'borg --version' probe.
         assertThat(probe).doesNotContain("BatchMode").doesNotContain("borg --version");
         assertThat(probe).contains("borg info").contains("BORG_PASSCOMMAND");

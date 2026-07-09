@@ -106,6 +106,27 @@ class BackupRepositoryFileAdapterTest {
     }
 
     @Test
+    void skipsEntryWithAnInvalidName() throws Exception {
+        // A repository created before names were validated (a space in "NUC 02") is now invalid by
+        // construction. The tolerant load must SKIP it with a warning, never abort the load of the whole
+        // file — the valid entry alongside it still comes back.
+        Path file = tempDir.resolve("backup-repositories.yml");
+        Files.writeString(file, """
+            repositories:
+            - name: NUC 02
+              serverName: nas-borg
+              appendOnly: false
+            - name: colina27
+              serverName: nas-borg
+              repoPath: ./colina
+              appendOnly: false
+            """);
+
+        assertThat(adapter.getAll()).containsExactly(
+            new BackupRepository("colina27", "nas-borg", "./colina", null, false));
+    }
+
+    @Test
     void getAll_emptyWhenFileMissing() {
         assertThat(adapter.getAll()).isEmpty();
     }

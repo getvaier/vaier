@@ -96,7 +96,15 @@ public class BackupRepositoryFileAdapter implements ForPersistingBackupRepositor
             log.warn("Skipping malformed backup-repository entry in {}", FILE_NAME);
             return null;
         }
-        return new BackupRepository(name, serverName, repoPath, passphrase, appendOnly);
+        // The name/path fields are now identifier/safe-path validated at construction. A pre-fix entry may
+        // carry an unsafe value (e.g. a name with a space, created before the fix) — skip it with a warning
+        // rather than let the IllegalArgumentException abort the load of every other repository.
+        try {
+            return new BackupRepository(name, serverName, repoPath, passphrase, appendOnly);
+        } catch (IllegalArgumentException e) {
+            log.warn("Skipping invalid backup-repository entry in {}: {}", FILE_NAME, e.getMessage());
+            return null;
+        }
     }
 
     private void writeAll(List<BackupRepository> repositories) {

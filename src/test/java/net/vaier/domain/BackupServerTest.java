@@ -21,6 +21,84 @@ class BackupServerTest {
     }
 
     @Test
+    void rejectsNameWithSpacesOrShellMetacharacters() {
+        for (String bad : new String[]{"nas borg", "a; rm -rf ~", "a$(x)", "a/b", ""}) {
+            assertThatThrownBy(() -> new BackupServer(bad, "NAS", "192.168.3.3", 8022,
+                "borg", "home/borg/backups", "/volume1/docker/borg", false))
+                .as("name %s", bad)
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void acceptsSafeIdentifierNames() {
+        for (String ok : new String[]{"NUC-02", "colina27", "nas_borg"}) {
+            assertThat(new BackupServer(ok, "NAS", "192.168.3.3", 8022,
+                "borg", "home/borg/backups", "/volume1/docker/borg", false).name()).isEqualTo(ok);
+        }
+    }
+
+    @Test
+    void sanitizedNameSlugsSpacesCollapsesRunsAndTrims() {
+        assertThat(BackupServer.sanitizedName("NUC 02")).isEqualTo("NUC-02");
+        assertThat(BackupServer.sanitizedName("  a   b  ")).isEqualTo("a-b");
+        assertThatThrownBy(() -> BackupServer.sanitizedName("   "))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> BackupServer.sanitizedName(null))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsHostWithSpaceOrMetacharacter() {
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "192.168.3.3; rm", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("host");
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "nas host", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("host");
+        // A hostname or IPv4 literal is accepted.
+        assertThat(new BackupServer("nas-borg", "NAS", "nas.local", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false).host()).isEqualTo("nas.local");
+    }
+
+    @Test
+    void rejectsBorgUserWithMetacharacter() {
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg;whoami", "home/borg/backups", "/volume1/docker/borg", false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("borgUser");
+    }
+
+    @Test
+    void rejectsBaseRepoPathWithMetacharacter() {
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg backups", "/volume1/docker/borg", false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("baseRepoPath");
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/$(x)", "/volume1/docker/borg", false))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsServerDataPathWithMetacharacterButAllowsBlank() {
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/volume1/docker borg", false))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("serverDataPath");
+        assertThatThrownBy(() -> new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/vol;rm", false))
+            .isInstanceOf(IllegalArgumentException.class);
+        // Blank/null remain allowed (validated elsewhere before use as a path).
+        assertThat(new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "  ", false).serverDataPath()).isEqualTo("  ");
+        assertThat(new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", null, false).serverDataPath()).isNull();
+    }
+
+    @Test
     void rejectsBlankMachineName() {
         assertThatThrownBy(() -> new BackupServer("nas-borg", " ", "192.168.3.3", 8022,
             "borg", "home/borg/backups", "/volume1/docker/borg", false))

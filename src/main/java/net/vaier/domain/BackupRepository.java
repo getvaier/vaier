@@ -30,14 +30,63 @@ public record BackupRepository(
     boolean appendOnly
 ) {
 
+    /**
+     * The identifier charset a repository {@code name} is confined to. A name is used verbatim as a
+     * shell/path token in every borg command (the derived repo path, the pass-file name, the
+     * {@code --restrict-to-path} confinement), so anything outside {@code [A-Za-z0-9_-]} — a space, a
+     * shell metacharacter, a path separator — is rejected at construction. Mirrors {@link PeerId}'s rule
+     * for exactly the same reason; deliberately not shared with it, since a VPN peer and a backup
+     * repository are unrelated concepts.
+     */
+    private static final String NAME_PATTERN = "[A-Za-z0-9_-]+";
+
+    /**
+     * The safe charset for an operator-settable <em>path</em> field (the {@link #repoPath} override): it
+     * may legitimately contain {@code /} and {@code .}, so it is not an identifier, but it must still be
+     * free of spaces and shell metacharacters ({@code ; $ " ' `} etc.) that could break out of quoting.
+     */
+    static final String PATH_PATTERN = "[A-Za-z0-9._/-]+";
+
     public BackupRepository {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Backup repository name must not be blank");
         }
+        if (!name.matches(NAME_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup repository name must contain only [A-Za-z0-9_-]: " + name);
+        }
         if (serverName == null || serverName.isBlank()) {
             throw new IllegalArgumentException("Backup repository serverName must not be blank");
         }
-        // repoPath is a nullable override: null/blank means "derive from the server", so it is not validated.
+        // repoPath is a nullable override: null/blank means "derive from the server". When present it is a
+        // real path (may hold '/' and '.'), so it is validated against the safe-path charset, not rejected.
+        if (repoPath != null && !repoPath.isBlank() && !repoPath.matches(PATH_PATTERN)) {
+            throw new IllegalArgumentException(
+                "Backup repository repoPath must contain only [A-Za-z0-9._/-]: " + repoPath);
+        }
+    }
+
+    /**
+     * Slugs raw operator input into a valid repository {@code name}: any character outside
+     * {@code [A-Za-z0-9_-]} becomes a hyphen, runs of hyphens collapse to one, and leading/trailing
+     * hyphens are dropped ({@code "NUC 02"} → {@code "NUC-02"}). Case is preserved. This is the helper the
+     * UI mirrors client-side so an operator can still type a friendly name. Self-contained — it replicates
+     * {@link PeerId#sanitized}'s rule locally rather than sharing it, since the two concepts are unrelated.
+     *
+     * @throws IllegalArgumentException if the input is null or slugs to nothing
+     */
+    public static String sanitizedName(String raw) {
+        if (raw == null) {
+            throw new IllegalArgumentException("Backup repository name is required");
+        }
+        String cleaned = raw.trim()
+            .replaceAll("[^A-Za-z0-9_-]", "-")
+            .replaceAll("-{2,}", "-")
+            .replaceAll("^-|-$", "");
+        if (cleaned.isBlank()) {
+            throw new IllegalArgumentException("Backup repository name is empty after sanitisation");
+        }
+        return cleaned;
     }
 
     /**

@@ -109,7 +109,7 @@ public final class BorgCommand {
      * twin masks the passphrase for logging.
      */
     public static BuiltCommand listArchives(BackupServer server, BackupRepository repo, String workDir) {
-        String body = "borg list --json " + repo.borgRepoUrl(server);
+        String body = "borg list --json " + singleQuote(repo.borgRepoUrl(server));
         String cmd = "sh -c \"" + dqEmbed(exportPasscommand(repo, workDir)) + dqEmbed(body) + "\"";
         // No secret in the command (the passcommand reads the pass file) -> redacted equals exec.
         return new BuiltCommand(cmd, cmd);
@@ -144,7 +144,7 @@ public final class BorgCommand {
      * server (see {@code BorgServerImage#borgVersion()}) and left unknown for an adopted one.
      */
     public static String serverAuthProbe(BackupServer server, BackupRepository repo, String workDir) {
-        String body = "borg info " + repo.borgRepoUrl(server);
+        String body = "borg info " + singleQuote(repo.borgRepoUrl(server));
         return "sh -c \"" + dqEmbed(exportPasscommand(repo, workDir)) + dqEmbed(body) + "\"";
     }
 
@@ -235,7 +235,11 @@ public final class BorgCommand {
     public static String restrictedKeyEntry(String publicKey, java.util.List<String> restrictPaths) {
         StringBuilder options = new StringBuilder("command=\"borg serve");
         for (String path : restrictPaths) {
-            options.append(" --restrict-to-path ").append(path);
+            // Single-quote each path so a space or shell metacharacter in a (hand-edited) repository path
+            // cannot mis-scope the confinement — `--restrict-to-path /a b` would otherwise restrict to `/a`
+            // and leave `b` a stray argument. The forced command runs through the login shell, which strips
+            // the quotes, so the effective restriction is unchanged for a normal path.
+            options.append(" --restrict-to-path ").append(singleQuote(path));
         }
         options.append("\",restrict");
         return options + " " + publicKey;
@@ -484,7 +488,8 @@ public final class BorgCommand {
      */
     public static BuiltCommand init(BackupServer server, BackupRepository repo, String workDir) {
         String cmd = exportPasscommand(repo, workDir)
-            + "borg init --encryption=repokey-blake2 --make-parent-dirs " + repo.borgRepoUrl(server);
+            + "borg init --encryption=repokey-blake2 --make-parent-dirs "
+            + singleQuote(repo.borgRepoUrl(server));
         return new BuiltCommand(cmd, cmd);
     }
 
@@ -616,12 +621,12 @@ public final class BorgCommand {
             + " --keep-daily " + job.keepDaily()
             + " --keep-weekly " + job.keepWeekly()
             + " --keep-monthly " + job.keepMonthly()
-            + " " + repo.borgRepoUrl(server);
+            + " " + singleQuote(repo.borgRepoUrl(server));
     }
 
     /** The {@code borg compact} body that frees space after a prune (borg ≥ 1.2). */
     private static String buildCompactBody(BackupServer server, BackupRepository repo) {
-        return "borg compact " + repo.borgRepoUrl(server);
+        return "borg compact " + singleQuote(repo.borgRepoUrl(server));
     }
 
     private static String buildCreateBody(BackupServer server, BackupJob job, BackupRepository repo) {
@@ -631,7 +636,11 @@ public final class BorgCommand {
         for (String exclude : job.excludes()) {
             cmd.append(" --exclude ").append(singleQuote(exclude));
         }
-        cmd.append(" ").append(repo.borgRepoUrl(server)).append("::").append(singleQuote(job.archiveNameTemplate()));
+        // REPO::ARCHIVE as two adjacent single-quoted tokens: the shell concatenates 'url'::'archive' into
+        // one argument, which borg parses as REPO::ARCHIVE — so the URL and the archive template are each
+        // quoted independently and neither can break out.
+        cmd.append(" ").append(singleQuote(repo.borgRepoUrl(server)))
+            .append("::").append(singleQuote(job.archiveNameTemplate()));
         for (String source : job.sourcePaths()) {
             cmd.append(" ").append(singleQuote(source));
         }
