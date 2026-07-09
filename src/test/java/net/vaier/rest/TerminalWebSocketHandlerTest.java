@@ -1,6 +1,8 @@
 package net.vaier.rest;
 
 import net.vaier.application.OpenTerminalSessionUseCase;
+import net.vaier.application.SendHostPasswordUseCase;
+import net.vaier.application.SendHostPasswordUseCase.SendPasswordResult;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.SshAuthException;
 import net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener;
@@ -32,11 +34,12 @@ import static org.mockito.Mockito.when;
 class TerminalWebSocketHandlerTest {
 
     @Mock OpenTerminalSessionUseCase openTerminalSessionUseCase;
+    @Mock SendHostPasswordUseCase sendHostPasswordUseCase;
     @Mock WebSocketSession wsSession;
     @Mock SshSession sshSession;
 
     private TerminalWebSocketHandler handler() {
-        return new TerminalWebSocketHandler(openTerminalSessionUseCase);
+        return new TerminalWebSocketHandler(openTerminalSessionUseCase, sendHostPasswordUseCase);
     }
 
     private Map<String, Object> attrs() {
@@ -123,6 +126,84 @@ class TerminalWebSocketHandlerTest {
         handler().afterConnectionClosed(wsSession, CloseStatus.NORMAL);
 
         verify(sshSession).close();
+    }
+
+    @Test
+    void sendPasswordFrame_callsUseCaseWithBufferedTail_andRepliesWithStatus() throws Exception {
+        attrs();
+        when(wsSession.getUri()).thenReturn(URI.create("wss://host/machines/nas/terminal"));
+        ArgumentCaptor<SshOutputListener> listener = ArgumentCaptor.forClass(SshOutputListener.class);
+        when(openTerminalSessionUseCase.openTerminal(eq("nas"), listener.capture())).thenReturn(sshSession);
+        lenient().when(wsSession.isOpen()).thenReturn(true);
+        when(sendHostPasswordUseCase.sendPassword(eq("nas"), eq(sshSession), any()))
+            .thenReturn(SendPasswordResult.SENT);
+
+        TerminalWebSocketHandler handler = handler();
+        handler.afterConnectionEstablished(wsSession);
+        listener.getValue().onOutput("geir@nas's password: ".getBytes(StandardCharsets.UTF_8));
+
+        handler.handleMessage(wsSession, new TextMessage("{\"type\":\"send-password\"}"));
+
+        ArgumentCaptor<String> tail = ArgumentCaptor.forClass(String.class);
+        verify(sendHostPasswordUseCase).sendPassword(eq("nas"), eq(sshSession), tail.capture());
+        assertThat(tail.getValue()).endsWith("password: ");
+
+        ArgumentCaptor<TextMessage> reply = ArgumentCaptor.forClass(TextMessage.class);
+        verify(wsSession).sendMessage(reply.capture());
+        assertThat(reply.getValue().getPayload()).contains("password-result").contains("SENT");
+    }
+
+    @Test
+    void sendPasswordReply_neverContainsTheSecret() throws Exception {
+        attrs();
+        when(wsSession.getUri()).thenReturn(URI.create("wss://host/machines/nas/terminal"));
+        when(openTerminalSessionUseCase.openTerminal(eq("nas"), any())).thenReturn(sshSession);
+        lenient().when(wsSession.isOpen()).thenReturn(true);
+        when(sendHostPasswordUseCase.sendPassword(eq("nas"), eq(sshSession), any()))
+            .thenReturn(SendPasswordResult.SENT);
+
+        TerminalWebSocketHandler handler = handler();
+        handler.afterConnectionEstablished(wsSession);
+        handler.handleMessage(wsSession, new TextMessage("{\"type\":\"send-password\"}"));
+
+        ArgumentCaptor<TextMessage> reply = ArgumentCaptor.forClass(TextMessage.class);
+        verify(wsSession).sendMessage(reply.capture());
+        // The handler never sees the secret, so it cannot leak — assert the reply is only the status shape.
+        assertThat(reply.getValue().getPayload()).doesNotContain("secret").doesNotContain("s3cret");
+    }
+
+    @Test
+    void tailBuffer_isBoundedToLast512Bytes() throws Exception {
+        attrs();
+        when(wsSession.getUri()).thenReturn(URI.create("wss://host/machines/nas/terminal"));
+        ArgumentCaptor<SshOutputListener> listener = ArgumentCaptor.forClass(SshOutputListener.class);
+        when(openTerminalSessionUseCase.openTerminal(eq("nas"), listener.capture())).thenReturn(sshSession);
+        lenient().when(wsSession.isOpen()).thenReturn(true);
+        when(sendHostPasswordUseCase.sendPassword(eq("nas"), eq(sshSession), any()))
+            .thenReturn(SendPasswordResult.NOT_AT_PROMPT);
+
+        TerminalWebSocketHandler handler = handler();
+        handler.afterConnectionEstablished(wsSession);
+        listener.getValue().onOutput("x".repeat(600).getBytes(StandardCharsets.UTF_8));
+        listener.getValue().onOutput("Password: ".getBytes(StandardCharsets.UTF_8));
+
+        handler.handleMessage(wsSession, new TextMessage("{\"type\":\"send-password\"}"));
+
+        ArgumentCaptor<String> tail = ArgumentCaptor.forClass(String.class);
+        verify(sendHostPasswordUseCase).sendPassword(eq("nas"), eq(sshSession), tail.capture());
+        assertThat(tail.getValue().getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(512);
+        assertThat(tail.getValue()).endsWith("Password: ");
+    }
+
+    @Test
+    void malformedControlFrame_isIgnored() throws Exception {
+        Map<String, Object> attrs = attrs();
+        attrs.put("sshSession", sshSession);
+
+        handler().handleMessage(wsSession, new TextMessage("{not json"));
+
+        verify(sshSession, never()).resize(org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test

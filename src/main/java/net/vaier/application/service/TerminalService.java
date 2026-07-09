@@ -8,6 +8,8 @@ import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.application.SaveHostCredentialUseCase;
+import net.vaier.application.SendHostPasswordUseCase;
+import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.HostCredentialView;
@@ -15,6 +17,7 @@ import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PasswordPrompt;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -46,6 +49,7 @@ public class TerminalService implements
     DeleteHostCredentialUseCase,
     OpenTerminalSessionUseCase,
     RunRemoteCommandUseCase,
+    SendHostPasswordUseCase,
     ClearHostKeyUseCase {
 
     private final ForPersistingHostCredentials forPersistingHostCredentials;
@@ -91,6 +95,26 @@ public class TerminalService implements
 
         pinOnFirstUse(machineName, target, result.hostKeyFingerprint());
         return result;
+    }
+
+    @Override
+    public SendPasswordResult sendPassword(String machineName, SshSession session, String recentOutput) {
+        try {
+            Optional<HostCredential> credential = forPersistingHostCredentials.getByMachine(machineName);
+            if (credential.isEmpty() || credential.get().authMethod() != AuthMethod.PASSWORD) {
+                return SendPasswordResult.NO_PASSWORD_CREDENTIAL;
+            }
+            if (!PasswordPrompt.isAwaitingPassword(recentOutput)) {
+                return SendPasswordResult.NOT_AT_PROMPT;
+            }
+            // The secret stays in-process: written straight into the SSH PTY, never returned or logged.
+            session.write((credential.get().secret() + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return SendPasswordResult.SENT;
+        } catch (RuntimeException e) {
+            // Never surface the secret — log only the machine and the failure class.
+            log.warn("Failed to send stored password to {}: {}", machineName, e.getClass().getSimpleName());
+            return SendPasswordResult.FAILED;
+        }
     }
 
     @Override

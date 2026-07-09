@@ -1,6 +1,7 @@
 package net.vaier.config;
 
 import net.vaier.application.OpenTerminalSessionUseCase;
+import net.vaier.application.SendHostPasswordUseCase;
 import net.vaier.rest.TerminalWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -24,17 +25,22 @@ import java.util.List;
 public class TerminalWebSocketConfig implements WebSocketConfigurer {
 
     private final OpenTerminalSessionUseCase openTerminalSessionUseCase;
+    private final SendHostPasswordUseCase sendHostPasswordUseCase;
     private final ConfigResolver configResolver;
 
     public TerminalWebSocketConfig(OpenTerminalSessionUseCase openTerminalSessionUseCase,
+                                   SendHostPasswordUseCase sendHostPasswordUseCase,
                                    ConfigResolver configResolver) {
         this.openTerminalSessionUseCase = openTerminalSessionUseCase;
+        this.sendHostPasswordUseCase = sendHostPasswordUseCase;
         this.configResolver = configResolver;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(new TerminalWebSocketHandler(openTerminalSessionUseCase), "/machines/*/terminal")
+        registry.addHandler(
+                new TerminalWebSocketHandler(openTerminalSessionUseCase, sendHostPasswordUseCase),
+                "/machines/*/terminal")
             .setAllowedOriginPatterns(allowedOriginPatterns(configResolver.getDomain()).toArray(String[]::new));
     }
 

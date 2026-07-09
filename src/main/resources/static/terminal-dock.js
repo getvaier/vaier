@@ -93,10 +93,18 @@
             if (reconnected) state.term.write('\r\n\x1b[32m[reconnected]\x1b[0m\r\n');
             if (isVisible(id)) { fitOne(id); sendResize(id); if (_focusedId === id) state.term.focus(); }
         };
-        ws.onmessage = (ev) => { if (ev.data instanceof ArrayBuffer) state.term.write(new Uint8Array(ev.data)); };
+        // Binary frames are shell output (write to xterm); text frames are JSON control replies from the
+        // server (e.g. the password-result). Keep them apart so a control reply never corrupts the pty stream.
+        ws.onmessage = (ev) => {
+            if (ev.data instanceof ArrayBuffer) { state.term.write(new Uint8Array(ev.data)); return; }
+            if (typeof ev.data === 'string') handleControlMessage(state, ev.data);
+        };
         ws.onclose = (ev) => {
             if (!_terminals.has(id)) return;   // closed by the user; nothing to report or retry
-            if (ev.code === 1000) { setDot(id, 'closed'); setStatus(id, 'Session ended.', false); return; }
+            // A clean exit (the remote shell ended) closes the pane outright — no dead window to tidy by hand.
+            // Deferred to a macrotask so we never mutate _terminals / the DOM from inside the ws's own onclose
+            // dispatch; closeShell then nulls this handler and closes an already-closed socket (a safe no-op).
+            if (ev.code === 1000) { setTimeout(() => { if (_terminals.has(id)) closeShell(id); }, 0); return; }
             setDot(id, 'error');
             if (!PERMANENT.has(ev.code) && state.retries < MAX_RECONNECTS) {
                 state.retries++;
@@ -157,6 +165,13 @@
         label.className = 'term-tab-label';
         label.append(dot, name);
         label.onclick = () => focus(id);
+        const sendPw = document.createElement('button');
+        sendPw.type = 'button';
+        sendPw.className = 'term-tab-sendpw';
+        sendPw.title = 'Send stored password';
+        sendPw.setAttribute('aria-label', 'Send the stored password to ' + machineName);
+        sendPw.textContent = '🔑';
+        sendPw.onclick = (e) => { e.stopPropagation(); sendPassword(id); };
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'term-tab-close';
@@ -164,7 +179,7 @@
         close.setAttribute('aria-label', 'Close shell to ' + machineName);
         close.textContent = '✕';
         close.onclick = (e) => { e.stopPropagation(); closeShell(id); };
-        tab.append(label, close);
+        tab.append(label, sendPw, close);
         return tab;
     }
 
@@ -377,7 +392,7 @@
 
     function onTabDragStart(e, id, tab) {
         if (e.button !== 0 || isPhone()) return;
-        if (e.target.closest('.term-tab-close')) return;
+        if (e.target.closest('.term-tab-close') || e.target.closest('.term-tab-sendpw')) return;
         const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
         let moved = false, ghost = null;
         const move = (me) => {
@@ -561,6 +576,38 @@
         btn.textContent = label;
         btn.onclick = onClick;
         return btn;
+    }
+
+    // A server control reply (text frame). Today the only one is the password-result — the outcome of a
+    // Send-password request. The frame never carries the secret; Vaier writes it straight into the remote
+    // PTY server-side, so the browser only ever learns whether it went.
+    function handleControlMessage(state, raw) {
+        let msg;
+        try { msg = JSON.parse(raw); } catch (e) { return; }   // ignore anything unparseable
+        if (msg && msg.type === 'password-result') showPasswordResult(state.id, msg.status);
+    }
+
+    // Ask Vaier to send this machine's stored password into its shell. The password never touches the
+    // browser — we send only the request; Vaier checks the remote is at a prompt and writes it there.
+    function sendPassword(id) {
+        const s = _terminals.get(id);
+        if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+        s.ws.send(JSON.stringify({ type: 'send-password' }));
+    }
+
+    const PASSWORD_RESULTS = {
+        SENT: { message: 'Password sent.', error: false },
+        NOT_AT_PROMPT: { message: "The remote isn't asking for a password right now.", error: true },
+        NO_PASSWORD_CREDENTIAL: { message: 'This machine has no stored password — it uses key auth.', error: true },
+        FAILED: { message: "Couldn't send the password. Check the Vaier logs.", error: true },
+    };
+
+    function showPasswordResult(id, status) {
+        const r = PASSWORD_RESULTS[status] || PASSWORD_RESULTS.FAILED;
+        setStatus(id, r.message, r.error);
+        // A quiet confirmation clears itself; the advisory cases stay until the next status change so the
+        // operator can read why nothing was sent.
+        if (!r.error) setTimeout(() => { const s = _terminals.get(id); if (s) setStatus(id, null); }, 2500);
     }
 
     function notifyChange() { if (_onChange) _onChange(_terminals.size); }

@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.SendHostPasswordUseCase;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
@@ -27,6 +28,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -212,5 +214,78 @@ class TerminalServiceTest {
         assertThatThrownBy(() -> service.run("nuc", "echo hi"))
             .isInstanceOf(NoHostCredentialException.class);
         verify(forRunningSshCommands, never()).run(any(), any());
+    }
+
+    // --- send stored password to a live prompt (feature: never via the browser) ---
+
+    @Test
+    void sendPassword_atPrompt_writesSecretNewline_exactlyOnce() {
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
+            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+
+        SendHostPasswordUseCase.SendPasswordResult result =
+            service.sendPassword("nas", sshSession, "geir@nas's password: ");
+
+        assertThat(result).isEqualTo(SendHostPasswordUseCase.SendPasswordResult.SENT);
+        verify(sshSession).write("s3cret\n".getBytes(StandardCharsets.UTF_8));
+        verify(sshSession, org.mockito.Mockito.times(1)).write(any());
+    }
+
+    @Test
+    void sendPassword_result_neverCarriesTheSecret() {
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
+            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+
+        SendHostPasswordUseCase.SendPasswordResult result =
+            service.sendPassword("nas", sshSession, "Password: ");
+
+        assertThat(result.name()).doesNotContain("s3cret");
+    }
+
+    @Test
+    void sendPassword_notAtPrompt_writesNothing() {
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
+            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+
+        SendHostPasswordUseCase.SendPasswordResult result =
+            service.sendPassword("nas", sshSession, "geir@nas:~$ ");
+
+        assertThat(result).isEqualTo(SendHostPasswordUseCase.SendPasswordResult.NOT_AT_PROMPT);
+        verify(sshSession, never()).write(any());
+    }
+
+    @Test
+    void sendPassword_keyAuthCredential_returnsNoPasswordCredential_writesNothing() {
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
+            new HostCredential("nas", "root", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", null, true)));
+
+        SendHostPasswordUseCase.SendPasswordResult result =
+            service.sendPassword("nas", sshSession, "Password: ");
+
+        assertThat(result).isEqualTo(SendHostPasswordUseCase.SendPasswordResult.NO_PASSWORD_CREDENTIAL);
+        verify(sshSession, never()).write(any());
+    }
+
+    @Test
+    void sendPassword_missingCredential_returnsNoPasswordCredential_writesNothing() {
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.empty());
+
+        SendHostPasswordUseCase.SendPasswordResult result =
+            service.sendPassword("nas", sshSession, "Password: ");
+
+        assertThat(result).isEqualTo(SendHostPasswordUseCase.SendPasswordResult.NO_PASSWORD_CREDENTIAL);
+        verify(sshSession, never()).write(any());
+    }
+
+    @Test
+    void sendPassword_throwingSession_returnsFailed_doesNotPropagate() {
+        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
+            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+        org.mockito.Mockito.doThrow(new RuntimeException("pipe broken")).when(sshSession).write(any());
+
+        SendHostPasswordUseCase.SendPasswordResult result =
+            service.sendPassword("nas", sshSession, "Password: ");
+
+        assertThat(result).isEqualTo(SendHostPasswordUseCase.SendPasswordResult.FAILED);
     }
 }

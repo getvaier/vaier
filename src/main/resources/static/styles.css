@@ -559,6 +559,22 @@ body {
 }
 .term-tab-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
 
+/* The key sends the machine's stored password straight from Vaier into the shell — it never touches the
+   browser. Sits with the close control, dimmed until hovered, matching the tab's quiet chrome. */
+.term-tab-sendpw {
+    background: none;
+    border: none;
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.3rem 0.3rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+    opacity: 0.55;
+    filter: grayscale(0.4);
+}
+.term-tab-sendpw:hover { opacity: 1; filter: none; background: rgba(255, 255, 255, 0.07); }
+
 .term-dock-panes {
     position: relative;
     flex: 1;
