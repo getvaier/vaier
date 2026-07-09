@@ -20,6 +20,7 @@ import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,7 @@ class BackupRunnerTest {
     NotifyAdminsOfBackupFailureUseCase backupNotifier;
     ConfigResolver configResolver;
     BackupWorkDirResolver workDirResolver;
+    ForPublishingEvents events;
     Clock clock;
     BackupRunner backupRunner;
 
@@ -94,6 +96,16 @@ class BackupRunnerTest {
             Optional.of(new HostCredentialView(name, "root", AuthMethod.PASSWORD, true)));
     }
 
+    /**
+     * Stub the pre-flight {@code borg --version} probe on {@code name} to report a supported borg, so a run
+     * gets past the fail-fast guard and launches. Declared AFTER any generic {@code any()} stub so Mockito's
+     * last-matching-stub rule lets the specific probe stub win.
+     */
+    private void borgPresentOn(String name) {
+        when(runner.run(eq(name), org.mockito.ArgumentMatchers.contains("borg --version")))
+            .thenReturn(new CommandResult(0, "borg 1.2.8\n", "", false, "SHA256:x"));
+    }
+
     /** Seed the run store with an in-flight RUNNING run for {@link #job()} at the fixed clock instant. */
     private void seedRunning(String runId) {
         runs.record(BackupRun.started(job(), runId, clock.instant()));
@@ -111,13 +123,14 @@ class BackupRunnerTest {
         backupNotifier = mock(NotifyAdminsOfBackupFailureUseCase.class);
         configResolver = mock(ConfigResolver.class);
         workDirResolver = mock(BackupWorkDirResolver.class);
+        events = mock(ForPublishingEvents.class);
         // Default: resolve to the SSH user's home so existing path assertions stay green.
         when(workDirResolver.workDirFor(any())).thenReturn("/home/geir/.vaier-backup");
         // Default: the repository's backup server is configured, so runs/lists reach the borg URL step.
         when(servers.getBackupServers()).thenReturn(List.of(server()));
         clock = Clock.fixed(Instant.parse("2026-07-08T02:00:00Z"), ZoneOffset.UTC);
         backupRunner = new BackupRunner(machines, credentials, runner, runs, repositories, servers, jobs,
-            backupNotifier, configResolver, clock, workDirResolver);
+            backupNotifier, configResolver, clock, workDirResolver, events);
     }
 
     @Test
@@ -126,6 +139,7 @@ class BackupRunnerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
 
         BackupRun run = backupRunner.runJob(job(), repo(), "run-1");
 
@@ -148,6 +162,7 @@ class BackupRunnerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
 
         BackupRun run = backupRunner.runJob(job(), repo());
 
@@ -166,6 +181,7 @@ class BackupRunnerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
 
         backupRunner.runJob(job(), repo(), "run-1");
 
@@ -187,6 +203,7 @@ class BackupRunnerTest {
         hasCredential("Colina 27");
         when(workDirResolver.workDirFor("Colina 27")).thenReturn("/home/geir/.vaier-backup");
         when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
 
         backupRunner.runJob(job(), repo(), "run-1");
 
@@ -208,6 +225,8 @@ class BackupRunnerTest {
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), any()))
             .thenReturn(new CommandResult(1, "", "nohup: cannot run", false, "SHA256:x"));
+        // borg IS present, so the run gets past the fail-fast guard and it is the LAUNCH that fails here.
+        borgPresentOn("Colina 27");
 
         BackupRun run = backupRunner.runJob(job(), repo(), "run-1");
 
@@ -255,7 +274,7 @@ class BackupRunnerTest {
         // in-flight state. The next poll must re-adopt it purely from the run store and resolve it.
         seedRunning("run-1");
         BackupRunner restarted = new BackupRunner(machines, credentials, runner, runs, repositories, servers, jobs,
-            backupNotifier, configResolver, clock, workDirResolver);
+            backupNotifier, configResolver, clock, workDirResolver, events);
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("echo RUNNING")))
@@ -344,6 +363,48 @@ class BackupRunnerTest {
         verify(runner, never()).run(any(), any());
     }
 
+    // --- Fail fast: refuse a doomed run when the client has no borg installed ---
+
+    @Test
+    void runJobFailsFastWhenBorgNotInstalledAndNeverLaunches() {
+        // The NUC 02 incident: a job on a host with no borg client dies with exit 127 / "borg: not found".
+        // Probe borg BEFORE the detached launch; a definite non-borg result records FAILED with a clear
+        // reason and never launches (no nohup command is ever sent), so we don't waste a run + poll cycle.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("borg --version")))
+            .thenReturn(new CommandResult(127, "", "bash: borg: command not found", false, "SHA256:x"));
+
+        BackupRun run = backupRunner.runJob(job(), repo(), "run-1");
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.FAILED);
+        assertThat(runs.getAll().get(0).status()).isEqualTo(BackupRunStatus.FAILED);
+        // The reason names the machine and points at the fix.
+        assertThat(run.summary()).contains("borg is not installed").contains("Colina 27").contains("Prepare client");
+        // Crucially: no detached launch happened — the run was refused before any borg was started.
+        verify(runner, never()).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("nohup"));
+    }
+
+    @Test
+    void runJobProceedsToLaunchWhenTheBorgProbeThrows() {
+        // A probe EXCEPTION means "couldn't verify" — never block a working host on a flaky probe. We proceed
+        // to the launch (the run itself still settles cleanly if borg really is missing).
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("borg --version")))
+            .thenThrow(new RuntimeException("ssh: connection reset"));
+        // Every other SSH call (pass-file ensure, detached launch) succeeds and confirms STARTED.
+        when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("nohup")))
+            .thenReturn(new CommandResult(0, "STARTED 9", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("printf %s")))
+            .thenReturn(new CommandResult(0, "", "", false, "SHA256:x"));
+
+        BackupRun run = backupRunner.runJob(job(), repo(), "run-1");
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.RUNNING);
+        verify(runner).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("nohup"));
+    }
+
     @Test
     void runJobRecordsFailedWhenBackupServerUnknown() {
         // Slice 2: a repository points at a Backup server by name. If that server is not configured, the
@@ -399,6 +460,7 @@ class BackupRunnerTest {
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), any()))
             .thenReturn(new CommandResult(0, "STARTED 1", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
 
         backupRunner.runDueJobs();
 
@@ -420,7 +482,7 @@ class BackupRunnerTest {
         // A due job exists, but the current hour (03:00) is not the configured schedule hour (2).
         Clock atNextHour = Clock.fixed(Instant.parse("2026-07-08T03:00:00Z"), ZoneOffset.UTC);
         BackupRunner runnerAtNextHour = new BackupRunner(machines, credentials, runner, runs,
-            repositories, servers, jobs, backupNotifier, configResolver, atNextHour, workDirResolver);
+            repositories, servers, jobs, backupNotifier, configResolver, atNextHour, workDirResolver, events);
         when(configResolver.getBackupScheduleHour()).thenReturn(2);
 
         runnerAtNextHour.runDueJobs();
@@ -515,11 +577,67 @@ class BackupRunnerTest {
         runs.record(BackupRun.fromExitCode(job(), "run-1",
             Instant.parse("2026-07-07T02:00:00Z"), Instant.parse("2026-07-07T02:05:00Z"), 2, "boom"));
         BackupRunner restarted = new BackupRunner(machines, credentials, runner, runs, repositories, servers, jobs,
-            backupNotifier, configResolver, clock, workDirResolver);
+            backupNotifier, configResolver, clock, workDirResolver, events);
 
         restarted.pollRunningRuns();
 
         verify(runner, never()).run(any(), any());
         verify(backupNotifier, never()).notifyAdminsOfBackupFailure(any());
+    }
+
+    // --- Settle events over SSE (the frontend never polls; a settle pushes an event it consumes) ---
+
+    @Test
+    void pollSettlingToSuccessPublishesRunSettledEventOnce() {
+        // When a RUNNING run settles this tick, exactly one `run-settled` event is pushed on the `backups`
+        // topic so the browser can re-fetch — it never polls.
+        seedRunning("run-1");
+        pollSettlesWith("0", "12 files, 3 GB");
+
+        backupRunner.pollRunningRuns();
+
+        org.mockito.ArgumentCaptor<String> data = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(events, times(1)).publish(eq("backups"), eq("run-settled"), data.capture());
+        assertThat(data.getValue()).contains("colina-home").contains("SUCCESS");
+    }
+
+    @Test
+    void pollSettlingToFailedPublishesRunSettledEvent() {
+        seedRunning("run-1");
+        pollSettlesWith("2", "borg exited 2");
+
+        backupRunner.pollRunningRuns();
+
+        org.mockito.ArgumentCaptor<String> data = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(events, times(1)).publish(eq("backups"), eq("run-settled"), data.capture());
+        assertThat(data.getValue()).contains("colina-home").contains("FAILED");
+    }
+
+    @Test
+    void stillRunningPollPublishesNothing() {
+        // A poll that still reports RUNNING (no result file, not yet stale) is not a settle: publish nothing.
+        seedRunning("run-1");
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("echo RUNNING")))
+            .thenReturn(new CommandResult(0, "RUNNING", "", false, "SHA256:x"));
+
+        backupRunner.pollRunningRuns();
+
+        verify(events, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void publisherThrowingDoesNotBreakTheSweep() {
+        // A publish failure must never break the sweep: the run still settles to its terminal state.
+        seedRunning("run-1");
+        pollSettlesWith("0", "done");
+        org.mockito.Mockito.doThrow(new RuntimeException("sse down"))
+            .when(events).publish(any(), any(), any());
+
+        backupRunner.pollRunningRuns();
+
+        assertThat(runs.latestForJob("colina-home").orElseThrow().status())
+            .isEqualTo(BackupRunStatus.SUCCESS);
     }
 }

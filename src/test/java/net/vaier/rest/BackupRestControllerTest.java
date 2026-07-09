@@ -11,6 +11,10 @@ import net.vaier.application.GenerateBackupServerSetupScriptUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase.RepoInitResult;
 import net.vaier.application.ListArchivesUseCase;
+import net.vaier.application.PrepareBackupClientUseCase;
+import net.vaier.application.PrepareBackupClientUseCase.PrepareResult;
+import net.vaier.application.PrepareBackupClientUseCase.PrepareState;
+import net.vaier.application.PrepareBackupClientUseCase.PrepareStatus;
 import net.vaier.application.ProvisionBackupServerUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionResult;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionState;
@@ -76,6 +80,8 @@ class BackupRestControllerTest {
     GenerateBackupServerSetupScriptUseCase generateSetupScript;
     GetMachinesUseCase getMachines;
     AuthorizeBackupClientUseCase authorizeBackupClient;
+    PrepareBackupClientUseCase prepareBackupClient;
+    net.vaier.domain.port.ForSubscribingToEvents forSubscribingToEvents;
     BackupService service;
     BackupRestController controller;
     ObjectMapper objectMapper = new ObjectMapper();
@@ -136,10 +142,13 @@ class BackupRestControllerTest {
         generateSetupScript = mock(GenerateBackupServerSetupScriptUseCase.class);
         getMachines = mock(GetMachinesUseCase.class);
         authorizeBackupClient = mock(AuthorizeBackupClientUseCase.class);
+        prepareBackupClient = mock(PrepareBackupClientUseCase.class);
+        forSubscribingToEvents = mock(net.vaier.domain.port.ForSubscribingToEvents.class);
         service = new BackupService(repositories, backupServers, jobs, runs);
         controller = new BackupRestController(service, service, service, service, service, service,
             generateSetupScript, provisionBackupServer, service, service, service, service, runBackupJob,
-            listArchives, checkPrerequisites, initBackupRepository, getMachines, authorizeBackupClient);
+            listArchives, checkPrerequisites, initBackupRepository, getMachines, authorizeBackupClient,
+            prepareBackupClient, forSubscribingToEvents);
     }
 
     private Machine machine(String name) {
@@ -210,6 +219,13 @@ class BackupRestControllerTest {
         mvc.perform(get("/backup-jobs/colina-home/provision/check")).andExpect(status().isPaymentRequired());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
             .post("/backup-repositories/nas-borg/provision/init")).andExpect(status().isPaymentRequired());
+        // Prepare-client routes are gated too.
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .post("/backup-jobs/colina-home/prepare-client")).andExpect(status().isPaymentRequired());
+        mvc.perform(get("/backup-jobs/colina-home/prepare-client/status"))
+            .andExpect(status().isPaymentRequired());
+        // The backup SSE stream is gated too.
+        mvc.perform(get("/backup-jobs/events")).andExpect(status().isPaymentRequired());
     }
 
     @Test
@@ -488,6 +504,91 @@ class BackupRestControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         verify(initBackupRepository, never()).initRepo(any(), any());
+    }
+
+    // --- Prepare client (install borg) ---
+
+    @Test
+    void prepareClientResolvesTheJobsMachineAndReturnsTheResult() {
+        repositories.save(repo());
+        backupServers.save(server());
+        jobs.save(job());
+        when(prepareBackupClient.prepareClient("Colina 27"))
+            .thenReturn(new PrepareResult(false, false, true, "Preparing client on Colina 27", null));
+
+        ResponseEntity<BackupRestController.PrepareClientResponse> response =
+            controller.prepareClient("colina-home");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().started()).isTrue();
+        assertThat(response.getBody().scriptOnly()).isFalse();
+        assertThat(response.getBody().stagedScriptPath()).isNull();
+        verify(prepareBackupClient).prepareClient("Colina 27");
+    }
+
+    @Test
+    void prepareClientScriptOnlyCarriesTheStagedPath() {
+        jobs.save(job());
+        when(prepareBackupClient.prepareClient("Colina 27"))
+            .thenReturn(new PrepareResult(false, true, false,
+                "Vaier cannot gain root over SSH on Colina 27. The prepare-client script has been placed at "
+                    + "/home/geir/.vaier-backup/prepare-client-Colina-27.sh — run: sudo bash "
+                    + "/home/geir/.vaier-backup/prepare-client-Colina-27.sh",
+                "/home/geir/.vaier-backup/prepare-client-Colina-27.sh"));
+
+        BackupRestController.PrepareClientResponse body =
+            controller.prepareClient("colina-home").getBody();
+
+        assertThat(body).isNotNull();
+        assertThat(body.scriptOnly()).isTrue();
+        assertThat(body.stagedScriptPath()).isEqualTo("/home/geir/.vaier-backup/prepare-client-Colina-27.sh");
+    }
+
+    @Test
+    void prepareClientUnknownJobReturns404() {
+        ResponseEntity<BackupRestController.PrepareClientResponse> response =
+            controller.prepareClient("does-not-exist");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(prepareBackupClient, never()).prepareClient(any());
+    }
+
+    @Test
+    void prepareClientStatusReturnsStateAndLogTail() {
+        jobs.save(job());
+        when(prepareBackupClient.prepareClientStatus("Colina 27"))
+            .thenReturn(new PrepareStatus(PrepareState.SUCCESS, "==> Vaier Backup client setup complete."));
+
+        ResponseEntity<BackupRestController.PrepareClientStatusResponse> response =
+            controller.prepareClientStatus("colina-home");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().state()).isEqualTo("SUCCESS");
+        assertThat(response.getBody().logTail()).contains("setup complete");
+        verify(prepareBackupClient).prepareClientStatus("Colina 27");
+    }
+
+    @Test
+    void prepareClientStatusUnknownJobReturns404() {
+        ResponseEntity<BackupRestController.PrepareClientStatusResponse> response =
+            controller.prepareClientStatus("does-not-exist");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(prepareBackupClient, never()).prepareClientStatus(any());
+    }
+
+    @Test
+    void backupEventsSubscribesToTheBackupsSseTopic() {
+        // The frontend never polls — it opens this SSE stream. The controller just hands back a subscription
+        // to the "backups" topic the backend publishes prepare-client settle events on.
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
+            new org.springframework.web.servlet.mvc.method.annotation.SseEmitter();
+        when(forSubscribingToEvents.subscribe("backups")).thenReturn(emitter);
+
+        assertThat(controller.backupEvents()).isSameAs(emitter);
+        verify(forSubscribingToEvents).subscribe("backups");
     }
 
     // --- Slice 3: backup-server CRUD, setup.sh, provision ---

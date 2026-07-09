@@ -50,6 +50,7 @@ class BackupProvisionerTest {
     GetBackupServersUseCase servers;
     GetBackupJobsUseCase jobs;
     BackupWorkDirResolver workDirResolver;
+    net.vaier.domain.port.ForPublishingEvents events;
     BackupProvisioner provisioner;
 
     private BackupServer server() {
@@ -90,6 +91,7 @@ class BackupProvisionerTest {
         servers = mock(GetBackupServersUseCase.class);
         jobs = mock(GetBackupJobsUseCase.class);
         workDirResolver = mock(BackupWorkDirResolver.class);
+        events = mock(net.vaier.domain.port.ForPublishingEvents.class);
         // Default: resolve to the SSH user's home so existing assertions stay green.
         when(workDirResolver.workDirFor(any())).thenReturn("/home/geir/.vaier-backup");
         // Default: the repository's backup server is configured, so probes/init reach the borg URL step.
@@ -97,7 +99,7 @@ class BackupProvisionerTest {
         // Default: no jobs, so authorize falls back to the base path unless a test configures jobs.
         when(jobs.getBackupJobs()).thenReturn(List.of());
         provisioner = new BackupProvisioner(machines, credentials, runner, repositories, servers,
-            jobs, workDirResolver);
+            jobs, workDirResolver, events);
     }
 
     @Test
@@ -939,6 +941,260 @@ class BackupProvisionerTest {
         assertThat(result.authorized()).isTrue();
         assertThat(result.hostKeyPinned()).isFalse();
         verify(runner, never()).run(eq("Colina 27"), contains("known_hosts"));
+    }
+
+    // --- Prepare client: install borg on a host that has none ---
+
+    @Test
+    void prepareClientLaunchesTheInstallDetachedWhenPasswordlessSudoIsAvailable() {
+        // The host is reachable and the SSH user has passwordless sudo, so Vaier installs borg itself,
+        // detached (an apt/dnf install can exceed the 20 s exec cap), and reports started.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_OK\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("nohup")))
+            .thenReturn(new CommandResult(0, "STARTED 7788\n", "", false, "SHA256:x"));
+
+        var result = provisioner.prepareClient("Colina 27");
+
+        assertThat(result.prepared()).isFalse();
+        assertThat(result.scriptOnly()).isFalse();
+        assertThat(result.started()).isTrue();
+        // A detached command ran under sudo; the install never ran synchronously.
+        verify(runner).run(eq("Colina 27"), contains("nohup"));
+        verify(runner).run(eq("Colina 27"), contains("sudo -n bash"));
+        verify(runner, never()).run(eq("Colina 27"), contains("apt-get install"));
+    }
+
+    @Test
+    void prepareClientReportsFailedWhenTheLaunchNeverEchoesStarted() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_OK\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("nohup")))
+            .thenReturn(new CommandResult(127, "", "base64: not found", false, "SHA256:x"));
+
+        var result = provisioner.prepareClient("Colina 27");
+
+        assertThat(result.started()).isFalse();
+        assertThat(result.scriptOnly()).isFalse();
+        assertThat(result.message()).containsIgnoringCase("fail");
+    }
+
+    @Test
+    void prepareClientStagesTheScriptWhenPasswordlessSudoIsAbsent() {
+        // No passwordless sudo: Vaier can SSH in but cannot gain root, so it stages the install script and
+        // returns scriptOnly with the exact `sudo bash <path>` command — never a raw curl | sudo bash.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_ABSENT\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("echo STAGED")))
+            .thenReturn(new CommandResult(0,
+                "STAGED /home/geir/.vaier-backup/prepare-client-Colina-27.sh\n", "", false, "SHA256:x"));
+
+        var result = provisioner.prepareClient("Colina 27");
+
+        assertThat(result.scriptOnly()).isTrue();
+        assertThat(result.started()).isFalse();
+        assertThat(result.stagedScriptPath())
+            .isEqualTo("/home/geir/.vaier-backup/prepare-client-Colina-27.sh");
+        assertThat(result.message())
+            .contains("/home/geir/.vaier-backup/prepare-client-Colina-27.sh")
+            .contains("sudo bash");
+        // The script was staged (base64-decoded onto the host); no install and no detached launch ran.
+        verify(runner).run(eq("Colina 27"), contains("base64 -d"));
+        verify(runner, never()).run(eq("Colina 27"), contains("nohup"));
+    }
+
+    @Test
+    void prepareClientStagingFailureDegradesToScriptOnlyWithNoPath() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_ABSENT\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("echo STAGED")))
+            .thenReturn(new CommandResult(1, "", "base64: not found", false, "SHA256:x"));
+
+        var result = provisioner.prepareClient("Colina 27");
+
+        assertThat(result.scriptOnly()).isTrue();
+        assertThat(result.stagedScriptPath()).isNull();
+        assertThat(result.message()).containsIgnoringCase("download");
+    }
+
+    @Test
+    void prepareClientGuardReturnsScriptOnlyWhenNoCredentialAndMakesNoSshCall() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        when(credentials.getHostCredential("Colina 27")).thenReturn(Optional.empty());
+
+        var result = provisioner.prepareClient("Colina 27");
+
+        assertThat(result.scriptOnly()).isTrue();
+        assertThat(result.started()).isFalse();
+        verify(runner, never()).run(any(), any());
+    }
+
+    @Test
+    void prepareClientGuardReturnsScriptOnlyWhenMachineUnknownAndMakesNoSshCall() {
+        when(machines.getAllMachines()).thenReturn(List.of());
+
+        var result = provisioner.prepareClient("ghost");
+
+        assertThat(result.scriptOnly()).isTrue();
+        verify(runner, never()).run(any(), any());
+    }
+
+    @Test
+    void inFlightPrepareIsSweptByTheBackendAndPublishesAnSseSettleEvent_notPolledByTheFrontend() {
+        // The frontend NEVER polls: after a detached prepare launches, a BACKEND scheduled sweep polls the
+        // host's .rc over SSH and publishes an SSE event when it settles, which the browser consumes.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_OK\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("nohup")))
+            .thenReturn(new CommandResult(0, "STARTED 7788\n", "", false, "SHA256:x"));
+        var started = provisioner.prepareClient("Colina 27");
+        assertThat(started.started()).isTrue();
+
+        // The install finished on the host (.rc has exit 0): the sweep publishes a settle event and does not
+        // re-publish on the next sweep (the in-flight entry is cleared once settled).
+        when(runner.run(eq("Colina 27"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "DONE 0\n", "", false, "SHA256:x"));
+
+        provisioner.pollInFlightPrepares();
+        provisioner.pollInFlightPrepares();
+
+        org.mockito.ArgumentCaptor<String> data = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(events, org.mockito.Mockito.times(1)).publish(
+            eq("backups"), eq("prepare-client-settled"), data.capture());
+        assertThat(data.getValue()).contains("Colina 27").contains("SUCCESS");
+    }
+
+    // --- Server provision: a backend sweep settles it and pushes an SSE event (the frontend never polls) ---
+
+    /** Launch a detached provision so an in-flight provision is registered for the sweep to settle. */
+    private void launchProvision() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
+        hasCredential("NAS");
+        when(runner.run(eq("NAS"), contains("command -v docker")))
+            .thenReturn(new CommandResult(0, "DOCKER_OK\n", "", false, "SHA256:x"));
+        when(runner.run(eq("NAS"), contains("nohup")))
+            .thenReturn(new CommandResult(0, "STARTED 4321\n", "", false, "SHA256:x"));
+        assertThat(provisioner.provision("nas-borg").started()).isTrue();
+    }
+
+    @Test
+    void inFlightProvisionIsSweptByTheBackendAndPublishesAnSseSettleEvent_notPolledByTheFrontend() {
+        launchProvision();
+
+        // The setup finished on the host (.rc has exit 0): the sweep publishes a settle event and does not
+        // re-publish on the next sweep (the in-flight entry is cleared once settled).
+        when(runner.run(eq("NAS"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "DONE 0\n", "", false, "SHA256:x"));
+
+        provisioner.pollInFlightProvisions();
+        provisioner.pollInFlightProvisions();
+
+        org.mockito.ArgumentCaptor<String> data = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(events, org.mockito.Mockito.times(1)).publish(
+            eq("backups"), eq("provision-settled"), data.capture());
+        assertThat(data.getValue()).contains("nas-borg").contains("SUCCESS");
+    }
+
+    @Test
+    void inFlightProvisionStaysInFlightWhileStillRunning_noSseEvent() {
+        launchProvision();
+
+        // No .rc yet: the sweep must publish nothing and keep the entry for the next sweep.
+        when(runner.run(eq("NAS"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "RUNNING\n", "", false, "SHA256:x"));
+
+        provisioner.pollInFlightProvisions();
+
+        verify(events, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void inFlightProvisionSweepSwallowsAPublisherError() {
+        launchProvision();
+        when(runner.run(eq("NAS"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "DONE 1\n", "", false, "SHA256:x"));
+        org.mockito.Mockito.doThrow(new RuntimeException("sse down"))
+            .when(events).publish(any(), any(), any());
+
+        // A publisher failure must never break the sweep.
+        org.assertj.core.api.Assertions.assertThatCode(() -> provisioner.pollInFlightProvisions())
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void inFlightProvisionStaysInFlightOnATransientPollFailureThenSettlesLater() {
+        launchProvision();
+
+        // A poll that times out is not a settle: nothing is published and the entry stays in flight.
+        when(runner.run(eq("NAS"), contains(".rc")))
+            .thenReturn(new CommandResult(255, "", "connection reset", true, null));
+        provisioner.pollInFlightProvisions();
+        verify(events, never()).publish(any(), any(), any());
+
+        // A later sweep with a real result settles it, proving it was still in flight.
+        when(runner.run(eq("NAS"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "DONE 0\n", "", false, "SHA256:x"));
+        provisioner.pollInFlightProvisions();
+        verify(events, org.mockito.Mockito.times(1)).publish(
+            eq("backups"), eq("provision-settled"), contains("SUCCESS"));
+    }
+
+    @Test
+    void inFlightPrepareStaysInFlightWhileTheInstallIsStillRunning_noSseEvent() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_OK\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("nohup")))
+            .thenReturn(new CommandResult(0, "STARTED 7788\n", "", false, "SHA256:x"));
+        provisioner.prepareClient("Colina 27");
+
+        // No .rc yet: the sweep must publish nothing and keep the entry for the next sweep.
+        when(runner.run(eq("Colina 27"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "RUNNING\n", "", false, "SHA256:x"));
+
+        provisioner.pollInFlightPrepares();
+
+        verify(events, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void prepareClientStatusReportsSuccessOnDoneZeroWithLogTail() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains(".rc")))
+            .thenReturn(new CommandResult(0, "DONE 0\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains(".log")))
+            .thenReturn(new CommandResult(0, "==> Vaier Backup client setup complete.\n", "", false, "SHA256:x"));
+
+        var status = provisioner.prepareClientStatus("Colina 27");
+
+        assertThat(status.state())
+            .isEqualTo(net.vaier.application.PrepareBackupClientUseCase.PrepareState.SUCCESS);
+        assertThat(status.logTail()).contains("setup complete");
+    }
+
+    @Test
+    void prepareClientStatusLeavesRunningOnTransientPollFailure() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains(".rc")))
+            .thenReturn(new CommandResult(255, "", "connection reset", true, null));
+
+        var status = provisioner.prepareClientStatus("Colina 27");
+
+        assertThat(status.state())
+            .isEqualTo(net.vaier.application.PrepareBackupClientUseCase.PrepareState.RUNNING);
     }
 
     @Test

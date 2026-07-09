@@ -10,11 +10,13 @@ import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase;
+import net.vaier.application.PrepareBackupClientUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupServer;
+import net.vaier.domain.BorgClientSetupScript;
 import net.vaier.domain.BorgCommand;
 import net.vaier.domain.BorgServerImage;
 import net.vaier.domain.BorgServerSetupScript;
@@ -22,10 +24,14 @@ import net.vaier.domain.BorgVersion;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
+import net.vaier.domain.port.ForPublishingEvents;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Guided-provisioning orchestrator for fleet backups, kept separate from {@link BackupRunner} so the
@@ -43,7 +49,8 @@ import java.util.Optional;
 @Component
 @Slf4j
 public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitBackupRepositoryUseCase,
-    ProvisionBackupServerUseCase, GenerateBackupServerSetupScriptUseCase, AuthorizeBackupClientUseCase {
+    ProvisionBackupServerUseCase, GenerateBackupServerSetupScriptUseCase, AuthorizeBackupClientUseCase,
+    PrepareBackupClientUseCase {
 
     private final GetMachinesUseCase machines;
     private final GetHostCredentialUseCase credentials;
@@ -52,6 +59,28 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
     private final GetBackupServersUseCase servers;
     private final GetBackupJobsUseCase jobs;
     private final BackupWorkDirResolver workDirResolver;
+    private final ForPublishingEvents events;
+
+    /** The SSE topic and events the backup UI subscribes to for progress (frontend never polls). */
+    static final String BACKUPS_TOPIC = "backups";
+    static final String PREPARE_SETTLED_EVENT = "prepare-client-settled";
+    static final String PROVISION_SETTLED_EVENT = "provision-settled";
+
+    /**
+     * How often the BACKEND sweeps launched client-prepares and server-provisions for a settled result. The
+     * frontend never polls; it opens an SSE stream and these sweeps push a settle event when the on-host
+     * install/setup finishes.
+     */
+    static final long SWEEP_INTERVAL_MS = 3000;
+
+    /** A launched detached run Vaier is waiting to settle: the host, its run id, and its work dir. */
+    private record InFlightRun(String host, String runId, String workDir) {}
+
+    /** machineName -> the in-flight prepare the backend sweep polls until it settles, then publishes over SSE. */
+    private final Map<String, InFlightRun> inFlightPrepares = new ConcurrentHashMap<>();
+
+    /** serverName -> the in-flight provision the backend sweep polls until it settles, then publishes over SSE. */
+    private final Map<String, InFlightRun> inFlightProvisions = new ConcurrentHashMap<>();
 
     public BackupProvisioner(GetMachinesUseCase machines,
                              GetHostCredentialUseCase credentials,
@@ -59,7 +88,8 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
                              GetBackupRepositoriesUseCase repositories,
                              GetBackupServersUseCase servers,
                              GetBackupJobsUseCase jobs,
-                             BackupWorkDirResolver workDirResolver) {
+                             BackupWorkDirResolver workDirResolver,
+                             ForPublishingEvents events) {
         this.machines = machines;
         this.credentials = credentials;
         this.remoteCommand = remoteCommand;
@@ -67,6 +97,7 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
         this.servers = servers;
         this.jobs = jobs;
         this.workDirResolver = workDirResolver;
+        this.events = events;
     }
 
     @Override
@@ -261,8 +292,11 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
             CommandResult result = remoteCommand.run(host, launch);
             if (!result.timedOut() && result.exitCode() == 0
                 && result.stdout() != null && result.stdout().contains("STARTED")) {
+                // Register the launched provision so the backend sweep settles it and pushes an SSE event —
+                // the frontend never polls, it just listens on the backups stream.
+                inFlightProvisions.put(serverName, new InFlightRun(host, runId, workDir));
                 return new ProvisionResult(false, false, true, "Provisioning started on " + host
-                    + " — poll GET /backup-servers/" + serverName + "/provision/status for progress.", null);
+                    + " — you'll be notified when it finishes.", null);
             }
             return new ProvisionResult(false, false, false,
                 "Provisioning failed to launch: " + summaryOf(result), null);
@@ -336,6 +370,183 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
                 LogSafe.forLog(serverName), LogSafe.forLog(host), e.getMessage());
             return new ProvisionStatus(ProvisionState.RUNNING, "");
         }
+    }
+
+    @Override
+    public PrepareResult prepareClient(String machineName) {
+        Optional<Machine> machine = reachableMachine(machineName);
+        if (machine.isEmpty()) {
+            // Unknown, SSH-disabled, or no stored credential: Vaier cannot SSH in to install, so tell the
+            // operator to run the script on the host rather than failing opaquely.
+            return new PrepareResult(false, true, false, "Machine " + machineName
+                + " is unknown, has SSH disabled, or has no stored credential — download the prepare-client"
+                + " script from the UI and run it on the host with sudo.", null);
+        }
+        String host = machine.get().name();
+        try {
+            // The install needs root, but Vaier SSHes as a non-root user. Probe for passwordless sudo: with
+            // it, Vaier runs the script itself; without it, it degrades to staging the script for the operator.
+            CommandResult probe = remoteCommand.run(host, BorgClientSetupScript.passwordlessSudoProbe());
+            if (probe.timedOut() || !BorgClientSetupScript.parsePasswordlessSudo(probe.stdout())) {
+                return stagePrepareScript(host, machineName);
+            }
+            // Launch detached: an apt/dnf install can blow the 20 s SSH exec cap. The client helper runs the
+            // script under `sudo -n bash`, writes the exit code/output to per-run files, and returns as soon
+            // as STARTED is echoed — status is polled from those files exactly like server provisioning.
+            String script = BorgClientSetupScript.generate();
+            String runId = prepareRunId(machineName);
+            String workDir = workDirResolver.workDirFor(host);
+            String launch = BorgClientSetupScript.detachedLaunch(script, runId, workDir);
+            log.info("Launching detached borg-client install on {}", LogSafe.forLog(host));
+            CommandResult result = remoteCommand.run(host, launch);
+            if (!result.timedOut() && result.exitCode() == 0
+                && result.stdout() != null && result.stdout().contains("STARTED")) {
+                // Register the launched install so the backend sweep settles it and pushes an SSE event —
+                // the frontend never polls, it just listens on the backups stream.
+                inFlightPrepares.put(machineName, new InFlightRun(host, runId, workDir));
+                return new PrepareResult(false, false, true,
+                    "Preparing client on " + host + " — you'll be notified when it finishes.", null);
+            }
+            return new PrepareResult(false, false, false,
+                "Client preparation failed to launch: " + summaryOf(result), null);
+        } catch (Exception e) {
+            log.debug("Preparing client on {} failed transiently: {}",
+                LogSafe.forLog(host), e.getMessage());
+            return new PrepareResult(false, false, false, "Client preparation failed: " + e.getMessage(), null);
+        }
+    }
+
+    /**
+     * Stage the install script onto {@code host} over SSH and return a {@code scriptOnly} result carrying the
+     * on-host path and the exact {@code sudo bash <path>} command — the path taken when Vaier can SSH the host
+     * but cannot gain root (no passwordless sudo). Mirrors {@link #stageSetupScript} and reuses the generic
+     * {@link BorgServerSetupScript#stageScript}/{@link BorgServerSetupScript#parseStagedPath} staging helpers.
+     * Owns its own error handling so a staging failure never propagates: on any error it degrades to
+     * {@code scriptOnly} with a null path and a "download it" message. Never throws.
+     */
+    private PrepareResult stagePrepareScript(String host, String machineName) {
+        String stagedPath = workDirResolver.workDirFor(host) + "/" + prepareRunId(machineName) + ".sh";
+        try {
+            String script = BorgClientSetupScript.generate();
+            String stage = BorgServerSetupScript.stageScript(script, stagedPath);
+            log.info("Staging the prepare-client script on {}", LogSafe.forLog(host));
+            CommandResult result = remoteCommand.run(host, stage);
+            Optional<String> confirmed = (!result.timedOut() && result.exitCode() == 0)
+                ? BorgServerSetupScript.parseStagedPath(result.stdout())
+                : Optional.empty();
+            if (confirmed.isPresent()) {
+                String path = confirmed.get();
+                return new PrepareResult(false, true, false,
+                    "Vaier cannot gain root over SSH on " + host + ". The prepare-client script has been placed"
+                        + " at " + path + " — run: sudo bash " + path, path);
+            }
+        } catch (Exception e) {
+            log.debug("Staging the prepare-client script on {} failed: {}",
+                LogSafe.forLog(host), e.getMessage());
+        }
+        return new PrepareResult(false, true, false,
+            "Vaier could not stage the prepare-client script on " + host
+                + ". Download prepare-client.sh from the UI and run it on the host with sudo.", null);
+    }
+
+    @Override
+    public PrepareStatus prepareClientStatus(String machineName) {
+        Optional<Machine> machine = reachableMachine(machineName);
+        if (machine.isEmpty()) {
+            return new PrepareStatus(PrepareState.RUNNING, "");
+        }
+        String host = machine.get().name();
+        String runId = prepareRunId(machineName);
+        String workDir = workDirResolver.workDirFor(host);
+        try {
+            CommandResult poll = remoteCommand.run(host, BorgCommand.pollStatus(runId, workDir));
+            if (poll.timedOut() || poll.exitCode() != 0) {
+                return new PrepareStatus(PrepareState.RUNNING, "");
+            }
+            Optional<Integer> exitCode = BorgCommand.parsePoll(poll.stdout());
+            if (exitCode.isEmpty()) {
+                return new PrepareStatus(PrepareState.RUNNING, "");
+            }
+            PrepareState state = exitCode.get() == 0 ? PrepareState.SUCCESS : PrepareState.FAILED;
+            return new PrepareStatus(state, fetchLogTail(host, runId, workDir));
+        } catch (Exception e) {
+            log.debug("Prepare-client status poll on {} failed transiently: {}",
+                LogSafe.forLog(host), e.getMessage());
+            return new PrepareStatus(PrepareState.RUNNING, "");
+        }
+    }
+
+    /**
+     * The backend sweep that settles launched client-prepares: for each in-flight install it reads the host's
+     * {@code .rc} file over SSH (backend polling is fine — the <em>frontend</em> never polls) and, when the
+     * install has finished, publishes a {@link #PREPARE_SETTLED_EVENT} on the {@link #BACKUPS_TOPIC} SSE topic
+     * keyed by {@code machineName} and drops the entry so it never re-publishes. A still-running install or a
+     * transient poll failure leaves the entry for the next sweep. Never throws.
+     */
+    @Scheduled(fixedDelay = SWEEP_INTERVAL_MS)
+    public void pollInFlightPrepares() {
+        sweepInFlight(inFlightPrepares, PREPARE_SETTLED_EVENT, "machineName", "prepare");
+    }
+
+    /**
+     * The backend sweep that settles launched server-provisions, mirroring {@link #pollInFlightPrepares}: it
+     * reads each in-flight provision's on-host {@code .rc} over SSH and, on settle, publishes a
+     * {@link #PROVISION_SETTLED_EVENT} on the {@link #BACKUPS_TOPIC} topic keyed by {@code serverName}, then
+     * drops the entry. The {@code GET …/provision/status} endpoint is kept for API symmetry, but the UI reacts
+     * to this pushed event rather than polling it. Never throws.
+     */
+    @Scheduled(fixedDelay = SWEEP_INTERVAL_MS)
+    public void pollInFlightProvisions() {
+        sweepInFlight(inFlightProvisions, PROVISION_SETTLED_EVENT, "serverName", "provision");
+    }
+
+    /**
+     * The shared settle sweep behind {@link #pollInFlightPrepares} and {@link #pollInFlightProvisions}: for
+     * each in-flight detached run it reads the host's {@code .rc} over SSH and, when it has finished, removes
+     * the entry and publishes {@code eventName} on {@link #BACKUPS_TOPIC} with a {@code {<idKey>,state}} payload
+     * (state SUCCESS/FAILED). A still-running run or a transient poll failure leaves the entry for the next
+     * sweep; a publish failure is swallowed. Never throws — one bad entry can never stall the sweep.
+     */
+    private void sweepInFlight(Map<String, InFlightRun> inFlight, String eventName, String idKey, String label) {
+        for (Map.Entry<String, InFlightRun> entry : inFlight.entrySet()) {
+            settleIfDone(inFlight, entry.getKey(), entry.getValue(), eventName, idKey, label);
+        }
+    }
+
+    private void settleIfDone(Map<String, InFlightRun> inFlight, String id, InFlightRun run,
+                              String eventName, String idKey, String label) {
+        try {
+            CommandResult poll = remoteCommand.run(run.host(), BorgCommand.pollStatus(run.runId(), run.workDir()));
+            if (poll.timedOut() || poll.exitCode() != 0) {
+                return;
+            }
+            Optional<Integer> exitCode = BorgCommand.parsePoll(poll.stdout());
+            if (exitCode.isEmpty()) {
+                return;   // still running — leave it for the next sweep
+            }
+            inFlight.remove(id);
+            String state = exitCode.get() == 0 ? "SUCCESS" : "FAILED";
+            events.publish(BACKUPS_TOPIC, eventName, settledJson(idKey, id, state));
+            log.info("borg {} on {} settled {}", label, LogSafe.forLog(id), state);
+        } catch (Exception e) {
+            log.debug("Sweeping in-flight {} on {} failed transiently: {}",
+                label, LogSafe.forLog(id), e.getMessage());
+        }
+    }
+
+    /** The SSE payload for a settled run: {@code {"<idKey>":"…","state":"SUCCESS"}} (JSON-escaped). */
+    private static String settledJson(String idKey, String idValue, String state) {
+        return "{\"" + idKey + "\":\"" + jsonEscape(idValue) + "\",\"state\":\"" + state + "\"}";
+    }
+
+    /** Escape a value for embedding in a double-quoted JSON string (backslash and double quote). */
+    private static String jsonEscape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** A deterministic per-machine run id for the prepare-client detached run's rc/log/sh files. */
+    private static String prepareRunId(String machineName) {
+        return "prepare-client-" + machineName.replaceAll("[^A-Za-z0-9._-]", "-");
     }
 
     @Override

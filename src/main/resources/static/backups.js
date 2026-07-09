@@ -13,8 +13,9 @@
     let jobs = [];
     let machines = [];           // machine names from /machines (peers + LAN servers + vaier-server)
     const latestRuns = {};       // jobName -> RunResponse | null
-    const pollTimers = {};       // jobName -> interval id
-    let serverProvisionTimer = null;
+    const pendingRunJobs = new Set();  // job names awaiting a `run-settled` SSE event (never polled)
+    let pendingProvision = null; // { serverName } while awaiting a `provision-settled` SSE event
+    let pendingPrepare = null;   // { job, machineName } while awaiting a prepare-client SSE settle event
     let editingServerName = null;
     let editingRepoName = null;  // null while creating
     let editingJobName = null;
@@ -282,12 +283,8 @@
         }
     }
 
-    function stopServerProvisionPoll() {
-        if (serverProvisionTimer) { clearInterval(serverProvisionTimer); serverProvisionTimer = null; }
-    }
-
     async function provisionServer(server) {
-        stopServerProvisionPoll();
+        pendingProvision = null;
         document.getElementById('serverProvisionTitle').textContent = 'Provision · ' + server.name;
         const body = document.getElementById('serverProvisionBody');
         body.innerHTML = '<div class="loading">Starting…</div>';
@@ -300,15 +297,35 @@
                 return;
             }
             if (result.started) {
+                // The setup runs detached on the host; the frontend NEVER polls. A backend sweep watches it
+                // and pushes a `provision-settled` SSE event, which onProvisionSettled handles.
+                pendingProvision = { serverName: server.name };
                 body.innerHTML = `<div class="bk-provision-status">${provisionState('RUNNING')}
                     <span class="bk-field-note">Provisioning started — pulling the borg-server image and starting it.</span></div>`;
-                startServerProvisionPoll(server.name);
                 return;
             }
             renderServerProvisionOutcome(body, result.provisioned ? 'SUCCESS' : 'FAILED', result.message || '');
         } catch (e) {
             body.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
         }
+    }
+
+    // Handle a backend-pushed provision settle event (SSE). If it's for the server we launched a provision
+    // on, re-fetch its status once for the log tail and render the outcome. The browser never polled.
+    async function onProvisionSettled(payload) {
+        if (!pendingProvision || !payload || payload.serverName !== pendingProvision.serverName) return;
+        const serverName = pendingProvision.serverName;
+        pendingProvision = null;
+        const body = document.getElementById('serverProvisionBody');
+        try {
+            const status = await jsonOrThrow(await fetch(
+                '/backup-servers/' + encodeURIComponent(serverName) + '/provision/status', { cache: 'no-store' }));
+            if (body) renderServerProvisionOutcome(body, status.state, status.logTail || '');
+        } catch (_) {
+            if (body) renderServerProvisionOutcome(body, payload.state, '');
+        }
+        if (payload.state === 'SUCCESS') msg('Server "' + serverName + '" provisioned.', 'success');
+        else msg('Provisioning "' + serverName + '" failed — see the log.', 'error');
     }
 
     // Vaier couldn't drive docker over SSH. If it staged the script on the host, show the one command to run;
@@ -349,26 +366,6 @@
             ? `<pre class="bk-log-tail">${escapeHtml(logTail)}</pre>`
             : '';
         body.innerHTML = `<div class="bk-provision-status">${provisionState(state)}</div>${tail}`;
-    }
-
-    function startServerProvisionPoll(name) {
-        stopServerProvisionPoll();
-        const body = document.getElementById('serverProvisionBody');
-        serverProvisionTimer = setInterval(async () => {
-            try {
-                const status = await jsonOrThrow(await fetch(
-                    '/backup-servers/' + encodeURIComponent(name) + '/provision/status', { cache: 'no-store' }));
-                if (status.state === 'RUNNING') {
-                    body.innerHTML = `<div class="bk-provision-status">${provisionState('RUNNING')}</div>` +
-                        (status.logTail ? `<pre class="bk-log-tail">${escapeHtml(status.logTail)}</pre>` : '');
-                    return;
-                }
-                stopServerProvisionPoll();
-                renderServerProvisionOutcome(body, status.state, status.logTail || '');
-                if (status.state === 'SUCCESS') msg('Server "' + name + '" provisioned.', 'success');
-                else msg('Provisioning "' + name + '" failed — see the log.', 'error');
-            } catch (_) { /* keep polling through a transient error */ }
-        }, 3000);
     }
 
     // --- Authorize a host ---
@@ -829,7 +826,7 @@
             'Delete job "' + job.name + '"? Existing archives in the repository are not removed.',
             async () => {
                 await jsonOrThrow(await fetch('/backup-jobs/' + encodeURIComponent(job.name), { method: 'DELETE' }));
-                stopPoll(job.name);
+                pendingRunJobs.delete(job.name);
                 delete latestRuns[job.name];
                 msg('Job "' + job.name + '" deleted.', 'success');
                 await loadJobs();
@@ -842,33 +839,26 @@
             const run = await jsonOrThrow(await fetch('/backup-jobs/' + encodeURIComponent(job.name) + '/runs', { method: 'POST' }));
             latestRuns[job.name] = run;
             paintBadge(job.name);
+            // Show RUNNING, then wait for the backend-pushed `run-settled` SSE event — the frontend never polls.
+            pendingRunJobs.add(job.name);
             msg('Run started for "' + job.name + '".', 'success');
-            startPoll(job.name);
         } catch (e) {
             msg(e.message, 'error');
         }
     }
 
-    function startPoll(jobName) {
-        stopPoll(jobName);
-        pollTimers[jobName] = setInterval(async () => {
-            try {
-                const res = await fetch('/backup-jobs/' + encodeURIComponent(jobName) + '/runs', { cache: 'no-store' });
-                if (!res.ok) return;
-                const run = await res.json();
-                latestRuns[jobName] = run;
-                paintBadge(jobName);
-                if (run.status !== 'RUNNING') {
-                    stopPoll(jobName);
-                    if (run.status === 'SUCCESS') msg('Backup of "' + jobName + '" finished.', 'success');
-                    else if (run.status === 'FAILED') msg('Backup of "' + jobName + '" failed — admins were emailed.', 'error');
-                }
-            } catch (_) { /* keep polling */ }
-        }, 3000);
-    }
-
-    function stopPoll(jobName) {
-        if (pollTimers[jobName]) { clearInterval(pollTimers[jobName]); delete pollTimers[jobName]; }
+    // Handle a backend-pushed run settle event (SSE). Guarded by pendingRunJobs so an event for another job
+    // never refreshes the wrong card: only re-fetch the job we launched, and only its latest run.
+    async function onRunSettled(payload) {
+        if (!payload || !payload.jobName || !pendingRunJobs.has(payload.jobName)) return;
+        const jobName = payload.jobName;
+        pendingRunJobs.delete(jobName);
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(jobName) + '/runs', { cache: 'no-store' });
+            if (res.ok) { latestRuns[jobName] = await res.json(); paintBadge(jobName); }
+        } catch (_) { /* the event already told us the outcome; the badge repaints on the next load */ }
+        if (payload.status === 'SUCCESS') msg('Backup of "' + jobName + '" finished.', 'success');
+        else if (payload.status === 'FAILED') msg('Backup of "' + jobName + '" failed — admins were emailed.', 'error');
     }
 
     // Readiness for the provisioning wizard. borgAuthOk and versionsCompatible are shown prominently:
@@ -896,13 +886,23 @@
         const authAction = (!c.borgAuthOk && serverName)
             ? `<button class="btn btn-small btn-secondary bk-check-action" id="readinessAuthorizeBtn">Authorize host</button>`
             : '';
+        // When borg is missing, offer to install it right here — the exact fix for the run that would die
+        // with "borg: not found". Mirrors the inline "Authorize host" action on the key-trust row.
+        const prepareAction = !c.borgInstalled
+            ? `<button class="btn btn-small btn-secondary bk-check-action" id="readinessPrepareBtn">Prepare client</button>`
+            : '';
         body.innerHTML = `<div class="bk-check-list">
-            <div class="bk-check-row">${checkMark(c.borgInstalled)}<span>borg installed on ${escapeHtml(job.machineName)}</span>${version}</div>
+            <div class="bk-check-row">${checkMark(c.borgInstalled)}<span>borg installed on ${escapeHtml(job.machineName)}</span>${version}${prepareAction}</div>
             <div class="bk-check-row">${checkMark(c.borgSupported)}<span>borg version supported</span></div>
             <div class="bk-check-row">${checkMark(c.nasReachable)}<span>server reachable from the machine</span></div>
             <div class="bk-check-row bk-check-key">${checkMark(c.borgAuthOk)}<span>client key trusted on the server</span>${authAction}</div>
             <div class="bk-check-row bk-check-key">${checkMark(c.versionsCompatible)}<span>borg versions compatible</span>${serverVer}</div>
-        </div>`;
+        </div>
+        <div id="readinessPrepareOut"></div>`;
+        const prepareBtn = document.getElementById('readinessPrepareBtn');
+        if (prepareBtn) {
+            prepareBtn.addEventListener('click', () => prepareClient(job, prepareBtn));
+        }
         const authBtn = document.getElementById('readinessAuthorizeBtn');
         if (authBtn) {
             authBtn.addEventListener('click', async () => {
@@ -929,6 +929,92 @@
                 }
             });
         }
+    }
+
+    // Install borg on the job's client host. On `started` the install runs detached on the host; the
+    // frontend NEVER polls — a backend sweep watches the install and pushes a `prepare-client-settled` SSE
+    // event when it finishes, which onPrepareSettled handles. On `scriptOnly` Vaier staged the script and we
+    // show the one `sudo bash <path>` command to run (directive guidance, not an error).
+    async function prepareClient(job, btn) {
+        const out = document.getElementById('readinessPrepareOut');
+        btn.disabled = true;
+        btn.textContent = 'Preparing…';
+        try {
+            const result = await jsonOrThrow(await fetch(
+                '/backup-jobs/' + encodeURIComponent(job.name) + '/prepare-client', { method: 'POST' }));
+            if (result.scriptOnly) {
+                renderPrepareScriptOnly(out, job, result);
+                btn.disabled = false;
+                btn.textContent = 'Prepare client';
+                return;
+            }
+            if (result.started) {
+                // Remember which job/machine we're waiting on; the SSE listener settles it. No polling.
+                pendingPrepare = { job, machineName: job.machineName };
+                out.innerHTML = `<div class="bk-provision-status" style="margin-top:0.75rem">${provisionState('RUNNING')}
+                    <span class="bk-field-note">Installing borg on ${escapeHtml(job.machineName)}…</span></div>`;
+                return;
+            }
+            out.innerHTML = `<pre class="bk-log-tail">${escapeHtml(result.message || 'Could not prepare the client.')}</pre>`;
+            btn.disabled = false;
+            btn.textContent = 'Prepare client';
+        } catch (e) {
+            out.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+            btn.disabled = false;
+            btn.textContent = 'Prepare client';
+        }
+    }
+
+    // Handle a backend-pushed prepare-client settle event (SSE). If it's for the machine we launched a
+    // prepare on and the readiness modal is still showing it, react: on success re-check readiness so the
+    // "borg installed" row flips green; on failure surface it. The browser never polled to learn this.
+    function onPrepareSettled(payload) {
+        if (!pendingPrepare || !payload || payload.machineName !== pendingPrepare.machineName) return;
+        const job = pendingPrepare.job;
+        pendingPrepare = null;
+        if (payload.state === 'SUCCESS') {
+            msg('borg installed on ' + job.machineName + ' — re-checking.', 'success');
+            checkReadiness(job);   // one-shot re-fetch, not a poll
+            return;
+        }
+        const out = document.getElementById('readinessPrepareOut');
+        if (out) {
+            out.innerHTML = `<div class="bk-provision-status" style="margin-top:0.75rem">${provisionState('FAILED')}</div>
+                <p class="bk-field-note">Installing borg on ${escapeHtml(job.machineName)} failed. Try the staged
+                   script, or install the <code>borgbackup</code> package on the host, then re-check.</p>`;
+        }
+        const btn = document.getElementById('readinessPrepareBtn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Prepare client'; }
+        msg('Preparing "' + job.machineName + '" failed.', 'error');
+    }
+
+    // Vaier can SSH the host but can't gain root (no passwordless sudo), so it staged the install script.
+    // Show the one command to run — never a raw curl | sudo bash.
+    function renderPrepareScriptOnly(out, job, result) {
+        if (result.stagedScriptPath) {
+            const cmd = 'sudo bash ' + result.stagedScriptPath;
+            out.innerHTML = `
+                <div class="bk-guidance" style="margin-top:0.75rem">
+                    <div class="bk-guidance-title">Run the staged install script on the host</div>
+                    <p>Vaier can't gain root over SSH on ${escapeHtml(job.machineName)}, so it placed the borg
+                       install script on the host. Run this on ${escapeHtml(job.machineName)} to install borg:</p>
+                </div>
+                <div class="bk-code-block" style="margin-top:0.5rem">
+                    <code id="prepareStagedCmd"></code>
+                    <button class="btn btn-small btn-secondary" id="prepareCopyBtn">Copy</button>
+                </div>`;
+            document.getElementById('prepareStagedCmd').textContent = cmd;
+            document.getElementById('prepareCopyBtn').onclick =
+                ev => copyToClipboard(cmd, ev.currentTarget);
+            return;
+        }
+        out.innerHTML = `
+            <div class="bk-guidance" style="margin-top:0.75rem">
+                <div class="bk-guidance-title">Install borg on the host</div>
+                <p>Vaier can't install borg over SSH on ${escapeHtml(job.machineName)}. Install the
+                   <code>borgbackup</code> package on the host, then re-check readiness.</p>
+                ${result.message ? `<p class="bk-field-note">${escapeHtml(result.message)}</p>` : ''}
+            </div>`;
     }
 
     // --- Machines (pickers) ---
@@ -1009,7 +1095,7 @@
         document.getElementById('setupCloseBtn').addEventListener('click', () => closeModal('setupModal'));
 
         document.getElementById('serverProvisionCloseBtn').addEventListener('click', () => {
-            stopServerProvisionPoll();
+            pendingProvision = null;
             closeModal('serverProvisionModal');
         });
 
@@ -1046,16 +1132,34 @@
         // Click on the dim backdrop closes a modal (matches vpn-peers/users).
         window.addEventListener('click', e => {
             if (e.target.classList.contains('modal')) {
-                if (e.target.id === 'serverProvisionModal') stopServerProvisionPoll();
+                if (e.target.id === 'serverProvisionModal') pendingProvision = null;
                 e.target.classList.remove('active');
             }
         });
+    }
+
+    // The backup UI never polls: it opens ONE backend SSE stream and reacts to pushed settle events. A
+    // backend sweep does all the host-side polling and pushes when a borg-client install, an on-demand run,
+    // or a server provision finishes.
+    function subscribeToBackupEvents() {
+        try {
+            const es = new EventSource('/backup-jobs/events');
+            const on = (name, handler) => es.addEventListener(name, e => {
+                let payload = null;
+                try { payload = JSON.parse(e.data); } catch (_) { /* ignore malformed */ }
+                if (payload) handler(payload);
+            });
+            on('prepare-client-settled', onPrepareSettled);
+            on('run-settled', onRunSettled);
+            on('provision-settled', onProvisionSettled);
+        } catch (_) { /* SSE unavailable — the action still works, just without live settle */ }
     }
 
     async function init() {
         wire();
         if (!(await isEnterprise())) { showGate(); return; }
         document.getElementById('bk-app').style.display = '';
+        subscribeToBackupEvents();
         await loadMachines();
         await Promise.all([loadServers(), loadRepositories(), loadJobs(), loadSchedule()]);
     }

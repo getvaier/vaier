@@ -19,8 +19,10 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.BorgCommand;
+import net.vaier.domain.BorgVersion;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.Machine;
+import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -67,6 +69,14 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
     static final long POLL_INTERVAL_MS = 60_000;
 
     /**
+     * The SSE topic and event the backup UI reacts to when a run settles. The frontend never polls: this
+     * backend sweep does the host-side polling and pushes a {@link #RUN_SETTLED_EVENT} when a run finishes,
+     * which the browser consumes to re-fetch just that job's outcome.
+     */
+    static final String BACKUPS_TOPIC = "backups";
+    static final String RUN_SETTLED_EVENT = "run-settled";
+
+    /**
      * How often the scheduler sweeps for due jobs. It runs frequently (every 15 min) but only <em>fires</em>
      * when the current hour equals the configured schedule hour, so it behaves like a nightly run at hour H
      * without any cron expression or on-host scheduler. Re-reading the hour each tick keeps it live-reconfigurable.
@@ -89,6 +99,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
     private final NotifyAdminsOfBackupFailureUseCase backupNotifier;
     private final ConfigResolver configResolver;
     private final BackupWorkDirResolver workDirResolver;
+    private final ForPublishingEvents events;
     private final Clock clock;
 
     /**
@@ -109,7 +120,8 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
                         NotifyAdminsOfBackupFailureUseCase backupNotifier,
                         ConfigResolver configResolver,
                         Clock clock,
-                        BackupWorkDirResolver workDirResolver) {
+                        BackupWorkDirResolver workDirResolver,
+                        ForPublishingEvents events) {
         this.machines = machines;
         this.credentials = credentials;
         this.remoteCommand = remoteCommand;
@@ -121,6 +133,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         this.configResolver = configResolver;
         this.clock = clock;
         this.workDirResolver = workDirResolver;
+        this.events = events;
     }
 
     /**
@@ -158,6 +171,17 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         if (server.isEmpty()) {
             return recorded(BackupRun.failed(job, runId, clock.instant(),
                 "No backup server named " + repo.serverName()));
+        }
+
+        // Fail fast: a job on a host with no borg client dies with exit 127 / "borg: not found" (the NUC 02
+        // incident) — but only AFTER a detached launch and a poll cycle have been wasted. One pre-flight
+        // `borg --version` probe per run (the nightly sweep already tolerates per-job SSH) catches it up
+        // front and refuses clearly. A probe EXCEPTION is treated as "couldn't verify" and we proceed to
+        // launch anyway (a flaky probe must never block a working host — the run itself still settles cleanly
+        // if borg really is missing); only a definite non-borg result blocks the run.
+        if (borgDefinitelyMissing(machine.get().name())) {
+            return recorded(BackupRun.failed(job, runId, clock.instant(),
+                "borg is not installed on " + job.machineName() + " — run Prepare client"));
         }
 
         // The run reads the passphrase from a provisioned 0600 file via BORG_PASSCOMMAND, so make sure that
@@ -338,6 +362,9 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
                 log.info("Backup {} for job {} finished with exit {}",
                     LogSafe.forLog(run.runId()), LogSafe.forLog(run.jobName()), exitCode.get());
                 alertOnTransition(terminal);
+                // The run settled this tick: push an SSE event so the browser re-fetches this job's outcome
+                // (it never polls). Only on an actual settle, never every tick.
+                publishRunSettled(terminal);
             } else if (run.isStaleWhileRunning(clock.instant(), RUN_GRACE)) {
                 // UNKNOWN is an indeterminate outcome, not a failure for alerting: settle the run but never
                 // page or all-clear on it, and leave the failure tracker untouched. Logged as a warning.
@@ -371,6 +398,30 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         }
     }
 
+    /**
+     * Push a {@link #RUN_SETTLED_EVENT} on the {@link #BACKUPS_TOPIC} SSE topic for a run that just settled,
+     * carrying {@code {jobName, status}} so the browser re-fetches only that job's outcome. A publish failure
+     * is swallowed so it can never break the poll sweep.
+     */
+    private void publishRunSettled(BackupRun terminal) {
+        try {
+            events.publish(BACKUPS_TOPIC, RUN_SETTLED_EVENT, runSettledJson(terminal));
+        } catch (Exception e) {
+            log.debug("Publishing run-settled for job {} failed: {}",
+                LogSafe.forLog(terminal.jobName()), e.getMessage());
+        }
+    }
+
+    /** The SSE payload for a settled run: {@code {"jobName":"…","status":"SUCCESS"}} (JSON-escaped). */
+    private static String runSettledJson(BackupRun run) {
+        return "{\"jobName\":\"" + jsonEscape(run.jobName()) + "\",\"status\":\"" + run.status().name() + "\"}";
+    }
+
+    /** Escape a value for embedding in a double-quoted JSON string (backslash and double quote). */
+    private static String jsonEscape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
     /** The tail of the run's on-host log for the summary, or a generic note if it cannot be read. */
     private String fetchSummary(String machineName, String runId, int exitCode, String workDir) {
         try {
@@ -383,6 +434,27 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
             log.debug("Could not fetch log tail for backup {}: {}", LogSafe.forLog(runId), e.getMessage());
         }
         return exitCode == 0 ? "Backup completed" : "Backup failed with exit " + exitCode;
+    }
+
+    /**
+     * Whether a pre-flight {@code borg --version} probe on {@code machineName} <em>definitely</em> shows borg
+     * is absent: a clean, non-timed-out run that either exits non-zero or whose output does not parse as a
+     * borg version (a {@code borg: not found} / exit 127). A timeout or a thrown SSH error is <em>not</em> a
+     * definite absence — it returns false so the run still launches (the run settles cleanly if borg really is
+     * missing), so a flaky probe never blocks a working host. Never throws.
+     */
+    private boolean borgDefinitelyMissing(String machineName) {
+        try {
+            CommandResult probe = remoteCommand.run(machineName, BorgCommand.versionProbe());
+            if (probe.timedOut()) {
+                return false;
+            }
+            return probe.exitCode() != 0 || BorgVersion.parse(probe.stdout()).isEmpty();
+        } catch (Exception e) {
+            log.debug("borg version probe on {} threw; proceeding to launch: {}",
+                LogSafe.forLog(machineName), e.getMessage());
+            return false;
+        }
     }
 
     private Optional<Machine> findMachine(String name) {

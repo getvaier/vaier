@@ -19,6 +19,9 @@ import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase.RepoInitResult;
 import net.vaier.application.ListArchivesUseCase;
+import net.vaier.application.PrepareBackupClientUseCase;
+import net.vaier.application.PrepareBackupClientUseCase.PrepareResult;
+import net.vaier.application.PrepareBackupClientUseCase.PrepareStatus;
 import net.vaier.application.ProvisionBackupServerUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionResult;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionStatus;
@@ -33,10 +36,12 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.BorgVersion;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -90,6 +95,8 @@ public class BackupRestController {
     private final InitBackupRepositoryUseCase initBackupRepository;
     private final GetMachinesUseCase getMachines;
     private final AuthorizeBackupClientUseCase authorizeBackupClient;
+    private final PrepareBackupClientUseCase prepareBackupClient;
+    private final ForSubscribingToEvents forSubscribingToEvents;
 
     public BackupRestController(SaveBackupRepositoryUseCase saveBackupRepository,
                                GetBackupRepositoriesUseCase getBackupRepositories,
@@ -108,7 +115,9 @@ public class BackupRestController {
                                CheckBackupPrerequisitesUseCase checkBackupPrerequisites,
                                InitBackupRepositoryUseCase initBackupRepository,
                                GetMachinesUseCase getMachines,
-                               AuthorizeBackupClientUseCase authorizeBackupClient) {
+                               AuthorizeBackupClientUseCase authorizeBackupClient,
+                               PrepareBackupClientUseCase prepareBackupClient,
+                               ForSubscribingToEvents forSubscribingToEvents) {
         this.saveBackupRepository = saveBackupRepository;
         this.getBackupRepositories = getBackupRepositories;
         this.deleteBackupRepository = deleteBackupRepository;
@@ -127,6 +136,19 @@ public class BackupRestController {
         this.initBackupRepository = initBackupRepository;
         this.getMachines = getMachines;
         this.authorizeBackupClient = authorizeBackupClient;
+        this.prepareBackupClient = prepareBackupClient;
+        this.forSubscribingToEvents = forSubscribingToEvents;
+    }
+
+    /**
+     * The backup UI's SSE stream. The frontend <strong>never polls</strong>: it opens this stream and reacts
+     * to pushed events (e.g. {@code prepare-client-settled} when a launched borg-client install finishes on a
+     * host — a backend sweep does the host-side polling and publishes here). Mirrors
+     * {@code VpnPeerRestController}'s {@code /events} seam.
+     */
+    @GetMapping(value = "/backup-jobs/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter backupEvents() {
+        return forSubscribingToEvents.subscribe("backups");
     }
 
     // --- Backup servers ---
@@ -403,6 +425,40 @@ public class BackupRestController {
         return ResponseEntity.ok(ProvisionInitResponse.from(result));
     }
 
+    /**
+     * Prepare a job's client host by installing borg on it (the fix for the {@code exit 127} / {@code borg:
+     * not found} run failure). The panel acts from a job's readiness view and the job knows its machine, so
+     * this is job-scoped: it resolves {@code job.machineName()} and runs {@link PrepareBackupClientUseCase}.
+     * {@code 404} when the job is unknown; otherwise {@code 200} with the outcome — {@code started} (poll the
+     * status endpoint) or {@code scriptOnly} (run the staged {@code sudo bash <path>}). Never fails opaquely.
+     */
+    @PostMapping("/backup-jobs/{name}/prepare-client")
+    public ResponseEntity<PrepareClientResponse> prepareClient(@PathVariable String name) {
+        Optional<BackupJob> job = findJob(name);
+        if (job.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        log.info("Preparing backup client for job {}", LogSafe.forLog(name));
+        PrepareResult result = prepareBackupClient.prepareClient(job.get().machineName());
+        return ResponseEntity.ok(PrepareClientResponse.from(result));
+    }
+
+    /**
+     * Report the progress of a launched client-prepare. The install is detached (an apt/dnf install can
+     * exceed the exec cap), so {@code POST …/prepare-client} returns once it has started and the UI polls
+     * this for the outcome: {@code RUNNING} until the install settles, then {@code SUCCESS}/{@code FAILED}
+     * with a log tail. {@code 404} when the job is unknown.
+     */
+    @GetMapping("/backup-jobs/{name}/prepare-client/status")
+    public ResponseEntity<PrepareClientStatusResponse> prepareClientStatus(@PathVariable String name) {
+        Optional<BackupJob> job = findJob(name);
+        if (job.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        PrepareStatus status = prepareBackupClient.prepareClientStatus(job.get().machineName());
+        return ResponseEntity.ok(PrepareClientStatusResponse.from(status));
+    }
+
     /** A machine to provision from: a first enabled job targeting the repo, else any job that targets it. */
     private Optional<BackupJob> firstJobTargeting(String repositoryName) {
         List<BackupJob> all = getBackupJobs.getBackupJobs();
@@ -476,6 +532,27 @@ public class BackupRestController {
     record ProvisionStatusResponse(String state, String logTail) {
         static ProvisionStatusResponse from(ProvisionStatus s) {
             return new ProvisionStatusResponse(s.state().name(), s.logTail());
+        }
+    }
+
+    /**
+     * The outcome of a prepare-client attempt for the UI (never carries a secret). Mirrors
+     * {@link ProvisionServerResponse}: {@code stagedScriptPath} is the absolute on-host path Vaier wrote the
+     * install script to when it could SSH the host but not gain root, so the UI renders {@code sudo bash
+     * <path>} precisely; it is {@code null} on every other path.
+     */
+    record PrepareClientResponse(boolean prepared, boolean scriptOnly, boolean started, String message,
+                                 String stagedScriptPath) {
+        static PrepareClientResponse from(PrepareResult r) {
+            return new PrepareClientResponse(r.prepared(), r.scriptOnly(), r.started(), r.message(),
+                r.stagedScriptPath());
+        }
+    }
+
+    /** The progress of a launched client-prepare: {@code RUNNING}/{@code SUCCESS}/{@code FAILED} + a log tail. */
+    record PrepareClientStatusResponse(String state, String logTail) {
+        static PrepareClientStatusResponse from(PrepareStatus s) {
+            return new PrepareClientStatusResponse(s.state().name(), s.logTail());
         }
     }
 
