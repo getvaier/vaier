@@ -1,22 +1,36 @@
 package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.vaier.application.AuthorizeBackupClientUseCase;
+import net.vaier.application.AuthorizeBackupClientUseCase.AuthorizeResult;
 import net.vaier.application.CheckBackupPrerequisitesUseCase;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.BorgAvailability;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.RepoReachability;
+import net.vaier.application.CheckBackupPrerequisitesUseCase.ServerBorgAuth;
+import net.vaier.application.GenerateBackupServerSetupScriptUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase.RepoInitResult;
 import net.vaier.application.ListArchivesUseCase;
+import net.vaier.application.ProvisionBackupServerUseCase;
+import net.vaier.application.ProvisionBackupServerUseCase.ProvisionResult;
+import net.vaier.application.ProvisionBackupServerUseCase.ProvisionState;
+import net.vaier.application.ProvisionBackupServerUseCase.ProvisionStatus;
+import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.service.BackupService;
 import net.vaier.domain.Archive;
+import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.Machine;
+import net.vaier.domain.MachineType;
 import net.vaier.domain.BorgVersion;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.Edition;
+import net.vaier.domain.BackupServer;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
+import net.vaier.domain.port.ForPersistingBackupServers;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import net.vaier.rest.BackupRestController.ArchiveResponse;
 import net.vaier.rest.BackupRestController.RepositoryRequest;
@@ -51,12 +65,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class BackupRestControllerTest {
 
     ForPersistingBackupRepositories repositories;
+    InMemoryServers backupServers;
     ForPersistingBackupJobs jobs;
     InMemoryRuns runs;
     RunBackupJobUseCase runBackupJob;
     ListArchivesUseCase listArchives;
     CheckBackupPrerequisitesUseCase checkPrerequisites;
     InitBackupRepositoryUseCase initBackupRepository;
+    ProvisionBackupServerUseCase provisionBackupServer;
+    GenerateBackupServerSetupScriptUseCase generateSetupScript;
+    GetMachinesUseCase getMachines;
+    AuthorizeBackupClientUseCase authorizeBackupClient;
     BackupService service;
     BackupRestController controller;
     ObjectMapper objectMapper = new ObjectMapper();
@@ -84,6 +103,16 @@ class BackupRestControllerTest {
         @Override public void deleteByName(String name) { store.removeIf(j -> j.name().equals(name)); }
     }
 
+    static final class InMemoryServers implements ForPersistingBackupServers {
+        final List<BackupServer> store = new ArrayList<>();
+        @Override public List<BackupServer> getAll() { return List.copyOf(store); }
+        @Override public Optional<BackupServer> getByName(String name) {
+            return store.stream().filter(s -> s.name().equals(name)).findFirst();
+        }
+        @Override public void save(BackupServer s) { store.removeIf(x -> x.name().equals(s.name())); store.add(s); }
+        @Override public void deleteByName(String name) { store.removeIf(s -> s.name().equals(name)); }
+    }
+
     static final class InMemoryRuns implements ForRecordingBackupRuns {
         final List<BackupRun> store = new ArrayList<>();
         @Override public void record(BackupRun run) { store.add(run); }
@@ -96,19 +125,42 @@ class BackupRestControllerTest {
     @BeforeEach
     void setUp() {
         repositories = new InMemoryRepos();
+        backupServers = new InMemoryServers();
         jobs = new InMemoryJobs();
         runs = new InMemoryRuns();
         runBackupJob = mock(RunBackupJobUseCase.class);
         listArchives = mock(ListArchivesUseCase.class);
         checkPrerequisites = mock(CheckBackupPrerequisitesUseCase.class);
         initBackupRepository = mock(InitBackupRepositoryUseCase.class);
-        service = new BackupService(repositories, jobs, runs);
+        provisionBackupServer = mock(ProvisionBackupServerUseCase.class);
+        generateSetupScript = mock(GenerateBackupServerSetupScriptUseCase.class);
+        getMachines = mock(GetMachinesUseCase.class);
+        authorizeBackupClient = mock(AuthorizeBackupClientUseCase.class);
+        service = new BackupService(repositories, backupServers, jobs, runs);
         controller = new BackupRestController(service, service, service, service, service, service,
-            service, runBackupJob, listArchives, checkPrerequisites, initBackupRepository);
+            generateSetupScript, provisionBackupServer, service, service, service, service, runBackupJob,
+            listArchives, checkPrerequisites, initBackupRepository, getMachines, authorizeBackupClient);
+    }
+
+    private Machine machine(String name) {
+        return new Machine(name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
+            null, "10.13.13.9", false, null, DeviceCategory.SERVER, null);
+    }
+
+    /** MockMvc that runs the Enterprise-edition gate (a licensed instance) in front of the controller. */
+    private MockMvc enterpriseMockMvc() {
+        return MockMvcBuilders.standaloneSetup(controller)
+            .addInterceptors(new EnterpriseLicenseInterceptor(() -> Edition.ENTERPRISE))
+            .build();
+    }
+
+    private BackupServer server() {
+        return new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false);
     }
 
     private BackupRepository repo() {
-        return new BackupRepository("nas-borg", "192.168.3.3", 8022, "borg", "./colina", "s3cr3t", false);
+        return new BackupRepository("nas-borg", "nas-borg", "./colina", "s3cr3t", false);
     }
 
     private BackupJob job() {
@@ -126,6 +178,20 @@ class BackupRestControllerTest {
     @Test
     void communityEditionGets402OnAllRoutes() throws Exception {
         MockMvc mvc = communityMockMvc();
+
+        // Slice 3: the backup-server routes are gated too.
+        mvc.perform(get("/backup-servers")).andExpect(status().isPaymentRequired());
+        mvc.perform(get("/backup-servers/nas-borg")).andExpect(status().isPaymentRequired());
+        mvc.perform(put("/backup-servers/nas-borg")
+            .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isPaymentRequired());
+        mvc.perform(delete("/backup-servers/nas-borg")).andExpect(status().isPaymentRequired());
+        mvc.perform(get("/backup-servers/nas-borg/setup.sh")).andExpect(status().isPaymentRequired());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .post("/backup-servers/nas-borg/provision")).andExpect(status().isPaymentRequired());
+        mvc.perform(get("/backup-servers/nas-borg/provision/status")).andExpect(status().isPaymentRequired());
+        // Slice 4: the key-trust route is gated too.
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .post("/backup-servers/nas-borg/authorize/colina27")).andExpect(status().isPaymentRequired());
 
         mvc.perform(get("/backup-repositories")).andExpect(status().isPaymentRequired());
         mvc.perform(get("/backup-repositories/nas-borg")).andExpect(status().isPaymentRequired());
@@ -149,7 +215,7 @@ class BackupRestControllerTest {
     @Test
     void putThenGetRepositoryNeverReturnsPassphrase() throws Exception {
         controller.saveRepository("nas-borg",
-            new RepositoryRequest("192.168.3.3", 8022, "borg", "./colina", "s3cr3t-passphrase", false));
+            new RepositoryRequest("nas-borg", "./colina", "s3cr3t-passphrase", false));
 
         RepositoryResponse body = controller.getRepository("nas-borg").getBody();
         assertThat(body).isNotNull();
@@ -163,22 +229,36 @@ class BackupRestControllerTest {
     }
 
     @Test
+    void getRepositoryReturnsEffectiveRepoPathDerivedFromServer() {
+        // A repository added by name only (no path override) derives its path from its server. The response
+        // shows the effective path so the UI can display where the store points.
+        backupServers.save(server());
+        controller.saveRepository("colina27", new RepositoryRequest("nas-borg", null, "s3cr3t", false));
+
+        RepositoryResponse body = controller.getRepository("colina27").getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.serverName()).isEqualTo("nas-borg");
+        assertThat(body.repoPath()).isEqualTo("home/borg/backups/colina27");
+    }
+
+    @Test
     void editWithBlankPassphraseKeepsStoredSecret() {
         controller.saveRepository("nas-borg",
-            new RepositoryRequest("192.168.3.3", 8022, "borg", "./colina", "original-secret", false));
+            new RepositoryRequest("nas-borg", "./colina", "original-secret", false));
 
-        // Edit changing the host but leaving the passphrase blank -> keep the stored secret.
+        // Edit changing the server but leaving the passphrase blank -> keep the stored secret.
         controller.saveRepository("nas-borg",
-            new RepositoryRequest("192.168.3.9", 8022, "borg", "./colina", "   ", false));
+            new RepositoryRequest("other-server", "./colina", "   ", false));
 
         BackupRepository stored = repositories.getByName("nas-borg").orElseThrow();
         assertThat(stored.passphrase()).isEqualTo("original-secret");
-        assertThat(stored.nasHost()).isEqualTo("192.168.3.9");
+        assertThat(stored.serverName()).isEqualTo("other-server");
     }
 
     @Test
     void postRunReturns202AndRunningStatus() {
         repositories.save(repo());
+        backupServers.save(server());
         jobs.save(job());
         BackupRun running = BackupRun.started(job(), "job-colina-home-1720404000000",
             Instant.parse("2026-07-08T02:00:00Z"));
@@ -196,6 +276,18 @@ class BackupRestControllerTest {
     @Test
     void postRunUnknownJobReturns404() {
         ResponseEntity<RunResponse> response = controller.runJob("does-not-exist");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(runBackupJob, never()).runJob(any(), any());
+    }
+
+    @Test
+    void postRunUnknownBackupServerReturns404() {
+        // The job and its repository exist, but the repository's Backup server is not configured.
+        repositories.save(repo());
+        jobs.save(job());
+
+        ResponseEntity<RunResponse> response = controller.runJob("colina-home");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         verify(runBackupJob, never()).runJob(any(), any());
@@ -261,11 +353,15 @@ class BackupRestControllerTest {
 
     @Test
     void provisionCheckReturnsStatus() {
+        repositories.save(repo());
+        backupServers.save(server());
         jobs.save(job());
         when(checkPrerequisites.checkBorg("Colina 27"))
             .thenReturn(new BorgAvailability(true, Optional.of(new BorgVersion(1, 2, 8)), true));
         when(checkPrerequisites.checkNas("nas-borg", "Colina 27"))
             .thenReturn(new RepoReachability(true));
+        when(checkPrerequisites.checkServerAuth("nas-borg", "Colina 27", Optional.of(new BorgVersion(1, 2, 8))))
+            .thenReturn(new ServerBorgAuth(true, Optional.of(new BorgVersion(1, 4, 3)), true));
 
         ResponseEntity<BackupRestController.ProvisionCheckResponse> response =
             controller.provisionCheck("colina-home");
@@ -276,6 +372,37 @@ class BackupRestControllerTest {
         assertThat(response.getBody().borgVersion()).isEqualTo("1.2.8");
         assertThat(response.getBody().borgSupported()).isTrue();
         assertThat(response.getBody().nasReachable()).isTrue();
+        // Slice 5: the auth+version fields the wizard needs to avoid a false all-green.
+        assertThat(response.getBody().borgAuthOk()).isTrue();
+        assertThat(response.getBody().serverBorgVersion()).isEqualTo("1.4.3");
+        assertThat(response.getBody().versionsCompatible()).isTrue();
+    }
+
+    @Test
+    void provisionCheckSurfacesTheFalseAllGreenWhenTheClientKeyIsNotTrusted() {
+        // The exact live-hardware regression: borg installed, NAS port open, but the client cannot
+        // authenticate. The response MUST carry borgAuthOk=false so it cannot read as ready.
+        repositories.save(repo());
+        backupServers.save(server());
+        jobs.save(job());
+        when(checkPrerequisites.checkBorg("Colina 27"))
+            .thenReturn(new BorgAvailability(true, Optional.of(new BorgVersion(1, 2, 8)), true));
+        when(checkPrerequisites.checkNas("nas-borg", "Colina 27"))
+            .thenReturn(new RepoReachability(true));
+        when(checkPrerequisites.checkServerAuth("nas-borg", "Colina 27", Optional.of(new BorgVersion(1, 2, 8))))
+            .thenReturn(new ServerBorgAuth(false, Optional.empty(), false));
+
+        BackupRestController.ProvisionCheckResponse body =
+            controller.provisionCheck("colina-home").getBody();
+
+        assertThat(body).isNotNull();
+        // borg and the port both look fine...
+        assertThat(body.borgInstalled()).isTrue();
+        assertThat(body.nasReachable()).isTrue();
+        // ...but auth is the truth: not ready.
+        assertThat(body.borgAuthOk()).isFalse();
+        assertThat(body.serverBorgVersion()).isNull();
+        assertThat(body.versionsCompatible()).isFalse();
     }
 
     @Test
@@ -288,12 +415,29 @@ class BackupRestControllerTest {
     }
 
     @Test
+    void provisionCheckUnknownBackupServerReturns404() {
+        // The job and its repository exist, but the repository's Backup server is not configured.
+        repositories.save(repo());
+        jobs.save(job());
+
+        ResponseEntity<BackupRestController.ProvisionCheckResponse> response =
+            controller.provisionCheck("colina-home");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(checkPrerequisites, never()).checkBorg(any());
+    }
+
+    @Test
     void provisionCheckReportsBorgAbsentWithNullVersion() {
+        repositories.save(repo());
+        backupServers.save(server());
         jobs.save(job());
         when(checkPrerequisites.checkBorg("Colina 27"))
             .thenReturn(new BorgAvailability(false, Optional.empty(), false));
         when(checkPrerequisites.checkNas("nas-borg", "Colina 27"))
             .thenReturn(new RepoReachability(false));
+        when(checkPrerequisites.checkServerAuth("nas-borg", "Colina 27", Optional.empty()))
+            .thenReturn(new ServerBorgAuth(false, Optional.empty(), false));
 
         BackupRestController.ProvisionCheckResponse body =
             controller.provisionCheck("colina-home").getBody();
@@ -303,6 +447,9 @@ class BackupRestControllerTest {
         assertThat(body.borgVersion()).isNull();
         assertThat(body.borgSupported()).isFalse();
         assertThat(body.nasReachable()).isFalse();
+        assertThat(body.borgAuthOk()).isFalse();
+        assertThat(body.serverBorgVersion()).isNull();
+        assertThat(body.versionsCompatible()).isFalse();
     }
 
     @Test
@@ -341,5 +488,190 @@ class BackupRestControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         verify(initBackupRepository, never()).initRepo(any(), any());
+    }
+
+    // --- Slice 3: backup-server CRUD, setup.sh, provision ---
+
+    @Test
+    void putThenGetServerRoundTrips() {
+        controller.saveServer("nas-borg", new BackupRestController.ServerRequest(
+            "NAS", "192.168.3.3", 8022, "borg", "home/borg/backups", "/volume1/docker/borg", true));
+
+        BackupRestController.ServerResponse body = controller.getServer("nas-borg").getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.name()).isEqualTo("nas-borg");
+        assertThat(body.machineName()).isEqualTo("NAS");
+        assertThat(body.host()).isEqualTo("192.168.3.3");
+        assertThat(body.sshPort()).isEqualTo(8022);
+        assertThat(body.serverDataPath()).isEqualTo("/volume1/docker/borg");
+        assertThat(body.managed()).isTrue();
+    }
+
+    @Test
+    void saveServerDefaultsSshPortWhenOmitted() {
+        controller.saveServer("nas-borg", new BackupRestController.ServerRequest(
+            "NAS", "192.168.3.3", null, null, null, "/volume1/docker/borg", true));
+
+        BackupServer stored = backupServers.getByName("nas-borg").orElseThrow();
+        assertThat(stored.sshPort()).isEqualTo(BackupServer.DEFAULT_SSH_PORT);
+        assertThat(stored.borgUser()).isEqualTo(BackupServer.DEFAULT_BORG_USER);
+    }
+
+    @Test
+    void getServerUnknownReturns404() {
+        assertThat(controller.getServer("nope").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void deleteServerRemovesIt() {
+        backupServers.save(server());
+
+        controller.deleteServer("nas-borg");
+
+        assertThat(backupServers.getByName("nas-borg")).isEmpty();
+    }
+
+    @Test
+    void setupScriptReturnsAttachmentWithShContentType() throws Exception {
+        backupServers.save(server());
+        when(generateSetupScript.generateSetupScript("nas-borg"))
+            .thenReturn(Optional.of("#!/usr/bin/env bash\nimage: horaceworblehat/borg-server:2.8.6\n"));
+        MockMvc mvc = enterpriseMockMvc();
+
+        mvc.perform(get("/backup-servers/nas-borg/setup.sh"))
+            .andExpect(status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .header().string("Content-Disposition", "attachment; filename=nas-borg-setup.sh"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .content().contentType("application/x-sh"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                .content().string(org.hamcrest.Matchers.containsString(
+                    "image: horaceworblehat/borg-server:2.8.6")));
+    }
+
+    @Test
+    void setupScriptUnknownServerReturns404() throws Exception {
+        when(generateSetupScript.generateSetupScript("nope")).thenReturn(Optional.empty());
+        MockMvc mvc = enterpriseMockMvc();
+
+        mvc.perform(get("/backup-servers/nope/setup.sh")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void provisionServerLaunchesAndReturnsStartedResult() {
+        backupServers.save(server());
+        when(provisionBackupServer.provision("nas-borg"))
+            .thenReturn(new ProvisionResult(false, false, true, "Provisioning started on NAS", null));
+
+        ResponseEntity<BackupRestController.ProvisionServerResponse> response =
+            controller.provisionServer("nas-borg");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().provisioned()).isFalse();
+        assertThat(response.getBody().scriptOnly()).isFalse();
+        assertThat(response.getBody().started()).isTrue();
+        assertThat(response.getBody().stagedScriptPath()).isNull();
+        verify(provisionBackupServer).provision("nas-borg");
+    }
+
+    @Test
+    void provisionServerScriptOnlyCarriesTheStagedScriptPath() {
+        // When Vaier stages the setup script over SSH (the Synology case), the response carries the exact
+        // on-host path so the UI can render `sudo bash <path>` precisely rather than parsing the message prose.
+        backupServers.save(server());
+        when(provisionBackupServer.provision("nas-borg"))
+            .thenReturn(new ProvisionResult(false, true, false,
+                "Vaier cannot drive docker over SSH on NAS. The setup script has been placed at "
+                    + "/home/geir/.vaier-backup/nas-borg-borg-setup.sh — run: sudo bash "
+                    + "/home/geir/.vaier-backup/nas-borg-borg-setup.sh",
+                "/home/geir/.vaier-backup/nas-borg-borg-setup.sh"));
+
+        ResponseEntity<BackupRestController.ProvisionServerResponse> response =
+            controller.provisionServer("nas-borg");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().scriptOnly()).isTrue();
+        assertThat(response.getBody().stagedScriptPath())
+            .isEqualTo("/home/geir/.vaier-backup/nas-borg-borg-setup.sh");
+    }
+
+    @Test
+    void provisionServerUnknownReturns404() {
+        ResponseEntity<BackupRestController.ProvisionServerResponse> response =
+            controller.provisionServer("nope");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(provisionBackupServer, never()).provision(any());
+    }
+
+    @Test
+    void provisionStatusReturnsStateAndLogTail() {
+        backupServers.save(server());
+        when(provisionBackupServer.provisionStatus("nas-borg"))
+            .thenReturn(new ProvisionStatus(ProvisionState.SUCCESS, "==> setup complete"));
+
+        ResponseEntity<BackupRestController.ProvisionStatusResponse> response =
+            controller.provisionStatus("nas-borg");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().state()).isEqualTo("SUCCESS");
+        assertThat(response.getBody().logTail()).isEqualTo("==> setup complete");
+        verify(provisionBackupServer).provisionStatus("nas-borg");
+    }
+
+    @Test
+    void provisionStatusUnknownServerReturns404() {
+        ResponseEntity<BackupRestController.ProvisionStatusResponse> response =
+            controller.provisionStatus("nope");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(provisionBackupServer, never()).provisionStatus(any());
+    }
+
+    // --- Slice 4: SSH key trust (closes #320) ---
+
+    @Test
+    void authorizeReturns200WithResult() {
+        backupServers.save(server());
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+        when(authorizeBackupClient.authorizeClient("nas-borg", "Colina 27"))
+            .thenReturn(new AuthorizeResult(true, false, true, "Client key authorized on nas-borg"));
+
+        ResponseEntity<BackupRestController.AuthorizeResponse> response =
+            controller.authorizeClient("nas-borg", "Colina 27");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().authorized()).isTrue();
+        assertThat(response.getBody().alreadyTrusted()).isFalse();
+        // Slice 8: the host-key pin outcome is surfaced to the UI.
+        assertThat(response.getBody().hostKeyPinned()).isTrue();
+        verify(authorizeBackupClient).authorizeClient("nas-borg", "Colina 27");
+    }
+
+    @Test
+    void authorizeUnknownServerReturns404() {
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.AuthorizeResponse> response =
+            controller.authorizeClient("nope", "Colina 27");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(authorizeBackupClient, never()).authorizeClient(any(), any());
+    }
+
+    @Test
+    void authorizeUnknownMachineReturns404() {
+        backupServers.save(server());
+        when(getMachines.getAllMachines()).thenReturn(List.of());
+
+        ResponseEntity<BackupRestController.AuthorizeResponse> response =
+            controller.authorizeClient("nas-borg", "ghost");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(authorizeBackupClient, never()).authorizeClient(any(), any());
     }
 }

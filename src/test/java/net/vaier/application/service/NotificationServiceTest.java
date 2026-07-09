@@ -330,6 +330,50 @@ class NotificationServiceTest {
         assertThat(subject.getValue()).isEqualTo("[Vaier] Backup recovered: colina-home on Colina 27");
     }
 
+    // --- fleet-backup server down / recovery alerts ---
+
+    private net.vaier.domain.BackupServer backupServer() {
+        return new net.vaier.domain.BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false);
+    }
+
+    @Test
+    void notifyAdminsOfBackupServerDownSendsToAdmins() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                user("carol@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfBackupServerDown(backupServer(),
+                net.vaier.domain.port.ForProbingTcp.ProbeResult.REFUSED);
+
+        ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                recipients.capture(), subject.capture(), body.capture());
+        assertThat(recipients.getValue()).containsExactly("alice@example.com");
+        assertThat(subject.getValue()).isEqualTo(backupServer().downSubject());
+        assertThat(body.getValue()).contains("borg server container is down").contains("vaier.example.com");
+    }
+
+    @Test
+    void notifyAdminsOfBackupServerRecoveredSendsAllClearToAdmins() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(admin("alice@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfBackupServerRecovered(backupServer());
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                anyList(), subject.capture(), any());
+        assertThat(subject.getValue()).isEqualTo(backupServer().recoverySubject());
+    }
+
     @Test
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));

@@ -48,8 +48,8 @@ public final class BorgCommand {
      * template and the source paths. The passphrase is exported into the environment ahead of the borg
      * invocation and masked in the redacted form.
      */
-    public static BuiltCommand create(BackupJob job, BackupRepository repo, String workDir) {
-        String cmd = exportPasscommand(repo, workDir) + buildCreateBody(job, repo);
+    public static BuiltCommand create(BackupServer server, BackupJob job, BackupRepository repo, String workDir) {
+        String cmd = exportPasscommand(repo, workDir) + buildCreateBody(server, job, repo);
         return new BuiltCommand(cmd, cmd);
     }
 
@@ -70,8 +70,9 @@ public final class BorgCommand {
      * {@code $W} (expanded by the outer shell) and {@code \$?} (passed through to the inner shell so it
      * captures the chain's own exit code) are emitted raw.
      */
-    public static BuiltCommand detachedRun(BackupJob job, BackupRepository repo, String runId, String workDir) {
-        String chainBody = buildRunChain(job, repo);
+    public static BuiltCommand detachedRun(BackupServer server, BackupJob job, BackupRepository repo,
+                                           String runId, String workDir) {
+        String chainBody = buildRunChain(server, job, repo);
         String cmd = assembleDetached(repo, chainBody, runId, workDir);
         // The passphrase never appears in the run command (it comes from the provisioned pass file via
         // BORG_PASSCOMMAND), so there is nothing to mask: the redacted twin is identical to exec.
@@ -85,10 +86,10 @@ public final class BorgCommand {
      * by {@code --glob-archives '{hostname}-*'} so a repository shared by several jobs never cross-deletes
      * another host's archives.
      */
-    private static String buildRunChain(BackupJob job, BackupRepository repo) {
-        return buildCreateBody(job, repo)
-            + " && " + buildPruneBody(job, repo)
-            + " && " + buildCompactBody(repo);
+    private static String buildRunChain(BackupServer server, BackupJob job, BackupRepository repo) {
+        return buildCreateBody(server, job, repo)
+            + " && " + buildPruneBody(server, job, repo)
+            + " && " + buildCompactBody(server, repo);
     }
 
     private static String assembleDetached(BackupRepository repo, String chainBody,
@@ -107,8 +108,8 @@ public final class BorgCommand {
      * is <b>not</b> detached — listing is fast and runs inside the normal 20 s SSH exec cap. The redacted
      * twin masks the passphrase for logging.
      */
-    public static BuiltCommand listArchives(BackupRepository repo, String workDir) {
-        String body = "borg list --json " + repo.borgRepoUrl();
+    public static BuiltCommand listArchives(BackupServer server, BackupRepository repo, String workDir) {
+        String body = "borg list --json " + repo.borgRepoUrl(server);
         String cmd = "sh -c \"" + dqEmbed(exportPasscommand(repo, workDir)) + dqEmbed(body) + "\"";
         // No secret in the command (the passcommand reads the pass file) -> redacted equals exec.
         return new BuiltCommand(cmd, cmd);
@@ -120,12 +121,237 @@ public final class BorgCommand {
     }
 
     /**
+     * The three outcomes of the {@link #serverAuthProbe} run: {@code AUTH_OK} (the client authenticated and
+     * borg serve ran — the repository exists <em>or</em> is merely not initialised yet), {@code AUTH_DENIED}
+     * (the client's key is not trusted on the server), or {@code UNREACHABLE} (a connection error, timeout,
+     * dropped tunnel, or output that reads as neither of the above). Deciding which of these a probe produced
+     * is a domain rule, not orchestration, so it lives here.
+     */
+    public enum ServerAuthOutcome { AUTH_OK, AUTH_DENIED, UNREACHABLE }
+
+    /**
+     * The server-side auth probe, run <b>from the client host</b>: {@code borg info} on <em>this
+     * repository's</em> URL, unlocked with the same {@code BORG_PASSCOMMAND} pass file as a run/list/init
+     * (wrapped in {@code sh -c "…"} so the passcommand export reaches borg).
+     *
+     * <p>This replaces a former {@code ssh 'borg --version'} probe, which a <b>restricted, forced-command</b>
+     * client key silently breaks: {@code command="borg serve …"} in {@code authorized_keys} discards the
+     * client's requested command for every session, so {@code borg --version} never runs — borg serve reads
+     * EOF instead and no version comes back. {@code borg info} exercises exactly the path that matters (can
+     * this client talk to {@code borg serve} for its repo?), so it validates auth <em>and</em> the per-repo
+     * restriction in one shot — strictly more meaningful than a version string. The server's version is not
+     * asked here (the forced command makes it unknowable over SSH); it is derived elsewhere for a managed
+     * server (see {@code BorgServerImage#borgVersion()}) and left unknown for an adopted one.
+     */
+    public static String serverAuthProbe(BackupServer server, BackupRepository repo, String workDir) {
+        String body = "borg info " + repo.borgRepoUrl(server);
+        return "sh -c \"" + dqEmbed(exportPasscommand(repo, workDir)) + dqEmbed(body) + "\"";
+    }
+
+    /**
+     * Read a {@link #serverAuthProbe}'s combined output into a {@link ServerAuthOutcome}. Matching is
+     * case-insensitive and keys off a few stable substrings, because borg's exact wording varies by version.
+     * The decision order is the rule:
+     * <ol>
+     *   <li><b>{@code AUTH_DENIED}</b> — {@code Permission denied} / {@code publickey}. borg tunnels
+     *       server-side stderr with a {@code Remote:} prefix, so a {@code Remote: … Permission denied} still
+     *       reads as a denial.</li>
+     *   <li><b>{@code AUTH_OK}</b> — {@code does not exist}: reaching borg's "repository not initialised yet"
+     *       error <em>proves</em> ssh auth succeeded and {@code borg serve} ran. This is the bootstrap case
+     *       on a fresh network, and it must read as ready-to-init, never as a failure.</li>
+     *   <li><b>{@code UNREACHABLE}</b> — a connection error, timeout, dropped tunnel ({@code connection
+     *       refused/closed/reset/timed out}, {@code no route to host}, {@code unreachable},
+     *       {@code could not resolve}).</li>
+     *   <li><b>{@code AUTH_OK}</b> — a successful {@code borg info} body (the repo exists and unlocked):
+     *       recognised by its stable headers ({@code Repository ID}, {@code Encrypted:}, {@code Original
+     *       size}).</li>
+     *   <li>anything else (blank, garbled, an unknown banner) is {@code UNREACHABLE} — never optimistically
+     *       read as success. Never throws.</li>
+     * </ol>
+     */
+    public static ServerAuthOutcome parseServerAuth(String output) {
+        String text = (output == null ? "" : output).toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("permission denied") || text.contains("publickey")) {
+            return ServerAuthOutcome.AUTH_DENIED;
+        }
+        // Reaching "repository … does not exist" proves auth + borg serve worked; the repo just isn't init'ed.
+        if (text.contains("does not exist")) {
+            return ServerAuthOutcome.AUTH_OK;
+        }
+        if (isConnectionFailure(text)) {
+            return ServerAuthOutcome.UNREACHABLE;
+        }
+        if (isBorgInfoBody(text)) {
+            return ServerAuthOutcome.AUTH_OK;
+        }
+        return ServerAuthOutcome.UNREACHABLE;
+    }
+
+    /** Stable connection-failure markers borg/ssh emit when the server host or tunnel is unreachable. */
+    private static boolean isConnectionFailure(String lower) {
+        return lower.contains("connection refused")
+            || lower.contains("connection closed")
+            || lower.contains("connection reset")
+            || lower.contains("connection timed out")
+            || lower.contains("timed out")
+            || lower.contains("no route to host")
+            || lower.contains("could not resolve")
+            || lower.contains("name or service not known")
+            || lower.contains("network is unreachable")
+            || lower.contains("unreachable");
+    }
+
+    /** Stable headers a successful repo-level {@code borg info} always prints, across borg 1.2–1.4. */
+    private static boolean isBorgInfoBody(String lower) {
+        return lower.contains("repository id") || lower.contains("original size")
+            || lower.contains("encrypted:");
+    }
+
+    /**
+     * On the <b>client</b> host: generate the borg client's {@code ~/.ssh/id_ed25519} key pair only when it
+     * is absent (idempotent — it never overwrites an existing key), with no passphrase, then print the
+     * public key so the orchestration can read it and trust it on the {@link BackupServer}. The private key
+     * never leaves the host; the public key it prints is <b>not</b> a secret, so this is a plain command
+     * string (no {@link BuiltCommand} redaction needed).
+     */
+    public static String ensureClientKeyPair() {
+        return "[ -f \"$HOME/.ssh/id_ed25519\" ] "
+            + "|| ssh-keygen -t ed25519 -N '' -q -f \"$HOME/.ssh/id_ed25519\"; "
+            + "cat \"$HOME/.ssh/id_ed25519.pub\"";
+    }
+
+    /**
+     * Render the <b>restricted</b> {@code authorized_keys} entry for {@code publicKey}: a forced
+     * {@code command="borg serve …"} with one {@code --restrict-to-path} per repository the client may
+     * reach, plus the {@code restrict} option (no pty, no port/agent/X11 forwarding, no shell), then the
+     * public key itself. A <em>bare</em> key would grant a full interactive shell as the borg user — enough
+     * for any one compromised client to read and delete every other host's repositories — so Vaier never
+     * writes one. The paths are kept in the order given; the orchestrator sorts and dedupes them first for a
+     * deterministic line (the idempotency check compares this exact string).
+     *
+     * <p>Deciding what a trusted entry looks like is a domain rule, so it lives here rather than being
+     * assembled by the orchestrator.
+     */
+    public static String restrictedKeyEntry(String publicKey, java.util.List<String> restrictPaths) {
+        StringBuilder options = new StringBuilder("command=\"borg serve");
+        for (String path : restrictPaths) {
+            options.append(" --restrict-to-path ").append(path);
+        }
+        options.append("\",restrict");
+        return options + " " + publicKey;
+    }
+
+    /**
+     * The key material of an {@code authorized_keys} line: the base64 blob that identifies a key regardless
+     * of its options or comment (e.g. the {@code AAAA…} field of {@code ssh-ed25519 AAAA… geir@colina}).
+     * Works on a bare key, a no-comment key, and a previously-restricted line ({@code command="…",restrict
+     * ssh-ed25519 AAAA… …}) alike — the blob is the first whitespace-separated token that reads as a real
+     * base64 blob. {@code Optional.empty()} when none is present. This is what an upsert keys off, so
+     * extracting it is a domain rule.
+     */
+    public static Optional<String> keyMaterial(String publicKeyLine) {
+        if (publicKeyLine == null) {
+            return Optional.empty();
+        }
+        for (String token : publicKeyLine.strip().split("\\s+")) {
+            if (token.matches("[A-Za-z0-9+/]{20,}={0,3}")) {
+                return Optional.of(token);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * On the <b>backup server's machine</b>: trust {@code publicKey} — confined to {@code restrictPaths} —
+     * in the server's host-side {@code authorized_keys} (a mounted-volume path — see
+     * {@link BackupServer#authorizedKeysPath()}), idempotently and newline-safely. What gets written is the
+     * {@link #restrictedKeyEntry restricted entry}, never a bare key. A public key is not a secret, so this
+     * is a plain command string — its exec form is safe to log verbatim (there is no redacted twin to keep).
+     *
+     * <p>Landmines learned on live hardware are handled here:
+     * <ul>
+     *   <li><b>Missing trailing newline.</b> The real {@code authorized_keys} ended with no {@code \n}; a
+     *       naive {@code >>} would splice the new key onto the previous key's line, corrupting both.
+     *       {@code awk 1} rewrites the file guaranteeing every line — including the last — is newline
+     *       terminated before anything is appended.</li>
+     *   <li><b>Upsert, not append.</b> When the restriction set changes (a repository was added for this
+     *       machine) the <em>line</em> differs, so a naive append would leave two entries for the same key —
+     *       the older, broader one still granting access. Identity is the {@link #keyMaterial key material},
+     *       stable across options/comment: if the exact desired line is already present it is a no-op
+     *       ({@code ALREADY}); otherwise <em>every</em> prior line carrying that key material (bare or
+     *       previously restricted) is removed with {@code grep -vF} before the new entry is appended
+     *       ({@code ADDED}). {@link #wasAlreadyTrusted(String)} reads that marker.</li>
+     *   <li><b>Never clobber.</b> Existing keys (other hosts' and the borg server's own) survive untouched;
+     *       the file is copied to a {@code .bak-vaier} backup before being rewritten.</li>
+     * </ul>
+     *
+     * <p>Ownership: the work is staged in a {@code .tmp} written by the SSH user and moved into place with
+     * {@code mv}, so the final file is owned by that same SSH user — exactly who Slice 3b's setup chowns
+     * {@code authorized_keys} to, so the write succeeds without root. The whole entry is single-quoted via
+     * {@link #singleQuote} (it contains spaces, {@code /}, {@code +} and an embedded {@code "}); it is never
+     * interpolated unquoted.
+     */
+    public static String authorizeKey(BackupServer server, String publicKey,
+                                      java.util.List<String> restrictPaths) {
+        String ak = server.authorizedKeysPath();
+        String entry = restrictedKeyEntry(publicKey, restrictPaths);
+        String qEntry = singleQuote(entry);
+        // Identify the key by its stable material so a changed restriction set replaces, never duplicates.
+        String qMaterial = singleQuote(keyMaterial(publicKey).orElse(publicKey));
+        return "AK=" + singleQuote(ak) + "; "
+            + "mkdir -p \"$(dirname \"$AK\")\"; touch \"$AK\"; "
+            + "cp \"$AK\" \"$AK.bak-vaier\"; "
+            + "awk 1 \"$AK.bak-vaier\" > \"$AK.tmp\"; "
+            + "if grep -qxF " + qEntry + " \"$AK.tmp\"; then echo ALREADY; "
+            + "else grep -vF " + qMaterial + " \"$AK.tmp\" > \"$AK.tmp2\" || true; "
+            + "printf '%s\\n' " + qEntry + " >> \"$AK.tmp2\"; mv \"$AK.tmp2\" \"$AK.tmp\"; echo ADDED; fi; "
+            + "mv \"$AK.tmp\" \"$AK\"; chmod 600 \"$AK\"";
+    }
+
+    /**
+     * Read an {@link #authorizeKey} run's marker: {@code true} when the client key was already present (the
+     * append was a no-op), {@code false} when it was freshly added. Whether an authorize was idempotent is
+     * a domain reading of the command's output, so it lives here rather than in the orchestrator.
+     */
+    public static boolean wasAlreadyTrusted(String stdout) {
+        return stdout != null && stdout.contains("ALREADY");
+    }
+
+    /**
+     * Validate and normalise the public-key output {@link #ensureClientKeyPair} prints on the client:
+     * {@code Optional.of} a single plausible {@code ssh-<type> <base64> [comment]} line, else
+     * {@code Optional.empty()}. This guards {@code authorized_keys} against a keygen error, a
+     * {@code Permission denied} line, or MOTD banner noise slipping in — anything that is not exactly one
+     * well-formed key line is rejected. Deciding what counts as a valid key is a domain rule, so it lives
+     * here rather than in the orchestrator.
+     */
+    public static Optional<String> parsePublicKey(String raw) {
+        if (raw == null) {
+            return Optional.empty();
+        }
+        String line = raw.strip();
+        // Exactly one line: an MOTD banner or a keygen error printed alongside the key must never pass.
+        if (line.isEmpty() || line.lines().count() != 1) {
+            return Optional.empty();
+        }
+        String[] parts = line.split("\\s+");
+        if (parts.length < 2) {
+            return Optional.empty();
+        }
+        // A plausible key type (ssh-ed25519, ssh-rsa, ecdsa-sha2-*, sk-ssh-*) and a base64 blob of real
+        // length — "not-a-key" / "Permission denied" / "short" are all rejected here.
+        boolean typeOk = parts[0].matches("(ssh-|ecdsa-sha2-|sk-ssh-|sk-ecdsa-)[A-Za-z0-9@.-]+");
+        boolean blobOk = parts[1].matches("[A-Za-z0-9+/]{20,}={0,3}");
+        return (typeOk && blobOk) ? Optional.of(line) : Optional.empty();
+    }
+
+    /**
      * A bounded probe that checks whether the client host can reach the NAS borg port over the tunnel: a
      * 5-second {@code /dev/tcp} connect that echoes {@code NAS_OPEN} on success and {@code NAS_CLOSED}
      * otherwise, so a firewalled or down NAS never hangs the check.
      */
-    public static String reachabilityProbe(BackupRepository repo) {
-        return "timeout 5 bash -c 'cat </dev/null >/dev/tcp/" + repo.nasHost() + "/" + repo.sshPort() + "'"
+    public static String reachabilityProbe(BackupServer server) {
+        return "timeout 5 bash -c 'cat </dev/null >/dev/tcp/" + server.host() + "/" + server.sshPort() + "'"
             + " && echo NAS_OPEN || echo NAS_CLOSED";
     }
 
@@ -134,15 +360,131 @@ public final class BorgCommand {
         return stdout != null && stdout.strip().contains("NAS_OPEN");
     }
 
+    /** A well-formed host-key line: a known key type and a base64 blob, optionally followed by a comment. */
+    private static final java.util.regex.Pattern HOST_KEY_LINE = java.util.regex.Pattern.compile(
+        "^(ssh-ed25519|ssh-rsa|ecdsa-sha2-\\S+) ([A-Za-z0-9+/]+=*)(\\s|$)");
+
+    /**
+     * On the <b>backup server's machine</b>: read the public host keys the setup script published (see
+     * {@link BorgServerSetupScript} and {@link BackupServer#hostKeysPath()}) so Vaier can pin them on clients.
+     * A plain {@code cat} of the {@code host_keys.pub} file — public keys, safe to log. When the file is
+     * absent (an adopted or not-yet-provisioned server) {@code cat} exits non-zero and the orchestrator skips
+     * pinning rather than failing the authorize.
+     */
+    public static String readServerHostKeys(BackupServer server) {
+        return "cat " + singleQuote(server.hostKeysPath());
+    }
+
+    /**
+     * Turn a {@link #readServerHostKeys} dump into the valid {@code type key} host-key pairs it contains,
+     * dropping any comment field. Only lines that read as a real host key ({@code ssh-ed25519} / {@code
+     * ssh-rsa} / {@code ecdsa-sha2-*} followed by a base64 blob) are kept — blank lines, {@code #} comments,
+     * MOTD banners and a leaked private-key header are all rejected, so nothing but a real key can ever reach
+     * a client's {@code known_hosts}. Deciding what counts as a valid host key is a domain rule, so it lives
+     * here. Never throws.
+     */
+    public static java.util.List<String> parseHostKeys(String output) {
+        if (output == null) {
+            return java.util.List.of();
+        }
+        java.util.List<String> keys = new java.util.ArrayList<>();
+        for (String line : output.split("\\R")) {
+            java.util.regex.Matcher m = HOST_KEY_LINE.matcher(line.strip());
+            if (m.find()) {
+                keys.add(m.group(1) + " " + m.group(2));
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * On the <b>client</b> host: pin {@code hostKeyLines} (the {@code type key} pairs from
+     * {@link #parseHostKeys}) for {@code server} into {@code ~/.ssh/known_hosts}, so borg — which runs
+     * non-interactively over SSH ({@code StrictHostKeyChecking=ask} with no tty) — has an authoritative pin
+     * and never has to trust-on-first-use. Vaier is the trusted broker: it obtained these keys over its own
+     * pinned, vault-authenticated channel to the server's machine, so this is a real pin, not TOFU.
+     *
+     * <p>The command is idempotent and known_hosts-safe:
+     * <ul>
+     *   <li>backs up {@code known_hosts} to {@code known_hosts.bak-vaier} before rewriting, so a client's
+     *       other pins are never lost;</li>
+     *   <li>removes <em>only</em> the existing entries for this exact {@code [host]:port} with {@code grep
+     *       -vF} (explicit and testable — not {@code ssh-keygen -R}) <b>before</b> appending, so a second run
+     *       replaces rather than duplicates;</li>
+     *   <li>appends one {@code [host]:port type key} line per key;</li>
+     *   <li>{@code mkdir -p ~/.ssh}, {@code chmod 700 ~/.ssh}, {@code chmod 600 known_hosts};</li>
+     *   <li>echoes {@code PINNED <n>} so the orchestrator can confirm (see {@link #parsePinnedCount}).</li>
+     * </ul>
+     *
+     * <p>The known_hosts key is {@code [host]:port} because the borg sshd uses a non-standard port; a
+     * standard port 22 uses the bare {@code host} form instead (both are handled). Each entry is single-quoted
+     * via {@link #singleQuote} so no character in a key can break out.
+     */
+    public static String pinHostKeys(BackupServer server, java.util.List<String> hostKeyLines) {
+        String marker = knownHostsMarker(server);
+        StringBuilder sb = new StringBuilder();
+        sb.append("KH=\"$HOME/.ssh/known_hosts\"; ");
+        sb.append("mkdir -p \"$HOME/.ssh\"; chmod 700 \"$HOME/.ssh\"; ");
+        sb.append("touch \"$KH\"; cp \"$KH\" \"$KH.bak-vaier\"; ");
+        // Strip every prior entry for THIS host first, so re-pinning replaces rather than duplicates.
+        //
+        // This MUST be `ssh-keygen -R`, not a `grep -vF` on the marker. OpenSSH defaults to
+        // `HashKnownHosts yes` on Debian/Ubuntu, so an existing pin is stored as an opaque `|1|…` hash and a
+        // substring grep cannot see it — the stale key would survive and the client would keep dying with
+        // REMOTE HOST IDENTIFICATION HAS CHANGED. `ssh-keygen -R` resolves hashed entries, and is anchored
+        // on the host rather than matching a bare substring anywhere in the line.
+        sb.append("ssh-keygen -R ").append(singleQuote(marker)).append(" -f \"$KH\" >/dev/null 2>&1 || true; ");
+        for (String line : hostKeyLines) {
+            sb.append("printf '%s\\n' ").append(singleQuote(marker + " " + line)).append(" >> \"$KH\"; ");
+        }
+        sb.append("chmod 600 \"$KH\"; ");
+        sb.append("echo PINNED ").append(hostKeyLines.size());
+        return sb.toString();
+    }
+
+    /**
+     * The {@code known_hosts} key for {@code server}: {@code [host]:port} for a non-standard port (the borg
+     * sshd's), or the bare {@code host} form when the port is the standard 22. Which form to use is a domain
+     * rule about how OpenSSH addresses a host, so it lives here.
+     */
+    private static String knownHostsMarker(BackupServer server) {
+        return server.sshPort() == 22 ? server.host() : "[" + server.host() + "]:" + server.sshPort();
+    }
+
+    /**
+     * Read a {@link #pinHostKeys} run's {@code PINNED <n>} marker into the number of keys pinned, or empty
+     * when no well-formed marker is present. Whether a pin confirmed is a domain reading of the command's
+     * output, so it lives here. Never throws.
+     */
+    public static Optional<Integer> parsePinnedCount(String stdout) {
+        if (stdout == null) {
+            return Optional.empty();
+        }
+        for (String line : stdout.strip().split("\\R")) {
+            String trimmed = line.strip();
+            if (trimmed.startsWith("PINNED")) {
+                String[] parts = trimmed.split("\\s+");
+                if (parts.length >= 2) {
+                    try {
+                        return Optional.of(Integer.parseInt(parts[1]));
+                    } catch (NumberFormatException e) {
+                        return Optional.empty();
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     /**
      * The {@code borg init} that provisions a fresh repository: repokey-blake2 encryption with the parent
      * directories made, addressed by the repo URL. Like a run, the passphrase is supplied via
      * {@code BORG_PASSCOMMAND} from the provisioned pass file, so init never puts the secret on argv/env
      * either. No secret in the command -> the redacted twin equals exec.
      */
-    public static BuiltCommand init(BackupRepository repo, String workDir) {
+    public static BuiltCommand init(BackupServer server, BackupRepository repo, String workDir) {
         String cmd = exportPasscommand(repo, workDir)
-            + "borg init --encryption=repokey-blake2 --make-parent-dirs " + repo.borgRepoUrl();
+            + "borg init --encryption=repokey-blake2 --make-parent-dirs " + repo.borgRepoUrl(server);
         return new BuiltCommand(cmd, cmd);
     }
 
@@ -269,27 +611,27 @@ public final class BorgCommand {
      * never cross-deletes another host's archives, then the job's daily/weekly/monthly retention and the
      * repo URL.
      */
-    private static String buildPruneBody(BackupJob job, BackupRepository repo) {
+    private static String buildPruneBody(BackupServer server, BackupJob job, BackupRepository repo) {
         return "borg prune --list --glob-archives " + singleQuote(job.archiveGlob())
             + " --keep-daily " + job.keepDaily()
             + " --keep-weekly " + job.keepWeekly()
             + " --keep-monthly " + job.keepMonthly()
-            + " " + repo.borgRepoUrl();
+            + " " + repo.borgRepoUrl(server);
     }
 
     /** The {@code borg compact} body that frees space after a prune (borg ≥ 1.2). */
-    private static String buildCompactBody(BackupRepository repo) {
-        return "borg compact " + repo.borgRepoUrl();
+    private static String buildCompactBody(BackupServer server, BackupRepository repo) {
+        return "borg compact " + repo.borgRepoUrl(server);
     }
 
-    private static String buildCreateBody(BackupJob job, BackupRepository repo) {
+    private static String buildCreateBody(BackupServer server, BackupJob job, BackupRepository repo) {
         StringBuilder cmd = new StringBuilder("borg create --json --stats --compression ")
             .append(job.compression())
             .append(" --exclude-caches");
         for (String exclude : job.excludes()) {
             cmd.append(" --exclude ").append(singleQuote(exclude));
         }
-        cmd.append(" ").append(repo.borgRepoUrl()).append("::").append(singleQuote(job.archiveNameTemplate()));
+        cmd.append(" ").append(repo.borgRepoUrl(server)).append("::").append(singleQuote(job.archiveNameTemplate()));
         for (String source : job.sourcePaths()) {
             cmd.append(" ").append(singleQuote(source));
         }

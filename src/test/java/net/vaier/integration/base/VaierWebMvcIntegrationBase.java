@@ -300,6 +300,24 @@ public abstract class VaierWebMvcIntegrationBase {
     protected DeleteBackupRepositoryUseCase deleteBackupRepositoryUseCase;
 
     @MockBean
+    protected GetBackupServersUseCase getBackupServersUseCase;
+
+    @MockBean
+    protected SaveBackupServerUseCase saveBackupServerUseCase;
+
+    @MockBean
+    protected DeleteBackupServerUseCase deleteBackupServerUseCase;
+
+    @MockBean
+    protected GenerateBackupServerSetupScriptUseCase generateBackupServerSetupScriptUseCase;
+
+    @MockBean
+    protected ProvisionBackupServerUseCase provisionBackupServerUseCase;
+
+    @MockBean
+    protected AuthorizeBackupClientUseCase authorizeBackupClientUseCase;
+
+    @MockBean
     protected SaveBackupJobUseCase saveBackupJobUseCase;
 
     @MockBean

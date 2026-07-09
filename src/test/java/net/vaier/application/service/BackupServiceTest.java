@@ -3,8 +3,10 @@ package net.vaier.application.service;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
+import net.vaier.domain.BackupServer;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
+import net.vaier.domain.port.ForPersistingBackupServers;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,9 +22,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class BackupServiceTest {
 
     InMemoryRepos repositories;
+    InMemoryServers servers;
     InMemoryJobs jobs;
     InMemoryRunRecorder runs;
     BackupService service;
+
+    static final class InMemoryServers implements ForPersistingBackupServers {
+        final List<BackupServer> store = new ArrayList<>();
+        @Override public List<BackupServer> getAll() { return List.copyOf(store); }
+        @Override public Optional<BackupServer> getByName(String name) {
+            return store.stream().filter(s -> s.name().equals(name)).findFirst();
+        }
+        @Override public void save(BackupServer s) {
+            store.removeIf(x -> x.name().equals(s.name())); store.add(s);
+        }
+        @Override public void deleteByName(String name) { store.removeIf(s -> s.name().equals(name)); }
+    }
 
     static final class InMemoryRepos implements ForPersistingBackupRepositories {
         final List<BackupRepository> store = new ArrayList<>();
@@ -61,13 +76,19 @@ class BackupServiceTest {
     @BeforeEach
     void setUp() {
         repositories = new InMemoryRepos();
+        servers = new InMemoryServers();
         jobs = new InMemoryJobs();
         runs = new InMemoryRunRecorder();
-        service = new BackupService(repositories, jobs, runs);
+        service = new BackupService(repositories, servers, jobs, runs);
+    }
+
+    private BackupServer server() {
+        return new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", true);
     }
 
     private BackupRepository repo() {
-        return new BackupRepository("nas-borg", "192.168.3.3", 8022, "borg", "./colina", "s3cr3t", false);
+        return new BackupRepository("nas-borg", "nas-borg", "./colina", "s3cr3t", false);
     }
 
     private BackupJob job() {
@@ -88,6 +109,27 @@ class BackupServiceTest {
 
         service.deleteBackupRepository("nas-borg");
         assertThat(service.getBackupRepositories()).isEmpty();
+    }
+
+    @Test
+    void crudBackupServers() {
+        assertThat(service.getBackupServers()).isEmpty();
+
+        service.saveBackupServer(server());
+        assertThat(service.getBackupServers()).containsExactly(server());
+
+        service.deleteBackupServer("nas-borg");
+        assertThat(service.getBackupServers()).isEmpty();
+    }
+
+    @Test
+    void savingABackupServerWithTheSameNameReplacesIt() {
+        service.saveBackupServer(server());
+        BackupServer moved = new BackupServer("nas-borg", "NAS", "192.168.3.9", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", true);
+        service.saveBackupServer(moved);
+
+        assertThat(service.getBackupServers()).containsExactly(moved);
     }
 
     @Test

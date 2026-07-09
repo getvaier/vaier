@@ -19,9 +19,19 @@
         <div id="bk-app" style="display:none">
             <div class="bk-intro">
                 <h1>Fleet Backup</h1>
-                <p>Back up your machines to a borg repository on the NAS. Define a backup repository once,
-                   then give each machine a backup job — run it on demand or let Vaier run it on the nightly
-                   schedule. Vaier emails admins when a run fails. Restore isn't available here yet.</p>
+                <p>Stand up a borg backup server from nothing, trust each machine that should back up to it,
+                   then add a repository just by naming it. Give a machine a backup job and run it on demand
+                   or on the nightly schedule. Vaier emails admins when a run fails, and when the backup
+                   server itself goes quiet. Restore isn't available here yet.</p>
+            </div>
+
+            <!-- Backup servers -->
+            <div class="bk-section">
+                <div class="bk-section-head">
+                    <div class="section-label">Backup servers</div>
+                    <button class="btn btn-primary" id="newServerBtn">+ New server</button>
+                </div>
+                <div class="bk-list" id="serverList"><div class="loading">Loading servers…</div></div>
             </div>
 
             <!-- Backup repositories -->
@@ -62,6 +72,105 @@
         </div>
     </div>
 
+    <!-- Backup server create/edit modal -->
+    <div id="serverModal" class="modal">
+        <div class="modal-content" style="max-width:600px;width:95%">
+            <div class="modal-header" id="serverModalTitle">New backup server</div>
+            <div id="serverModalError" style="display:none"></div>
+            <div class="form-group">
+                <label class="form-label" for="serverName">Name</label>
+                <input type="text" id="serverName" class="form-input" placeholder="e.g. nas-borg" autocomplete="off">
+                <div class="bk-field-note" id="serverNameNote">A short identifier, unique across servers.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="serverMachine">Machine</label>
+                <select id="serverMachine" class="form-input"></select>
+                <div class="bk-field-note">The machine that hosts the borg server — often a LAN server such as NAS.
+                    Vaier reaches it over SSH to provision and to trust client keys.</div>
+            </div>
+            <div class="bk-form-row">
+                <div class="form-group" style="flex:2;margin-bottom:1rem">
+                    <label class="form-label" for="serverHost">Host</label>
+                    <input type="text" id="serverHost" class="form-input" placeholder="e.g. nas.apalveien5" autocomplete="off">
+                </div>
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="serverSshPort">SSH port</label>
+                    <input type="number" id="serverSshPort" class="form-input" min="1" max="65535" placeholder="8022">
+                </div>
+            </div>
+            <div class="bk-form-row">
+                <div class="form-group" style="flex:1;margin-bottom:1rem">
+                    <label class="form-label" for="serverBorgUser">Borg user</label>
+                    <input type="text" id="serverBorgUser" class="form-input" placeholder="borg" autocomplete="off">
+                </div>
+                <div class="form-group" style="flex:2;margin-bottom:1rem">
+                    <label class="form-label" for="serverBaseRepoPath">Base repository path</label>
+                    <input type="text" id="serverBaseRepoPath" class="form-input" placeholder="home/borg/backups" autocomplete="off">
+                    <div class="bk-field-note">Repositories derive their path as <code>base/&lt;name&gt;</code>. No leading slash.</div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="serverDataPath">Server data path <span style="color:var(--text-dim)">(on the host)</span></label>
+                <input type="text" id="serverDataPath" class="form-input" placeholder="e.g. /volume1/docker/borg" autocomplete="off">
+                <div class="bk-field-note">Where the borg server's volumes live on its machine — used to provision it
+                    and to write trusted client keys.</div>
+            </div>
+            <div class="form-checkbox" style="margin-top:0.2rem">
+                <input type="checkbox" id="serverManaged" checked>
+                <label for="serverManaged">Vaier manages this server (provision and re-provision it from here)</label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="serverCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="serverSaveBtn">Save server</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup script modal (download + copy to the host) -->
+    <div id="setupModal" class="modal">
+        <div class="modal-content" style="max-width:600px;width:95%">
+            <div class="modal-header" id="setupModalTitle">Setup script</div>
+            <p class="bk-modal-lead" id="setupLead"></p>
+            <div class="bk-field-note">The script is idempotent — safe to run more than once. It stands up a
+                pinned borg-server container and opens its SSH port. It's served behind admin login, so copy it
+                to the host and run it there rather than fetching it on the host.</div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="setupCloseBtn">Close</button>
+                <button class="btn btn-primary" id="setupDownloadBtn">Download setup.sh</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server provisioning modal (attempt + status polling) -->
+    <div id="serverProvisionModal" class="modal">
+        <div class="modal-content" style="max-width:600px;width:95%">
+            <div class="modal-header" id="serverProvisionTitle">Provision backup server</div>
+            <div id="serverProvisionBody"><div class="loading">Starting…</div></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="serverProvisionCloseBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Authorize host modal -->
+    <div id="authorizeModal" class="modal">
+        <div class="modal-content" style="max-width:520px;width:95%">
+            <div class="modal-header" id="authorizeTitle">Authorize a host</div>
+            <div id="authorizeError" style="display:none"></div>
+            <p class="bk-modal-lead">Trust a machine's SSH key on this server so its backup jobs can authenticate.
+                Vaier generates the key if the host doesn't have one yet, then adds it exactly once.</p>
+            <div class="form-group">
+                <label class="form-label" for="authorizeMachine">Machine</label>
+                <select id="authorizeMachine" class="form-input"></select>
+            </div>
+            <div id="authorizeResult"></div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="authorizeCloseBtn">Close</button>
+                <button class="btn btn-primary" id="authorizeOkBtn">Authorize host</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Repository create/edit modal -->
     <div id="repoModal" class="modal">
         <div class="modal-content" style="max-width:560px;width:95%">
@@ -69,33 +178,34 @@
             <div id="repoModalError" style="display:none"></div>
             <div class="form-group">
                 <label class="form-label" for="repoName">Name</label>
-                <input type="text" id="repoName" class="form-input" placeholder="e.g. nas-primary" autocomplete="off">
+                <input type="text" id="repoName" class="form-input" placeholder="e.g. apalveien5" autocomplete="off">
                 <div class="bk-field-note" id="repoNameNote">A short identifier, unique across repositories.</div>
             </div>
-            <div class="bk-form-row">
-                <div class="form-group" style="flex:2;margin-bottom:1rem">
-                    <label class="form-label" for="repoNasHost">NAS host</label>
-                    <input type="text" id="repoNasHost" class="form-input" placeholder="e.g. nas.apalveien5" autocomplete="off">
-                </div>
-                <div class="form-group" style="flex:1;margin-bottom:1rem">
-                    <label class="form-label" for="repoSshPort">SSH port</label>
-                    <input type="number" id="repoSshPort" class="form-input" min="1" max="65535" placeholder="8022">
-                </div>
-            </div>
-            <div class="bk-form-row">
-                <div class="form-group" style="flex:1;margin-bottom:1rem">
-                    <label class="form-label" for="repoBorgUser">Borg user</label>
-                    <input type="text" id="repoBorgUser" class="form-input" placeholder="borg" autocomplete="off">
-                </div>
-                <div class="form-group" style="flex:2;margin-bottom:1rem">
-                    <label class="form-label" for="repoPath">Repository path</label>
-                    <input type="text" id="repoPath" class="form-input" placeholder="e.g. /mnt/backups/fleet" autocomplete="off">
-                </div>
-            </div>
             <div class="form-group">
+                <label class="form-label" for="repoServer">Server</label>
+                <select id="repoServer" class="form-input"></select>
+                <div class="bk-field-note">The backup server this repository lives on.</div>
+            </div>
+            <div class="bk-derived" id="repoDerived"></div>
+            <div class="form-group" style="margin-bottom:0.6rem">
+                <button type="button" class="bk-disclosure" id="repoPathToggle" aria-expanded="false">
+                    <span class="bk-disclosure-caret">›</span> Custom repository path
+                </button>
+                <div id="repoPathAdvanced" style="display:none;margin-top:0.5rem">
+                    <input type="text" id="repoPath" class="form-input" placeholder="Leave blank to derive from the server" autocomplete="off">
+                    <div class="bk-field-note">Only needed to point at an existing, oddly-named repository. Blank derives
+                        <code>base/&lt;name&gt;</code>.</div>
+                </div>
+            </div>
+            <div class="form-group" id="repoPassphraseGroup">
                 <label class="form-label" for="repoPassphrase">Passphrase</label>
-                <input type="password" id="repoPassphrase" class="form-input" autocomplete="new-password" placeholder="Enter a passphrase">
-                <div class="bk-field-note">Encrypts the repository. Stored encrypted at rest; never shown back.</div>
+                <div class="bk-passphrase-row">
+                    <input type="text" id="repoPassphrase" class="form-input" autocomplete="off" spellcheck="false">
+                    <button type="button" class="btn btn-small btn-secondary" id="repoPassRegenBtn" title="Generate a new passphrase">Regenerate</button>
+                    <button type="button" class="btn btn-small btn-secondary" id="repoPassCopyBtn">Copy</button>
+                </div>
+                <div class="bk-field-note bk-passphrase-warn" id="repoPassphraseWarn">
+                    Auto-generated. Vaier stores this encrypted — copy it somewhere safe now, it can't be shown again.</div>
             </div>
             <div class="form-checkbox" style="margin-top:0.2rem">
                 <input type="checkbox" id="repoAppendOnly">

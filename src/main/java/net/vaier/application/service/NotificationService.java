@@ -2,11 +2,13 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.NotifyAdminsOfBackupFailureUseCase;
+import net.vaier.application.NotifyAdminsOfBackupServerDownUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.BackupRun;
+import net.vaier.domain.BackupServer;
 import net.vaier.domain.DiskFillForecast;
 import net.vaier.domain.DiskFillForecastCleared;
 import net.vaier.domain.RemoteDiskUsage;
@@ -15,6 +17,7 @@ import net.vaier.domain.AccessEntry;
 import net.vaier.domain.PendingIdentity;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForNotifyingAdmins;
+import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForReadingStoredSmtpPassword;
@@ -32,6 +35,7 @@ public class NotificationService implements
         NotifyAdminsOfRemoteDiskPressureUseCase,
         NotifyAdminsOfDiskFillForecastUseCase,
         NotifyAdminsOfBackupFailureUseCase,
+        NotifyAdminsOfBackupServerDownUseCase,
         ForNotifyingAdmins {
 
     private static final int DEFAULT_SMTP_PORT = 587;
@@ -101,6 +105,20 @@ public class NotificationService implements
         sendToAdmins(run.recoverySubject(),
                 run.recoveryBody(configResolver.getDomain()),
                 "backup recovery for job " + run.jobName());
+    }
+
+    @Override
+    public void notifyAdminsOfBackupServerDown(BackupServer server, ProbeResult cause) {
+        sendToAdmins(server.downSubject(),
+                server.downBody(configResolver.getDomain(), cause),
+                "backup server down: " + server.name());
+    }
+
+    @Override
+    public void notifyAdminsOfBackupServerRecovered(BackupServer server) {
+        sendToAdmins(server.recoverySubject(),
+                server.recoveryBody(configResolver.getDomain()),
+                "backup server recovery: " + server.name());
     }
 
     /**

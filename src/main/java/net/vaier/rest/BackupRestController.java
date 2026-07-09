@@ -1,26 +1,41 @@
 package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.AuthorizeBackupClientUseCase;
+import net.vaier.application.AuthorizeBackupClientUseCase.AuthorizeResult;
 import net.vaier.application.CheckBackupPrerequisitesUseCase;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.BorgAvailability;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.RepoReachability;
+import net.vaier.application.CheckBackupPrerequisitesUseCase.ServerBorgAuth;
 import net.vaier.application.DeleteBackupJobUseCase;
 import net.vaier.application.DeleteBackupRepositoryUseCase;
+import net.vaier.application.DeleteBackupServerUseCase;
+import net.vaier.application.GenerateBackupServerSetupScriptUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetBackupRunsUseCase;
+import net.vaier.application.GetBackupServersUseCase;
+import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase.RepoInitResult;
 import net.vaier.application.ListArchivesUseCase;
+import net.vaier.application.ProvisionBackupServerUseCase;
+import net.vaier.application.ProvisionBackupServerUseCase.ProvisionResult;
+import net.vaier.application.ProvisionBackupServerUseCase.ProvisionStatus;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.SaveBackupJobUseCase;
 import net.vaier.application.SaveBackupRepositoryUseCase;
+import net.vaier.application.SaveBackupServerUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
+import net.vaier.domain.BackupServer;
+import net.vaier.domain.BorgVersion;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -60,6 +75,11 @@ public class BackupRestController {
     private final SaveBackupRepositoryUseCase saveBackupRepository;
     private final GetBackupRepositoriesUseCase getBackupRepositories;
     private final DeleteBackupRepositoryUseCase deleteBackupRepository;
+    private final GetBackupServersUseCase getBackupServers;
+    private final SaveBackupServerUseCase saveBackupServer;
+    private final DeleteBackupServerUseCase deleteBackupServer;
+    private final GenerateBackupServerSetupScriptUseCase generateBackupServerSetupScript;
+    private final ProvisionBackupServerUseCase provisionBackupServer;
     private final SaveBackupJobUseCase saveBackupJob;
     private final GetBackupJobsUseCase getBackupJobs;
     private final DeleteBackupJobUseCase deleteBackupJob;
@@ -68,10 +88,17 @@ public class BackupRestController {
     private final ListArchivesUseCase listArchivesUseCase;
     private final CheckBackupPrerequisitesUseCase checkBackupPrerequisites;
     private final InitBackupRepositoryUseCase initBackupRepository;
+    private final GetMachinesUseCase getMachines;
+    private final AuthorizeBackupClientUseCase authorizeBackupClient;
 
     public BackupRestController(SaveBackupRepositoryUseCase saveBackupRepository,
                                GetBackupRepositoriesUseCase getBackupRepositories,
                                DeleteBackupRepositoryUseCase deleteBackupRepository,
+                               GetBackupServersUseCase getBackupServers,
+                               SaveBackupServerUseCase saveBackupServer,
+                               DeleteBackupServerUseCase deleteBackupServer,
+                               GenerateBackupServerSetupScriptUseCase generateBackupServerSetupScript,
+                               ProvisionBackupServerUseCase provisionBackupServer,
                                SaveBackupJobUseCase saveBackupJob,
                                GetBackupJobsUseCase getBackupJobs,
                                DeleteBackupJobUseCase deleteBackupJob,
@@ -79,10 +106,17 @@ public class BackupRestController {
                                RunBackupJobUseCase runBackupJob,
                                ListArchivesUseCase listArchivesUseCase,
                                CheckBackupPrerequisitesUseCase checkBackupPrerequisites,
-                               InitBackupRepositoryUseCase initBackupRepository) {
+                               InitBackupRepositoryUseCase initBackupRepository,
+                               GetMachinesUseCase getMachines,
+                               AuthorizeBackupClientUseCase authorizeBackupClient) {
         this.saveBackupRepository = saveBackupRepository;
         this.getBackupRepositories = getBackupRepositories;
         this.deleteBackupRepository = deleteBackupRepository;
+        this.getBackupServers = getBackupServers;
+        this.saveBackupServer = saveBackupServer;
+        this.deleteBackupServer = deleteBackupServer;
+        this.generateBackupServerSetupScript = generateBackupServerSetupScript;
+        this.provisionBackupServer = provisionBackupServer;
         this.saveBackupJob = saveBackupJob;
         this.getBackupJobs = getBackupJobs;
         this.deleteBackupJob = deleteBackupJob;
@@ -91,6 +125,111 @@ public class BackupRestController {
         this.listArchivesUseCase = listArchivesUseCase;
         this.checkBackupPrerequisites = checkBackupPrerequisites;
         this.initBackupRepository = initBackupRepository;
+        this.getMachines = getMachines;
+        this.authorizeBackupClient = authorizeBackupClient;
+    }
+
+    // --- Backup servers ---
+
+    @GetMapping("/backup-servers")
+    public ResponseEntity<List<ServerResponse>> listServers() {
+        return ResponseEntity.ok(getBackupServers.getBackupServers().stream()
+            .map(ServerResponse::from).toList());
+    }
+
+    @GetMapping("/backup-servers/{name}")
+    public ResponseEntity<ServerResponse> getServer(@PathVariable String name) {
+        return findServer(name)
+            .map(server -> ResponseEntity.ok(ServerResponse.from(server)))
+            .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/backup-servers/{name}")
+    public ResponseEntity<ServerResponse> saveServer(@PathVariable String name,
+                                                     @RequestBody ServerRequest request) {
+        log.info("Saving backup server {}", LogSafe.forLog(name));
+        // A null sshPort defaults to the borg-server convention; bad input surfaces as a 400 from the record.
+        int sshPort = request.sshPort() != null ? request.sshPort() : BackupServer.DEFAULT_SSH_PORT;
+        BackupServer server = new BackupServer(name, request.machineName(), request.host(), sshPort,
+            request.borgUser(), request.baseRepoPath(), request.serverDataPath(), request.managed());
+        saveBackupServer.saveBackupServer(server);
+        return ResponseEntity.ok(ServerResponse.from(server));
+    }
+
+    @DeleteMapping("/backup-servers/{name}")
+    public ResponseEntity<Void> deleteServer(@PathVariable String name) {
+        log.info("Deleting backup server {}", LogSafe.forLog(name));
+        deleteBackupServer.deleteBackupServer(name);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * The bootstrap {@code setup.sh} a host runs to stand up this borg server from nothing — an idempotent,
+     * pinned borg-server compose. 404 when the server is unknown. Mirrors {@code LanServerRestController}:
+     * no {@code produces} constraint, so the success path sets {@code application/x-sh} explicitly while an
+     * error still renders as JSON {@code ApiError}.
+     */
+    @GetMapping(value = "/backup-servers/{name}/setup.sh")
+    public ResponseEntity<?> downloadSetupScript(@PathVariable String name) {
+        return generateBackupServerSetupScript.generateSetupScript(name)
+            .<ResponseEntity<?>>map(script -> ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + name + "-setup.sh")
+                .contentType(MediaType.parseMediaType("application/x-sh"))
+                .body(script))
+            .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Provision this borg server by running its setup script on the host over SSH, where docker-over-SSH is
+     * available. 404 when the server is unknown. Otherwise it never fails opaquely: when Vaier cannot run
+     * the script itself (no docker over SSH, or the host is not reachable) the result reports {@code
+     * scriptOnly} so the UI points the operator at the downloadable setup script instead.
+     */
+    @PostMapping("/backup-servers/{name}/provision")
+    public ResponseEntity<ProvisionServerResponse> provisionServer(@PathVariable String name) {
+        if (findServer(name).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        log.info("Provisioning backup server {}", LogSafe.forLog(name));
+        ProvisionResult result = provisionBackupServer.provision(name);
+        return ResponseEntity.ok(ProvisionServerResponse.from(result));
+    }
+
+    /**
+     * Report the progress of a launched provision. Provisioning is detached (it pulls a ~100 MB image), so
+     * {@code POST …/provision} returns as soon as it has started and the UI polls this for the outcome:
+     * {@code RUNNING} until the setup script settles, then {@code SUCCESS}/{@code FAILED} with a log tail.
+     * 404 when the server is unknown.
+     */
+    @GetMapping("/backup-servers/{name}/provision/status")
+    public ResponseEntity<ProvisionStatusResponse> provisionStatus(@PathVariable String name) {
+        if (findServer(name).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        ProvisionStatus status = provisionBackupServer.provisionStatus(name);
+        return ResponseEntity.ok(ProvisionStatusResponse.from(status));
+    }
+
+    /**
+     * Trust a backup client host's SSH key on this server so borg — which runs on the client as the SSH
+     * user, not root — can authenticate to the borg sshd (closes #320). {@code 404} when the server or the
+     * machine is unknown; otherwise {@code 200} with the outcome. The use case never throws: a guarded-out
+     * host, a missing data path, or an SSH failure come back as a negative result, not an error.
+     */
+    @PostMapping("/backup-servers/{name}/authorize/{machineName}")
+    public ResponseEntity<AuthorizeResponse> authorizeClient(@PathVariable String name,
+                                                             @PathVariable String machineName) {
+        if (findServer(name).isEmpty() || !machineExists(machineName)) {
+            return ResponseEntity.notFound().build();
+        }
+        log.info("Authorizing backup client {} on server {}",
+            LogSafe.forLog(machineName), LogSafe.forLog(name));
+        AuthorizeResult result = authorizeBackupClient.authorizeClient(name, machineName);
+        return ResponseEntity.ok(AuthorizeResponse.from(result));
+    }
+
+    private boolean machineExists(String machineName) {
+        return getMachines.getAllMachines().stream().anyMatch(m -> m.name().equals(machineName));
     }
 
     // --- Backup repositories ---
@@ -98,13 +237,13 @@ public class BackupRestController {
     @GetMapping("/backup-repositories")
     public ResponseEntity<List<RepositoryResponse>> listRepositories() {
         return ResponseEntity.ok(getBackupRepositories.getBackupRepositories().stream()
-            .map(RepositoryResponse::from).toList());
+            .map(this::toResponse).toList());
     }
 
     @GetMapping("/backup-repositories/{name}")
     public ResponseEntity<RepositoryResponse> getRepository(@PathVariable String name) {
         return findRepository(name)
-            .map(repo -> ResponseEntity.ok(RepositoryResponse.from(repo)))
+            .map(repo -> ResponseEntity.ok(toResponse(repo)))
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
@@ -118,13 +257,10 @@ public class BackupRestController {
         if (passphrase == null || passphrase.isBlank()) {
             passphrase = findRepository(name).map(BackupRepository::passphrase).orElse(null);
         }
-        int sshPort = request.sshPort() == null ? BackupRepository.DEFAULT_SSH_PORT : request.sshPort();
-        String borgUser = (request.borgUser() == null || request.borgUser().isBlank())
-            ? BackupRepository.DEFAULT_BORG_USER : request.borgUser();
-        BackupRepository repository = new BackupRepository(name, request.nasHost(), sshPort, borgUser,
-            request.repoPath(), passphrase, request.appendOnly());
+        BackupRepository repository = new BackupRepository(name, request.serverName(), request.repoPath(),
+            passphrase, request.appendOnly());
         saveBackupRepository.saveBackupRepository(repository);
-        return ResponseEntity.ok(RepositoryResponse.from(repository));
+        return ResponseEntity.ok(toResponse(repository));
     }
 
     @DeleteMapping("/backup-repositories/{name}")
@@ -199,7 +335,7 @@ public class BackupRestController {
             return ResponseEntity.notFound().build();
         }
         Optional<BackupRepository> repo = findRepository(job.get().repositoryName());
-        if (repo.isEmpty()) {
+        if (repo.isEmpty() || findServer(repo.get().serverName()).isEmpty()) {
             return ResponseEntity.notFound().build();
         }
         BackupRun run = runBackupJob.runJob(job.get(), repo.get());
@@ -229,11 +365,19 @@ public class BackupRestController {
         if (job.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
+        Optional<BackupRepository> repo = findRepository(job.get().repositoryName());
+        if (repo.isEmpty() || findServer(repo.get().serverName()).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
         log.info("Checking backup prerequisites for job {}", LogSafe.forLog(name));
         BorgAvailability borg = checkBackupPrerequisites.checkBorg(job.get().machineName());
         RepoReachability nas = checkBackupPrerequisites.checkNas(job.get().repositoryName(),
             job.get().machineName());
-        return ResponseEntity.ok(ProvisionCheckResponse.from(borg, nas));
+        // The decisive probe: authenticate to the server and compare versions, threading the client's own
+        // borg version in so compatibility is judged against a real server version — not assumed.
+        ServerBorgAuth auth = checkBackupPrerequisites.checkServerAuth(job.get().repositoryName(),
+            job.get().machineName(), borg.version());
+        return ResponseEntity.ok(ProvisionCheckResponse.from(borg, nas, auth));
     }
 
     /**
@@ -278,21 +422,87 @@ public class BackupRestController {
             .filter(r -> r.name().equals(name)).findFirst();
     }
 
+    private Optional<BackupServer> findServer(String serverName) {
+        return getBackupServers.getBackupServers().stream()
+            .filter(s -> s.name().equals(serverName)).findFirst();
+    }
+
+    /**
+     * The repository view for the browser, with {@code repoPath} resolved to the <em>effective</em> path so
+     * the UI can show where the store actually points. When the repository's server is known the path is
+     * derived through it ({@link BackupRepository#repoPathOn}); when the server is unknown the raw stored
+     * override (which may be null) is returned rather than failing.
+     */
+    private RepositoryResponse toResponse(BackupRepository r) {
+        String effectivePath = findServer(r.serverName())
+            .map(r::repoPathOn)
+            .orElse(r.repoPath());
+        boolean hasPassphrase = r.passphrase() != null && !r.passphrase().isBlank();
+        return new RepositoryResponse(r.name(), r.serverName(), effectivePath, r.appendOnly(), hasPassphrase);
+    }
+
     // --- DTOs ---
 
-    /** Create/update a backup repository. A blank/omitted {@code passphrase} keeps the stored secret. */
-    record RepositoryRequest(String nasHost, Integer sshPort, String borgUser, String repoPath,
-                             String passphrase, boolean appendOnly) {}
+    /**
+     * Create/update a backup server (the name is the path variable). A null {@code sshPort} defaults to the
+     * borg-server convention. The server carries no secret, so every field round-trips.
+     */
+    record ServerRequest(String machineName, String host, Integer sshPort, String borgUser,
+                         String baseRepoPath, String serverDataPath, boolean managed) {}
 
-    /** The repository as returned to the browser — reports only whether a passphrase is held. */
-    record RepositoryResponse(String name, String nasHost, int sshPort, String borgUser, String repoPath,
-                              boolean appendOnly, boolean hasPassphrase) {
-        static RepositoryResponse from(BackupRepository r) {
-            boolean hasPassphrase = r.passphrase() != null && !r.passphrase().isBlank();
-            return new RepositoryResponse(r.name(), r.nasHost(), r.sshPort(), r.borgUser(), r.repoPath(),
-                r.appendOnly(), hasPassphrase);
+    /** The backup server as returned to the browser (servers hold no secrets). */
+    record ServerResponse(String name, String machineName, String host, int sshPort, String borgUser,
+                          String baseRepoPath, String serverDataPath, boolean managed) {
+        static ServerResponse from(BackupServer s) {
+            return new ServerResponse(s.name(), s.machineName(), s.host(), s.sshPort(), s.borgUser(),
+                s.baseRepoPath(), s.serverDataPath(), s.managed());
         }
     }
+
+    /**
+     * The outcome of a provision attempt for the UI (never carries a secret). {@code stagedScriptPath} is the
+     * absolute on-host path Vaier wrote the setup script to when it could SSH the machine but not drive its
+     * docker, so the UI renders {@code sudo bash <path>} precisely; it is {@code null} on every other path.
+     */
+    record ProvisionServerResponse(boolean provisioned, boolean scriptOnly, boolean started, String message,
+                                   String stagedScriptPath) {
+        static ProvisionServerResponse from(ProvisionResult r) {
+            return new ProvisionServerResponse(r.provisioned(), r.scriptOnly(), r.started(), r.message(),
+                r.stagedScriptPath());
+        }
+    }
+
+    /** The progress of a launched provision for the UI: {@code RUNNING}/{@code SUCCESS}/{@code FAILED} + a log tail. */
+    record ProvisionStatusResponse(String state, String logTail) {
+        static ProvisionStatusResponse from(ProvisionStatus s) {
+            return new ProvisionStatusResponse(s.state().name(), s.logTail());
+        }
+    }
+
+    /**
+     * The outcome of an authorize-client attempt for the UI (carries no secret — a public key is not one).
+     * {@code hostKeyPinned} reports whether Vaier could pin the server's host key on the client (Slice 8), so
+     * the UI can warn when it could not (an adopted server that never ran the setup script).
+     */
+    record AuthorizeResponse(boolean authorized, boolean alreadyTrusted, boolean hostKeyPinned, String message) {
+        static AuthorizeResponse from(AuthorizeResult r) {
+            return new AuthorizeResponse(r.authorized(), r.alreadyTrusted(), r.hostKeyPinned(), r.message());
+        }
+    }
+
+    /**
+     * Create/update a backup repository (the name is the path variable). {@code repoPath} is an optional
+     * override — omit it to derive the path from the server. A blank/omitted {@code passphrase} keeps the
+     * stored secret.
+     */
+    record RepositoryRequest(String serverName, String repoPath, String passphrase, boolean appendOnly) {}
+
+    /**
+     * The repository as returned to the browser — reports the <em>effective</em> repo path and only whether
+     * a passphrase is held (never the secret itself).
+     */
+    record RepositoryResponse(String name, String serverName, String repoPath,
+                              boolean appendOnly, boolean hasPassphrase) {}
 
     /** Create/update a backup job. */
     record JobRequest(String machineName, String repositoryName, List<String> sourcePaths,
@@ -317,16 +527,26 @@ public class BackupRestController {
     }
 
     /**
-     * A job's provisioning readiness for the wizard: whether borg is present on the host and new enough,
-     * its version string (null when borg is absent), and whether the host can reach the NAS borg port.
+     * A job's provisioning readiness for the wizard. Beyond whether borg is present on the host and new
+     * enough ({@code borgInstalled}/{@code borgVersion}/{@code borgSupported}) and whether the host can
+     * reach the NAS borg port ({@code nasReachable}), it carries the checks that kill the false all-green:
+     * {@code borgAuthOk} (the client's key is actually trusted on the server), {@code serverBorgVersion}
+     * (null when it could not be read) and {@code versionsCompatible} (client and server borg majors match).
+     * A host can show {@code borgInstalled} and {@code nasReachable} true yet {@code borgAuthOk} false — so
+     * the response never reads as ready on auth alone.
      */
     record ProvisionCheckResponse(boolean borgInstalled, String borgVersion, boolean borgSupported,
-                                  boolean nasReachable) {
-        static ProvisionCheckResponse from(BorgAvailability borg, RepoReachability nas) {
-            String version = borg.version()
-                .map(v -> v.major() + "." + v.minor() + "." + v.patch())
-                .orElse(null);
-            return new ProvisionCheckResponse(borg.installed(), version, borg.supported(), nas.reachable());
+                                  boolean nasReachable, boolean borgAuthOk, String serverBorgVersion,
+                                  boolean versionsCompatible) {
+        static ProvisionCheckResponse from(BorgAvailability borg, RepoReachability nas, ServerBorgAuth auth) {
+            String version = borg.version().map(ProvisionCheckResponse::render).orElse(null);
+            String serverVersion = auth.serverVersion().map(ProvisionCheckResponse::render).orElse(null);
+            return new ProvisionCheckResponse(borg.installed(), version, borg.supported(), nas.reachable(),
+                auth.authOk(), serverVersion, auth.versionsCompatible());
+        }
+
+        private static String render(BorgVersion v) {
+            return v.major() + "." + v.minor() + "." + v.patch();
         }
     }
 

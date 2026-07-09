@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
+import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.NotifyAdminsOfBackupFailureUseCase;
@@ -13,6 +14,7 @@ import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
+import net.vaier.domain.BackupServer;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.HostCredentialView;
@@ -46,6 +48,7 @@ class BackupRunnerTest {
     RunRemoteCommandUseCase runner;
     InMemoryRunRecorder runs;
     GetBackupRepositoriesUseCase repositories;
+    GetBackupServersUseCase servers;
     GetBackupJobsUseCase jobs;
     NotifyAdminsOfBackupFailureUseCase backupNotifier;
     ConfigResolver configResolver;
@@ -67,8 +70,13 @@ class BackupRunnerTest {
         @Override public List<BackupRun> getAll() { return List.copyOf(recorded); }
     }
 
+    private BackupServer server() {
+        return new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", false);
+    }
+
     private BackupRepository repo() {
-        return new BackupRepository("nas-borg", "192.168.3.3", 8022, "borg", "./colina", "s3cr3t", false);
+        return new BackupRepository("nas-borg", "nas-borg", "./colina", "s3cr3t", false);
     }
 
     private BackupJob job() {
@@ -98,14 +106,17 @@ class BackupRunnerTest {
         runner = mock(RunRemoteCommandUseCase.class);
         runs = new InMemoryRunRecorder();
         repositories = mock(GetBackupRepositoriesUseCase.class);
+        servers = mock(GetBackupServersUseCase.class);
         jobs = mock(GetBackupJobsUseCase.class);
         backupNotifier = mock(NotifyAdminsOfBackupFailureUseCase.class);
         configResolver = mock(ConfigResolver.class);
         workDirResolver = mock(BackupWorkDirResolver.class);
         // Default: resolve to the SSH user's home so existing path assertions stay green.
         when(workDirResolver.workDirFor(any())).thenReturn("/home/geir/.vaier-backup");
+        // Default: the repository's backup server is configured, so runs/lists reach the borg URL step.
+        when(servers.getBackupServers()).thenReturn(List.of(server()));
         clock = Clock.fixed(Instant.parse("2026-07-08T02:00:00Z"), ZoneOffset.UTC);
-        backupRunner = new BackupRunner(machines, credentials, runner, runs, repositories, jobs,
+        backupRunner = new BackupRunner(machines, credentials, runner, runs, repositories, servers, jobs,
             backupNotifier, configResolver, clock, workDirResolver);
     }
 
@@ -243,7 +254,7 @@ class BackupRunnerTest {
         // Simulate a Vaier restart: the RUNNING run is in the store, but a fresh runner instance holds no
         // in-flight state. The next poll must re-adopt it purely from the run store and resolve it.
         seedRunning("run-1");
-        BackupRunner restarted = new BackupRunner(machines, credentials, runner, runs, repositories, jobs,
+        BackupRunner restarted = new BackupRunner(machines, credentials, runner, runs, repositories, servers, jobs,
             backupNotifier, configResolver, clock, workDirResolver);
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
@@ -333,6 +344,32 @@ class BackupRunnerTest {
         verify(runner, never()).run(any(), any());
     }
 
+    @Test
+    void runJobRecordsFailedWhenBackupServerUnknown() {
+        // Slice 2: a repository points at a Backup server by name. If that server is not configured, the
+        // run cannot build a borg URL — it records FAILED with a clear reason and never contacts the host.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(servers.getBackupServers()).thenReturn(List.of());
+
+        BackupRun run = backupRunner.runJob(job(), repo(), "run-1");
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.FAILED);
+        assertThat(runs.getAll().get(0).summary()).contains("nas-borg");
+        verify(runner, never()).run(any(), any());
+    }
+
+    @Test
+    void listArchivesEmptyWhenBackupServerUnknown() {
+        // The repository exists but its Backup server is not configured -> no borg URL to list from -> empty,
+        // and nothing is ever run.
+        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(servers.getBackupServers()).thenReturn(List.of());
+
+        assertThat(backupRunner.listArchives("nas-borg")).isEmpty();
+        verify(runner, never()).run(any(), any());
+    }
+
     // --- Slice 6: Vaier-owned nightly scheduling ---
 
     private BackupJob disabledJob() {
@@ -383,7 +420,7 @@ class BackupRunnerTest {
         // A due job exists, but the current hour (03:00) is not the configured schedule hour (2).
         Clock atNextHour = Clock.fixed(Instant.parse("2026-07-08T03:00:00Z"), ZoneOffset.UTC);
         BackupRunner runnerAtNextHour = new BackupRunner(machines, credentials, runner, runs,
-            repositories, jobs, backupNotifier, configResolver, atNextHour, workDirResolver);
+            repositories, servers, jobs, backupNotifier, configResolver, atNextHour, workDirResolver);
         when(configResolver.getBackupScheduleHour()).thenReturn(2);
 
         runnerAtNextHour.runDueJobs();
@@ -477,7 +514,7 @@ class BackupRunnerTest {
         // terminal run is never re-polled -> the tracker is never fed for it.
         runs.record(BackupRun.fromExitCode(job(), "run-1",
             Instant.parse("2026-07-07T02:00:00Z"), Instant.parse("2026-07-07T02:05:00Z"), 2, "boom"));
-        BackupRunner restarted = new BackupRunner(machines, credentials, runner, runs, repositories, jobs,
+        BackupRunner restarted = new BackupRunner(machines, credentials, runner, runs, repositories, servers, jobs,
             backupNotifier, configResolver, clock, workDirResolver);
 
         restarted.pollRunningRuns();

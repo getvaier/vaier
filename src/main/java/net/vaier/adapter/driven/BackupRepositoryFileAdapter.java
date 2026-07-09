@@ -19,8 +19,10 @@ import org.yaml.snakeyaml.Yaml;
 /**
  * File-backed store for fleet-backup {@link BackupRepository} definitions: one entry per repository in
  * {@code backup-repositories.yml}, keyed on {@code name}. The {@code passphrase} is a secret and is
- * encrypted at rest via {@link SecretCipher}; every other field (host, port, borg user, repo path,
- * append-only flag) is stored in the clear. The file is locked down to owner-only on every write.
+ * encrypted at rest via {@link SecretCipher}; every other field (server name, repo-path override,
+ * append-only flag) is stored in the clear. The file is locked down to owner-only on every write. An entry
+ * missing its {@code serverName} is malformed under the slimmed shape and is skipped with a warning, so a
+ * stale old-shape file never crashes the load.
  */
 @Component
 @Slf4j
@@ -84,18 +86,17 @@ public class BackupRepositoryFileAdapter implements ForPersistingBackupRepositor
 
     private BackupRepository deserialize(Map<?, ?> m) {
         String name = asString(m.get("name"));
-        String nasHost = asString(m.get("nasHost"));
-        Integer sshPort = m.get("sshPort") instanceof Number n ? n.intValue() : null;
-        String borgUser = asString(m.get("borgUser"));
+        String serverName = asString(m.get("serverName"));
         String repoPath = asString(m.get("repoPath"));
         String passphrase = cipher.decrypt(asString(m.get("passphrase")));
         boolean appendOnly = m.get("appendOnly") instanceof Boolean b && b;
-        if (name == null || nasHost == null || repoPath == null || sshPort == null) {
+        // repoPath is a nullable override; only name and serverName are required. A missing serverName is a
+        // stale old-shape entry -> skip it.
+        if (name == null || serverName == null) {
             log.warn("Skipping malformed backup-repository entry in {}", FILE_NAME);
             return null;
         }
-        String user = (borgUser == null || borgUser.isBlank()) ? BackupRepository.DEFAULT_BORG_USER : borgUser;
-        return new BackupRepository(name, nasHost, sshPort, user, repoPath, passphrase, appendOnly);
+        return new BackupRepository(name, serverName, repoPath, passphrase, appendOnly);
     }
 
     private void writeAll(List<BackupRepository> repositories) {
@@ -111,10 +112,10 @@ public class BackupRepositoryFileAdapter implements ForPersistingBackupRepositor
         for (BackupRepository r : repositories) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("name", r.name());
-            entry.put("nasHost", r.nasHost());
-            entry.put("sshPort", r.sshPort());
-            entry.put("borgUser", r.borgUser());
-            entry.put("repoPath", r.repoPath());
+            entry.put("serverName", r.serverName());
+            if (r.repoPath() != null) {
+                entry.put("repoPath", r.repoPath());
+            }
             if (r.passphrase() != null) {
                 entry.put("passphrase", cipher.encrypt(r.passphrase()));
             }

@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
+import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.ListArchivesUseCase;
@@ -16,6 +17,7 @@ import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
+import net.vaier.domain.BackupServer;
 import net.vaier.domain.BorgCommand;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.Machine;
@@ -82,6 +84,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
     private final RunRemoteCommandUseCase remoteCommand;
     private final ForRecordingBackupRuns runs;
     private final GetBackupRepositoriesUseCase repositories;
+    private final GetBackupServersUseCase servers;
     private final GetBackupJobsUseCase jobs;
     private final NotifyAdminsOfBackupFailureUseCase backupNotifier;
     private final ConfigResolver configResolver;
@@ -101,6 +104,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
                         RunRemoteCommandUseCase remoteCommand,
                         ForRecordingBackupRuns runs,
                         GetBackupRepositoriesUseCase repositories,
+                        GetBackupServersUseCase servers,
                         GetBackupJobsUseCase jobs,
                         NotifyAdminsOfBackupFailureUseCase backupNotifier,
                         ConfigResolver configResolver,
@@ -111,6 +115,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         this.remoteCommand = remoteCommand;
         this.runs = runs;
         this.repositories = repositories;
+        this.servers = servers;
         this.jobs = jobs;
         this.backupNotifier = backupNotifier;
         this.configResolver = configResolver;
@@ -149,6 +154,11 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
             return recorded(BackupRun.failed(job, runId, clock.instant(),
                 "No stored credential for " + job.machineName()));
         }
+        Optional<BackupServer> server = findServer(repo.serverName());
+        if (server.isEmpty()) {
+            return recorded(BackupRun.failed(job, runId, clock.instant(),
+                "No backup server named " + repo.serverName()));
+        }
 
         // The run reads the passphrase from a provisioned 0600 file via BORG_PASSCOMMAND, so make sure that
         // file exists before launching (write-if-absent) — a run must never fail merely because the pass
@@ -157,7 +167,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         String workDir = workDirResolver.workDirFor(machine.get().name());
         ensurePassFile(machine.get().name(), repo, workDir);
 
-        BorgCommand.BuiltCommand command = BorgCommand.detachedRun(job, repo, runId, workDir);
+        BorgCommand.BuiltCommand command = BorgCommand.detachedRun(server.get(), job, repo, runId, workDir);
         log.info("Launching backup job {} on {}: {}",
             LogSafe.forLog(job.name()), LogSafe.forLog(machine.get().name()), command.redacted());
         Instant startedAt = clock.instant();
@@ -233,6 +243,12 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         if (repo.isEmpty()) {
             return List.of();
         }
+        Optional<BackupServer> server = findServer(repo.get().serverName());
+        if (server.isEmpty()) {
+            log.debug("Cannot list archives for repository {}: its backup server {} is not configured",
+                LogSafe.forLog(repositoryName), LogSafe.forLog(repo.get().serverName()));
+            return List.of();
+        }
         Optional<BackupJob> job = firstJobTargeting(repositoryName);
         if (job.isEmpty()) {
             log.debug("Cannot list archives for repository {}: no job targets it, so no host to list from",
@@ -249,7 +265,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         // borg list unlocks the repo via BORG_PASSCOMMAND too, so ensure the pass file is provisioned first.
         String workDir = workDirResolver.workDirFor(machine.get().name());
         ensurePassFile(machine.get().name(), repo.get(), workDir);
-        BorgCommand.BuiltCommand command = BorgCommand.listArchives(repo.get(), workDir);
+        BorgCommand.BuiltCommand command = BorgCommand.listArchives(server.get(), repo.get(), workDir);
         log.info("Listing archives for repository {} on {}: {}",
             LogSafe.forLog(repositoryName), LogSafe.forLog(machine.get().name()), command.redacted());
         try {
@@ -372,6 +388,13 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
     private Optional<Machine> findMachine(String name) {
         return machines.getAllMachines().stream()
             .filter(m -> m.name().equals(name))
+            .findFirst();
+    }
+
+    /** The Backup server a repository lives on, resolved by name — empty when it is not configured. */
+    private Optional<BackupServer> findServer(String serverName) {
+        return servers.getBackupServers().stream()
+            .filter(s -> s.name().equals(serverName))
             .findFirst();
     }
 
