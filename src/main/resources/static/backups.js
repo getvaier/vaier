@@ -1,7 +1,7 @@
 /* Fleet Backup admin page. All fetch + render logic for backup servers, backup repositories, backup
    jobs, backup runs and the nightly schedule. Follows the conventions in vpn-peers.js / users.html:
    escapeHtml on every interpolated value, event listeners wired by closure (never a name spliced into
-   an onclick string), and a top-of-page toast for feedback. The whole feature is Enterprise-gated;
+   an onclick string), and a fixed bottom-centre toast overlay for feedback. The whole feature is Enterprise-gated;
    a Community instance sees the gate state instead of the console. */
 
 (function () {
