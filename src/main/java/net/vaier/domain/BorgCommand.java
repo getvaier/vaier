@@ -87,9 +87,28 @@ public final class BorgCommand {
      * another host's archives.
      */
     private static String buildRunChain(BackupServer server, BackupJob job, BackupRepository repo) {
-        return buildCreateBody(server, job, repo)
+        return ensureInitializedBody(server, repo)
+            + " && " + buildCreateBody(server, job, repo)
             + " && " + buildPruneBody(server, job, repo)
             + " && " + buildCompactBody(server, repo);
+    }
+
+    /**
+     * Ensure the repository exists before a run creates into it, so {@code borg init} is never a manual
+     * prerequisite the operator can forget (which surfaces as a cryptic "Repository does not exist" run
+     * failure). Mirrors the ensure-pass-file guard: {@code borg info} probes the repo, and only when it is
+     * absent does {@code borg init} create it. It is {@code &&}-chained to the create so a <em>genuine</em>
+     * init failure aborts the run with init's own error, rather than being swallowed and re-failing create
+     * with the same message. Init reads the passphrase from the same {@code BORG_PASSCOMMAND} file, so no
+     * secret is added to the command.
+     */
+    private static String ensureInitializedBody(BackupServer server, BackupRepository repo) {
+        String url = singleQuote(repo.borgRepoUrl(server));
+        return "borg info " + url + " > /dev/null 2>&1 || " + buildInitBody(server, repo);
+    }
+
+    private static String buildInitBody(BackupServer server, BackupRepository repo) {
+        return "borg init --encryption=repokey-blake2 --make-parent-dirs " + singleQuote(repo.borgRepoUrl(server));
     }
 
     private static String assembleDetached(BackupRepository repo, String chainBody,
@@ -487,9 +506,7 @@ public final class BorgCommand {
      * either. No secret in the command -> the redacted twin equals exec.
      */
     public static BuiltCommand init(BackupServer server, BackupRepository repo, String workDir) {
-        String cmd = exportPasscommand(repo, workDir)
-            + "borg init --encryption=repokey-blake2 --make-parent-dirs "
-            + singleQuote(repo.borgRepoUrl(server));
+        String cmd = exportPasscommand(repo, workDir) + buildInitBody(server, repo);
         return new BuiltCommand(cmd, cmd);
     }
 

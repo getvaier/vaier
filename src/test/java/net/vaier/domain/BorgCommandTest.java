@@ -93,6 +93,26 @@ class BorgCommandTest {
     }
 
     @Test
+    void detachedRunInitialisesTheRepoIfAbsentBeforeCreating_soInitIsNeverAManualStep() {
+        // A run must not fail with "Repository does not exist" just because nobody clicked Initialize.
+        // Like ensurePassFile, the run ensures its prerequisite: borg info probes the repo, and only if it
+        // is absent does borg init create it (repokey-blake2), then the create chain proceeds.
+        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR);
+        String exec = cmd.exec();
+        String url = "'ssh://borg@192.168.3.3:8022/./colina'";
+
+        // info-or-init guard, chained with && to the create so a genuine init failure aborts the run
+        // (rather than being swallowed and then failing create with the same cryptic error).
+        assertThat(exec).contains("borg info " + url + " > /dev/null 2>&1 || "
+            + "borg init --encryption=repokey-blake2 --make-parent-dirs " + url);
+        // The guard runs BEFORE create.
+        assertThat(exec.indexOf("borg info " + url)).isLessThan(exec.indexOf("borg create --json"));
+        assertThat(exec.indexOf("borg init")).isLessThan(exec.indexOf("borg create --json"));
+        // Still no plaintext secret (init reads the passphrase from the same BORG_PASSCOMMAND file).
+        assertThat(exec).doesNotContain("s3cr3t");
+    }
+
+    @Test
     void detachedRunChainsCreateThenPruneScopedByGlobThenCompact() {
         BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR);
         String exec = cmd.exec();
