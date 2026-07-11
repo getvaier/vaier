@@ -29,6 +29,14 @@ class PasswordPromptTest {
     }
 
     @Test
+    void matches_sshKeyPassphrasePrompt() {
+        assertThat(PasswordPrompt.isAwaitingPassword(
+            "Enter passphrase for key '/root/.ssh/id_rsa':")).isTrue();
+        assertThat(PasswordPrompt.isAwaitingPassword(
+            "Enter passphrase for key '/root/.ssh/id_rsa': ")).isTrue();
+    }
+
+    @Test
     void matches_whenPromptIsPrecededByEarlierOutput() {
         assertThat(PasswordPrompt.isAwaitingPassword(
             "Last login: Tue\r\ngeir@nas's password: ")).isTrue();
@@ -67,5 +75,11 @@ class PasswordPromptTest {
             "[sudo] password for geir:\r\ngeir@openhab4:~$ ")).isFalse();
         assertThat(PasswordPrompt.isAwaitingPassword(
             "geir@nas's password:\r\nLinux nas 6.1.0\r\ngeir@nas:~$ ")).isFalse();
+    }
+
+    @Test
+    void rejects_answeredPassphrasePromptFollowedByShell() {
+        assertThat(PasswordPrompt.isAwaitingPassword(
+            "Enter passphrase for key '/root/.ssh/id_rsa':\r\ngeir@nas:~$ ")).isFalse();
     }
 }

@@ -1,3 +1,9 @@
+# The wireguard container's bridge address, pinned so the host-netns route-sync container can name it
+# without Docker DNS. Sits high in the subnet, clear of the addresses Docker hands out sequentially from
+# .2, so it can never collide with a dynamically-assigned container. Everything else — Vaier's
+# LanRouteAdapter, traefik-lan-routes — still resolves the container by DNS name and is unaffected.
+x-wireguard-bridge-ip: &wireguard-bridge-ip "172.20.0.250"
+
 networks:
   vaier-network:
     driver: bridge
@@ -111,6 +117,10 @@ services:
   wireguard:
     image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
     container_name: wireguard
+    # Memory caps on every service so one runaway container cannot exhaust this
+    # 1.9 GB host and livelock it (2026-07-10). Sized from measured RSS with
+    # generous headroom; caps are ceilings, not reservations.
+    mem_limit: 128m
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -134,11 +144,13 @@ services:
       - net.ipv4.ip_forward=1
     restart: unless-stopped
     networks:
-      - vaier-network
+      vaier-network:
+        ipv4_address: *wireguard-bridge-ip
 
   wireguard-masquerade:
     image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
     container_name: wireguard-masquerade
+    mem_limit: 64m
     network_mode: "service:wireguard"
     cap_add:
       - NET_ADMIN
@@ -168,6 +180,7 @@ services:
   traefik:
     image: traefik:v3.6.14
     container_name: traefik
+    mem_limit: 192m
     cap_add:
       - NET_ADMIN
     entrypoint:
@@ -217,6 +230,7 @@ services:
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.4.2
     container_name: docker-proxy
+    mem_limit: 64m
     environment:
       # Allowlist flags for Vaier + Traefik. Combined with the haproxy_template
       # config below (which adds explicit denies for /containers/create and
@@ -241,9 +255,55 @@ services:
     networks:
       - vaier-network
 
+  # The Vaier host is the one machine in the fleet that IS the Docker host rather than something behind
+  # the tunnel, so it inherits no LAN routes: `traefik-lan-routes` and Vaier's own LanRouteAdapter write
+  # into container netns, never the host's. That left the host unable to reach a relay's LAN — so a backup
+  # job for the Vaier server itself couldn't reach the borg server, and neither could any host-level tool.
+  #
+  # This shares the HOST's network namespace and installs the same relay lanCidr routes there, via the
+  # wireguard container. It can't use Docker DNS to find that container (the host has none), so it reads
+  # the address the sibling containers see. wireguard-masquerade already SNATs 172.20.0.0/16 out of wg0,
+  # and a host packet routed at the bridge is sourced from 172.20.0.1 — inside that range — so replies
+  # come back without any extra rule.
+  host-lan-routes:
+    image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
+    container_name: host-lan-routes
+    mem_limit: 64m
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    environment:
+      # The host has no Docker DNS, so it can't resolve `wireguard` the way the sibling route-sync
+      # containers do. Hence the pinned bridge address below — never the Docker socket, which would hand
+      # a NET_ADMIN host-netns container full control of the daemon that docker-socket-proxy exists to fence off.
+      WG_IP: *wireguard-bridge-ip
+    volumes:
+      - ./wireguard/config:/wireguard-config:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        while true; do
+          if [ -n "$$WG_IP" ]; then
+            for f in /wireguard-config/*/*.conf; do
+              [ -f "$$f" ] || continue
+              cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+              if [ -n "$$cidr" ]; then
+                ip route show "$$cidr" 2>/dev/null | grep -q "via $$WG_IP" || \
+                  ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
+              fi
+            done
+          fi
+          sleep 15
+        done
+    depends_on:
+      - wireguard
+    restart: unless-stopped
+
   traefik-lan-routes:
     image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
     container_name: traefik-lan-routes
+    mem_limit: 64m
     network_mode: "service:traefik"
     cap_add:
       - NET_ADMIN
@@ -331,6 +391,12 @@ services:
   vaier:
     image: getvaier/vaier:latest
     container_name: vaier
+    # The JVM sizes its heap from the cgroup limit once one exists, so this cap and
+    # JAVA_TOOL_OPTIONS below must be read together: 55% of 768m is a ~422 MB heap,
+    # leaving ~346 MB for metaspace, code cache, thread stacks and direct buffers.
+    # Measured steady-state RSS is ~340 MB. Without the explicit percentage the JVM
+    # would fall back to its 25% default and starve itself down to a 192 MB heap.
+    mem_limit: 768m
     cap_add:
       # Needed by VpnNetworkSetupAdapter and LanRouteAdapter, which shell out to
       # `ip route` inside this container to install routes for the VPN subnet
@@ -338,6 +404,12 @@ services:
       # wireguard container's own namespace (which has its own NET_ADMIN).
       - NET_ADMIN
     environment:
+      # Heap ceiling as a share of the mem_limit above. Read the mem_limit comment before changing.
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=55
+      # The zone Vaier reads local time in. The nightly fleet-backup schedule compares the configured
+      # hour against this zone, so "02:00" means 02:00 here — not 02:00 UTC. Defaults to UTC; set
+      # VAIER_TZ in .env (e.g. Europe/Oslo) to schedule in your own local time.
+      TZ: ${VAIER_TZ:-UTC}
       VAIER_AWS_KEY: ${VAIER_AWS_KEY:-}
       VAIER_AWS_SECRET: ${VAIER_AWS_SECRET:-}
       VAIER_DOMAIN: ${VAIER_DOMAIN:-}
@@ -514,6 +586,7 @@ services:
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
     container_name: oauth2-proxy
+    mem_limit: 96m
     command:
       # Flags kept as flags — not covered by alpha config, or conflicting with it.
       - --cookie-secret=${VAIER_OAUTH2_COOKIE_SECRET}
@@ -605,6 +678,7 @@ services:
   dex:
     image: ghcr.io/dexidp/dex:v2.45.1
     container_name: dex
+    mem_limit: 96m
     command: [dex, serve, /dex/config/config.yaml]
     volumes:
       - ./dex/config:/dex/config:ro
@@ -630,6 +704,7 @@ services:
   vaier-offline:
     image: nginx:1.27.5-alpine
     container_name: vaier-offline
+    mem_limit: 32m
     restart: unless-stopped
     volumes:
       - ./offline/html:/usr/share/nginx/html:ro

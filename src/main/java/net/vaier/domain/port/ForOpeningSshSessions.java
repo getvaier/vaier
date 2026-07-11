@@ -12,10 +12,13 @@ import net.vaier.domain.SshTarget;
 public interface ForOpeningSshSessions {
 
     /**
-     * Open a shell session to {@code target}, delivering remote output to {@code onOutput}. The
-     * returned {@link SshSession} is the live handle: write keystrokes, resize the PTY, and close it.
+     * Open an interactive PTY session to {@code target} running {@code command}, delivering remote output
+     * to {@code onOutput}. The {@code command} is a shell decision the domain makes (see {@code
+     * PersistentShell}) — typically a tmux attach-or-create with a plain-shell fallback — run under a PTY
+     * so it behaves exactly like an interactive login. The returned {@link SshSession} is the live handle:
+     * write keystrokes, resize the PTY, and close it.
      */
-    SshSession open(SshTarget target, SshOutputListener onOutput);
+    SshSession open(SshTarget target, String command, SshOutputListener onOutput);
 
     /** A live SSH shell session. Thread-safe writes/close; closing is idempotent. */
     interface SshSession {

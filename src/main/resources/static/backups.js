@@ -33,7 +33,8 @@
         const el = document.getElementById('bk-message');
         if (!type) { el.innerHTML = ''; return; }
         el.innerHTML = `<div class="${type}">${escapeHtml(text)}</div>`;
-        if (type === 'success') setTimeout(() => { el.innerHTML = ''; }, 5000);
+        // Non-alarming toasts (a finished backup, warnings) clear themselves; errors stay until dismissed.
+        if (type === 'success' || type === 'warning') setTimeout(() => { el.innerHTML = ''; }, 5000);
     }
 
     function openModal(id) { document.getElementById(id).classList.add('active'); }
@@ -96,6 +97,129 @@
         return ok ? '<span class="bk-check-mark pass">✓</span>' : '<span class="bk-check-mark fail">✕</span>';
     }
 
+    // --- Overflow menu ---
+    // A card shows one verb inline; the rest live here. Built as elements rather than markup so an action
+    // is a closure over its own entity, never a name spliced into an onclick string.
+
+    // An open menu hangs over the cards below it. Without a backdrop, a click aimed at a card behind it
+    // fires that card's action immediately — "Run now" and "Provision" take no confirmation. The backdrop
+    // sits under the menu but over the page, so the first click anywhere outside the menu only closes it.
+    function menuBackdrop() {
+        let el = document.getElementById('bk-menu-backdrop');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'bk-menu-backdrop';
+            document.body.appendChild(el);
+        }
+        return el;
+    }
+
+    function closeMenus() {
+        document.querySelectorAll('.bk-menu.open').forEach(m => {
+            m.classList.remove('open');
+            m.querySelector('.bk-menu-btn').setAttribute('aria-expanded', 'false');
+        });
+        menuBackdrop().classList.remove('active');
+    }
+
+    function actionMenu(actions) {
+        const menu = document.createElement('div');
+        menu.className = 'bk-menu';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'bk-menu-btn';
+        btn.textContent = '⋯';
+        btn.setAttribute('aria-haspopup', 'true');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.setAttribute('aria-label', 'More actions');
+        btn.addEventListener('click', ev => {
+            ev.stopPropagation();
+            const wasOpen = menu.classList.contains('open');
+            closeMenus();
+            if (!wasOpen) {
+                menu.classList.add('open');
+                btn.setAttribute('aria-expanded', 'true');
+                menuBackdrop().classList.add('active');
+            }
+        });
+
+        const list = document.createElement('div');
+        list.className = 'bk-menu-list';
+        list.setAttribute('role', 'menu');
+        actions.forEach(action => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'btn btn-small ' + (action.cls || 'btn-secondary');
+            item.setAttribute('role', 'menuitem');
+            item.textContent = action.label;
+            item.addEventListener('click', () => { closeMenus(); action.onClick(); });
+            list.appendChild(item);
+        });
+
+        menu.append(btn, list);
+        return menu;
+    }
+
+    // --- The chain ---
+    // Each stage is done once it holds something, current when you can act on it now, and blocked while its
+    // prerequisite is missing. A blocked stage refuses its "New…" button, so the page can't be worked
+    // out of order.
+    function setStage(id, state) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle('is-done', state === 'done');
+        el.classList.toggle('is-current', state === 'current');
+        el.classList.toggle('is-blocked', state === 'blocked');
+    }
+
+    function stageState(count, prerequisiteMet) {
+        if (count > 0) return 'done';
+        return prerequisiteMet ? 'current' : 'blocked';
+    }
+
+    // A satisfied stage trades its numeral for a checkmark — the step is behind you.
+    function setNode(id, numeral, done) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = done ? '✓' : numeral;
+    }
+
+    function blockButton(id, blocked, why) {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.disabled = blocked;
+        if (blocked) btn.title = why; else btn.removeAttribute('title');
+    }
+
+    function updateChain() {
+        setStage('stageServers', stageState(servers.length, true));
+        setStage('stageRepos', stageState(repos.length, servers.length > 0));
+        setStage('stageJobs', stageState(jobs.length, repos.length > 0));
+        setStage('stageSchedule', jobs.some(j => j.enabled) ? 'done' : 'blocked');
+
+        setNode('serverNode', '1', servers.length > 0);
+        setNode('repoNode', '2', repos.length > 0);
+        setNode('jobNode', '3', jobs.length > 0);
+
+        blockButton('newRepoBtn', servers.length === 0, 'Add a backup server first');
+        blockButton('newJobBtn', repos.length === 0, 'Add a backup repository first');
+        updateScheduleSummary();
+    }
+
+    // What the next run on the nightly schedule will actually pick up.
+    function updateScheduleSummary() {
+        const el = document.getElementById('scheduleSummary');
+        if (!el) return;
+        if (jobs.length === 0) { el.textContent = 'No jobs yet — nothing runs tonight.'; return; }
+        const hourValue = document.getElementById('scheduleHour').value;
+        const zone = scheduleZone ? ' ' + scheduleZone : '';
+        const hour = hourValue === ''
+            ? ''
+            : ' · next run ' + String(hourValue).padStart(2, '0') + ':00' + zone;
+        const enabled = jobs.filter(j => j.enabled).length;
+        el.textContent = `${enabled} of ${jobs.length} job${jobs.length === 1 ? '' : 's'} enabled` + hour;
+    }
+
     // --- Enterprise gate ---
     const GATE_ICON = '<svg width="40" height="40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="3" rx="0.5"/><path d="M2.5 5.5v7a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-7"/><line x1="6" y1="8.5" x2="10" y2="8.5"/></svg>';
 
@@ -132,6 +256,7 @@
         try {
             servers = await jsonOrThrow(await fetch('/backup-servers', { cache: 'no-store' }));
             renderServers();
+            updateChain();
         } catch (e) {
             if (handleGated(e)) return;
             list.innerHTML = `<div class="error">Couldn't load servers: ${escapeHtml(e.message)}</div>`;
@@ -141,7 +266,9 @@
     function renderServers() {
         const list = document.getElementById('serverList');
         if (servers.length === 0) {
-            list.innerHTML = `<div class="bk-empty">No backup servers yet.<br>Add one to point at (or provision) a borg server for the fleet.</div>`;
+            list.innerHTML = `<div class="bk-empty"><b>Start here.</b>
+                Point Vaier at the machine that will hold the fleet's archives. If Vaier can reach it over
+                SSH it will install and start borg there itself.</div>`;
             return;
         }
         list.innerHTML = '';
@@ -151,6 +278,14 @@
             const managed = server.managed
                 ? '<span class="badge badge-success">managed</span>'
                 : '<span class="badge bk-badge-muted">registered</span>';
+            // A managed server's next move is to provision it; one Vaier only registers is ready to trust
+            // machines. Whichever isn't the primary action drops into the overflow menu.
+            const primary = server.managed
+                ? { label: 'Provision', cls: 'btn-success', onClick: () => provisionServer(server) }
+                : { label: 'Authorize host…', cls: 'btn-secondary', onClick: () => openAuthorizeModal(server) };
+            const secondary = server.managed
+                ? { label: 'Authorize host…', onClick: () => openAuthorizeModal(server) }
+                : { label: 'Provision', onClick: () => provisionServer(server) };
             el.innerHTML = `
                 <div class="bk-item-main">
                     <div class="bk-item-title"><span class="bk-item-name">${escapeHtml(server.name)}</span></div>
@@ -162,17 +297,15 @@
                     <div class="bk-tags">${managed}</div>
                 </div>
                 <div class="bk-item-actions">
-                    <button class="btn btn-small btn-success js-provision">Provision</button>
-                    <button class="btn btn-small btn-secondary js-setup">Setup script</button>
-                    <button class="btn btn-small btn-secondary js-authorize">Authorize host…</button>
-                    <button class="btn btn-small btn-secondary js-edit">Edit</button>
-                    <button class="btn btn-small btn-danger js-delete">Delete</button>
+                    <button class="btn btn-small ${primary.cls} js-primary">${escapeHtml(primary.label)}</button>
                 </div>`;
-            el.querySelector('.js-provision').addEventListener('click', () => provisionServer(server));
-            el.querySelector('.js-setup').addEventListener('click', () => openSetupModal(server));
-            el.querySelector('.js-authorize').addEventListener('click', () => openAuthorizeModal(server));
-            el.querySelector('.js-edit').addEventListener('click', () => openServerModal(server));
-            el.querySelector('.js-delete').addEventListener('click', () => confirmDeleteServer(server));
+            el.querySelector('.js-primary').addEventListener('click', primary.onClick);
+            el.querySelector('.bk-item-actions').appendChild(actionMenu([
+                secondary,
+                { label: 'Setup script', onClick: () => openSetupModal(server) },
+                { label: 'Edit', onClick: () => openServerModal(server) },
+                { label: 'Delete', cls: 'btn-danger', onClick: () => confirmDeleteServer(server) }
+            ]));
             list.appendChild(el);
         });
     }
@@ -428,6 +561,7 @@
         try {
             repos = await jsonOrThrow(await fetch('/backup-repositories', { cache: 'no-store' }));
             renderRepos();
+            updateChain();
         } catch (e) {
             if (handleGated(e)) return;
             list.innerHTML = `<div class="error">Couldn't load repositories: ${escapeHtml(e.message)}</div>`;
@@ -437,7 +571,12 @@
     function renderRepos() {
         const list = document.getElementById('repoList');
         if (repos.length === 0) {
-            list.innerHTML = `<div class="bk-empty">No backup repositories yet.<br>Add one by naming it on a backup server.</div>`;
+            list.innerHTML = servers.length === 0
+                ? `<div class="bk-empty"><b>Waiting on step 1.</b>
+                    A repository lives inside a backup server, so there's nowhere to put one yet.</div>`
+                : `<div class="bk-empty"><b>Name a repository.</b>
+                    Vaier derives its path on ${escapeHtml(servers[0].name)} and generates a passphrase for
+                    it. Give each machine its own.</div>`;
             return;
         }
         list.innerHTML = '';
@@ -460,14 +599,15 @@
                 </div>
                 <div class="bk-item-actions">
                     <button class="btn btn-small btn-secondary js-archives">Browse archives</button>
-                    <button class="btn btn-small btn-secondary js-init">Initialise</button>
-                    <button class="btn btn-small btn-secondary js-edit">Edit</button>
-                    <button class="btn btn-small btn-danger js-delete">Delete</button>
                 </div>`;
             el.querySelector('.js-archives').addEventListener('click', () => browseArchives(repo));
-            el.querySelector('.js-init').addEventListener('click', () => initRepository(repo));
-            el.querySelector('.js-edit').addEventListener('click', () => openRepoModal(repo));
-            el.querySelector('.js-delete').addEventListener('click', () => confirmDeleteRepo(repo));
+            // No Initialise action: a run creates the repository if it is absent. The endpoint that does it
+            // borrows a host from a job targeting the repository, so a button here could only ever fail on a
+            // repository no job references yet — the moment its name most invites pressing it.
+            el.querySelector('.bk-item-actions').appendChild(actionMenu([
+                { label: 'Edit', onClick: () => openRepoModal(repo) },
+                { label: 'Delete', cls: 'btn-danger', onClick: () => confirmDeleteRepo(repo) }
+            ]));
             list.appendChild(el);
         });
     }
@@ -630,32 +770,13 @@
         }
     }
 
-    async function initRepository(repo) {
-        document.getElementById('provisionModalTitle').textContent = 'Initialise · ' + repo.name;
-        const body = document.getElementById('provisionBody');
-        body.innerHTML = '<div class="loading">Initialising repository…</div>';
-        openModal('provisionModal');
-        try {
-            const res = await fetch('/backup-repositories/' + encodeURIComponent(repo.name) + '/provision/init', { method: 'POST' });
-            const result = await jsonOrThrow(res);
-            const heading = result.alreadyExisted
-                ? 'Repository already initialised'
-                : result.initialized ? 'Repository initialised' : 'Initialisation did not complete';
-            body.innerHTML = `<div class="bk-check-list">
-                <div class="bk-check-row">${checkMark(result.initialized)}<span>${escapeHtml(heading)}</span></div>
-                <div class="bk-field-note">${escapeHtml(result.message || '')}</div>
-            </div>`;
-        } catch (e) {
-            body.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
-        }
-    }
-
     // --- Jobs ---
     async function loadJobs() {
         const list = document.getElementById('jobList');
         try {
             jobs = await jsonOrThrow(await fetch('/backup-jobs', { cache: 'no-store' }));
             renderJobs();
+            updateChain();
             jobs.forEach(refreshRunBadge);
         } catch (e) {
             if (handleGated(e)) return;
@@ -670,6 +791,7 @@
         switch (run.status) {
             case 'RUNNING': return '<span class="status status-running"><span class="status-indicator"></span>Running</span>';
             case 'SUCCESS': return `<span class="status status-ok"><span class="status-indicator"></span>Success</span>${time}`;
+            case 'WARNING': return `<span class="status status-warn"><span class="status-indicator"></span>Warnings</span>${time}`;
             case 'FAILED':  return `<span class="status status-error"><span class="status-indicator"></span>Failed</span>${time}`;
             default:        return `<span class="status status-unknown"><span class="status-indicator"></span>Unknown</span>${time}`;
         }
@@ -678,7 +800,12 @@
     function renderJobs() {
         const list = document.getElementById('jobList');
         if (jobs.length === 0) {
-            list.innerHTML = `<div class="bk-empty">No backup jobs yet.<br>Add a job to back up a machine to one of your repositories.</div>`;
+            list.innerHTML = repos.length === 0
+                ? `<div class="bk-empty"><b>Waiting on step 2.</b>
+                    A job needs a repository to write into.</div>`
+                : `<div class="bk-empty"><b>Back up a machine.</b>
+                    Pick the machine, the paths, and the repository the archives land in. Vaier installs borg
+                    on the machine and trusts its key when you check readiness.</div>`;
             return;
         }
         list.innerHTML = '';
@@ -705,15 +832,14 @@
                 </div>
                 <div class="bk-item-actions">
                     <button class="btn btn-small btn-success js-run">Run now</button>
-                    <button class="btn btn-small btn-secondary js-check">Check readiness</button>
-                    <button class="btn btn-small btn-secondary js-edit">Edit</button>
-                    <button class="btn btn-small btn-danger js-delete">Delete</button>
                 </div>`;
             el.querySelector('.js-run').addEventListener('click', () => runJob(job));
-            el.querySelector('.js-check').addEventListener('click', () => checkReadiness(job));
-            el.querySelector('.js-edit').addEventListener('click', () => openJobModal(job));
-            el.querySelector('.js-delete').addEventListener('click', () => confirmDeleteJob(job));
             el.querySelector('.js-enabled').addEventListener('change', ev => toggleEnabled(job, ev.target.checked));
+            el.querySelector('.bk-item-actions').appendChild(actionMenu([
+                { label: 'Check readiness', onClick: () => checkReadiness(job) },
+                { label: 'Edit', onClick: () => openJobModal(job) },
+                { label: 'Delete', cls: 'btn-danger', onClick: () => confirmDeleteJob(job) }
+            ]));
             list.appendChild(el);
         });
     }
@@ -814,6 +940,7 @@
                 body: JSON.stringify(body)
             }));
             job.enabled = enabled;
+            updateChain();   // the nightly schedule's reach just changed
             msg('Job "' + job.name + '" ' + (enabled ? 'enabled' : 'disabled') + '.', 'success');
         } catch (e) {
             msg(e.message, 'error');
@@ -858,6 +985,7 @@
             if (res.ok) { latestRuns[jobName] = await res.json(); paintBadge(jobName); }
         } catch (_) { /* the event already told us the outcome; the badge repaints on the next load */ }
         if (payload.status === 'SUCCESS') msg('Backup of "' + jobName + '" finished.', 'success');
+        else if (payload.status === 'WARNING') msg('Backup of "' + jobName + '" completed with warnings — some files were skipped.', 'warning');
         else if (payload.status === 'FAILED') msg('Backup of "' + jobName + '" failed — admins were emailed.', 'error');
     }
 
@@ -1030,6 +1158,8 @@
     }
 
     // --- Nightly schedule ---
+    let scheduleZone = '';   // the zone the backend's scheduler reads the hour in, e.g. "Europe/Oslo"
+
     async function loadSchedule() {
         const sel = document.getElementById('scheduleHour');
         sel.innerHTML = Array.from({ length: 24 }, (_, h) =>
@@ -1038,6 +1168,10 @@
             const cfg = await jsonOrThrow(await fetch('/settings/config', { cache: 'no-store' }));
             const hour = Number.isInteger(cfg.backupScheduleHour) ? cfg.backupScheduleHour : 2;
             sel.value = String(hour);
+            // Name the zone rather than say "server local time": the hour is read in the backend's zone,
+            // which is not necessarily the operator's, and a wrong guess costs two hours of surprise.
+            scheduleZone = cfg.backupScheduleZone || '';
+            if (scheduleZone) document.getElementById('scheduleZone').textContent = scheduleZone;
         } catch (_) {
             sel.value = '2';
         }
@@ -1054,6 +1188,7 @@
                 body: JSON.stringify({ backupScheduleHour: hour })
             }));
             note.textContent = 'Saved.';
+            updateScheduleSummary();
             setTimeout(() => { note.textContent = ''; }, 4000);
         } catch (e) {
             note.textContent = e.message;
@@ -1129,13 +1264,16 @@
 
         document.getElementById('saveScheduleBtn').addEventListener('click', saveSchedule);
 
-        // Click on the dim backdrop closes a modal (matches vpn-peers/users).
+        // Click on the dim backdrop closes a modal (matches vpn-peers/users). Any click outside an open
+        // overflow menu closes it; so does Escape, which keeps it reachable from the keyboard alone.
         window.addEventListener('click', e => {
+            closeMenus();
             if (e.target.classList.contains('modal')) {
                 if (e.target.id === 'serverProvisionModal') pendingProvision = null;
                 e.target.classList.remove('active');
             }
         });
+        window.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
     }
 
     // The backup UI never polls: it opens ONE backend SSE stream and reacts to pushed settle events. A
@@ -1161,7 +1299,12 @@
         document.getElementById('bk-app').style.display = '';
         subscribeToBackupEvents();
         await loadMachines();
-        await Promise.all([loadServers(), loadRepositories(), loadJobs(), loadSchedule()]);
+        // Loaded in chain order, not in parallel: a stage's empty state names the prerequisite it is
+        // waiting on, so repositories must already know whether a server exists before they render.
+        await loadSchedule();
+        await loadServers();
+        await loadRepositories();
+        await loadJobs();
     }
 
     init();

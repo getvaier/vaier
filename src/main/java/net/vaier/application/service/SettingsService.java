@@ -18,6 +18,8 @@ import net.vaier.domain.port.ForValidatingAwsCredentials;
 import net.vaier.domain.port.ForVerifyingSmtpCredentials;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+
 @Service
 @Slf4j
 public class SettingsService implements
@@ -36,6 +38,7 @@ public class SettingsService implements
     private final ForSendingTestEmail testEmailSender;
     private final ConfigResolver configResolver;
     private final ForReadingAppVersion appVersionReader;
+    private final Clock clock;
 
     public SettingsService(ForPersistingAppConfiguration configPersistence,
                            ForValidatingAwsCredentials forValidatingAwsCredentials,
@@ -43,7 +46,8 @@ public class SettingsService implements
                            ForReadingStoredSmtpPassword storedPasswordReader,
                            ForSendingTestEmail testEmailSender,
                            ConfigResolver configResolver,
-                           ForReadingAppVersion appVersionReader) {
+                           ForReadingAppVersion appVersionReader,
+                           Clock clock) {
         this.configPersistence = configPersistence;
         this.forValidatingAwsCredentials = forValidatingAwsCredentials;
         this.smtpVerifier = smtpVerifier;
@@ -51,6 +55,7 @@ public class SettingsService implements
         this.testEmailSender = testEmailSender;
         this.configResolver = configResolver;
         this.appVersionReader = appVersionReader;
+        this.clock = clock;
     }
 
     @Override
@@ -64,7 +69,7 @@ public class SettingsService implements
             .map(this::toResult)
             .orElse(new AppSettingsResult(null, null, null, null, null, null, null, dnsProviderName(),
                 VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT, configResolver.isSocialAuthAvailable(),
-                VaierConfig.DEFAULT_BACKUP_SCHEDULE_HOUR));
+                VaierConfig.DEFAULT_BACKUP_SCHEDULE_HOUR, backupScheduleZone()));
     }
 
     @Override
@@ -128,8 +133,17 @@ public class SettingsService implements
             dnsProviderName(),
             config.effectiveDiskMonitorThresholdPercent(),
             configResolver.isSocialAuthAvailable(),
-            config.effectiveBackupScheduleHour()
+            config.effectiveBackupScheduleHour(),
+            backupScheduleZone()
         );
+    }
+
+    /**
+     * The zone the nightly backup schedule fires in, taken from the same clock the scheduler reads, so the
+     * label the UI shows can never drift from the hour that actually runs.
+     */
+    private String backupScheduleZone() {
+        return clock.getZone().getId();
     }
 
     private String resolveSmtpPassword(String provided) {

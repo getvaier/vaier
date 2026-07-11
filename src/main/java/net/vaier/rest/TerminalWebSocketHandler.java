@@ -5,11 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.OpenTerminalSessionUseCase;
+import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
 import net.vaier.application.SendHostPasswordUseCase;
 import net.vaier.application.SendHostPasswordUseCase.SendPasswordResult;
 import net.vaier.domain.HostKeyMismatchException;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PasswordPrompt;
+import net.vaier.domain.PersistentShell;
 import net.vaier.domain.SshAuthException;
 import net.vaier.domain.SshConnectException;
 import net.vaier.domain.port.ForOpeningSshSessions.SshSession;
@@ -28,7 +31,9 @@ import java.nio.charset.StandardCharsets;
  * WebSocket bridge for the web terminal (#308): on connect it resolves the machine from the path,
  * opens an SSH shell via {@link OpenTerminalSessionUseCase} (authenticated from the vault), and pipes
  * both directions — inbound binary frames are keystrokes, inbound text frames are JSON control
- * ({@code {"type":"resize","cols":..,"rows":..}}), and remote output is relayed as binary frames.
+ * ({@code resize}, {@code send-password}), and remote output is relayed as binary frames. Outbound text
+ * frames are control replies ({@code shell-mode}, {@code password-prompt}, {@code password-result}); none
+ * ever carries a secret.
  *
  * <p>Each distinct failure closes the socket with its own application close code + reason so the UI can
  * explain it: {@code 4404} unknown machine, {@code 4401} no credential, {@code 4402} auth failed,
@@ -66,10 +71,15 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
         }
         try {
             OutputTail tail = new OutputTail();
-            SshSession ssh = openTerminalSessionUseCase.openTerminal(machine, new WsOutputListener(wsSession, tail));
-            wsSession.getAttributes().put(SSH_SESSION_ATTR, ssh);
+            String paneId = paneFromQuery(wsSession.getUri());
+            OpenedTerminal opened = openTerminalSessionUseCase.openTerminal(
+                machine, paneId, new WsOutputListener(wsSession, tail));
+            wsSession.getAttributes().put(SSH_SESSION_ATTR, opened.session());
             wsSession.getAttributes().put(MACHINE_ATTR, machine);
             wsSession.getAttributes().put(TAIL_ATTR, tail);
+            // Tell the browser truthfully how this open resolved, so its reconnect banner can say
+            // "reattached" only when the session was genuinely resumed.
+            sendShellMode(wsSession, opened.continuity());
         } catch (NotFoundException e) {
             closeWith(wsSession, CLOSE_NOT_FOUND, "No machine named \"" + machine + "\"");
         } catch (NoHostCredentialException e) {
@@ -148,6 +158,43 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
     }
 
     /**
+     * Push the {@code shell-mode} control frame stating how the persistent shell resolved:
+     * {@code reattached} (the tmux session was resumed), {@code new} (a fresh session was created), or
+     * {@code plain} (tmux absent — a non-persistent shell). The browser uses it to write a truthful
+     * reconnect banner instead of always implying continuity.
+     */
+    private static void sendShellMode(WebSocketSession wsSession, PersistentShell.Continuity continuity) {
+        String mode = switch (continuity) {
+            case REATTACHED -> "reattached";
+            case NEW -> "new";
+            case PLAIN -> "plain";
+        };
+        try {
+            wsSession.sendMessage(new TextMessage("{\"type\":\"shell-mode\",\"mode\":\"" + mode + "\"}"));
+        } catch (IOException e) {
+            log.debug("Failed to send shell-mode frame: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * The stable per-pane id from the {@code ?pane=…} query of the terminal WebSocket URI, used to name
+     * the machine's tmux session so a reconnect for the same pane reattaches and two panes never share one
+     * session. Null when absent (the domain then falls back to a single default session name).
+     */
+    static String paneFromQuery(URI uri) {
+        if (uri == null || uri.getQuery() == null) {
+            return null;
+        }
+        for (String pair : uri.getQuery().split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && "pane".equals(pair.substring(0, eq))) {
+                return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            }
+        }
+        return null;
+    }
+
+    /**
      * The machine name from a {@code /machines/{machine}/terminal} URI, URL-decoded (the name can
      * contain spaces, e.g. "Vaier server"). Null when the path doesn't match.
      */
@@ -197,11 +244,19 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
         }
     }
 
-    /** Relays remote shell output to the browser as binary frames; ends the socket when the shell closes. */
+    /**
+     * Relays remote shell output to the browser as binary frames; ends the socket when the shell closes.
+     * It also watches the buffered tail after each chunk and, when the {@link PasswordPrompt} decision
+     * flips, pushes a {@code {"type":"password-prompt","showing":..}} frame so the browser can reveal or
+     * hide the Send-password action exactly while the remote is awaiting a password. The frame is sent on
+     * <em>change</em> only, never per chunk, and the tail is what makes a prompt split across two reads
+     * still register.
+     */
     private static final class WsOutputListener implements net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener {
         private final WebSocketSession wsSession;
         private final OutputTail tail;
         private final Object sendLock = new Object();
+        private boolean promptShowing = false;
 
         WsOutputListener(WebSocketSession wsSession, OutputTail tail) {
             this.wsSession = wsSession;
@@ -211,10 +266,16 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
         @Override
         public void onOutput(byte[] data) {
             tail.append(data);
+            boolean nowShowing = PasswordPrompt.isAwaitingPassword(tail.snapshot());
             synchronized (sendLock) {
                 if (!wsSession.isOpen()) return;
                 try {
                     wsSession.sendMessage(new BinaryMessage(data));
+                    if (nowShowing != promptShowing) {
+                        promptShowing = nowShowing;
+                        wsSession.sendMessage(new TextMessage(
+                            "{\"type\":\"password-prompt\",\"showing\":" + nowShowing + "}"));
+                    }
                 } catch (IOException e) {
                     log.debug("Failed to relay shell output: {}", e.getMessage());
                 }

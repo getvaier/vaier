@@ -15,14 +15,16 @@ import java.util.regex.Pattern;
 public final class PasswordPrompt {
 
     /**
-     * Matches a password prompt only at the very end of the output. {@code (?is)} makes it
-     * case-insensitive and lets {@code .*} span newlines; the alternation covers both the bare
-     * {@code password:} / {@code user@host's password:} forms and sudo's {@code password for <user>:};
-     * {@code \s*\z} allows an optional trailing space or newline but nothing else after the prompt, so a
-     * shell prompt printed after an answered password no longer matches.
+     * Matches a password/passphrase prompt only at the very end of the output. {@code (?is)} makes it
+     * case-insensitive and lets {@code .*} span newlines; the alternation covers the bare
+     * {@code password:} / {@code user@host's password:} forms, sudo's {@code password for <user>:}, and
+     * ssh's {@code Enter passphrase for key '...':} form (the key path can hold spaces/quotes, so
+     * {@code .+} runs up to the anchoring colon). {@code \s*\z} allows an optional trailing space or
+     * newline but nothing else after the prompt, so a shell prompt printed after an answered password no
+     * longer matches.
      */
     private static final Pattern AWAITING_PASSWORD =
-        Pattern.compile("(?is).*password(?: for \\S+)?:\\s*\\z");
+        Pattern.compile("(?is).*(?:password(?: for \\S+)?|passphrase for .+):\\s*\\z");
 
     private PasswordPrompt() {
     }

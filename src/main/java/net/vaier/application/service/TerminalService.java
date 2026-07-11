@@ -6,6 +6,7 @@ import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.DeleteHostCredentialUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
+import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.application.SaveHostCredentialUseCase;
 import net.vaier.application.SendHostPasswordUseCase;
@@ -18,6 +19,7 @@ import net.vaier.domain.LanServer;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PasswordPrompt;
+import net.vaier.domain.PersistentShell;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -76,15 +78,25 @@ public class TerminalService implements
     }
 
     @Override
-    public SshSession openTerminal(String machineName, SshOutputListener onOutput) {
+    public OpenedTerminal openTerminal(String machineName, String paneId, SshOutputListener onOutput) {
         SshTarget target = buildTarget(machineName);
-        // The adapter enforces host-key trust via the domain HostKeyTrust decision and throws
-        // HostKeyMismatchException on a changed key; other failures surface as SshAuth/SshConnect.
-        SshSession session = forOpeningSshSessions.open(target, onOutput);
+        // Probe first (a normal exec run, the same host-key trust as any command): is tmux installed on
+        // this machine, and does the pane's session already exist? The domain reads it into a truthful
+        // continuity, so the reconnect banner can say "reattached" only when it really was. This first
+        // connection is also where an unpinned host is pinned on first use.
+        CommandResult probe = forRunningSshCommands.run(target, PersistentShell.probeCommand(paneId));
+        pinOnFirstUse(machineName, target, probe.hostKeyFingerprint());
+        PersistentShell.Continuity continuity = PersistentShell.readProbe(probe.stdout());
 
-        pinOnFirstUse(machineName, target, session.hostKeyFingerprint());
-        log.info("Opened terminal session to {} ({})", machineName, target.host());
-        return session;
+        // Open the persistent shell: tmux attach-or-create for the pane, falling back to a plain login
+        // shell when tmux is absent. The adapter enforces host-key trust and throws HostKeyMismatchException
+        // on a changed key; other failures surface as SshAuth/SshConnect.
+        SshSession session = forOpeningSshSessions.open(
+            target, PersistentShell.attachOrCreateCommand(paneId), onOutput);
+
+        log.info("Opened {} terminal session to {} ({}) for pane {}",
+            continuity, machineName, target.host(), PersistentShell.sessionName(paneId));
+        return new OpenedTerminal(session, continuity);
     }
 
     @Override

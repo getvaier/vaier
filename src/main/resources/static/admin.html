@@ -133,19 +133,20 @@
     </main>
 
     <section class="term-panel" id="terminalPanel" style="display:none">
-        <div class="term-dock-bar">
-            <div class="term-dock-tabs" id="terminalTabs"></div>
-        </div>
         <div class="term-dock-panes" id="terminalPanes">
             <div class="term-empty" id="terminalEmpty">
                 No shells open. Open one from a machine's <strong>Terminal</strong> button on Infrastructure.
             </div>
         </div>
+        <!-- On-screen keys a phone's soft keyboard can't send (Esc, Tab, Ctrl, Alt, arrows). Populated and
+             wired by terminal-dock.js; shown only on a phone while a shell is open. -->
+        <div class="term-keybar" id="terminalKeys" role="group" aria-label="Terminal keys"></div>
     </section>
 
     <script src="avatar.js"></script>
     <script src="vendor/xterm/5.3.0/xterm.js"></script>
     <script src="vendor/xterm/5.3.0/xterm-addon-fit.js"></script>
+    <script src="vendor/xterm/5.3.0/xterm-addon-web-links.js"></script>
     <script src="terminal-dock.js"></script>
     <script>
         const mainContent = document.getElementById('mainContent');

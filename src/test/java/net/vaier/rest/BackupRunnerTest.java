@@ -570,6 +570,37 @@ class BackupRunnerTest {
     }
 
     @Test
+    void warningRunIsFedAsHealthyAndDoesNotPage() {
+        // A borg-exit-1 WARNING settle is fed to the tracker as healthy (isFailure()==false): a job whose
+        // baseline is healthy stays healthy, so a WARNING never pages admins.
+        seedRunning("run-1");
+        pollSettlesWith("1", "2 files skipped (permission denied)");
+
+        backupRunner.pollRunningRuns();
+
+        assertThat(runs.latestForJob("colina-home").orElseThrow().status())
+            .isEqualTo(BackupRunStatus.WARNING);
+        verify(backupNotifier, never()).notifyAdminsOfBackupFailure(any());
+        verify(backupNotifier, never()).notifyAdminsOfBackupRecovery(any());
+    }
+
+    @Test
+    void warningAfterFailureAllClears() {
+        // A failing job pages once; a later WARNING run (archive created, files skipped) is healthy, so it
+        // crosses the job back to healthy and sends a single all-clear — a warning is a recovery, not a page.
+        seedRunning("run-1");
+        pollSettlesWith("2", "borg exited 2");
+        backupRunner.pollRunningRuns();
+
+        seedRunning("run-2");
+        pollSettlesWith("1", "1 file skipped");
+        backupRunner.pollRunningRuns();
+
+        verify(backupNotifier, times(1)).notifyAdminsOfBackupFailure(any());
+        verify(backupNotifier, times(1)).notifyAdminsOfBackupRecovery(any());
+    }
+
+    @Test
     void restartDoesNotReAlertAlreadyFailedJob() {
         // Before the restart the job already failed and was alerted; its latest run is terminal FAILED in
         // the store. After a restart (fresh runner, empty tracker) the poll must not re-alert it, because a

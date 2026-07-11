@@ -47,7 +47,7 @@ class SettingsRestControllerTest {
     @Test
     void getConfig_returnsCurrentSettings() {
         AppSettingsResult settings = new AppSettingsResult("example.com", "****MPLE", "admin@example.com",
-                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false, 2);
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false, 2, "Europe/Oslo");
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         ResponseEntity<AppSettingsResult> response = controller.getConfig();

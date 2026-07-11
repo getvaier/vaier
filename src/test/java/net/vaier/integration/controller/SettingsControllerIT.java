@@ -19,7 +19,7 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
     void getConfig_returnsAppSettings() throws Exception {
         AppSettingsResult settings = new AppSettingsResult(
                 "example.com", "****MPLE", "admin@example.com",
-                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false, 2);
+                "smtp.example.com", 587, "user@example.com", "noreply@example.com", "ROUTE53", 85, false, 2, "Europe/Oslo");
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         mockMvc.perform(get("/settings/config"))

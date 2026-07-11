@@ -34,6 +34,39 @@ class BackupRunTest {
     }
 
     @Test
+    void exitOneIsWarningNeitherSuccessNorFailure() {
+        Instant start = Instant.parse("2026-07-08T02:00:00Z");
+        Instant end = Instant.parse("2026-07-08T02:05:00Z");
+
+        BackupRun warn = BackupRun.fromExitCode(job(), "run-w", start, end, 1,
+            "2 files skipped (permission denied)");
+
+        // Borg exit 1 means the archive was created but some files were skipped: a WARNING, not a failure.
+        assertThat(warn.status()).isEqualTo(BackupRunStatus.WARNING);
+        assertThat(warn.exitCode()).isEqualTo(1);
+        assertThat(warn.isFailure()).isFalse();
+        // WARNING is a settled outcome (never re-polled) but non-paging.
+        assertThat(warn.status().isTerminal()).isTrue();
+        assertThat(warn.status().isFailure()).isFalse();
+    }
+
+    @Test
+    void completedFromExitOneSettlesToWarning() {
+        Instant started = Instant.parse("2026-07-08T02:00:00Z");
+        Instant done = Instant.parse("2026-07-08T02:40:00Z");
+        BackupRun running = BackupRun.started(job(), "run-w2", started);
+
+        BackupRun warn = running.completedFrom(1, done, "1 file skipped");
+
+        assertThat(warn.status()).isEqualTo(BackupRunStatus.WARNING);
+        assertThat(warn.exitCode()).isEqualTo(1);
+        assertThat(warn.isFailure()).isFalse();
+        // Identity of the run is preserved across completion.
+        assertThat(warn.runId()).isEqualTo("run-w2");
+        assertThat(warn.finishedAt()).isEqualTo(done);
+    }
+
+    @Test
     void startedIsRunningWithNoOutcomeYet() {
         Instant now = Instant.parse("2026-07-08T02:00:00Z");
 

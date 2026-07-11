@@ -17,58 +17,99 @@
 
         <!-- Everything below is hidden until the Enterprise check passes. -->
         <div id="bk-app" style="display:none">
-            <div class="bk-intro">
+            <div class="bk-head">
                 <h1>Fleet Backup</h1>
-                <p>Stand up a borg backup server from nothing, trust each machine that should back up to it,
-                   then add a repository just by naming it. Give a machine a backup job and run it on demand
-                   or on the nightly schedule. Vaier emails admins when a run fails, and when the backup
-                   server itself goes quiet. Restore isn't available here yet.</p>
+                <p class="bk-lede">A backup server stores the archives, a repository is a named place inside
+                   it, and a job writes one machine's paths into a repository every night. Build them in that
+                   order. Vaier emails admins when a run fails, and when the backup server goes quiet.</p>
             </div>
 
-            <!-- Backup servers -->
-            <div class="bk-section">
-                <div class="bk-section-head">
-                    <div class="section-label">Backup servers</div>
-                    <button class="btn btn-primary" id="newServerBtn">+ New server</button>
-                </div>
-                <div class="bk-list" id="serverList"><div class="loading">Loading servers…</div></div>
-            </div>
-
-            <!-- Backup repositories -->
-            <div class="bk-section">
-                <div class="bk-section-head">
-                    <div class="section-label">Backup repositories</div>
-                    <button class="btn btn-primary" id="newRepoBtn">+ New repository</button>
-                </div>
-                <div class="bk-list" id="repoList"><div class="loading">Loading repositories…</div></div>
-            </div>
-
-            <!-- Backup jobs -->
-            <div class="bk-section">
-                <div class="bk-section-head">
-                    <div class="section-label">Backup jobs</div>
-                    <button class="btn btn-primary" id="newJobBtn">+ New job</button>
-                </div>
-                <div class="bk-list" id="jobList"><div class="loading">Loading jobs…</div></div>
-            </div>
-
-            <!-- Nightly schedule -->
-            <div class="bk-section">
-                <div class="section-label" style="margin-bottom:0.7rem">Nightly schedule</div>
-                <div class="bk-schedule-card">
-                    <div class="bk-schedule-info">
-                        <div class="bk-schedule-title">Run enabled jobs each night</div>
-                        <div class="bk-schedule-desc">Vaier runs every enabled backup job once a day at this
-                            hour (server local time). A failed run emails all admins.</div>
+            <!-- The three stages hang off one spine. Each node's state, and how far the connector reaches,
+                 is set by updateChain() from the data actually loaded. -->
+            <ol class="bk-chain">
+                <li class="bk-stage" id="stageServers">
+                    <div class="bk-rail"><span class="bk-node" id="serverNode">1</span></div>
+                    <div class="bk-stage-body">
+                        <div class="bk-stage-head">
+                            <div>
+                                <h2 class="bk-stage-title">Stand up a backup server</h2>
+                                <p class="bk-stage-desc">The machine that stores the fleet's archives — often a
+                                   NAS. Vaier reaches it over SSH to install borg and to trust the machines
+                                   that back up to it.</p>
+                            </div>
+                            <button class="btn btn-primary" id="newServerBtn">+ New server</button>
+                        </div>
+                        <div class="bk-list" id="serverList"><div class="loading">Loading servers…</div></div>
                     </div>
-                    <div class="bk-schedule-control">
-                        <label class="form-label" for="scheduleHour" style="margin:0">Hour</label>
-                        <select class="form-input" id="scheduleHour"></select>
-                        <button class="btn btn-primary" id="saveScheduleBtn">Save</button>
-                        <span class="bk-note" id="scheduleNote"></span>
+                </li>
+
+                <li class="bk-stage" id="stageRepos">
+                    <div class="bk-rail"><span class="bk-node" id="repoNode">2</span></div>
+                    <div class="bk-stage-body">
+                        <div class="bk-stage-head">
+                            <div>
+                                <h2 class="bk-stage-title">Name a repository on it</h2>
+                                <p class="bk-stage-desc">A repository is where one machine's archives land. Name
+                                   it and Vaier derives its path on the server, generates a passphrase, and
+                                   creates it on the first run.</p>
+                            </div>
+                            <button class="btn btn-primary" id="newRepoBtn">+ New repository</button>
+                        </div>
+                        <div class="bk-list" id="repoList"><div class="loading">Loading repositories…</div></div>
                     </div>
-                </div>
-            </div>
+                </li>
+
+                <li class="bk-stage" id="stageJobs">
+                    <div class="bk-rail"><span class="bk-node" id="jobNode">3</span></div>
+                    <div class="bk-stage-body">
+                        <div class="bk-stage-head">
+                            <div>
+                                <h2 class="bk-stage-title">Give a machine a job</h2>
+                                <p class="bk-stage-desc">Which paths to back up, into which repository, and how
+                                   long to keep them. Check readiness to install borg on the machine and trust
+                                   its key, then run it on demand or leave it to the nightly schedule.</p>
+                            </div>
+                            <button class="btn btn-primary" id="newJobBtn">+ New job</button>
+                        </div>
+                        <div class="bk-list" id="jobList"><div class="loading">Loading jobs…</div></div>
+                    </div>
+                </li>
+
+                <!-- The nightly schedule: the chain's outflow, what happens without anyone pressing anything. -->
+                <li class="bk-stage" id="stageSchedule">
+                    <div class="bk-rail">
+                        <span class="bk-node" id="scheduleNode" aria-hidden="true">
+                            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                                 stroke-width="1.6" stroke-linecap="round">
+                                <circle cx="8" cy="8" r="6.4"/><path d="M8 4.4V8l2.4 1.6"/>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="bk-stage-body">
+                        <div class="bk-stage-head">
+                            <div>
+                                <h2 class="bk-stage-title">Every night, on its own</h2>
+                                <p class="bk-stage-desc">Enabled jobs run once a day at this hour, in
+                                   <span id="scheduleZone">the server's zone</span>. A failed run emails all
+                                   admins.</p>
+                            </div>
+                        </div>
+                        <div class="bk-schedule-card">
+                            <div class="bk-schedule-info">
+                                <div class="bk-schedule-desc">Restore isn't available here yet — browse a
+                                    repository's archives to confirm what's stored.</div>
+                                <span class="bk-schedule-summary" id="scheduleSummary"></span>
+                            </div>
+                            <div class="bk-schedule-control">
+                                <label class="form-label" for="scheduleHour" style="margin:0">Hour</label>
+                                <select class="form-input" id="scheduleHour"></select>
+                                <button class="btn btn-primary" id="saveScheduleBtn">Save</button>
+                                <span class="bk-note" id="scheduleNote"></span>
+                            </div>
+                        </div>
+                    </div>
+                </li>
+            </ol>
         </div>
     </div>
 
@@ -289,7 +330,7 @@
         </div>
     </div>
 
-    <!-- Provisioning modal (readiness check + init result share this shell) -->
+    <!-- Host readiness modal -->
     <div id="provisionModal" class="modal">
         <div class="modal-content" style="max-width:560px;width:95%">
             <div class="modal-header" id="provisionModalTitle">Host readiness</div>

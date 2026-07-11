@@ -16,6 +16,11 @@ public interface GetAppSettingsUseCase {
         /** Whether the per-service {@code social} auth mode is offered (Google OAuth configured, #305). */
         boolean socialAuthAvailable,
         /** The hour of day (0–23) at which Vaier-owned nightly fleet-backup scheduling fires due jobs. */
-        int backupScheduleHour
+        int backupScheduleHour,
+        /**
+         * The zone that hour is read in — the scheduler's own clock zone (e.g. {@code Europe/Oslo}), so the
+         * UI can name it instead of saying "server local time" and leaving the operator to guess.
+         */
+        String backupScheduleZone
     ) {}
 }

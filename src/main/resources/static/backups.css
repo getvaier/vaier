@@ -1,36 +1,127 @@
 /* Fleet Backup admin page (Slice 9). Page-scoped layout only — every colour, radius and control
    reuses the tokens/primitives in styles.css so this reads as a native Vaier section, not a bolt-on.
-   The one domain-native flourish is the run-status badge (last-run outcome, with a live pulse while a
-   run is in flight) and the compact retention encoding "7d · 4w · 6m". */
 
-/* --- Page intro --- */
-.bk-intro {
-    margin-bottom: 1.5rem;
+   The page is drawn as what the domain actually is: a chain with hard prerequisites. A repository
+   cannot exist without a server, and a job cannot exist without a repository, so the three stages sit
+   on one spine whose connector only reaches as far as the fleet is actually built. The node numerals
+   become checkmarks once a stage holds something, and a stage whose prerequisite is missing is drawn
+   blocked and refuses its "New…" button. The chain terminates in the nightly schedule — its outflow.
+
+   The other domain-native flourishes are the run-status badge (last-run outcome, with a live pulse
+   while a run is in flight) and the compact retention encoding "7d · 4w · 6m". */
+
+/* --- Page head --- */
+.bk-head {
+    margin-bottom: 1.9rem;
 }
-.bk-intro h1 {
-    font-size: 1rem;
+.bk-head h1 {
+    font-family: var(--display);
+    font-size: 1.15rem;
     font-weight: 600;
     color: var(--text);
     letter-spacing: 0.01em;
 }
-.bk-intro p {
-    font-size: 0.8rem;
+.bk-lede {
+    font-size: 0.82rem;
     color: var(--text-muted);
-    margin-top: 0.2rem;
-    max-width: 46rem;
+    margin-top: 0.3rem;
+    max-width: 44rem;
+    line-height: 1.6;
 }
 
-/* --- Section scaffolding --- */
-.bk-section { margin-bottom: 2rem; }
+/* --- The chain: one spine through the three stages, ending at the nightly schedule --- */
+.bk-chain { list-style: none; }
 
-.bk-section-head {
+.bk-stage {
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    column-gap: 1.05rem;
+}
+
+/* The rail column: a node, and the connector running from it down to the next stage. The connector is
+   dashed and dim by default and only turns solid accent once this stage holds something — so the line
+   literally stops where the fleet stops. */
+.bk-rail {
+    position: relative;
     display: flex;
+    justify-content: center;
+}
+.bk-rail::after {
+    content: "";
+    position: absolute;
+    top: 1.95rem;
+    bottom: -0.3rem;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 1px dashed var(--border-hi);
+}
+.bk-stage.is-done .bk-rail::after {
+    border-left: 1px solid var(--accent);
+    opacity: 0.45;
+}
+.bk-stage:last-child .bk-rail::after { display: none; }
+
+.bk-node {
+    position: relative;
+    z-index: 1;
+    width: 1.6rem;
+    height: 1.6rem;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    border-radius: 50%;
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--border-hi);
+    color: var(--text-dim);
+    font-family: var(--display);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+}
+/* Current — the stage you can act on now. */
+.bk-stage.is-current .bk-node {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(76, 201, 230, 0.09);
+}
+/* Done — this stage holds at least one thing. */
+.bk-stage.is-done .bk-node {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+}
+
+.bk-stage-body {
+    min-width: 0;
+    padding-bottom: 2.1rem;
+}
+.bk-stage:last-child .bk-stage-body { padding-bottom: 0; }
+
+.bk-stage-head {
+    display: flex;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    margin: 1.5rem 0 0.7rem;
+    margin-bottom: 0.8rem;
 }
-.bk-section-head .section-label { margin: 0; }
+.bk-stage-title {
+    font-family: var(--display);
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.35;
+}
+.bk-stage.is-blocked .bk-stage-title { color: var(--text-muted); }
+.bk-stage-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-top: 0.15rem;
+    max-width: 40rem;
+}
+.bk-stage-head .btn { flex-shrink: 0; }
 
 /* --- Card list (repositories, jobs) --- */
 .bk-list {
@@ -94,12 +185,71 @@
 }
 .bk-retention b { color: var(--text); font-weight: 600; }
 
+/* One card, one visible verb. Every card used to carry four or five identically-styled text buttons,
+   which read as a wall of words and hid the action you actually came for. The primary action stays
+   inline; everything else lives behind the overflow menu. */
 .bk-item-actions {
     display: flex;
-    gap: 0.25rem;
-    flex-wrap: wrap;
+    gap: 0.3rem;
     align-items: center;
     justify-content: flex-end;
+}
+
+.bk-menu { position: relative; }
+
+/* Invisible, but it catches the click that would otherwise land on whatever the open menu covers. */
+#bk-menu-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+}
+#bk-menu-backdrop.active { display: block; }
+.bk-menu-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+    min-height: 22px;
+}
+.bk-menu-btn:hover, .bk-menu.open .bk-menu-btn {
+    color: var(--text);
+    background: var(--bg-hover);
+    border-color: var(--border);
+}
+.bk-menu-list {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 20;
+    min-width: 11rem;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0.25rem;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-hi);
+    border-radius: 3px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.bk-menu.open .bk-menu-list { display: flex; }
+.bk-menu-list .btn {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.76rem;
+}
+
+/* Quality floor: a visible keyboard focus ring on every control this page draws. */
+.bk-stage-body .btn:focus-visible,
+.bk-menu-btn:focus-visible,
+.bk-disclosure:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
 /* Row of badges (append-only, passphrase, enabled, source count). */
@@ -159,16 +309,22 @@
 }
 .bk-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; }
 
-/* --- Empty states --- */
+/* --- Empty states: an invitation to act, or a plain statement of what's blocking. --- */
 .bk-empty {
-    text-align: center;
-    padding: 1.75rem 1rem;
+    padding: 1.1rem 1.15rem;
     color: var(--text-muted);
     font-size: 0.82rem;
     line-height: 1.6;
     border: 1px dashed var(--border);
     border-radius: 2px;
 }
+.bk-empty b {
+    display: block;
+    color: var(--text);
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+}
+.bk-stage.is-blocked .bk-empty b { color: var(--text-muted); }
 
 /* --- Enterprise gate --- */
 .bk-gate {
@@ -286,7 +442,7 @@
     flex-shrink: 0;
 }
 
-/* --- Nightly schedule card --- */
+/* --- Nightly schedule: the chain's outflow, not a fourth peer section --- */
 .bk-schedule-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -299,7 +455,6 @@
     flex-wrap: wrap;
 }
 .bk-schedule-info { flex: 1; min-width: 14rem; }
-.bk-schedule-title { font-size: 0.85rem; font-weight: 500; color: var(--text); margin-bottom: 0.3rem; }
 .bk-schedule-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
 .bk-schedule-control {
     display: flex;
@@ -308,6 +463,15 @@
     flex-shrink: 0;
 }
 .bk-schedule-control select { width: auto; }
+
+/* How many jobs the nightly schedule will actually pick up — the honest state of the schedule. */
+.bk-schedule-summary {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--text-dim);
+    margin-top: 0.45rem;
+}
 
 /* Inline note for save results, mirrors settings.html's .settings-form-note. */
 .bk-note { font-size: 0.72rem; color: var(--text-dim); font-style: italic; }
@@ -482,7 +646,7 @@
     width: max-content;
     max-width: 90%;
 }
-#bk-message .error, #bk-message .success {
+#bk-message .error, #bk-message .success, #bk-message .warning {
     margin-bottom: 0;
     pointer-events: auto;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
@@ -490,8 +654,18 @@
 
 @media (max-width: 640px) {
     .bk-item { grid-template-columns: 1fr; }
+    /* The actions sit at the left of the card here, so the menu must open rightwards or it runs off
+       the edge of the screen. */
     .bk-item-actions { justify-content: flex-start; }
+    .bk-menu-list { right: auto; left: 0; }
     .bk-schedule-card { flex-direction: column; align-items: flex-start; }
+
+    /* Keep the spine on mobile — it's the whole point of the page — but narrow its gutter, and let a
+       stage head stack so the "New…" button doesn't squeeze the title. */
+    .bk-stage { grid-template-columns: 1.35rem 1fr; column-gap: 0.7rem; }
+    .bk-node { width: 1.35rem; height: 1.35rem; font-size: 0.66rem; }
+    .bk-rail::after { top: 1.65rem; }
+    .bk-stage-head { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
     /* Full-width toast on narrow screens, matching vpn-peers. */
     #bk-message { left: 0.5rem; right: 0.5rem; transform: none; width: auto; max-width: none; }
 }

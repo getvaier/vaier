@@ -22,7 +22,6 @@ import net.vaier.domain.port.ForOpeningSshSessions;
 import net.vaier.domain.port.ForRunningSshCommands;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.channel.ChannelExec;
-import org.apache.sshd.client.channel.ChannelShell;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
 import org.apache.sshd.client.future.AuthFuture;
@@ -107,9 +106,9 @@ public class MinaSshSessionAdapter implements ForOpeningSshSessions, ForRunningS
     }
 
     @Override
-    public SshSession open(SshTarget target, SshOutputListener onOutput) {
+    public SshSession open(SshTarget target, String command, SshOutputListener onOutput) {
         Connection conn = establish(target);
-        ChannelShell channel = openShell(conn.client(), conn.session(), target, onOutput);
+        ChannelExec channel = openPtyCommand(conn.client(), conn.session(), target, command, onOutput);
 
         channel.addCloseFutureListener(f -> onOutput.onClosed());
         return new MinaSshSession(conn.client(), conn.session(), channel, conn.fingerprint());
@@ -193,10 +192,17 @@ public class MinaSshSessionAdapter implements ForOpeningSshSessions, ForRunningS
         }
     }
 
-    private ChannelShell openShell(SshClient client, ClientSession session, SshTarget target,
-                                   SshOutputListener onOutput) {
+    /**
+     * Open {@code command} under an interactive PTY (an exec channel with {@code usePty} set), rather than
+     * a bare login shell, so the domain can decide what runs — a tmux attach-or-create with a plain-shell
+     * fallback (see {@code PersistentShell}). {@code exec}-ing tmux/the shell inside {@code command} keeps
+     * the process tree clean, and the PTY makes it behave exactly like an interactive login.
+     */
+    private ChannelExec openPtyCommand(SshClient client, ClientSession session, SshTarget target,
+                                       String command, SshOutputListener onOutput) {
         try {
-            ChannelShell channel = session.createShellChannel();
+            ChannelExec channel = session.createExecChannel(command);
+            channel.setUsePty(true);
             channel.setPtyType(PTY_TYPE);
             channel.setPtyColumns(INITIAL_COLS);
             channel.setPtyLines(INITIAL_ROWS);
@@ -319,16 +325,16 @@ public class MinaSshSessionAdapter implements ForOpeningSshSessions, ForRunningS
         }
     }
 
-    /** Live handle over a MINA shell channel; write/resize/close are best-effort and close is idempotent. */
+    /** Live handle over a MINA PTY channel; write/resize/close are best-effort and close is idempotent. */
     private static final class MinaSshSession implements SshSession {
         private final SshClient client;
         private final ClientSession session;
-        private final ChannelShell channel;
+        private final ChannelExec channel;
         private final OutputStream toRemote;
         private final String fingerprint;
         private final AtomicBoolean closed = new AtomicBoolean(false);
 
-        MinaSshSession(SshClient client, ClientSession session, ChannelShell channel, String fingerprint) {
+        MinaSshSession(SshClient client, ClientSession session, ChannelExec channel, String fingerprint) {
             this.client = client;
             this.session = session;
             this.channel = channel;

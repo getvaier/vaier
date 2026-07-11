@@ -53,6 +53,17 @@ class BackupRunFileAdapterTest {
     }
 
     @Test
+    void warningRunSurvivesSaveLoadRoundTrip() {
+        // A borg-exit-1 WARNING run persists like any other terminal status via valueOf/name.
+        adapter.record(run("run-w", "colina-home", BackupRunStatus.WARNING, 1));
+
+        BackupRunFileAdapter fresh = new BackupRunFileAdapter(tempDir.toString());
+
+        assertThat(fresh.latestForJob("colina-home"))
+            .contains(run("run-w", "colina-home", BackupRunStatus.WARNING, 1));
+    }
+
+    @Test
     void getAll_emptyWhenFileMissing() {
         assertThat(adapter.getAll()).isEmpty();
     }

@@ -353,6 +353,12 @@ body {
     border: 1px solid rgba(78, 201, 176, 0.25);
 }
 
+.status-warn {
+    background: rgba(206, 145, 120, 0.1);
+    color: var(--orange);
+    border: 1px solid rgba(206, 145, 120, 0.25);
+}
+
 .status-error {
     background: rgba(244, 135, 113, 0.1);
     color: var(--red);
@@ -373,6 +379,7 @@ body {
 }
 
 .status-ok .status-indicator      { background: var(--green); }
+.status-warn .status-indicator    { background: var(--orange); }
 .status-error .status-indicator   { background: var(--red); }
 .status-unknown .status-indicator { background: var(--text-dim); }
 
@@ -401,7 +408,7 @@ body {
 }
 
 /* Messages */
-.error, .success {
+.error, .success, .warning {
     padding: 0.6rem 1rem;
     border-radius: 2px;
     margin-bottom: 1rem;
@@ -409,8 +416,9 @@ body {
     border-left: 3px solid;
 }
 
-.error   { background: rgba(244, 135, 113, 0.08); color: var(--red);   border-left-color: var(--red); }
-.success { background: rgba(78, 201, 176, 0.08);  color: var(--green); border-left-color: var(--green); }
+.error   { background: rgba(244, 135, 113, 0.08); color: var(--red);    border-left-color: var(--red); }
+.success { background: rgba(78, 201, 176, 0.08);  color: var(--green);  border-left-color: var(--green); }
+.warning { background: rgba(206, 145, 120, 0.08); color: var(--orange); border-left-color: var(--orange); }
 
 .loading {
     text-align: center;
@@ -466,9 +474,11 @@ body {
    resizable from the corner, several live at once. Same card chrome as a modal, on a true-black
    surface. The container is click-through; only the windows take pointer events. */
 /* The terminal panel: its own shell tab (like Infrastructure/Users), filling the content area below the
-   topbar. One tab per open shell; only the active pane renders. Lives in the admin shell so its SSH
-   sessions survive navigating between sections. Replaces the old floating windows (undraggable on touch)
-   and the short-lived in-page dock (destroyed whenever its host page reloaded). */
+   topbar. Every open shell is a pane, and every pane wears its own tab as its header — so a machine is
+   named once, on the line directly above its terminal. Lives in the admin shell so its SSH sessions survive
+   navigating between sections. Replaces the old floating windows (undraggable on touch), the short-lived
+   in-page dock (destroyed whenever its host page reloaded), and the panel-wide tab strip that repeated
+   every name a second time above the split. */
 .term-panel {
     flex: 1;
     min-height: 0;
@@ -477,32 +487,18 @@ body {
     background: var(--bg-card, #1a1a1a);
 }
 
-.term-dock-bar {
-    display: flex;
-    align-items: stretch;
-    background: var(--bg-input, #111);
-    border-bottom: 1px solid var(--border, #2a2a2a);
-    flex-shrink: 0;
-}
-
-.term-dock-tabs {
-    display: flex;
-    align-items: stretch;
-    flex: 1;
-    overflow-x: auto;
-    scrollbar-width: thin;
-}
-
 .term-tab {
     display: flex;
     align-items: center;
     flex-shrink: 0;
     max-width: 15rem;
-    border-right: 1px solid var(--border, #2a2a2a);
     color: var(--text-muted);
     user-select: none;
     cursor: grab;
 }
+/* Tabs only sit side by side in a pane that has adopted the others' (maximized, or a phone); a lone tab
+   needs no rule beside it. */
+.term-pane.has-tabstrip .term-tab { border-right: 1px solid var(--border, #2a2a2a); }
 .term-tab.dragging { opacity: 0.5; cursor: grabbing; }
 
 /* The chip that follows the pointer while dragging a tab into the split. */
@@ -526,6 +522,7 @@ body {
     box-shadow: inset 0 2px 0 var(--accent);
 }
 
+/* A header now sits above every pane, so it buys its vertical room from the terminal: keep the line tight. */
 .term-tab-label {
     display: flex;
     align-items: center;
@@ -536,8 +533,8 @@ body {
     color: inherit;
     cursor: pointer;
     font-family: var(--mono, monospace);
-    font-size: 0.8rem;
-    padding: 0.55rem 0.25rem 0.55rem 0.7rem;
+    font-size: 0.75rem;
+    padding: 0.4rem 0.25rem 0.4rem 0.7rem;
 }
 .term-tab-name {
     white-space: nowrap;
@@ -609,41 +606,67 @@ body {
     position: relative;
 }
 .term-pane.is-visible { display: flex; }
-.term-pane.is-focused.show-head { box-shadow: inset 0 0 0 1px var(--accent); }
+/* Which pane has the keys only needs saying when there is more than one to choose between. */
+.term-dock-panes.is-split .term-pane.is-focused { box-shadow: inset 0 0 0 1px var(--accent); }
 
-/* A column's header — shown only while split, so each pane is labelled and can be dropped from view. */
-.term-pane-head {
+/* The phone key bar: the keys a soft keyboard omits (Esc, Tab, Ctrl, Alt, arrows). Desktop never shows it —
+   a hardware keyboard has these already. It rides below the panes, scrolls sideways if a narrow phone can't
+   fit the row, and clears the home-indicator inset at the very bottom of the screen. */
+.term-keybar {
     display: none;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.55rem;
+    flex-shrink: 0;
+    gap: 0.3rem;
+    padding: 0.35rem 0.4rem calc(0.35rem + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.term-keybar::-webkit-scrollbar { display: none; }
+
+.term-key {
+    flex: 1 0 auto;
+    min-width: 3rem;
+    padding: 0.7rem 0.5rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border-hi);
+    border-radius: 7px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+.term-key:active { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+/* An armed sticky modifier glows in the accent so it's unmistakable which one will catch the next key. */
+.term-key-mod.is-armed {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+}
+
+@media (max-width: 720px) {
+    .term-panel:not(.term-no-shells) .term-keybar { display: flex; }
+}
+
+/* The pane's single header line. No padding of its own: the tab starts at the pane's left edge, and brings
+   its own inset. Scrolls horizontally on the one pane that adopts every tab (maximized, or a phone). */
+.term-pane-head {
+    display: flex;
+    align-items: stretch;
+    padding: 0;
     background: var(--bg-input, #111);
     border-bottom: 1px solid var(--border, #2a2a2a);
     flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
 }
-.term-pane.show-head .term-pane-head { display: flex; }
-.term-pane-head-name {
-    flex: 1;
-    min-width: 0;
-    font-family: var(--mono, monospace);
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.term-pane.is-focused .term-pane-head-name { color: var(--text); }
-.term-pane-head-close {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.75rem;
-    line-height: 1;
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-}
-.term-pane-head-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
 
 /* The drag handle between two split columns. */
 .term-split-divider {
@@ -678,50 +701,90 @@ body {
 .term-window-dot.error { background: var(--red, #e06c75); box-shadow: 0 0 6px var(--red, #e06c75); }
 .term-window-dot.closed { background: var(--text-dim, #666); box-shadow: none; }
 
+/* A transient pane message ("Connection lost — reconnecting…", a host-key refusal). It floats over the
+   bottom of its own pane rather than sitting in the flow above the terminal: as a strip it shifted the
+   shell down and back up as messages came and went. Same bottom-anchored, shadowed, non-shifting toast
+   the rest of Vaier uses (see #bk-message), but scoped to the pane — with a split, each pane must carry
+   its own message and its own Reconnect button. */
 .term-window-status {
+    position: absolute;
+    left: 50%;
+    bottom: 0.75rem;
+    transform: translateX(-50%);
+    z-index: 6;
+    width: max-content;
+    max-width: calc(100% - 1.5rem);
     font-size: 0.8rem;
-    padding: 0.45rem 0.65rem;
+    padding: 0.45rem 0.7rem;
     background: var(--bg-input, #111);
-    border-bottom: 1px solid var(--border, #2a2a2a);
+    border: 1px solid var(--border, #2a2a2a);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
     color: var(--text);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.55rem;
-    flex-shrink: 0;
 }
 
-.term-window-status.error { color: var(--red, #e06c75); }
+.term-window-status.error { color: var(--red, #e06c75); border-left-color: var(--red, #e06c75); }
 
 /* A per-pane action row above the terminal viewport — a left-aligned menu line that holds shell actions
    (Send password leads it) and can grow to hold more. A fixed-height row so the body below still flexes to
    fill the pane; shares the pane head's surface and border. */
-.term-pane-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.3rem 0.4rem;
-    background: var(--bg-input, #111);
-    border-bottom: 1px solid var(--border, #2a2a2a);
-    flex-shrink: 0;
-}
-.term-toolbar-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
+/* The shell's actions live behind a ⋯ on its tab, so they cost the terminal no vertical room. The
+   button takes the accent colour while the menu holds a newly-usable action (a live password prompt) —
+   the one signal that survives the actions being hidden. */
+.term-tab-menu-btn {
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 0.72rem;
+    font-size: 0.9rem;
     line-height: 1;
     cursor: pointer;
-    padding: 0.3rem 0.5rem;
+    padding: 0.3rem 0.35rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.term-tab-menu-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.term-tab-menu-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.term-tab-menu-btn.has-action { color: var(--accent); }
+
+/* Fixed-position and parented to <body>: the tab strip scrolls, and would clip a menu inside it. */
+.term-tab-menu {
+    position: fixed;
+    z-index: 4000;
+    min-width: 12rem;
+    padding: 0.25rem;
+    background: var(--bg-card, #1a1a1a);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* An action is never removed when it can't be used — it greys, and its tooltip says why. */
+.term-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1;
+    text-align: left;
+    cursor: pointer;
+    padding: 0.45rem 0.6rem;
     border-radius: 4px;
 }
-.term-toolbar-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
-.term-toolbar-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.term-toolbar-btn-glyph { font-size: 0.8rem; filter: grayscale(0.4); }
-.term-toolbar-btn:hover .term-toolbar-btn-glyph { filter: none; }
+.term-menu-item:hover:not(:disabled) { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.term-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.term-menu-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.term-menu-item-glyph { font-size: 0.85rem; filter: grayscale(0.4); }
+.term-menu-item:hover:not(:disabled) .term-menu-item-glyph { filter: none; }
+.term-menu-item:disabled .term-menu-item-glyph { filter: grayscale(1); }
 
 .term-window-body {
     flex: 1;

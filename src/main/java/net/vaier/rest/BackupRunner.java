@@ -380,10 +380,12 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
     }
 
     /**
-     * Feed a freshly-settled terminal run (SUCCESS/FAILED only — never UNKNOWN) to the per-job failure
-     * tracker and alert admins only on a boundary crossing: once when a job goes healthy→failing, and a
-     * single all-clear when it recovers failing→healthy. Steady nightly failures produce NONE and stay
-     * quiet. A notification failure is swallowed so it can never break the poll sweep.
+     * Feed a freshly-settled terminal run (SUCCESS/WARNING/FAILED — never UNKNOWN, which settles on its own
+     * path and never reaches here) to the per-job failure tracker and alert admins only on a boundary
+     * crossing: once when a job goes healthy→failing, and a single all-clear when it recovers failing→healthy.
+     * A WARNING (borg exit 1, archive created, some files skipped) is fed as healthy, so it never pages and can
+     * itself all-clear a previously failing job. Steady nightly failures produce NONE and stay quiet. A
+     * notification failure is swallowed so it can never break the poll sweep.
      */
     private void alertOnTransition(BackupRun terminal) {
         try {

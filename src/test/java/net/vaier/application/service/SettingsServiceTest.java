@@ -16,8 +16,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -41,6 +45,9 @@ class SettingsServiceTest {
     @Mock ForSendingTestEmail testEmailSender;
     @Mock ConfigResolver configResolver;
     @Mock ForReadingAppVersion appVersionReader;
+
+    /** A zone that is not the CI JVM's default (UTC), so a hardcoded-UTC answer can't pass by accident. */
+    @Spy Clock clock = Clock.fixed(Instant.parse("2026-07-10T00:00:00Z"), ZoneId.of("Europe/Oslo"));
 
     @InjectMocks SettingsService service;
 
@@ -112,6 +119,29 @@ class SettingsServiceTest {
 
         assertThat(result.domain()).isNull();
         assertThat(result.awsKeyHint()).isNull();
+    }
+
+    /**
+     * The nightly backup hour is resolved against the scheduler's clock zone, so the UI must be able to
+     * name that zone rather than say "server local time" and leave the operator guessing. Reporting the
+     * zone from the same {@link Clock} the scheduler uses means the label can never drift from the truth.
+     */
+    @Test
+    void getSettings_reportsTheZoneTheBackupScheduleActuallyFiresIn() {
+        when(configPersistence.load()).thenReturn(Optional.of(existingConfig()));
+
+        AppSettingsResult result = service.getSettings();
+
+        assertThat(result.backupScheduleZone()).isEqualTo("Europe/Oslo");
+    }
+
+    @Test
+    void getSettings_reportsTheScheduleZoneEvenWithNoConfig() {
+        when(configPersistence.load()).thenReturn(Optional.empty());
+
+        AppSettingsResult result = service.getSettings();
+
+        assertThat(result.backupScheduleZone()).isEqualTo("Europe/Oslo");
     }
 
     @Test

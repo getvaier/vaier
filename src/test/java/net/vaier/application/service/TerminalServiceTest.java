@@ -1,5 +1,6 @@
 package net.vaier.application.service;
 
+import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
 import net.vaier.application.SendHostPasswordUseCase;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CommandResult;
@@ -10,6 +11,7 @@ import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PersistentShell;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -86,23 +88,59 @@ class TerminalServiceTest {
 
     // --- terminal (slice 2) ---
 
+    private CommandResult probe(String markerFingerprint, String stdout) {
+        return new CommandResult(0, stdout, "", false, markerFingerprint);
+    }
+
     @Test
-    void openTerminal_peer_resolvesTunnelIp_opensSession_pinsOnFirstUse() {
+    void openTerminal_peer_resolvesTunnelIp_opensPersistentShell_pinsOnFirstUse() {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
         when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
         when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.empty());
-        when(sshSession.hostKeyFingerprint()).thenReturn("SHA256:fresh");
-        when(forOpeningSshSessions.open(any(), any())).thenReturn(sshSession);
+        // The probe (a remote command) is the first connection — it presents the fingerprint and pins it.
+        when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:fresh", "VAIER_TMUX_NEW"));
+        when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
-        SshSession result = service.openTerminal("nuc", onOutput);
+        OpenedTerminal result = service.openTerminal("nuc", "pane1", onOutput);
 
-        assertThat(result).isSameAs(sshSession);
+        assertThat(result.session()).isSameAs(sshSession);
+        assertThat(result.continuity()).isEqualTo(PersistentShell.Continuity.NEW);
+        // The shell command is the pane's tmux attach-or-create with the plain-shell fallback.
         ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
-        verify(forOpeningSshSessions).open(target.capture(), any());
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(forOpeningSshSessions).open(target.capture(), command.capture(), any());
         assertThat(target.getValue().host()).isEqualTo("10.13.13.9");   // tunnel IP
-        assertThat(target.getValue().pinnedFingerprint()).isNull();
-        verify(forTrackingHostKeys).pin("nuc", "SHA256:fresh");        // TOFU pin on first use
+        assertThat(command.getValue()).contains("tmux new-session -A -D -s 'vaier-pane1'");
+        verify(forTrackingHostKeys).pin("nuc", "SHA256:fresh");         // TOFU pin on first use
+    }
+
+    @Test
+    void openTerminal_existingTmuxSession_reportsReattached() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
+        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", "VAIER_TMUX_ATTACH"));
+        when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
+
+        OpenedTerminal result = service.openTerminal("nuc", "pane1", onOutput);
+
+        assertThat(result.continuity()).isEqualTo(PersistentShell.Continuity.REATTACHED);
+    }
+
+    @Test
+    void openTerminal_tmuxAbsent_reportsPlain() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
+        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", "VAIER_TMUX_ABSENT"));
+        when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
+
+        OpenedTerminal result = service.openTerminal("nuc", "pane1", onOutput);
+
+        assertThat(result.continuity()).isEqualTo(PersistentShell.Continuity.PLAIN);
     }
 
     @Test
@@ -112,12 +150,13 @@ class TerminalServiceTest {
             new LanServer("nas", "192.168.3.50", true, 2375)));
         when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(passwordCred("nas")));
         when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(Optional.of("SHA256:pinned"));
-        when(forOpeningSshSessions.open(any(), any())).thenReturn(sshSession);
+        when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", "VAIER_TMUX_NEW"));
+        when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
-        service.openTerminal("nas", onOutput);
+        service.openTerminal("nas", "pane1", onOutput);
 
         ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
-        verify(forOpeningSshSessions).open(target.capture(), any());
+        verify(forOpeningSshSessions).open(target.capture(), any(), any());
         assertThat(target.getValue().host()).isEqualTo("192.168.3.50");
         assertThat(target.getValue().pinnedFingerprint()).isEqualTo("SHA256:pinned");
         verify(forTrackingHostKeys, never()).pin(any(), any());   // already pinned → no re-pin
@@ -131,13 +170,13 @@ class TerminalServiceTest {
         when(forPersistingHostCredentials.getByMachine(LanAnchor.VAIER_SERVER_NAME))
             .thenReturn(Optional.of(passwordCred(LanAnchor.VAIER_SERVER_NAME)));
         when(forTrackingHostKeys.getFingerprint(LanAnchor.VAIER_SERVER_NAME)).thenReturn(Optional.empty());
-        when(sshSession.hostKeyFingerprint()).thenReturn("SHA256:host");
-        when(forOpeningSshSessions.open(any(), any())).thenReturn(sshSession);
+        when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:host", "VAIER_TMUX_NEW"));
+        when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
-        service.openTerminal(LanAnchor.VAIER_SERVER_NAME, onOutput);
+        service.openTerminal(LanAnchor.VAIER_SERVER_NAME, "pane1", onOutput);
 
         ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
-        verify(forOpeningSshSessions).open(target.capture(), any());
+        verify(forOpeningSshSessions).open(target.capture(), any(), any());
         assertThat(target.getValue().host()).isEqualTo("172.17.0.1");
     }
 
@@ -147,9 +186,9 @@ class TerminalServiceTest {
             new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
         when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.openTerminal("nuc", onOutput))
+        assertThatThrownBy(() -> service.openTerminal("nuc", "pane1", onOutput))
             .isInstanceOf(NoHostCredentialException.class);
-        verify(forOpeningSshSessions, never()).open(any(), any());
+        verify(forOpeningSshSessions, never()).open(any(), any(), any());
     }
 
     @Test
@@ -157,7 +196,7 @@ class TerminalServiceTest {
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         when(forPersistingLanServers.getAll()).thenReturn(List.of());
 
-        assertThatThrownBy(() -> service.openTerminal("ghost", onOutput))
+        assertThatThrownBy(() -> service.openTerminal("ghost", "pane1", onOutput))
             .isInstanceOf(NotFoundException.class);
     }
 

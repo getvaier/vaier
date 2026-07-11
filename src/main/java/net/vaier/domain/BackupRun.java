@@ -8,10 +8,11 @@ import java.time.Instant;
  * It records which job/repository/machine ran, its {@link BackupRunStatus}, the start/finish instants,
  * borg's exit code (null until known), the archive it wrote and a short summary.
  *
- * <p>The mapping from a borg exit code to a status is a business decision and lives here on the entity:
- * {@link #fromExitCode} treats {@code 0} as {@code SUCCESS} and any non-zero code as {@code FAILED}.
- * {@link #started} opens a run in {@code RUNNING} before an outcome exists, and {@link #failed} records a
- * guard failure that never reached borg at all.
+ * <p>The mapping from a borg exit code to a status is a business decision and lives here on the entity,
+ * following borg's own exit-code contract: {@link #fromExitCode} treats {@code 0} as {@code SUCCESS},
+ * {@code 1} as {@code WARNING} (the archive was created but some files were skipped) and any code
+ * {@code >= 2} as {@code FAILED}. {@link #started} opens a run in {@code RUNNING} before an outcome
+ * exists, and {@link #failed} records a guard failure that never reached borg at all.
  *
  * @param runId          a unique id for this run
  * @param exitCode       borg's exit code, or null while running / when a guard stopped the run
@@ -53,14 +54,29 @@ public record BackupRun(
     }
 
     /**
-     * Close a run for {@code job} with borg's {@code exitCode}: {@code 0} is {@code SUCCESS}, any
-     * non-zero code is {@code FAILED}. This exit-code-to-status rule is the entity's decision.
+     * Close a run for {@code job} with borg's {@code exitCode}, following borg's exit-code contract:
+     * {@code 0} is {@code SUCCESS}, {@code 1} is {@code WARNING} (archive created, some files skipped)
+     * and any code {@code >= 2} is {@code FAILED}. This exit-code-to-status rule is the entity's decision.
      */
     public static BackupRun fromExitCode(BackupJob job, String runId, Instant startedAt, Instant now,
                                          int exitCode, String summary) {
-        BackupRunStatus status = exitCode == 0 ? BackupRunStatus.SUCCESS : BackupRunStatus.FAILED;
         return new BackupRun(runId, job.name(), job.repositoryName(), job.machineName(),
-            status, startedAt, now, exitCode, job.archiveNameTemplate(), summary);
+            statusFor(exitCode), startedAt, now, exitCode, job.archiveNameTemplate(), summary);
+    }
+
+    /**
+     * Borg's exit-code contract as the entity's rule: {@code 0} is {@code SUCCESS}, {@code 1} is
+     * {@code WARNING} (the archive was created but some files were skipped, e.g. unreadable by the SSH
+     * user), and any code {@code >= 2} is {@code FAILED}.
+     */
+    private static BackupRunStatus statusFor(int exitCode) {
+        if (exitCode == 0) {
+            return BackupRunStatus.SUCCESS;
+        }
+        if (exitCode == 1) {
+            return BackupRunStatus.WARNING;
+        }
+        return BackupRunStatus.FAILED;
     }
 
     /**
@@ -75,14 +91,14 @@ public record BackupRun(
 
     /**
      * Settle this (typically {@code RUNNING}) run with the detached borg chain's {@code exitCode}: the
-     * same rule as {@link #fromExitCode} — {@code 0} is {@code SUCCESS}, any non-zero code is
-     * {@code FAILED} — preserving the run's identity (id, job, repository, machine, archive, start time)
-     * and stamping the finish instant, exit code and {@code summary}. This is the wither a poll uses to
-     * promote an in-flight run to its outcome.
+     * same rule as {@link #fromExitCode} — {@code 0} is {@code SUCCESS}, {@code 1} is {@code WARNING}
+     * (archive created, some files skipped) and any code {@code >= 2} is {@code FAILED} — preserving the
+     * run's identity (id, job, repository, machine, archive, start time) and stamping the finish instant,
+     * exit code and {@code summary}. This is the wither a poll uses to promote an in-flight run to its
+     * outcome.
      */
     public BackupRun completedFrom(int exitCode, Instant now, String summary) {
-        BackupRunStatus terminal = exitCode == 0 ? BackupRunStatus.SUCCESS : BackupRunStatus.FAILED;
-        return new BackupRun(runId, jobName, repositoryName, machineName, terminal,
+        return new BackupRun(runId, jobName, repositoryName, machineName, statusFor(exitCode),
             startedAt, now, exitCode, archiveName, summary);
     }
 
