@@ -62,6 +62,33 @@
         });
     } catch (e) { /* older browsers: font is set at shell-open time only */ }
 
+    // Keep a phone's screen awake while any shell is live. You watch a terminal far more than you touch it, and
+    // a display that dims mid-command is the one thing a persistent shell can't ride out for you — a long
+    // `apt upgrade` finishing to a black screen, the login code you were about to read gone. The lock is a
+    // phone concern only (a desktop doesn't sleep out from under a session) and is held only while at least one
+    // shell is open, released on the last close. Browsers drop the lock whenever the tab is backgrounded, so it
+    // is re-acquired every time the page returns to the foreground.
+    let _wakeLock = null;
+    async function acquireWakeLock() {
+        if (!isPhone() || _terminals.size === 0) return;
+        if (!('wakeLock' in navigator) || _wakeLock) return;
+        try {
+            _wakeLock = await navigator.wakeLock.request('screen');
+            // A lock the browser releases on its own (backgrounding, low battery) must be forgotten, or the
+            // next foregrounding believes one is still held and never re-acquires.
+            _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+        } catch (e) { _wakeLock = null; /* denied or unsupported — the screen just dims as it always did */ }
+    }
+    function releaseWakeLock() {
+        if (!_wakeLock) return;
+        try { _wakeLock.release(); } catch (e) { /* ignore */ }
+        _wakeLock = null;
+    }
+    function syncWakeLock() { if (_terminals.size > 0) acquireWakeLock(); else releaseWakeLock(); }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') syncWakeLock();
+    });
+
     function panes() { return document.getElementById('terminalPanes'); }
 
     function open(machineName) {
@@ -92,6 +119,7 @@
             promptShowing: false, claude: null,
             loginScanTimer: 0, claudeLoginUrl: null, awaitingLoginCode: false, loginBanner: null };
         _terminals.set(id, state);
+        syncWakeLock();   // first shell on a phone → hold the screen awake for as long as one stays open
 
         // Route typed input through sendTyped so an armed on-screen Ctrl/Alt (the phone key bar) modifies
         // the next keystroke the soft keyboard produces. With nothing armed it is a plain pass-through, so
@@ -355,6 +383,7 @@
         if (s.pane && s.pane.parentNode) s.pane.parentNode.removeChild(s.pane);
         if (s.tab && s.tab.parentNode) s.tab.parentNode.removeChild(s.tab);
         _terminals.delete(id);
+        syncWakeLock();   // last shell gone → let the screen sleep again
         removeFromGrid(id);
         if (_maximizedId === id) _maximizedId = null;
         if (_focusedId === id) _focusedId = gridIds()[0] ?? null;

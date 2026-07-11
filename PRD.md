@@ -796,7 +796,11 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   the grid collapses to a single full-screen pane at a smaller font (10px vs 13px, re-fitting on rotate),
   touch scrolling is driven from the finger via `term.scrollLines` with `touch-action: none` so the
   scrollback scrolls instead of the page (xterm's viewport is a sibling of its text layer), and the shell
-  binds its height to `visualViewport` so the soft keyboard never covers the prompt. Only visible panes
+  binds its height to `visualViewport` so the soft keyboard never covers the prompt. On a phone Vaier also
+  **holds the screen awake** while any shell is open — `navigator.wakeLock.request('screen')`, acquired when
+  the first shell opens and released on the last close, re-acquired on `visibilitychange` because browsers
+  drop the lock whenever the tab is backgrounded — so a long-running command you're watching isn't lost to a
+  dimmed display; it degrades silently where the API is unsupported or denied. Only visible panes
   render and re-fit; hidden shells keep running. A dropped WebSocket **auto-reconnects** with exponential
   backoff (to 8s, up to 8 attempts, then a manual Reconnect action) unless the close is clean (`1000`) or
   permanent (no credential / auth / host-key mismatch / not found); term input is bound to the session's
