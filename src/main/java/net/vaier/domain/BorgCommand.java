@@ -49,7 +49,7 @@ public final class BorgCommand {
      * invocation and masked in the redacted form.
      */
     public static BuiltCommand create(BackupServer server, BackupJob job, BackupRepository repo, String workDir) {
-        String cmd = exportPasscommand(repo, workDir) + buildCreateBody(server, job, repo);
+        String cmd = exportPasscommand(repo, workDir) + buildCreateBody(server, job, repo, "borg");
         return new BuiltCommand(cmd, cmd);
     }
 
@@ -71,8 +71,9 @@ public final class BorgCommand {
      * captures the chain's own exit code) are emitted raw.
      */
     public static BuiltCommand detachedRun(BackupServer server, BackupJob job, BackupRepository repo,
-                                           String runId, String workDir) {
-        String chainBody = buildRunChain(server, job, repo);
+                                           String runId, String workDir, String sshHome) {
+        String borg = borgBinary(job, repo, workDir, sshHome);
+        String chainBody = buildRunChain(server, job, repo, borg);
         String cmd = assembleDetached(repo, chainBody, runId, workDir);
         // The passphrase never appears in the run command (it comes from the provisioned pass file via
         // BORG_PASSCOMMAND), so there is nothing to mask: the redacted twin is identical to exec.
@@ -80,17 +81,94 @@ public final class BorgCommand {
     }
 
     /**
-     * The inner {@code create && prune && compact} chain the detached run executes. The {@code &&}
-     * chaining means prune only runs on a successful create and compact only after a successful prune,
-     * and the whole chain's exit code (via {@code echo \$?}) reflects the first failure. Prune is scoped
-     * by {@code --glob-archives '{hostname}-*'} so a repository shared by several jobs never cross-deletes
-     * another host's archives.
+     * How this job invokes borg on the machine: plain {@code borg} for a normal job, and — when the job opts in
+     * to {@link BackupJob#backupAsRoot() Back up as root} — {@code sudo -n <env> borg}, so borg reads the
+     * root-owned files (container volumes, {@code 0600} broker state) the SSH user would otherwise be silently
+     * denied, leaving holes in the archive.
+     *
+     * <p>Four things sudo would otherwise break, all handled on this one line:
+     * <ul>
+     *   <li><b>SSH cannot find the key or the host pin — and {@code HOME} does not fix it.</b> The client's SSH
+     *       key ({@link #ensureClientKeyPair}) and the server's pinned host key ({@link #pinHostKeys}) both live
+     *       under the SSH <em>user's</em> home. Under sudo, ssh runs as root — and <b>OpenSSH ignores
+     *       {@code $HOME}</b>: it resolves {@code ~} from {@code getpwuid(getuid())}, i.e. from the passwd entry
+     *       of the UID it is running as. So root's ssh reads {@code /root/.ssh/}, which holds neither the key nor
+     *       the pin, no matter what {@code HOME} is set to. Host-key verification runs <em>before</em> publickey
+     *       auth, so the run does not even reach a key error — it dies with {@code Host key verification failed}.
+     *       <b>{@code BORG_RSH}</b> is what actually fixes this: it names the identity and the known_hosts file
+     *       as <b>absolute literals</b> under the SSH user's home, so root's ssh is pointed straight at them.
+     *       It carries neither {@code -p <port>} nor the {@code user@host} — borg appends both itself from the
+     *       repo URL.</li>
+     *   <li><b>HOME.</b> Still set explicitly, to the <b>absolute literal</b> home the orchestration resolved
+     *       (never a {@code $HOME} for the command to expand — same doctrine as the work dir; see
+     *       {@code BackupWorkDirResolver}), so anything in the chain that <em>does</em> honour {@code $HOME}
+     *       looks in the right place. It is no longer load-bearing for ssh (see above). The SSH home is required
+     *       either way: it is what the {@code BORG_RSH} paths are built from, so an as-root render without an
+     *       absolute one is refused outright rather than launched at the backup server to fail obscurely.</li>
+     *   <li><b>The environment is reset.</b> The chain exports {@code BORG_PASSCOMMAND} into the shell, but sudo
+     *       discards it, so root's borg would have no passphrase and would hang or fail. It is passed explicitly
+     *       on the sudo line — which is exactly what the {@code SETENV:} tag in the sudoers drop-in
+     *       ({@link BorgClientSetupScript}) permits, and which equally covers {@code BORG_RSH}.</li>
+     *   <li><b>Root's borg cache.</b> Left alone, root's borg would write into the SSH user's
+     *       {@code ~/.cache/borg} and leave root-owned files that break a later NON-root run of the same job
+     *       (when the toggle is turned back off). {@code BORG_BASE_DIR} isolates it under
+     *       {@code <workDir>/root}. The first as-root run therefore rebuilds the chunk cache — slower, but
+     *       correct; dedup is content-addressed server-side, so nothing is stored twice.</li>
+     * </ul>
+     *
+     * <p>A NON-root job gets none of this: it runs as the SSH user, whose own home already resolves to exactly
+     * the key and known_hosts ssh needs, so plain {@code borg} is rendered and the working path is untouched.
+     *
+     * <p><b>Security.</b> Only the borg binary is ever sudoed — never {@code sudo env …}, never {@code sudo sh
+     * -c …}, never a wildcard. Either of those is a trivial root shell for anyone who can run it, which would
+     * turn this feature into a local privilege-escalation hole. The env assignments are given to <em>sudo</em>,
+     * not to an env wrapper, and the sudoers Cmnd list names borg's absolute paths and nothing else.
      */
-    private static String buildRunChain(BackupServer server, BackupJob job, BackupRepository repo) {
-        return ensureInitializedBody(server, repo)
-            + " && " + buildCreateBody(server, job, repo)
-            + " && " + buildPruneBody(server, job, repo)
-            + " && " + buildCompactBody(server, repo);
+    private static String borgBinary(BackupJob job, BackupRepository repo, String workDir, String sshHome) {
+        if (!job.backupAsRoot()) {
+            return "borg";
+        }
+        if (sshHome == null || sshHome.isBlank() || !sshHome.startsWith("/")) {
+            throw new IllegalArgumentException(
+                "A back-up-as-root run needs the SSH user's absolute home; got: " + sshHome);
+        }
+        return "sudo -n"
+            + " HOME=" + singleQuote(sshHome)
+            + " BORG_BASE_DIR=" + singleQuote(rootBaseDir(workDir))
+            + " BORG_RSH=" + singleQuote(rootRsh(sshHome))
+            + " BORG_PASSCOMMAND=" + singleQuote("cat " + passFilePath(repo, workDir))
+            + " borg";
+    }
+
+    /**
+     * The {@code ssh} command root's borg must use: the SSH user's client identity and pinned known_hosts, both
+     * as absolute literals under {@code sshHome} — because OpenSSH resolves {@code ~} from the running UID's
+     * passwd entry and would otherwise read root's empty {@code /root/.ssh/}. No {@code -p} and no
+     * {@code user@host}: borg appends those itself from the repo URL.
+     */
+    private static String rootRsh(String sshHome) {
+        return "ssh -i " + sshHome + "/.ssh/id_ed25519"
+            + " -o UserKnownHostsFile=" + sshHome + "/.ssh/known_hosts";
+    }
+
+    /** Root's isolated {@code BORG_BASE_DIR} for an as-root run: {@code <workDir>/root}. */
+    private static String rootBaseDir(String workDir) {
+        return workDir + "/root";
+    }
+
+    /**
+     * The inner {@code create && prune && compact} chain the detached run executes, every borg invocation made
+     * through {@code borg} — the binary (plain, or sudo-prefixed for a {@link BackupJob#backupAsRoot()} job)
+     * decided by {@link #borgBinary}. The {@code &&} chaining means prune only runs on a successful create and
+     * compact only after a successful prune, and the whole chain's exit code (via {@code echo \$?}) reflects the
+     * first failure. Prune is scoped by {@code --glob-archives '{hostname}-*'} so a repository shared by several
+     * jobs never cross-deletes another host's archives.
+     */
+    private static String buildRunChain(BackupServer server, BackupJob job, BackupRepository repo, String borg) {
+        return ensureInitializedBody(server, repo, borg)
+            + " && " + buildCreateBody(server, job, repo, borg)
+            + " && " + buildPruneBody(server, job, repo, borg)
+            + " && " + buildCompactBody(server, repo, borg);
     }
 
     /**
@@ -102,13 +180,14 @@ public final class BorgCommand {
      * with the same message. Init reads the passphrase from the same {@code BORG_PASSCOMMAND} file, so no
      * secret is added to the command.
      */
-    private static String ensureInitializedBody(BackupServer server, BackupRepository repo) {
+    private static String ensureInitializedBody(BackupServer server, BackupRepository repo, String borg) {
         String url = singleQuote(repo.borgRepoUrl(server));
-        return "borg info " + url + " > /dev/null 2>&1 || " + buildInitBody(server, repo);
+        return borg + " info " + url + " > /dev/null 2>&1 || " + buildInitBody(server, repo, borg);
     }
 
-    private static String buildInitBody(BackupServer server, BackupRepository repo) {
-        return "borg init --encryption=repokey-blake2 --make-parent-dirs " + singleQuote(repo.borgRepoUrl(server));
+    private static String buildInitBody(BackupServer server, BackupRepository repo, String borg) {
+        return borg + " init --encryption=repokey-blake2 --make-parent-dirs "
+            + singleQuote(repo.borgRepoUrl(server));
     }
 
     private static String assembleDetached(BackupRepository repo, String chainBody,
@@ -506,7 +585,7 @@ public final class BorgCommand {
      * either. No secret in the command -> the redacted twin equals exec.
      */
     public static BuiltCommand init(BackupServer server, BackupRepository repo, String workDir) {
-        String cmd = exportPasscommand(repo, workDir) + buildInitBody(server, repo);
+        String cmd = exportPasscommand(repo, workDir) + buildInitBody(server, repo, "borg");
         return new BuiltCommand(cmd, cmd);
     }
 
@@ -633,8 +712,8 @@ public final class BorgCommand {
      * never cross-deletes another host's archives, then the job's daily/weekly/monthly retention and the
      * repo URL.
      */
-    private static String buildPruneBody(BackupServer server, BackupJob job, BackupRepository repo) {
-        return "borg prune --list --glob-archives " + singleQuote(job.archiveGlob())
+    private static String buildPruneBody(BackupServer server, BackupJob job, BackupRepository repo, String borg) {
+        return borg + " prune --list --glob-archives " + singleQuote(job.archiveGlob())
             + " --keep-daily " + job.keepDaily()
             + " --keep-weekly " + job.keepWeekly()
             + " --keep-monthly " + job.keepMonthly()
@@ -642,12 +721,12 @@ public final class BorgCommand {
     }
 
     /** The {@code borg compact} body that frees space after a prune (borg ≥ 1.2). */
-    private static String buildCompactBody(BackupServer server, BackupRepository repo) {
-        return "borg compact " + singleQuote(repo.borgRepoUrl(server));
+    private static String buildCompactBody(BackupServer server, BackupRepository repo, String borg) {
+        return borg + " compact " + singleQuote(repo.borgRepoUrl(server));
     }
 
-    private static String buildCreateBody(BackupServer server, BackupJob job, BackupRepository repo) {
-        StringBuilder cmd = new StringBuilder("borg create --json --stats --compression ")
+    private static String buildCreateBody(BackupServer server, BackupJob job, BackupRepository repo, String borg) {
+        StringBuilder cmd = new StringBuilder(borg + " create --json --stats --compression ")
             .append(job.compression())
             .append(" --exclude-caches");
         for (String exclude : job.excludes()) {

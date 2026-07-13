@@ -17,13 +17,23 @@ import java.util.Optional;
  * expression borg expands at create time (per-host hostname + ISO timestamp), and {@link #archiveGlob()}
  * matches every archive this job has ever written.
  *
+ * <p><b>Back up as root.</b> Vaier runs borg over SSH as the machine's credential user (e.g. {@code ubuntu}),
+ * never root — so every file in a source path that user cannot read is <em>silently skipped</em>: borg exits
+ * 1, the run settles WARNING, and the archive has holes. Container volumes are the usual victims (a
+ * mosquitto {@code .db} owned {@code 1883:1883} mode {@code 0600}, a pihole file owned {@code root:root}).
+ * Per-file chmod is whack-a-mole — every new volume is a fresh silent hole — so a job may opt in to
+ * {@link #backupAsRoot()}, and its borg then runs under {@code sudo -n} on the machine (what that changes on
+ * the command line is {@link BorgCommand}'s decision; the sudoers grant that permits it is installed by
+ * {@link BorgClientSetupScript}). It is <b>opt-in</b>: a job never escalates to root on its own.
+ *
  * @param sourcePaths the paths on the machine to back up (at least one)
  * @param excludes    borg {@code --exclude} patterns (may be empty)
  * @param keepDaily   daily archives to keep on prune (≥ 0)
  * @param keepWeekly  weekly archives to keep on prune (≥ 0)
  * @param keepMonthly monthly archives to keep on prune (≥ 0)
- * @param compression the borg {@code --compression} spec; defaults to {@code zstd,6} when blank
- * @param enabled     whether nightly scheduling should run this job
+ * @param compression  the borg {@code --compression} spec; defaults to {@code zstd,6} when blank
+ * @param enabled      whether nightly scheduling should run this job
+ * @param backupAsRoot whether this job's borg runs as root on the machine (see below)
  */
 public record BackupJob(
     String name,
@@ -35,7 +45,8 @@ public record BackupJob(
     int keepWeekly,
     int keepMonthly,
     String compression,
-    boolean enabled
+    boolean enabled,
+    boolean backupAsRoot
 ) {
 
     /** The borg compression used when none is configured. */

@@ -93,7 +93,7 @@ class BackupServiceTest {
 
     private BackupJob job() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
-            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
     }
 
     @Test

@@ -69,7 +69,7 @@ class BackupProvisionerTest {
 
     private BackupJob jobFor(String name, String machineName, String repositoryName) {
         return new BackupJob(name, machineName, repositoryName, List.of("/home"), List.of(),
-            7, 4, 6, "zstd,6", true);
+            7, 4, 6, "zstd,6", true, false);
     }
 
     private Machine sshMachine(String name) {
@@ -116,6 +116,51 @@ class BackupProvisionerTest {
         assertThat(availability.version().get().major()).isEqualTo(1);
         assertThat(availability.version().get().minor()).isEqualTo(2);
         assertThat(availability.supported()).isTrue();
+    }
+
+    // --- checkRootBorg: can this machine actually run borg as root? (the "Back up as root" prerequisite) ---
+
+    /**
+     * The check that stops a "Back up as root" job from silently doing nothing: it probes {@code sudo -n borg
+     * --version}, which only succeeds when the sudoers drop-in is installed AND borg is where sudo can find it.
+     */
+    @Test
+    void checkRootBorgReportsOkWhenSudoCanRunBorg() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n borg --version")))
+            .thenReturn(new CommandResult(0, "ROOT_BORG_OK\n", "", false, "SHA256:x"));
+
+        assertThat(provisioner.checkRootBorg("Colina 27").canRunAsRoot()).isTrue();
+    }
+
+    @Test
+    void checkRootBorgReportsAbsentWhenTheSudoersGrantIsMissing() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n borg --version")))
+            .thenReturn(new CommandResult(0, "ROOT_BORG_ABSENT\n", "", false, "SHA256:x"));
+
+        assertThat(provisioner.checkRootBorg("Colina 27").canRunAsRoot()).isFalse();
+    }
+
+    /** A guarded-out host (unknown / SSH off / no credential) reports a negative, never throws. */
+    @Test
+    void checkRootBorgReportsAbsentWhenGuardsUnmet() {
+        when(machines.getAllMachines()).thenReturn(List.of());
+
+        assertThat(provisioner.checkRootBorg("Nowhere").canRunAsRoot()).isFalse();
+    }
+
+    /** A timeout is never optimistically read as success. */
+    @Test
+    void checkRootBorgReportsAbsentOnATimeout() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), contains("sudo -n borg --version")))
+            .thenReturn(new CommandResult(-1, "", "timeout", true, null));
+
+        assertThat(provisioner.checkRootBorg("Colina 27").canRunAsRoot()).isFalse();
     }
 
     @Test

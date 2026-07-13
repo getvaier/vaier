@@ -122,6 +122,32 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
         }
     }
 
+    /**
+     * Probe whether the machine can run borg as root. The decision of what the probe is and what its output
+     * means belongs to the domain ({@link BorgClientSetupScript#rootBorgProbe}/
+     * {@link BorgClientSetupScript#parseRootBorg}); this only applies the usual guards and runs it. A
+     * guarded-out host, a timeout, or a thrown SSH error all report a negative — never an optimistic yes.
+     */
+    @Override
+    public RootBorgAvailability checkRootBorg(String machineName) {
+        Optional<Machine> machine = reachableMachine(machineName);
+        if (machine.isEmpty()) {
+            return new RootBorgAvailability(false);
+        }
+        log.info("Checking whether borg can run as root on {}", LogSafe.forLog(machineName));
+        try {
+            CommandResult result = remoteCommand.run(machine.get().name(),
+                BorgClientSetupScript.rootBorgProbe());
+            boolean canRunAsRoot = !result.timedOut()
+                && BorgClientSetupScript.parseRootBorg(result.stdout());
+            return new RootBorgAvailability(canRunAsRoot);
+        } catch (Exception e) {
+            log.debug("Root-borg probe on {} failed transiently: {}",
+                LogSafe.forLog(machineName), e.getMessage());
+            return new RootBorgAvailability(false);
+        }
+    }
+
     @Override
     public RepoReachability checkNas(String repositoryName, String machineName) {
         Optional<BackupRepository> repo = findRepository(repositoryName);

@@ -280,7 +280,7 @@ class NotificationServiceTest {
 
     private net.vaier.domain.BackupRun failedRun() {
         net.vaier.domain.BackupJob job = new net.vaier.domain.BackupJob("colina-home", "Colina 27",
-            "nas-borg", List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            "nas-borg", List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
         return net.vaier.domain.BackupRun.fromExitCode(job, "run-1",
             java.time.Instant.parse("2026-07-08T02:00:00Z"),
             java.time.Instant.parse("2026-07-08T02:05:00Z"), 2, "borg failed");
@@ -288,7 +288,7 @@ class NotificationServiceTest {
 
     private net.vaier.domain.BackupRun succeededRun() {
         net.vaier.domain.BackupJob job = new net.vaier.domain.BackupJob("colina-home", "Colina 27",
-            "nas-borg", List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            "nas-borg", List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
         return net.vaier.domain.BackupRun.fromExitCode(job, "run-2",
             java.time.Instant.parse("2026-07-08T02:00:00Z"),
             java.time.Instant.parse("2026-07-08T02:40:00Z"), 0, "12 files, 3 GB");

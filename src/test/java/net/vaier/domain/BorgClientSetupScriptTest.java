@@ -23,12 +23,118 @@ class BorgClientSetupScriptTest {
     }
 
     @Test
-    void generate_isIdempotent_earlyExitsWhenBorgAlreadyInstalled() {
+    void generate_isIdempotent_skipsTheInstallWhenBorgIsAlreadyPresent() {
         String s = BorgClientSetupScript.generate();
 
         assertThat(s).contains("if command -v borg >/dev/null 2>&1; then");
         assertThat(s).contains("borg already installed");
-        assertThat(s).contains("exit 0");
+    }
+
+    /**
+     * The script must NOT bail out the moment it finds borg. It used to {@code exit 0} there — which would
+     * mean the sudoers drop-in below is never installed on any host that already has borg, i.e. on every host
+     * in the fleet today. "Prepare client" would silently do nothing and "Back up as root" would never work.
+     * Finding borg skips the INSTALL, and the script goes on to grant the sudo rule.
+     */
+    @Test
+    void generate_stillInstallsTheSudoersRule_whenBorgIsAlreadyInstalled() {
+        String s = BorgClientSetupScript.generate();
+
+        int borgFound = s.indexOf("borg already installed");
+        int sudoersInstall = s.indexOf("/etc/sudoers.d/vaier-borg");
+        assertThat(borgFound).isGreaterThan(-1);
+        assertThat(sudoersInstall).isGreaterThan(borgFound);
+        // No early exit that would jump over the sudoers step.
+        assertThat(s.substring(borgFound, sudoersInstall)).doesNotContain("exit 0");
+    }
+
+    // --- The sudoers drop-in that lets "Back up as root" work: borg as root, and NOTHING else ---
+
+    /**
+     * The grant: the SSH user may run the borg binary as root without a password, carrying the env vars borg
+     * needs (SETENV — sudo would otherwise strip BORG_PASSCOMMAND/HOME/BORG_BASE_DIR and the run would hang
+     * asking for a passphrase). Both borg paths are listed: apt installs to /usr/bin, pip/pipx to
+     * /usr/local/bin.
+     */
+    @Test
+    void generate_installsASudoersDropInPermittingBorgAsRoot() {
+        String s = BorgClientSetupScript.generate();
+
+        assertThat(s).contains("ALL=(root) NOPASSWD: SETENV: /usr/bin/borg, /usr/local/bin/borg");
+        assertThat(s).contains("/etc/sudoers.d/vaier-borg");
+        // The grantee is the invoking SSH user (the script itself runs as root via sudo).
+        assertThat(s).contains("${SUDO_USER:-$(logname");
+    }
+
+    /**
+     * SECURITY: the Cmnd list is borg's absolute paths and NOTHING else. A {@code sudo env}, a {@code sudo sh},
+     * or an ALL/wildcard here would be a trivial root shell for anyone who can run it — turning a backup
+     * feature into a local privilege-escalation hole.
+     */
+    @Test
+    void generate_sudoersRuleGrantsOnlyBorg_neverAShellOrEnvOrWildcard() {
+        String s = BorgClientSetupScript.generate();
+
+        String rule = s.lines().filter(l -> l.contains("ALL=(root) NOPASSWD:")).findFirst().orElseThrow();
+        assertThat(rule).doesNotContain("ALL=(root) NOPASSWD: ALL");
+        assertThat(rule).doesNotContain("/bin/sh").doesNotContain("/bin/bash").doesNotContain("/usr/bin/env");
+        assertThat(rule).doesNotContain("*");
+        // Exactly the two borg binaries.
+        String cmnds = rule.substring(rule.indexOf("SETENV:") + "SETENV:".length()).trim();
+        // Trim the trailing printf format/quoting so only the command list remains.
+        assertThat(cmnds).startsWith("/usr/bin/borg, /usr/local/bin/borg");
+    }
+
+    /**
+     * A malformed sudoers drop-in can lock a host out of sudo ENTIRELY. So the file is validated with
+     * {@code visudo -c} while it is still a temp file, and only a file that passes is installed — never
+     * written straight into /etc/sudoers.d.
+     */
+    @Test
+    void generate_validatesTheSudoersFileWithVisudoBeforeInstallingIt() {
+        String s = BorgClientSetupScript.generate();
+
+        assertThat(s).contains("visudo -cf");
+        int validate = s.indexOf("visudo -cf");
+        int install = s.indexOf("/etc/sudoers.d/vaier-borg");
+        assertThat(validate).isLessThan(install);
+    }
+
+    /** sudoers files must be 0440 root:root, or sudo refuses to read them ("is mode 0644, should be 0440"). */
+    @Test
+    void generate_installsTheSudoersDropInAs0440RootOwned() {
+        String s = BorgClientSetupScript.generate();
+
+        assertThat(s).contains("install -o root -g root -m 0440");
+    }
+
+    /** Re-running must be safe: the drop-in is rewritten and re-validated, never appended to. */
+    @Test
+    void generate_sudoersDropInIsSafeToReRun() {
+        String s = BorgClientSetupScript.generate();
+
+        // Written to a temp file, then moved into place — never a >> append onto the live sudoers file.
+        assertThat(s).doesNotContain(">> /etc/sudoers");
+        assertThat(s).doesNotContain(">> \"$SUDOERS_TMP\"");
+    }
+
+    // --- The root-borg readiness probe: can this machine actually run borg as root? ---
+
+    @Test
+    void rootBorgProbe_echoesOkOnlyWhenSudoCanRunBorgWithoutAPassword() {
+        String probe = BorgClientSetupScript.rootBorgProbe();
+
+        assertThat(probe).contains("sudo -n borg --version");
+        assertThat(probe).contains("ROOT_BORG_OK");
+        assertThat(probe).contains("ROOT_BORG_ABSENT");
+    }
+
+    @Test
+    void parseRootBorg_readsTheProbeResult() {
+        assertThat(BorgClientSetupScript.parseRootBorg("ROOT_BORG_OK\n")).isTrue();
+        assertThat(BorgClientSetupScript.parseRootBorg("ROOT_BORG_ABSENT\n")).isFalse();
+        assertThat(BorgClientSetupScript.parseRootBorg(null)).isFalse();
+        assertThat(BorgClientSetupScript.parseRootBorg("")).isFalse();
     }
 
     @Test

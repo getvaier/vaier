@@ -784,8 +784,14 @@
         }
     }
 
-    function statusBadge(run) {
-        if (!run) return '<span class="status status-unknown"><span class="status-indicator"></span>Never run</span>';
+    // A run that went wrong and has something to say about it. The happy path never has diagnostics, so a
+    // clean run gets no disclosure and the row stays quiet.
+    function hasDiagnostics(run) {
+        return !!run && !!run.diagnostics && run.diagnostics.trim() !== ''
+            && (run.status === 'WARNING' || run.status === 'FAILED' || run.status === 'UNKNOWN');
+    }
+
+    function statusPill(run) {
         const t = formatTime(run.finishedAt || run.startedAt);
         const time = t ? `<span class="bk-run-time">${escapeHtml(t)}</span>` : '';
         switch (run.status) {
@@ -795,6 +801,37 @@
             case 'FAILED':  return `<span class="status status-error"><span class="status-indicator"></span>Failed</span>${time}`;
             default:        return `<span class="status status-unknown"><span class="status-indicator"></span>Unknown</span>${time}`;
         }
+    }
+
+    // The pill, wrapped in the page's existing disclosure control when — and only when — the run left
+    // diagnostics worth reading. Reuses .bk-disclosure/.bk-disclosure-caret from the repo-path advanced row.
+    function statusBadge(run) {
+        if (!run) return '<span class="status status-unknown"><span class="status-indicator"></span>Never run</span>';
+        const pill = statusPill(run);
+        if (!hasDiagnostics(run)) return pill;
+        return `<button type="button" class="bk-disclosure bk-run-disclosure" aria-expanded="false"
+                    title="Show what borg reported">${pill}<span class="bk-disclosure-caret">›</span></button>`;
+    }
+
+    // The diagnostic lines themselves: borg's skipped-file / error output, as the backend's run diagnostics
+    // (the JSON stats blob is already stripped server-side). Untrusted remote paths — always escaped.
+    function diagnosticsPanel(run) {
+        if (!hasDiagnostics(run)) return '';
+        const tone = run.status === 'WARNING' ? 'warn' : 'err';
+        return `<pre class="bk-run-diag ${tone}" hidden>${escapeHtml(run.diagnostics)}</pre>`;
+    }
+
+    // Wire the disclosure inside one job row. Scoped to the row, so no ids and no collisions between jobs.
+    function bindDiagnostics(item) {
+        const toggle = item.querySelector('.bk-run-disclosure');
+        const panel = item.querySelector('.bk-run-diag');
+        if (!toggle || !panel) return;
+        toggle.addEventListener('click', () => {
+            const open = toggle.getAttribute('aria-expanded') !== 'true';
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            toggle.classList.toggle('open', open);
+            panel.hidden = !open;
+        });
     }
 
     function renderJobs() {
@@ -829,10 +866,12 @@
                         <span class="bk-retention">keep <b>${escapeHtml(String(job.keepDaily))}d</b> · <b>${escapeHtml(String(job.keepWeekly))}w</b> · <b>${escapeHtml(String(job.keepMonthly))}m</b></span>
                         <label class="bk-toggle"><input type="checkbox" class="js-enabled" ${job.enabled ? 'checked' : ''}> Enabled</label>
                     </div>
+                    <div class="bk-run-diag-slot">${diagnosticsPanel(latestRuns[job.name])}</div>
                 </div>
                 <div class="bk-item-actions">
                     <button class="btn btn-small btn-success js-run">Run now</button>
                 </div>`;
+            bindDiagnostics(el);
             el.querySelector('.js-run').addEventListener('click', () => runJob(job));
             el.querySelector('.js-enabled').addEventListener('change', ev => toggleEnabled(job, ev.target.checked));
             el.querySelector('.bk-item-actions').appendChild(actionMenu([
@@ -844,10 +883,15 @@
         });
     }
 
-    // Repaint just one job's last-run badge without re-rendering the whole list.
+    // Repaint just one job's last-run badge (and its diagnostics) without re-rendering the whole list.
     function paintBadge(jobName) {
-        const row = document.querySelector(`.bk-item[data-job="${CSS.escape(jobName)}"] .bk-run-badge`);
-        if (row) row.innerHTML = statusBadge(latestRuns[jobName]);
+        const item = document.querySelector(`.bk-item[data-job="${CSS.escape(jobName)}"]`);
+        if (!item) return;
+        const badge = item.querySelector('.bk-run-badge');
+        const slot = item.querySelector('.bk-run-diag-slot');
+        if (badge) badge.innerHTML = statusBadge(latestRuns[jobName]);
+        if (slot) slot.innerHTML = diagnosticsPanel(latestRuns[jobName]);
+        bindDiagnostics(item);   // the toggle is fresh markup, so it needs its listener back
     }
 
     async function refreshRunBadge(job) {
@@ -872,7 +916,8 @@
             keepWeekly: parseInt(document.getElementById('jobKeepWeekly').value, 10) || 0,
             keepMonthly: parseInt(document.getElementById('jobKeepMonthly').value, 10) || 0,
             compression: document.getElementById('jobCompression').value.trim() || 'zstd,6',
-            enabled: document.getElementById('jobEnabled').checked
+            enabled: document.getElementById('jobEnabled').checked,
+            backupAsRoot: document.getElementById('jobBackupAsRoot').checked
         };
     }
 
@@ -895,6 +940,8 @@
         document.getElementById('jobKeepMonthly').value = job ? job.keepMonthly : 6;
         document.getElementById('jobCompression').value = job ? job.compression : 'zstd,6';
         document.getElementById('jobEnabled').checked = job ? job.enabled : true;
+        // Opt-in, never inherited: a new job starts as the SSH user, like every job that exists today.
+        document.getElementById('jobBackupAsRoot').checked = job ? !!job.backupAsRoot : false;
         openModal('jobModal');
         if (!job) nameEl.focus();
     }
@@ -984,9 +1031,10 @@
             const res = await fetch('/backup-jobs/' + encodeURIComponent(jobName) + '/runs', { cache: 'no-store' });
             if (res.ok) { latestRuns[jobName] = await res.json(); paintBadge(jobName); }
         } catch (_) { /* the event already told us the outcome; the badge repaints on the next load */ }
+        // Point the operator at the detail that now exists on the row, instead of stating a dead end.
         if (payload.status === 'SUCCESS') msg('Backup of "' + jobName + '" finished.', 'success');
-        else if (payload.status === 'WARNING') msg('Backup of "' + jobName + '" completed with warnings — some files were skipped.', 'warning');
-        else if (payload.status === 'FAILED') msg('Backup of "' + jobName + '" failed — admins were emailed.', 'error');
+        else if (payload.status === 'WARNING') msg('Backup of "' + jobName + '" completed with warnings. Open the Warnings badge on the job to see which files were skipped.', 'warning');
+        else if (payload.status === 'FAILED') msg('Backup of "' + jobName + '" failed — admins were emailed. Open the Failed badge on the job to see what borg reported.', 'error');
     }
 
     // Readiness for the provisioning wizard. borgAuthOk and versionsCompatible are shown prominently:
@@ -1019,14 +1067,29 @@
         const prepareAction = !c.borgInstalled
             ? `<button class="btn btn-small btn-secondary bk-check-action" id="readinessPrepareBtn">Prepare client</button>`
             : '';
+        // Only a job that opted in to "Back up as root" is judged on it. A job that runs as the SSH user is
+        // not "not ready" for lacking a grant it will never use, so the row simply isn't there.
+        // When borg is present but the grant is missing, re-running Prepare client is the fix (it installs
+        // the sudoers rule), so the action is offered right on the row that failed.
+        const rootFixAction = (c.backupAsRoot && !c.rootBorgOk && c.borgInstalled)
+            ? `<button class="btn btn-small btn-secondary bk-check-action" id="readinessRootPrepareBtn">Prepare client</button>`
+            : '';
+        const rootRow = c.backupAsRoot
+            ? `<div class="bk-check-row">${checkMark(c.rootBorgOk)}<span>borg can run as root on ${escapeHtml(job.machineName)}</span>${rootFixAction}</div>`
+            : '';
         body.innerHTML = `<div class="bk-check-list">
             <div class="bk-check-row">${checkMark(c.borgInstalled)}<span>borg installed on ${escapeHtml(job.machineName)}</span>${version}${prepareAction}</div>
             <div class="bk-check-row">${checkMark(c.borgSupported)}<span>borg version supported</span></div>
             <div class="bk-check-row">${checkMark(c.nasReachable)}<span>server reachable from the machine</span></div>
             <div class="bk-check-row bk-check-key">${checkMark(c.borgAuthOk)}<span>client key trusted on the server</span>${authAction}</div>
             <div class="bk-check-row bk-check-key">${checkMark(c.versionsCompatible)}<span>borg versions compatible</span>${serverVer}</div>
+            ${rootRow}
         </div>
         <div id="readinessPrepareOut"></div>`;
+        const rootPrepareBtn = document.getElementById('readinessRootPrepareBtn');
+        if (rootPrepareBtn) {
+            rootPrepareBtn.addEventListener('click', () => prepareClient(job, rootPrepareBtn));
+        }
         const prepareBtn = document.getElementById('readinessPrepareBtn');
         if (prepareBtn) {
             prepareBtn.addEventListener('click', () => prepareClient(job, prepareBtn));

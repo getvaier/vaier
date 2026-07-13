@@ -16,6 +16,9 @@ class BorgCommandTest {
     /** The work dir the orchestration resolves and passes in (formerly WORK_DIR). */
     private static final String WORK_DIR = "/var/lib/vaier-backup";
 
+    /** The SSH user's absolute home, resolved by the orchestration (BackupWorkDirResolver). */
+    private static final String SSH_HOME = "/home/ubuntu";
+
     private BackupServer server() {
         return new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
             "borg", "home/borg/backups", "/volume1/docker/borg", false);
@@ -29,12 +32,266 @@ class BorgCommandTest {
     private BackupJob job() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
             List.of("/home/geir", "/etc"), List.of("*.tmp", "/var/cache"),
-            7, 4, 6, "zstd,6", true);
+            7, 4, 6, "zstd,6", true, false);
+    }
+
+    /** The same job, opted in to "Back up as root" — borg runs under sudo on the machine. */
+    private BackupJob rootJob() {
+        return new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home/geir", "/etc"), List.of("*.tmp", "/var/cache"),
+            7, 4, 6, "zstd,6", true, true);
     }
 
     /** The passcommand a run/list/init uses to fetch the passphrase from the provisioned 0600 file. */
     private String expectedPasscommand() {
         return "export BORG_PASSCOMMAND='cat /var/lib/vaier-backup/nas-borg.pass'";
+    }
+
+    // --- Back up as root: borg under sudo, so root-owned files are read rather than silently skipped ---
+
+    /**
+     * The regression pin. A job WITHOUT "Back up as root" must render byte-for-byte the command it rendered
+     * before the feature existed — every existing job on every host keeps running exactly as it did, and no
+     * job is ever escalated to root by the mere presence of the toggle.
+     */
+    @Test
+    void detachedRun_withoutBackupAsRoot_isByteForByteUnchanged() {
+        String exec = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        String url = "'ssh://borg@192.168.3.3:8022/./colina'";
+        assertThat(exec).isEqualTo(
+            "W=/var/lib/vaier-backup; mkdir -p \"$W\"; nohup sh -c \""
+                + "export BORG_PASSCOMMAND='cat /var/lib/vaier-backup/nas-borg.pass'; "
+                + "borg info " + url + " > /dev/null 2>&1 || "
+                + "borg init --encryption=repokey-blake2 --make-parent-dirs " + url
+                + " && borg create --json --stats --compression zstd,6 --exclude-caches"
+                + " --exclude '*.tmp' --exclude '/var/cache' "
+                + url + "::'{hostname}-{now:%Y-%m-%dT%H:%M:%S}' '/home/geir' '/etc'"
+                + " && borg prune --list --glob-archives '{hostname}-*'"
+                + " --keep-daily 7 --keep-weekly 4 --keep-monthly 6 " + url
+                + " && borg compact " + url
+                + "; echo \\$? > $W/run-1.rc\" > \"$W/run-1.log\" 2>&1 & echo STARTED $!");
+        // Not a whiff of sudo anywhere for a normal job.
+        assertThat(exec).doesNotContain("sudo").doesNotContain("BORG_BASE_DIR").doesNotContain("HOME=");
+    }
+
+    /**
+     * Every borg invocation in the run chain — info, init, create, prune, compact — runs under {@code sudo -n}
+     * when the job is "Back up as root". Missing any one of them would half-escalate the run: e.g. a create as
+     * root writing a repo the non-root prune then cannot manage.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_runsEveryBorgInvocationInTheChainUnderSudo() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        // All five borg invocations are sudo-prefixed...
+        assertThat(exec).contains("sudo -n ").contains("borg info").contains("borg init")
+            .contains("borg create").contains("borg prune").contains("borg compact");
+        assertThat(countOf(exec, "sudo -n ")).isEqualTo(5);
+        // ...and no borg call is left bare: every "borg " occurrence is immediately preceded by a sudo line.
+        assertThat(countOf(exec, "borg info")).isEqualTo(1);
+        for (String verb : List.of("borg info", "borg init", "borg create", "borg prune", "borg compact")) {
+            assertThat(exec).contains(sudoPrefix() + verb);
+        }
+    }
+
+    /**
+     * TRAP (a): HOME. Plain sudo makes HOME {@code /root}, so anything that expands {@code ~} or reads
+     * {@code $HOME} would look in root's home. HOME is therefore set explicitly to the SSH user's home — as a
+     * literal absolute path resolved by the orchestration, never a {@code $HOME} the command would have to
+     * expand. Note this does NOT fix ssh (see the BORG_RSH test: ssh ignores {@code $HOME} entirely); it is a
+     * belt for every other tool in the chain.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_setsHomeToTheSshUsersHomeSoRootFindsTheKeyAndTheHostPin() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec).contains("sudo -n HOME='/home/ubuntu'");
+        // Never a $HOME to expand — borg/ssh would look at the literal string, and sudo would have reset it.
+        assertThat(exec).doesNotContain("HOME=$HOME").doesNotContain("HOME=\"$HOME\"");
+        assertThat(exec).doesNotContain("/root/.ssh");
+    }
+
+    /**
+     * TRAP (a2), THE ONE THAT ACTUALLY BIT: setting HOME is not enough, because <b>OpenSSH ignores
+     * {@code $HOME}</b> — it resolves {@code ~} from {@code getpwuid(getuid())}, i.e. from the passwd entry of
+     * the UID it is running as. Under sudo that is root, so root's ssh reads {@code /root/.ssh/known_hosts}
+     * and {@code /root/.ssh/id_ed25519} no matter what HOME says. Neither exists, and host-key verification
+     * runs BEFORE publickey auth, so every as-root run died with "Host key verification failed."
+     *
+     * <p>The fix is BORG_RSH: it names the SSH user's identity and known_hosts as absolute literals, so root's
+     * ssh is pointed at the key {@link BorgCommand#ensureClientKeyPair} wrote and the host pin
+     * {@link BorgCommand#pinHostKeys} wrote.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_pointsRootsSshAtTheSshUsersKeyAndPinViaBorgRsh() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec).contains("BORG_RSH='ssh -i /home/ubuntu/.ssh/id_ed25519"
+            + " -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts'");
+        // Every one of the five sudoed borg invocations carries it — not just the create.
+        assertThat(countOf(exec, "BORG_RSH=")).isEqualTo(5);
+        // Root's ssh must never be left to fall back on /root/.ssh, where there is no key and no pin.
+        assertThat(exec).doesNotContain("/root/.ssh");
+    }
+
+    /**
+     * BORG_RSH carries the identity and the known_hosts file and NOTHING else: borg appends {@code -p <port>}
+     * and the {@code user@host} itself, from the repo URL. Adding either here would either duplicate the port
+     * flag or pin ssh to the wrong target when the repo URL changes.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_borgRshNamesNeitherThePortNorTheUserAtHost() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        String rsh = between(exec, "BORG_RSH='", "'");
+        assertThat(rsh).isEqualTo("ssh -i /home/ubuntu/.ssh/id_ed25519"
+            + " -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts");
+        // borg supplies these from the repo URL — the RSH command must not.
+        assertThat(rsh).doesNotContain("-p ").doesNotContain("8022")
+            .doesNotContain("borg@").doesNotContain("192.168.3.3");
+    }
+
+    /**
+     * The working path is left alone. A NON-root job runs as the SSH user, whose own home already resolves to
+     * exactly the key and known_hosts ssh needs, so it gets no BORG_RSH at all — colina27 and apalveien5 keep
+     * backing up byte-for-byte as they did.
+     */
+    @Test
+    void detachedRun_withoutBackupAsRoot_rendersNoBorgRshBecauseTheSshUsersOwnHomeAlreadyResolves() {
+        String exec = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec).doesNotContain("BORG_RSH");
+    }
+
+    /** The substring between the first {@code open} and the next {@code close} after it. */
+    private static String between(String haystack, String open, String close) {
+        int from = haystack.indexOf(open);
+        assertThat(from).as("expected to find " + open).isGreaterThanOrEqualTo(0);
+        int start = from + open.length();
+        int end = haystack.indexOf(close, start);
+        assertThat(end).as("expected a closing " + close).isGreaterThanOrEqualTo(0);
+        return haystack.substring(start, end);
+    }
+
+    /**
+     * TRAP (b): sudo resets the environment. The chain exports BORG_PASSCOMMAND into the shell, but sudo
+     * discards it — root's borg would then have no passphrase and would hang or fail. So the passcommand is
+     * passed explicitly on the sudo line (which is what needs the SETENV tag in sudoers).
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_passesThePasscommandOnTheSudoLineBecauseSudoResetsTheEnv() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec).contains("BORG_PASSCOMMAND='cat /var/lib/vaier-backup/nas-borg.pass' borg");
+        // Each of the five sudo lines carries it — not just the create.
+        assertThat(countOf(exec, "BORG_PASSCOMMAND='cat /var/lib/vaier-backup/nas-borg.pass' borg")).isEqualTo(5);
+        // Still no plaintext passphrase anywhere.
+        assertThat(exec).doesNotContain("s3cr3t").doesNotContain("BORG_PASSPHRASE");
+    }
+
+    /**
+     * TRAP (c): root's borg cache. If root's borg wrote into the SSH user's {@code ~/.cache/borg}, it would
+     * leave root-owned cache files that break a later NON-root run of the same job (when the toggle is turned
+     * back off). BORG_BASE_DIR isolates it under the work dir instead.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_isolatesRootsBorgCacheSoItCannotBreakALaterNonRootRun() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec).contains("BORG_BASE_DIR='/var/lib/vaier-backup/root'");
+        assertThat(countOf(exec, "BORG_BASE_DIR='/var/lib/vaier-backup/root'")).isEqualTo(5);
+    }
+
+    /**
+     * SECURITY. The sudoers grant permits the borg binary and nothing else, so the command must never sudo a
+     * shell or an env wrapper: {@code sudo env …} and {@code sudo sh -c …} are each a trivial root shell for
+     * anyone who can run them, which would turn this feature into a local privilege-escalation hole. Every
+     * sudo invocation here runs {@code borg} directly, with env assignments passed to sudo itself.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_neverSudoesAShellOrAnEnvWrapper() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec)
+            .doesNotContain("sudo env").doesNotContain("sudo -n env")
+            .doesNotContain("sudo sh").doesNotContain("sudo -n sh")
+            .doesNotContain("sudo bash").doesNotContain("sudo -n bash")
+            .doesNotContain("sudo -E").doesNotContain("sudo -i").doesNotContain("sudo -s");
+        // The only thing sudo ever runs is borg: after the env assignments, the command word is `borg`.
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("sudo -n ([^;&|]*)").matcher(exec);
+        int seen = 0;
+        while (m.find()) {
+            seen++;
+            // Strip the VAR='…' assignments; whatever remains must start with the borg binary.
+            String rest = m.group(1).replaceAll("^(?:[A-Z_]+='[^']*' )+", "");
+            assertThat(rest).startsWith("borg ");
+        }
+        assertThat(seen).isEqualTo(5);
+    }
+
+    /**
+     * The nesting survives the sudo prefix: the chain is still embedded in {@code nohup sh -c "…"}, still
+     * writes its exit code and log to the per-run files, and still returns {@code STARTED} at once. A sudo
+     * prefix that broke the {@code dqEmbed} escaping would corrupt the whole detached wrapper.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_keepsTheDetachedWrapperAndItsEscapingIntact() {
+        String exec = BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
+
+        assertThat(exec).startsWith("W=/var/lib/vaier-backup; mkdir -p \"$W\"; nohup sh -c \"");
+        assertThat(exec).contains("; echo \\$? > $W/run-1.rc\" > \"$W/run-1.log\" 2>&1 & echo STARTED $!");
+        // The single-quoted env values are literal inside the double-quoted sh -c, so they are NOT escaped;
+        // only the structural \$? is. A stray backslash before a quote here would break the inner shell.
+        assertThat(exec).doesNotContain("\\'");
+    }
+
+    /**
+     * An as-root run with no resolved SSH home is REFUSED, never silently launched: without HOME, root's ssh
+     * would look in /root for a key and a host pin that are not there, and the run would die at the NAS with a
+     * misleading "Permission denied (publickey)". The orchestration must resolve the home first.
+     */
+    @Test
+    void detachedRun_whenBackupAsRoot_refusesToRenderWithoutAnAbsoluteSshHome() {
+        assertThatThrownBy(() -> BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, ""))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("home");
+        assertThatThrownBy(() -> BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, null))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() ->
+            BorgCommand.detachedRun(server(), rootJob(), repo(), "run-1", WORK_DIR, "relative/home"))
+            .isInstanceOf(IllegalArgumentException.class);
+        // A job that is NOT as-root never needs a home, so it renders fine without one.
+        assertThat(BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, "").exec())
+            .contains("borg create");
+    }
+
+    /**
+     * Only the RUN chain escalates. Provisioning and browsing (init, list, the server-auth probe) stay as the
+     * SSH user: they only talk to the NAS and read the user's own pass file, so root buys nothing there and
+     * would only add another root-owned cache to clean up.
+     */
+    @Test
+    void initListAndAuthProbeNeverRunUnderSudoEvenForAnAsRootJob() {
+        assertThat(BorgCommand.init(server(), repo(), WORK_DIR).exec()).doesNotContain("sudo");
+        assertThat(BorgCommand.listArchives(server(), repo(), WORK_DIR).exec()).doesNotContain("sudo");
+        assertThat(BorgCommand.serverAuthProbe(server(), repo(), WORK_DIR)).doesNotContain("sudo");
+    }
+
+    /** The sudo prefix every borg invocation in an as-root chain carries. */
+    private String sudoPrefix() {
+        return "sudo -n HOME='/home/ubuntu' BORG_BASE_DIR='/var/lib/vaier-backup/root'"
+            + " BORG_RSH='ssh -i /home/ubuntu/.ssh/id_ed25519"
+            + " -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts'"
+            + " BORG_PASSCOMMAND='cat /var/lib/vaier-backup/nas-borg.pass' ";
+    }
+
+    private static int countOf(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     @Test
@@ -68,7 +325,7 @@ class BorgCommandTest {
 
     @Test
     void detachedRunBackgroundsWithNohupWritesRcAndLogAndReturnsImmediately() {
-        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR);
+        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, SSH_HOME);
 
         String exec = cmd.exec();
         // Persistent work dir is set up before launch.
@@ -97,7 +354,7 @@ class BorgCommandTest {
         // A run must not fail with "Repository does not exist" just because nobody clicked Initialize.
         // Like ensurePassFile, the run ensures its prerequisite: borg info probes the repo, and only if it
         // is absent does borg init create it (repokey-blake2), then the create chain proceeds.
-        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR);
+        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, SSH_HOME);
         String exec = cmd.exec();
         String url = "'ssh://borg@192.168.3.3:8022/./colina'";
 
@@ -114,7 +371,7 @@ class BorgCommandTest {
 
     @Test
     void detachedRunChainsCreateThenPruneScopedByGlobThenCompact() {
-        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR);
+        BuiltCommand cmd = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, SSH_HOME);
         String exec = cmd.exec();
 
         // create && prune && compact, in that order.
@@ -166,7 +423,7 @@ class BorgCommandTest {
             .contains("borg info " + q);
         assertThat(BorgCommand.init(server(), repo(), WORK_DIR).exec())
             .contains("--make-parent-dirs " + q);
-        String run = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR).exec();
+        String run = BorgCommand.detachedRun(server(), job(), repo(), "run-1", WORK_DIR, SSH_HOME).exec();
         assertThat(run).contains("borg compact " + q);       // compact site
         assertThat(run).contains("--keep-monthly 6 " + q);   // prune site
         assertThat(run).contains(q + "::'{hostname}");        // create site: 'URL'::'ARCHIVE'

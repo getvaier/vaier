@@ -95,6 +95,9 @@ public class BackupJobFileAdapter implements ForPersistingBackupJobs {
         Integer keepMonthly = m.get("keepMonthly") instanceof Number n ? n.intValue() : null;
         String compression = asString(m.get("compression"));
         boolean enabled = m.get("enabled") instanceof Boolean b && b;
+        // Absent in every job file written before "Back up as root" existed -> false. A job is never escalated
+        // to root merely because a new key appeared in the schema; opting in is always an explicit act.
+        boolean backupAsRoot = m.get("backupAsRoot") instanceof Boolean r && r;
         if (name == null || machineName == null || repositoryName == null
             || sourcePaths.isEmpty() || keepDaily == null || keepWeekly == null || keepMonthly == null) {
             log.warn("Skipping malformed backup-job entry in {}", FILE_NAME);
@@ -102,7 +105,7 @@ public class BackupJobFileAdapter implements ForPersistingBackupJobs {
         }
         try {
             return new BackupJob(name, machineName, repositoryName, sourcePaths, excludes,
-                keepDaily, keepWeekly, keepMonthly, compression, enabled);
+                keepDaily, keepWeekly, keepMonthly, compression, enabled, backupAsRoot);
         } catch (IllegalArgumentException e) {
             log.warn("Skipping invalid backup-job entry '{}' in {}: {}",
                 name.replaceAll("[\r\n]+", "_"), FILE_NAME, e.getMessage());
@@ -132,6 +135,7 @@ public class BackupJobFileAdapter implements ForPersistingBackupJobs {
             entry.put("keepMonthly", j.keepMonthly());
             entry.put("compression", j.compression());
             entry.put("enabled", j.enabled());
+            entry.put("backupAsRoot", j.backupAsRoot());
             serialized.add(entry);
         }
         Map<String, Object> root = new LinkedHashMap<>();

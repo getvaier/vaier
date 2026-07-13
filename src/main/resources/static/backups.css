@@ -297,6 +297,42 @@
     margin-left: 0.1rem;
 }
 
+/* A run that went wrong can be opened for what borg actually reported. Reuses the .bk-disclosure control
+   from the repo-path advanced row: the status pill becomes the trigger, so no extra chrome is added — and
+   a clean run has no diagnostics, so it never renders this at all. */
+.bk-run-disclosure {
+    gap: 0.3rem;
+}
+.bk-run-disclosure .status {
+    cursor: pointer;
+}
+.bk-run-disclosure .bk-disclosure-caret {
+    font-size: 0.8rem;
+}
+
+/* The diagnostic lines: borg's own output, so monospace with line breaks preserved. Long remote paths
+   scroll inside the box — never widening the card or the page. */
+.bk-run-diag {
+    margin: 0.5rem 0 0;
+    padding: 0.45rem 0.6rem;
+    max-width: 100%;
+    max-height: 11rem;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--bg-input);
+    border: 1px solid var(--border-hi);
+    border-left: 2px solid var(--border-hi);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    white-space: pre;
+    tab-size: 4;
+}
+.bk-run-diag.warn { border-left-color: var(--orange); }
+.bk-run-diag.err  { border-left-color: var(--red); }
+
 /* --- Enabled toggle --- */
 .bk-toggle {
     display: inline-flex;
@@ -363,6 +399,12 @@
     font-size: 0.7rem;
     color: var(--text-dim);
     margin-top: 0.3rem;
+}
+/* A field note under a .form-checkbox: indent past the box so it reads as a note on the LABEL, not a
+   second option. (.form-checkbox is a flex row: input + 0.5rem gap.) */
+.bk-checkbox-note {
+    margin-left: 1.3rem;
+    max-width: 46ch;
 }
 
 /* --- Retention / number row inside the job form --- */

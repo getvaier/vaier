@@ -39,7 +39,9 @@ public class BackupWorkDirResolver {
     static final String HOME_PROBE = "printf %s \"$HOME\"";
 
     private final RunRemoteCommandUseCase remoteCommand;
-    private final Map<String, String> cache = new ConcurrentHashMap<>();
+
+    /** machineName -> the resolved absolute {@code $HOME}. The home is the primitive; the work dir derives. */
+    private final Map<String, String> homeCache = new ConcurrentHashMap<>();
 
     public BackupWorkDirResolver(RunRemoteCommandUseCase remoteCommand) {
         this.remoteCommand = remoteCommand;
@@ -52,24 +54,45 @@ public class BackupWorkDirResolver {
      * never blocked and a blip never sticks.
      */
     public String workDirFor(String machineName) {
-        String cached = cache.get(machineName);
+        return homeFor(machineName).map(home -> home + "/.vaier-backup").orElse(FALLBACK_WORK_DIR);
+    }
+
+    /**
+     * The SSH user's absolute {@code $HOME} on {@code machineName}, cached once resolved — the same probe and
+     * cache {@link #workDirFor} derives its directory from.
+     *
+     * <p>This is what a <b>Back up as root</b> run is built from. The borg client key and the pinned
+     * backup-server host key both live in the SSH <em>user's</em> home, and under sudo ssh runs as root — which
+     * would read {@code /root/.ssh/}, where neither exists. Setting {@code HOME} does <b>not</b> fix that:
+     * OpenSSH ignores {@code $HOME} and resolves {@code ~} from the running UID's passwd entry. So the run names
+     * both files as absolute literals under this home, via {@code BORG_RSH} (see {@code BorgCommand.borgBinary});
+     * {@code HOME} is passed too, for the tools that do honour it. As with the work dir, the home is expanded
+     * here, once, into an absolute literal — a {@code $HOME} left in the command would be reset by sudo before
+     * borg ever saw it.
+     *
+     * <p>Unlike {@link #workDirFor} there is <b>no fallback</b>: an unresolvable home comes back empty rather
+     * than guessed. A missing home does not degrade an as-root run, it breaks it — the run cannot even name the
+     * key and the host pin — so the orchestration must refuse the run instead. Never throws.
+     */
+    public java.util.Optional<String> homeFor(String machineName) {
+        String cached = homeCache.get(machineName);
         if (cached != null) {
-            return cached;
+            return java.util.Optional.of(cached);
         }
         try {
             CommandResult result = remoteCommand.run(machineName, HOME_PROBE);
             if (!result.timedOut() && result.exitCode() == 0 && result.stdout() != null) {
                 String home = result.stdout().strip();
                 if (!home.isBlank() && home.startsWith("/")) {
-                    String dir = home + "/.vaier-backup";
-                    cache.put(machineName, dir);
-                    return dir;
+                    homeCache.put(machineName, home);
+                    return java.util.Optional.of(home);
                 }
             }
         } catch (Exception e) {
             log.debug("Could not resolve $HOME on {} for backup work dir: {}",
                 LogSafe.forLog(machineName), e.getMessage());
         }
-        return FALLBACK_WORK_DIR;
+        // Deliberately NOT cached: a transient probe failure must never poison the cache.
+        return java.util.Optional.empty();
     }
 }

@@ -12,7 +12,7 @@ class BackupRunTest {
 
     private BackupJob job() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
-            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
     }
 
     @Test
@@ -132,6 +132,127 @@ class BackupRunTest {
             .isEqualTo("[Vaier] Backup recovered: colina-home on Colina 27");
         assertThat(ok.recoveryBody("example.com"))
             .contains("colina-home").contains("Colina 27").contains("vaier.example.com");
+    }
+
+    @Test
+    void diagnosticsStripsTrailingJsonStatsBlockFromWarningSummary() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:50Z");
+        String summary = """
+            /home/ubuntu/mqtt/data/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'
+            /home/ubuntu/pihole/etc-pihole/logrotate: open: [Errno 13] Permission denied: 'logrotate'
+            {
+                "archive": {
+                    "command_line": ["/usr/bin/borg", "create"],
+                    "duration": 2.820213,
+                    "name": "ip-172-31-17-253-2026-07-13T00:07:47",
+                    "stats": {"compressed_size": 369044822, "deduplicated_size": 3199530, "nfiles": 7341, "original_size": 1004101215}
+                },
+                "cache": {},
+                "encryption": {"mode": "repokey-blake2"},
+                "repository": {}
+            }""";
+
+        BackupRun warn = BackupRun.fromExitCode(job(), "run-diag-1", start, end, 1, summary);
+
+        assertThat(warn.diagnostics()).isEqualTo(
+            "/home/ubuntu/mqtt/data/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'\n"
+            + "/home/ubuntu/pihole/etc-pihole/logrotate: open: [Errno 13] Permission denied: 'logrotate'");
+    }
+
+    @Test
+    void diagnosticsIsEmptyWhenSummaryIsOnlyTheJsonStatsBlock() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:50Z");
+        String summary = """
+            {
+                "archive": {"name": "ip-172-31-17-253-2026-07-13T00:07:47"},
+                "repository": {}
+            }""";
+
+        BackupRun success = BackupRun.fromExitCode(job(), "run-diag-2", start, end, 0, summary);
+
+        assertThat(success.diagnostics()).isEmpty();
+    }
+
+    @Test
+    void diagnosticsIsTheWholeSummaryWhenThereIsNoJsonBlock() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:48Z");
+
+        BackupRun failed = BackupRun.fromExitCode(job(), "run-diag-3", start, end, 127, "sh: 1: borg: not found");
+
+        assertThat(failed.diagnostics()).isEqualTo("sh: 1: borg: not found");
+    }
+
+    @Test
+    void diagnosticsIsEmptyForNullOrBlankSummary() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:48Z");
+
+        BackupRun noSummary = BackupRun.fromExitCode(job(), "run-diag-4", start, end, 0, null);
+        BackupRun blankSummary = BackupRun.fromExitCode(job(), "run-diag-5", start, end, 0, "   ");
+
+        assertThat(noSummary.diagnostics()).isEmpty();
+        assertThat(blankSummary.diagnostics()).isEmpty();
+    }
+
+    @Test
+    void diagnosticsIsNotFooledByABraceInsideADiagnosticLine() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:48Z");
+        String summary = "/home/ubuntu/data/{weird}/file.db: open: [Errno 13] Permission denied";
+
+        BackupRun failed = BackupRun.fromExitCode(job(), "run-diag-6", start, end, 2, summary);
+
+        // No line is *structurally* "just" a JSON object start, so the summary is returned unchanged.
+        assertThat(failed.diagnostics()).isEqualTo(summary);
+    }
+
+    @Test
+    void diagnosticsKeepsBorgPruneLinesThatFollowTheJsonBlock() {
+        Instant start = Instant.parse("2026-07-10T02:07:53Z");
+        Instant end = Instant.parse("2026-07-10T02:09:04Z");
+        // The real shape of a clean run in backup-runs.yml: borg create's JSON stats block, and *after* it
+        // borg prune's retention report. The JSON therefore does NOT run to the end of the summary — only
+        // the stats object is machine noise, the prune lines are human-readable and are kept.
+        String summary = """
+            {
+                "archive": {"name": "nuc02-2026-07-10T02:07:59"},
+                "repository": {}
+            }
+            Keeping archive (rule: daily #1):        nuc02-2026-07-10T02:07:59            Fri, 2026-07-10 02:08:02 [8201c77]
+            Keeping archive (rule: daily #2):        nuc02-2026-07-09T13:13:24            Thu, 2026-07-09 13:13:27 [c333e07]""";
+
+        BackupRun ok = BackupRun.fromExitCode(job(), "run-diag-7", start, end, 0, summary);
+
+        assertThat(ok.diagnostics()).isEqualTo(
+            "Keeping archive (rule: daily #1):        nuc02-2026-07-10T02:07:59            Fri, 2026-07-10 02:08:02 [8201c77]\n"
+            + "Keeping archive (rule: daily #2):        nuc02-2026-07-09T13:13:24            Thu, 2026-07-09 13:13:27 [c333e07]");
+    }
+
+    @Test
+    void diagnosticsKeepsTheLinesOnBothSidesOfTheJsonBlock() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:48Z");
+        String summary = "before the json\n{\n    \"a\": 1\n}\nafter the json";
+
+        BackupRun failed = BackupRun.fromExitCode(job(), "run-diag-8", start, end, 2, summary);
+
+        // Only the stats object is removed; every human-readable line survives, wherever it sits.
+        assertThat(failed.diagnostics()).isEqualTo("before the json\nafter the json");
+    }
+
+    @Test
+    void diagnosticsDropsAnUnterminatedJsonBlockButKeepsTheLinesBeforeIt() {
+        Instant start = Instant.parse("2026-07-13T00:07:47Z");
+        Instant end = Instant.parse("2026-07-13T00:07:48Z");
+        // A truncated summary: the stats object opened but never closed at column 0.
+        String summary = "/data/db: open: [Errno 13] Permission denied\n{\n    \"archive\": {";
+
+        BackupRun failed = BackupRun.fromExitCode(job(), "run-diag-9", start, end, 2, summary);
+
+        assertThat(failed.diagnostics()).isEqualTo("/data/db: open: [Errno 13] Permission denied");
     }
 
     @Test

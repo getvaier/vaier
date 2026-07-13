@@ -36,11 +36,23 @@ public interface CheckBackupPrerequisitesUseCase {
                                    Optional<BorgVersion> clientBorgVersion);
 
     /**
+     * Whether {@code machineName} can actually run <b>borg as root</b> — the prerequisite for a job with
+     * <em>Back up as root</em> on. Probes {@code sudo -n borg --version}, which succeeds only when the sudoers
+     * grant is installed (see {@code BorgClientSetupScript}) and borg is where sudo can find it. Only
+     * meaningful for a job that has opted in; a job with the toggle off is not failing this check, it simply
+     * does not need it. Never throws: a guarded-out host or a failed probe reports a negative.
+     */
+    RootBorgAvailability checkRootBorg(String machineName);
+
+    /**
      * The borg found on a host: {@code installed} is false when borg is absent or the probe could not be
      * read, otherwise {@code version} carries the parsed {@link BorgVersion} and {@code supported} reflects
      * {@link BorgVersion#isSupported()}.
      */
     record BorgAvailability(boolean installed, Optional<BorgVersion> version, boolean supported) {}
+
+    /** Whether the checked host can run borg as root without a password (the "Back up as root" grant). */
+    record RootBorgAvailability(boolean canRunAsRoot) {}
 
     /** Whether the NAS borg port is reachable from the checked host. */
     record RepoReachability(boolean reachable) {}

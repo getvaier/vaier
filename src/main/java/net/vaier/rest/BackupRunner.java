@@ -191,7 +191,21 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
         String workDir = workDirResolver.workDirFor(machine.get().name());
         ensurePassFile(machine.get().name(), repo, workDir);
 
-        BorgCommand.BuiltCommand command = BorgCommand.detachedRun(server.get(), job, repo, runId, workDir);
+        // A "Back up as root" run needs the SSH user's home: under sudo, ssh runs as root and reads /root/.ssh/,
+        // which holds neither the borg client key nor the pinned server host key. (HOME alone cannot fix that --
+        // OpenSSH ignores $HOME and resolves ~ from the running UID -- so the run points ssh at both files as
+        // absolute literals under this home, via BORG_RSH.) If the home cannot be resolved, REFUSE the run rather
+        // than launching it to die at the backup server hours later with a host-key/publickey error. A normal job
+        // never needs a home, so it is unaffected.
+        Optional<String> sshHome = workDirResolver.homeFor(machine.get().name());
+        if (job.backupAsRoot() && sshHome.isEmpty()) {
+            return recorded(BackupRun.failed(job, runId, clock.instant(),
+                "Could not resolve the SSH user's home on " + job.machineName()
+                    + ", which a back-up-as-root run needs as HOME"));
+        }
+
+        BorgCommand.BuiltCommand command = BorgCommand.detachedRun(server.get(), job, repo, runId, workDir,
+            sshHome.orElse(""));
         log.info("Launching backup job {} on {}: {}",
             LogSafe.forLog(job.name()), LogSafe.forLog(machine.get().name()), command.redacted());
         Instant startedAt = clock.instant();

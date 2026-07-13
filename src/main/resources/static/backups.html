@@ -312,6 +312,19 @@
                 <input type="checkbox" id="jobEnabled" checked>
                 <label for="jobEnabled">Enabled (included in the nightly run)</label>
             </div>
+            <div class="form-checkbox" style="margin-top:0.4rem">
+                <input type="checkbox" id="jobBackupAsRoot">
+                <label for="jobBackupAsRoot">Back up as root</label>
+            </div>
+            <div class="bk-field-note bk-checkbox-note">
+                Runs borg under <code>sudo</code> on the machine, so it can read files the SSH user cannot —
+                container volumes and other root-owned data are otherwise skipped without failing the run.
+                Requires passwordless sudo for borg on the machine; <strong>Prepare client</strong> grants it.
+                <br>
+                <strong>This makes Vaier's SSH credential for this machine root-equivalent.</strong> A borg
+                that runs as root can read and write any file on it, so grant this only on machines where
+                that is acceptable.
+            </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="jobCancelBtn">Cancel</button>
                 <button class="btn btn-primary" id="jobSaveBtn">Save job</button>

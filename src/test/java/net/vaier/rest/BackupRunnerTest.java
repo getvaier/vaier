@@ -83,7 +83,7 @@ class BackupRunnerTest {
 
     private BackupJob job() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
-            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
     }
 
     private Machine sshMachine(String name) {
@@ -126,6 +126,7 @@ class BackupRunnerTest {
         events = mock(ForPublishingEvents.class);
         // Default: resolve to the SSH user's home so existing path assertions stay green.
         when(workDirResolver.workDirFor(any())).thenReturn("/home/geir/.vaier-backup");
+        when(workDirResolver.homeFor(any())).thenReturn(Optional.of("/home/geir"));
         // Default: the repository's backup server is configured, so runs/lists reach the borg URL step.
         when(servers.getBackupServers()).thenReturn(List.of(server()));
         clock = Clock.fixed(Instant.parse("2026-07-08T02:00:00Z"), ZoneOffset.UTC);
@@ -153,6 +154,70 @@ class BackupRunnerTest {
         assertThat(runs.getAll()).hasSize(1);
         assertThat(runs.getAll().get(0).status()).isEqualTo(BackupRunStatus.RUNNING);
         assertThat(runs.getAll().get(0).jobName()).isEqualTo("colina-home");
+    }
+
+    // --- Back up as root: the run escalates to sudo, and refuses rather than escalating blindly ---
+
+    /** The same job with "Back up as root" on. */
+    private BackupJob rootJob() {
+        return new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, true);
+    }
+
+    /**
+     * A "Back up as root" job launches its borg under sudo, with the SSH user's resolved home threaded in as
+     * HOME — so root's ssh finds the borg client key and the pinned server host key that live in that home.
+     */
+    @Test
+    void runJobForABackupAsRootJobLaunchesBorgUnderSudoWithTheSshUsersHome() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
+
+        BackupRun run = backupRunner.runJob(rootJob(), repo(), "run-1");
+
+        verify(runner).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains(
+            "sudo -n HOME='/home/geir' BORG_BASE_DIR='/home/geir/.vaier-backup/root'"));
+        verify(runner).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("borg create"));
+        assertThat(run.status()).isEqualTo(BackupRunStatus.RUNNING);
+    }
+
+    /**
+     * A "Back up as root" job whose SSH home cannot be resolved is REFUSED — recorded FAILED with a clear
+     * reason, and never launched. Launching it anyway would let sudo set HOME=/root, where root's ssh finds no
+     * client key and no host pin, and the run would die at the backup server with a misleading
+     * "Permission denied (publickey)" hours later. Better an honest failure now.
+     */
+    @Test
+    void runJobRefusesABackupAsRootJobWhenTheSshHomeCannotBeResolved() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
+        when(workDirResolver.homeFor("Colina 27")).thenReturn(Optional.empty());
+
+        BackupRun run = backupRunner.runJob(rootJob(), repo(), "run-1");
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.FAILED);
+        assertThat(run.summary()).containsIgnoringCase("home");
+        // Never launched: no sudo, no borg, nothing.
+        verify(runner, never()).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("nohup"));
+    }
+
+    /** A NORMAL job with an unresolvable home still runs — it never needed a home, and /tmp is writable. */
+    @Test
+    void runJobStillLaunchesANonRootJobWhenTheSshHomeCannotBeResolved() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        when(runner.run(eq("Colina 27"), any())).thenReturn(new CommandResult(0, "STARTED 1234", "", false, "SHA256:x"));
+        borgPresentOn("Colina 27");
+        when(workDirResolver.homeFor("Colina 27")).thenReturn(Optional.empty());
+
+        BackupRun run = backupRunner.runJob(job(), repo(), "run-1");
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.RUNNING);
+        verify(runner).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("nohup sh -c \""));
     }
 
     @Test
@@ -435,12 +500,12 @@ class BackupRunnerTest {
 
     private BackupJob disabledJob() {
         return new BackupJob("roon-media", "Roon", "nas-borg",
-            List.of("/data"), List.of(), 7, 4, 6, "zstd,6", false);
+            List.of("/data"), List.of(), 7, 4, 6, "zstd,6", false, false);
     }
 
     private BackupJob succeededTodayJob() {
         return new BackupJob("apalveien-srv", "Apalveien 5", "nas-borg",
-            List.of("/srv"), List.of(), 7, 4, 6, "zstd,6", true);
+            List.of("/srv"), List.of(), 7, 4, 6, "zstd,6", true, false);
     }
 
     @Test

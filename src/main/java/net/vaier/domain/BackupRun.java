@@ -2,6 +2,7 @@ package net.vaier.domain;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * One execution of a {@link BackupJob} and its outcome — the "Backup run" of the fleet-backup feature.
@@ -126,6 +127,53 @@ public record BackupRun(
     /** Whether this run did not complete successfully. */
     public boolean isFailure() {
         return status.isFailure();
+    }
+
+    /**
+     * The run diagnostics: the human-readable lines of {@code summary} — the skipped-file and error lines a
+     * person needs in order to act — with borg's machine-readable JSON stats object removed. Deciding what
+     * in a raw borg summary is worth showing a human is this entity's call, not a view's.
+     *
+     * <p>borg pretty-prints its {@code --json --stats} object as a block whose braces sit alone at column 0,
+     * so the block is identified structurally: it opens at the first line that is exactly <code>{</code> and
+     * closes at the first following line that is exactly <code>}</code>. Everything outside that block is
+     * kept — including borg prune's "Keeping archive (rule: …)" report, which follows the object on a clean
+     * run. A summary with no such block (e.g. {@code sh: 1: borg: not found}) is diagnostics in its entirety;
+     * an unterminated block is treated as running to the end. The method is total: it never throws and never
+     * returns null, and — like {@code summary} itself — it never carries the passphrase.
+     *
+     * @return the diagnostic lines, or an empty string when there are none (a clean run says nothing)
+     */
+    public String diagnostics() {
+        if (summary == null || summary.isBlank()) {
+            return "";
+        }
+        List<String> lines = summary.lines().toList();
+        int open = lineThatIsExactly(lines, "{", 0);
+        if (open < 0) {
+            return summary.strip();          // no stats object at all — it is all diagnostics
+        }
+        int close = lineThatIsExactly(lines, "}", open + 1);
+        int lastOfBlock = close < 0 ? lines.size() - 1 : close;   // unterminated block runs to the end
+
+        StringBuilder kept = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i >= open && i <= lastOfBlock) {
+                continue;
+            }
+            kept.append(lines.get(i)).append('\n');
+        }
+        return kept.toString().strip();
+    }
+
+    /** Index of the first line at or after {@code from} that consists of exactly {@code token}, else -1. */
+    private static int lineThatIsExactly(List<String> lines, String token, int from) {
+        for (int i = from; i < lines.size(); i++) {
+            if (token.equals(lines.get(i).stripTrailing())) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** Subject line for the admin failure alert, sent once when a job crosses from healthy to failing. */

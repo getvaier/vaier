@@ -330,7 +330,7 @@ public class BackupRestController {
         BackupJob job = new BackupJob(name, request.machineName(), request.repositoryName(),
             request.sourcePaths(), request.excludes(),
             request.keepDaily(), request.keepWeekly(), request.keepMonthly(),
-            request.compression(), request.enabled());
+            request.compression(), request.enabled(), request.backupAsRoot());
         saveBackupJob.saveBackupJob(job);
         return ResponseEntity.ok(JobResponse.from(job));
     }
@@ -399,7 +399,13 @@ public class BackupRestController {
         // borg version in so compatibility is judged against a real server version — not assumed.
         ServerBorgAuth auth = checkBackupPrerequisites.checkServerAuth(job.get().repositoryName(),
             job.get().machineName(), borg.version());
-        return ResponseEntity.ok(ProvisionCheckResponse.from(borg, nas, auth));
+        // "Back up as root" is only a prerequisite for a job that asked for it: a job with the toggle off does
+        // not need the sudo grant and must never be shown as failing a check it will never use — so it is not
+        // even probed (no pointless SSH round trip).
+        boolean backupAsRoot = job.get().backupAsRoot();
+        boolean rootBorgOk = backupAsRoot
+            && checkBackupPrerequisites.checkRootBorg(job.get().machineName()).canRunAsRoot();
+        return ResponseEntity.ok(ProvisionCheckResponse.from(borg, nas, auth, backupAsRoot, rootBorgOk));
     }
 
     /**
@@ -584,15 +590,16 @@ public class BackupRestController {
     /** Create/update a backup job. */
     record JobRequest(String machineName, String repositoryName, List<String> sourcePaths,
                       List<String> excludes, int keepDaily, int keepWeekly, int keepMonthly,
-                      String compression, boolean enabled) {}
+                      String compression, boolean enabled, boolean backupAsRoot) {}
 
     /** The job as returned to the browser (jobs hold no secrets). */
     record JobResponse(String name, String machineName, String repositoryName, List<String> sourcePaths,
                        List<String> excludes, int keepDaily, int keepWeekly, int keepMonthly,
-                       String compression, boolean enabled) {
+                       String compression, boolean enabled, boolean backupAsRoot) {
         static JobResponse from(BackupJob j) {
             return new JobResponse(j.name(), j.machineName(), j.repositoryName(), j.sourcePaths(),
-                j.excludes(), j.keepDaily(), j.keepWeekly(), j.keepMonthly(), j.compression(), j.enabled());
+                j.excludes(), j.keepDaily(), j.keepWeekly(), j.keepMonthly(), j.compression(), j.enabled(),
+                j.backupAsRoot());
         }
     }
 
@@ -614,12 +621,13 @@ public class BackupRestController {
      */
     record ProvisionCheckResponse(boolean borgInstalled, String borgVersion, boolean borgSupported,
                                   boolean nasReachable, boolean borgAuthOk, String serverBorgVersion,
-                                  boolean versionsCompatible) {
-        static ProvisionCheckResponse from(BorgAvailability borg, RepoReachability nas, ServerBorgAuth auth) {
+                                  boolean versionsCompatible, boolean backupAsRoot, boolean rootBorgOk) {
+        static ProvisionCheckResponse from(BorgAvailability borg, RepoReachability nas, ServerBorgAuth auth,
+                                           boolean backupAsRoot, boolean rootBorgOk) {
             String version = borg.version().map(ProvisionCheckResponse::render).orElse(null);
             String serverVersion = auth.serverVersion().map(ProvisionCheckResponse::render).orElse(null);
             return new ProvisionCheckResponse(borg.installed(), version, borg.supported(), nas.reachable(),
-                auth.authOk(), serverVersion, auth.versionsCompatible());
+                auth.authOk(), serverVersion, auth.versionsCompatible(), backupAsRoot, rootBorgOk);
         }
 
         private static String render(BorgVersion v) {
@@ -635,12 +643,18 @@ public class BackupRestController {
     }
 
     /** One backup run as returned to the browser (runs hold no secrets). */
+    /**
+     * A run as the UI sees it. {@code summary} is borg's raw output; {@code diagnostics} is the entity's
+     * verdict on which of it is worth showing a human (the skipped-file and error lines, without borg's
+     * JSON stats object) — empty on a clean run, which is how the UI knows to offer no disclosure.
+     */
     record RunResponse(String runId, String jobName, String machineName, String repositoryName,
                        BackupRunStatus status, Instant startedAt, Instant finishedAt, Integer exitCode,
-                       String archiveName, String summary) {
+                       String archiveName, String summary, String diagnostics) {
         static RunResponse from(BackupRun r) {
             return new RunResponse(r.runId(), r.jobName(), r.machineName(), r.repositoryName(),
-                r.status(), r.startedAt(), r.finishedAt(), r.exitCode(), r.archiveName(), r.summary());
+                r.status(), r.startedAt(), r.finishedAt(), r.exitCode(), r.archiveName(), r.summary(),
+                r.diagnostics());
         }
     }
 }

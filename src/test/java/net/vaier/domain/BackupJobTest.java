@@ -17,7 +17,22 @@ class BackupJobTest {
 
     private BackupJob job(String name) {
         return new BackupJob(name, "Colina 27", "nas-borg",
-            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
+    }
+
+    /**
+     * "Back up as root" is opt-in and carried on the job: borg then reads files the SSH user cannot
+     * (root-owned container volumes), instead of silently skipping them and leaving holes in the archive.
+     */
+    @Test
+    void backupAsRoot_isCarriedOnTheJob_andIsOptIn() {
+        BackupJob asUser = new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
+        BackupJob asRoot = new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, true);
+
+        assertThat(asUser.backupAsRoot()).isFalse();
+        assertThat(asRoot.backupAsRoot()).isTrue();
     }
 
     private BackupJob enabledJob() {
@@ -26,7 +41,7 @@ class BackupJobTest {
 
     private BackupJob disabledJob() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
-            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", false);
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", false, false);
     }
 
     /** An instant at 02:00 on {@code date} in the test zone, so it buckets to that calendar day. */

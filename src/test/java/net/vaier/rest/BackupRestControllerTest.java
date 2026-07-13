@@ -174,7 +174,7 @@ class BackupRestControllerTest {
 
     private BackupJob job() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
-            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true);
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
     }
 
     /** MockMvc that runs the Community-edition Enterprise gate in front of the controller. */
@@ -330,6 +330,41 @@ class BackupRestControllerTest {
     }
 
     @Test
+    void getRunsExposesTheRunDiagnosticsWithoutBorgsJsonStats() {
+        // A real WARNING run: borg's skipped-file lines, then its --json --stats object.
+        String summary = """
+            /home/ubuntu/mqtt/data/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'
+            {
+                "archive": {"name": "ip-172-31-17-253-2026-07-13T00:07:47"}
+            }""";
+        runs.record(BackupRun.fromExitCode(job(), "run-warn", Instant.parse("2026-07-13T00:07:41Z"),
+            Instant.parse("2026-07-13T00:08:02Z"), 1, summary));
+
+        ResponseEntity<RunResponse> response = controller.getRuns("colina-home");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().status()).isEqualTo(BackupRunStatus.WARNING);
+        // The raw summary is still carried verbatim...
+        assertThat(response.getBody().summary()).isEqualTo(summary);
+        // ...and the diagnostics are the part worth showing a human — no JSON stats blob.
+        assertThat(response.getBody().diagnostics()).isEqualTo(
+            "/home/ubuntu/mqtt/data/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'");
+    }
+
+    @Test
+    void getRunsReportsNoDiagnosticsForACleanRun() {
+        runs.record(BackupRun.fromExitCode(job(), "run-ok", Instant.parse("2026-07-13T02:00:00Z"),
+            Instant.parse("2026-07-13T02:05:00Z"), 0, "{\n    \"archive\": {}\n}"));
+
+        ResponseEntity<RunResponse> response = controller.getRuns("colina-home");
+
+        assertThat(response.getBody()).isNotNull();
+        // The happy path has nothing to disclose — the UI shows no affordance for this.
+        assertThat(response.getBody().diagnostics()).isEmpty();
+    }
+
+    @Test
     void getArchivesReturnsList() {
         repositories.save(repo());
         when(listArchives.listArchives("nas-borg")).thenReturn(List.of(
@@ -419,6 +454,111 @@ class BackupRestControllerTest {
         assertThat(body.borgAuthOk()).isFalse();
         assertThat(body.serverBorgVersion()).isNull();
         assertThat(body.versionsCompatible()).isFalse();
+    }
+
+    // --- Back up as root: the DTOs carry it, and the readiness check only judges a job that asked for it ---
+
+    /** The same job with "Back up as root" on. */
+    private BackupJob rootJob() {
+        return new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, true);
+    }
+
+    @Test
+    void saveJobPersistsBackupAsRootAndReturnsItOnTheJob() {
+        repositories.save(repo());
+        backupServers.save(server());
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.saveJob("colina-home",
+            new BackupRestController.JobRequest("Colina 27", "nas-borg", List.of("/home/geir"),
+                List.of(), 7, 4, 6, "zstd,6", true, true));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().backupAsRoot()).isTrue();
+        assertThat(jobs.getByName("colina-home").orElseThrow().backupAsRoot()).isTrue();
+    }
+
+    /** Opting out is just as explicit — and is the default a job is created with. */
+    @Test
+    void saveJobWithoutBackupAsRootKeepsTheJobRunningAsTheSshUser() {
+        repositories.save(repo());
+        backupServers.save(server());
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.saveJob("colina-home",
+            new BackupRestController.JobRequest("Colina 27", "nas-borg", List.of("/home/geir"),
+                List.of(), 7, 4, 6, "zstd,6", true, false));
+
+        assertThat(response.getBody().backupAsRoot()).isFalse();
+        assertThat(jobs.getByName("colina-home").orElseThrow().backupAsRoot()).isFalse();
+    }
+
+    /**
+     * For a job that HAS opted in, the wizard reports whether the machine can actually run borg as root —
+     * otherwise the run silently skips exactly the files the operator turned this on to capture.
+     */
+    @Test
+    void provisionCheckReportsRootBorgForAJobThatBacksUpAsRoot() {
+        repositories.save(repo());
+        backupServers.save(server());
+        jobs.save(rootJob());
+        when(checkPrerequisites.checkBorg("Colina 27"))
+            .thenReturn(new BorgAvailability(true, Optional.of(new BorgVersion(1, 2, 8)), true));
+        when(checkPrerequisites.checkNas("nas-borg", "Colina 27")).thenReturn(new RepoReachability(true));
+        when(checkPrerequisites.checkServerAuth("nas-borg", "Colina 27", Optional.of(new BorgVersion(1, 2, 8))))
+            .thenReturn(new ServerBorgAuth(true, Optional.of(new BorgVersion(1, 4, 3)), true));
+        when(checkPrerequisites.checkRootBorg("Colina 27"))
+            .thenReturn(new CheckBackupPrerequisitesUseCase.RootBorgAvailability(true));
+
+        BackupRestController.ProvisionCheckResponse body =
+            controller.provisionCheck("colina-home").getBody();
+
+        assertThat(body.backupAsRoot()).isTrue();
+        assertThat(body.rootBorgOk()).isTrue();
+    }
+
+    /** An opted-in job on a host with no sudo grant is honestly reported as NOT ready. */
+    @Test
+    void provisionCheckReportsRootBorgMissingForAJobThatBacksUpAsRoot() {
+        repositories.save(repo());
+        backupServers.save(server());
+        jobs.save(rootJob());
+        when(checkPrerequisites.checkBorg("Colina 27"))
+            .thenReturn(new BorgAvailability(true, Optional.of(new BorgVersion(1, 2, 8)), true));
+        when(checkPrerequisites.checkNas("nas-borg", "Colina 27")).thenReturn(new RepoReachability(true));
+        when(checkPrerequisites.checkServerAuth("nas-borg", "Colina 27", Optional.of(new BorgVersion(1, 2, 8))))
+            .thenReturn(new ServerBorgAuth(true, Optional.of(new BorgVersion(1, 4, 3)), true));
+        when(checkPrerequisites.checkRootBorg("Colina 27"))
+            .thenReturn(new CheckBackupPrerequisitesUseCase.RootBorgAvailability(false));
+
+        BackupRestController.ProvisionCheckResponse body =
+            controller.provisionCheck("colina-home").getBody();
+
+        assertThat(body.backupAsRoot()).isTrue();
+        assertThat(body.rootBorgOk()).isFalse();
+    }
+
+    /**
+     * A job with the toggle OFF must not be shown as failing this check — it does not need root, and is not
+     * "not ready" for lacking a grant it will never use. The check is not even run for it.
+     */
+    @Test
+    void provisionCheckDoesNotJudgeRootBorgForAJobThatDoesNotBackUpAsRoot() {
+        repositories.save(repo());
+        backupServers.save(server());
+        jobs.save(job());
+        when(checkPrerequisites.checkBorg("Colina 27"))
+            .thenReturn(new BorgAvailability(true, Optional.of(new BorgVersion(1, 2, 8)), true));
+        when(checkPrerequisites.checkNas("nas-borg", "Colina 27")).thenReturn(new RepoReachability(true));
+        when(checkPrerequisites.checkServerAuth("nas-borg", "Colina 27", Optional.of(new BorgVersion(1, 2, 8))))
+            .thenReturn(new ServerBorgAuth(true, Optional.of(new BorgVersion(1, 4, 3)), true));
+
+        BackupRestController.ProvisionCheckResponse body =
+            controller.provisionCheck("colina-home").getBody();
+
+        assertThat(body.backupAsRoot()).isFalse();
+        // Not probed at all — no pointless SSH round trip for a check that cannot apply.
+        verify(checkPrerequisites, never()).checkRootBorg(any());
     }
 
     @Test

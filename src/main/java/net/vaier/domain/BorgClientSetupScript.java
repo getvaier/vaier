@@ -47,35 +47,113 @@ public final class BorgClientSetupScript {
         // /usr/local/bin and /sbin, where some distros keep their package tools (and later borg itself).
         sb.append("export PATH=\"$PATH:/usr/local/bin:/usr/bin:/sbin:/usr/sbin\"\n\n");
 
+        // Installing is SKIPPED when borg is present — but the script does NOT exit here. It used to, which
+        // would mean the sudoers grant below never lands on any host that already has borg (i.e. every host in
+        // the fleet), and "Back up as root" would silently never work.
         sb.append("if command -v borg >/dev/null 2>&1; then\n");
         sb.append("    echo \"borg already installed: $(borg --version)\"\n");
-        sb.append("    exit 0\n");
-        sb.append("fi\n\n");
-
-        sb.append("echo \"==> Installing borg...\"\n");
-        sb.append("if command -v apt-get >/dev/null 2>&1; then\n");
-        sb.append("    apt-get update && apt-get install -y borgbackup\n");
-        sb.append("elif command -v dnf >/dev/null 2>&1; then\n");
-        sb.append("    dnf install -y borgbackup\n");
-        sb.append("elif command -v yum >/dev/null 2>&1; then\n");
-        sb.append("    yum install -y borgbackup\n");
-        sb.append("elif command -v apk >/dev/null 2>&1; then\n");
-        sb.append("    apk add --no-cache borgbackup\n");
-        // Arch's package is 'borg', not 'borgbackup' — getting this wrong makes the install fail on Arch.
-        sb.append("elif command -v pacman >/dev/null 2>&1; then\n");
-        sb.append("    pacman -Sy --noconfirm borg\n");
-        sb.append("elif command -v zypper >/dev/null 2>&1; then\n");
-        sb.append("    zypper install -y borgbackup\n");
         sb.append("else\n");
-        sb.append("    echo \"ERROR: no supported package manager ")
+        sb.append("    echo \"==> Installing borg...\"\n");
+        sb.append("    if command -v apt-get >/dev/null 2>&1; then\n");
+        sb.append("        apt-get update && apt-get install -y borgbackup\n");
+        sb.append("    elif command -v dnf >/dev/null 2>&1; then\n");
+        sb.append("        dnf install -y borgbackup\n");
+        sb.append("    elif command -v yum >/dev/null 2>&1; then\n");
+        sb.append("        yum install -y borgbackup\n");
+        sb.append("    elif command -v apk >/dev/null 2>&1; then\n");
+        sb.append("        apk add --no-cache borgbackup\n");
+        // Arch's package is 'borg', not 'borgbackup' — getting this wrong makes the install fail on Arch.
+        sb.append("    elif command -v pacman >/dev/null 2>&1; then\n");
+        sb.append("        pacman -Sy --noconfirm borg\n");
+        sb.append("    elif command -v zypper >/dev/null 2>&1; then\n");
+        sb.append("        zypper install -y borgbackup\n");
+        sb.append("    else\n");
+        sb.append("        echo \"ERROR: no supported package manager ")
             .append("(apt/dnf/yum/apk/pacman/zypper) found\" >&2\n");
-        sb.append("    exit 5\n");
+        sb.append("        exit 5\n");
+        sb.append("    fi\n");
         sb.append("fi\n\n");
 
         sb.append("echo \"==> Verifying borg...\"\n");
-        sb.append("borg --version\n");
+        sb.append("borg --version\n\n");
+
+        sb.append(sudoersDropIn());
+
         sb.append("echo \"==> Vaier Backup client setup complete.\"\n");
         return sb.toString();
+    }
+
+    /**
+     * The sudoers drop-in that makes <b>Back up as root</b> possible: it lets the SSH user run <em>borg, and
+     * only borg</em>, as root without a password. Vaier runs borg as the credential user (e.g. {@code ubuntu}),
+     * so every root-owned file in a job's source paths — a container volume, a {@code 0600} broker database —
+     * is otherwise silently skipped, and the archive quietly has holes.
+     *
+     * <p><b>Security — be honest about what this grant is.</b> A passwordless {@code sudo borg} is
+     * <em>root-equivalent</em> for the grantee, and no tightening of this rule changes that: borg running as
+     * root can read and write any file on the machine, and its {@code --rsh} flag runs a command of the
+     * caller's choosing as root. Narrowing the Cmnd list to borg's two absolute paths ({@code /usr/bin/borg}
+     * from a distro package, {@code /usr/local/bin/borg} from pip/pipx) — never {@code ALL}, a wildcard,
+     * {@code /usr/bin/env} or a shell — keeps the rule to its stated purpose and keeps it auditable, but it is
+     * not a sandbox. The real control is that <b>Back up as root</b> is opt-in per job: enabling it makes
+     * Vaier's SSH credential for that machine as powerful as root, and the operator is told so at the toggle.
+     *
+     * <p>{@code SETENV:} is required because sudo otherwise strips the {@code HOME}/{@code BORG_BASE_DIR}/
+     * {@code BORG_PASSCOMMAND} that {@link BorgCommand} passes on the sudo line, and the run would hang
+     * waiting for a passphrase. It widens nothing that borg's own flags do not already allow.
+     *
+     * <p><b>Never write straight into {@code /etc/sudoers.d}.</b> A malformed drop-in can lock the host out of
+     * sudo entirely. The rule is written to a temp file, validated with {@code visudo -c}, and only then
+     * installed {@code 0440 root:root} (any other mode and sudo refuses to read it). A host with no
+     * {@code visudo} at all is left alone with a loud warning rather than having an unvalidated file dropped on
+     * it — the readiness check then honestly reports that root borg is unavailable there.
+     *
+     * <p>The grantee is the invoking SSH user: this script runs as root <em>via sudo</em>, so {@code SUDO_USER}
+     * is that user, with {@code logname} as the fallback when it is run directly on a console.
+     */
+    private static String sudoersDropIn() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("echo \"==> Granting borg-as-root to the Vaier SSH user...\"\n");
+        // Under `set -u`, SUDO_USER may be unset (a console run), and under `set -e` a failing logname would
+        // kill the script — so both are guarded.
+        sb.append("BORG_SUDO_USER=\"${SUDO_USER:-$(logname 2>/dev/null || echo root)}\"\n");
+        sb.append("if command -v visudo >/dev/null 2>&1; then\n");
+        sb.append("    SUDOERS_TMP=\"$(mktemp)\"\n");
+        sb.append("    printf '%s ALL=(root) NOPASSWD: SETENV: /usr/bin/borg, /usr/local/bin/borg\\n' ")
+            .append("\"$BORG_SUDO_USER\" > \"$SUDOERS_TMP\"\n");
+        // Validate BEFORE installing: a bad drop-in can break sudo for the whole host.
+        sb.append("    if visudo -cf \"$SUDOERS_TMP\" >/dev/null 2>&1; then\n");
+        sb.append("        install -o root -g root -m 0440 \"$SUDOERS_TMP\" /etc/sudoers.d/vaier-borg\n");
+        sb.append("        echo \"    granted: $BORG_SUDO_USER may run borg as root ")
+            .append("(/etc/sudoers.d/vaier-borg)\"\n");
+        sb.append("    else\n");
+        sb.append("        rm -f \"$SUDOERS_TMP\"\n");
+        sb.append("        echo \"ERROR: the generated sudoers rule failed visudo validation; ")
+            .append("not installing it\" >&2\n");
+        sb.append("        exit 6\n");
+        sb.append("    fi\n");
+        sb.append("    rm -f \"$SUDOERS_TMP\"\n");
+        sb.append("else\n");
+        sb.append("    echo \"WARNING: visudo not found; skipping the borg-as-root grant. ")
+            .append("'Back up as root' will not work on this host.\" >&2\n");
+        sb.append("fi\n\n");
+        return sb.toString();
+    }
+
+    /**
+     * A bounded probe of whether this machine can actually run <b>borg as root</b>: {@code sudo -n borg
+     * --version} succeeds only when the sudoers drop-in is in place <em>and</em> borg is installed where sudo's
+     * secure_path can find it. Echoes {@code ROOT_BORG_OK} then, and {@code ROOT_BORG_ABSENT} otherwise. This
+     * is the readiness check behind a "Back up as root" job — the one thing that tells the operator, before a
+     * run silently skips half a host, that the grant is missing.
+     */
+    public static String rootBorgProbe() {
+        return "sudo -n borg --version >/dev/null 2>&1 && echo ROOT_BORG_OK || echo ROOT_BORG_ABSENT";
+    }
+
+    /** Read a {@link #rootBorgProbe} result: {@code ROOT_BORG_OK} means this host can back up as root. */
+    public static boolean parseRootBorg(String stdout) {
+        return stdout != null && stdout.strip().contains("ROOT_BORG_OK");
     }
 
     /**
