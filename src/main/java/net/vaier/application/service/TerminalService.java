@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.DeleteHostCredentialUseCase;
+import net.vaier.application.EndTerminalSessionUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
@@ -50,6 +51,7 @@ public class TerminalService implements
     GetHostCredentialUseCase,
     DeleteHostCredentialUseCase,
     OpenTerminalSessionUseCase,
+    EndTerminalSessionUseCase,
     RunRemoteCommandUseCase,
     SendHostPasswordUseCase,
     ClearHostKeyUseCase {
@@ -97,6 +99,20 @@ public class TerminalService implements
         log.info("Opened {} terminal session to {} ({}) for pane {}",
             continuity, machineName, target.host(), PersistentShell.sessionName(paneId));
         return new OpenedTerminal(session, continuity);
+    }
+
+    @Override
+    public void endTerminal(String machineName, String paneId) {
+        // Best-effort: the operator has already closed the pane. A host that is down, has no credential, or
+        // whose key no longer matches is not something they can act on from here — and leaving the session
+        // behind on an unreachable host is no worse than the state we were already in. Log and move on.
+        try {
+            forRunningSshCommands.run(buildTarget(machineName), PersistentShell.endCommand(paneId));
+            log.info("Ended terminal session {} on {}", PersistentShell.sessionName(paneId), machineName);
+        } catch (RuntimeException e) {
+            log.warn("Could not end terminal session {} on {}: {}",
+                PersistentShell.sessionName(paneId), machineName, e.toString());
+        }
     }
 
     @Override

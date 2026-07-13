@@ -848,6 +848,27 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   that command, rather than a bare login shell; resize still flows via `sendWindowChange`. tmux config is
   kept minimal and passed on the command line — the operator's prefix key is never rebound and no `tmux.conf`
   is written to their hosts.
+- **Ending a persistent shell — closing a pane no longer strands a tmux session ✅.** Persistence had no
+  counterpart: closing a pane only closed the WebSocket, and the pane id lived in browser memory alone. So
+  every closed pane and every page reload abandoned a tmux session on the machine **forever**, still running
+  whatever was inside it — 10 orphaned sessions were found on the Vaier server itself, including a `claude`
+  detached for 3+ hours, on a 1.9 GB box whose earlyoom preferentially kills `java`/`mvn`/`claude`. The fix
+  rests on one distinction: **ending** a shell (deliberate — the session dies) is not **disconnecting** from
+  it (the session lives on, reattachable), and the two are indistinguishable from the socket alone, so the
+  browser must say which it means. Domain: `PersistentShell.endCommand(paneId)` →
+  `tmux kill-session -t 'vaier-<pane>' 2>/dev/null || true`, scoped to that pane's session, idempotent (a
+  session already gone is success), and reduced through the same safe-identifier rule so a hostile pane id
+  can't break out. Application: a new narrow `EndTerminalSessionUseCase.endTerminal(machineName, paneId)`,
+  implemented by the existing `TerminalService` (no new service class) and **best-effort by contract** — it
+  never throws, because it runs on a close path where an unreachable host or a missing credential is not
+  something the operator, who has already dismissed the pane, can act on. Web: a `{"type":"end-shell"}`
+  control frame on the terminal WebSocket; `afterConnectionClosed` still deliberately does **not** end the
+  shell, since a dropped socket must leave the session alive to reattach to. Browser (`terminal-dock.js`):
+  `closeShell` sends `end-shell` before closing the socket, and pane ids are now persisted in
+  `localStorage` (`vaier.terminal.panes`, keyed by machine) and reused on open (`claimPaneId` picks the first
+  id owned for that machine that isn't already on screen), so a page reload **reattaches** to the shells it
+  already owns instead of minting fresh ids and stranding the old sessions unnamed; `releasePaneId` drops an
+  id only when its shell has been ended.
 - **Send stored password to a live prompt ✅.** A **Send password** action in each shell's tab actions menu
   asks Vaier to write that machine's stored password straight into the PTY, so it travels vault → SSH server without the
   browser ever holding it. The safety gate is a domain rule: `PasswordPrompt.isAwaitingPassword` matches a

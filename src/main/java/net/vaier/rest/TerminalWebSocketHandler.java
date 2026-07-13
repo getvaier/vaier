@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.EndTerminalSessionUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
 import net.vaier.application.SendHostPasswordUseCase;
@@ -56,10 +57,12 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
 
     private static final String SSH_SESSION_ATTR = "sshSession";
     private static final String MACHINE_ATTR = "machine";
+    private static final String PANE_ATTR = "paneId";
     private static final String TAIL_ATTR = "outputTail";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final OpenTerminalSessionUseCase openTerminalSessionUseCase;
+    private final EndTerminalSessionUseCase endTerminalSessionUseCase;
     private final SendHostPasswordUseCase sendHostPasswordUseCase;
 
     @Override
@@ -76,6 +79,7 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
                 machine, paneId, new WsOutputListener(wsSession, tail));
             wsSession.getAttributes().put(SSH_SESSION_ATTR, opened.session());
             wsSession.getAttributes().put(MACHINE_ATTR, machine);
+            wsSession.getAttributes().put(PANE_ATTR, paneId);
             wsSession.getAttributes().put(TAIL_ATTR, tail);
             // Tell the browser truthfully how this open resolved, so its reconnect banner can say
             // "reattached" only when the session was genuinely resumed.
@@ -121,6 +125,8 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
                 }
             } else if ("send-password".equals(type)) {
                 sendStoredPassword(wsSession, ssh);
+            } else if ("end-shell".equals(type)) {
+                endShell(wsSession);
             }
         } catch (IOException e) {
             log.debug("Ignoring malformed terminal control frame: {}", e.getMessage());
@@ -145,6 +151,25 @@ public class TerminalWebSocketHandler extends AbstractWebSocketHandler {
         }
     }
 
+    /**
+     * The operator closed the pane. A persistent shell survives a dropped socket by design, so nothing else
+     * will ever end it — this frame is the only thing that distinguishes "I am done with this shell" from "my
+     * connection died", and without it the tmux session lingers on the machine forever, still running whatever
+     * was inside it.
+     */
+    private void endShell(WebSocketSession wsSession) {
+        String machine = (String) wsSession.getAttributes().get(MACHINE_ATTR);
+        String paneId = (String) wsSession.getAttributes().get(PANE_ATTR);
+        if (machine != null) {
+            endTerminalSessionUseCase.endTerminal(machine, paneId);
+        }
+    }
+
+    /**
+     * Closes the PTY, and nothing more. A close here is indistinguishable from a dropped tunnel, a closed
+     * laptop lid or a Vaier redeploy — so the remote tmux session is deliberately left alive for the reconnect
+     * to reattach to. Ending it for good is the {@code end-shell} frame's job.
+     */
     @Override
     public void afterConnectionClosed(WebSocketSession wsSession, CloseStatus status) {
         SshSession ssh = ssh(wsSession);

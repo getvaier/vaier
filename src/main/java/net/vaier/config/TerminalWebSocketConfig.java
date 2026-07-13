@@ -1,5 +1,6 @@
 package net.vaier.config;
 
+import net.vaier.application.EndTerminalSessionUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
 import net.vaier.application.SendHostPasswordUseCase;
 import net.vaier.rest.TerminalWebSocketHandler;
@@ -25,13 +26,16 @@ import java.util.List;
 public class TerminalWebSocketConfig implements WebSocketConfigurer {
 
     private final OpenTerminalSessionUseCase openTerminalSessionUseCase;
+    private final EndTerminalSessionUseCase endTerminalSessionUseCase;
     private final SendHostPasswordUseCase sendHostPasswordUseCase;
     private final ConfigResolver configResolver;
 
     public TerminalWebSocketConfig(OpenTerminalSessionUseCase openTerminalSessionUseCase,
+                                   EndTerminalSessionUseCase endTerminalSessionUseCase,
                                    SendHostPasswordUseCase sendHostPasswordUseCase,
                                    ConfigResolver configResolver) {
         this.openTerminalSessionUseCase = openTerminalSessionUseCase;
+        this.endTerminalSessionUseCase = endTerminalSessionUseCase;
         this.sendHostPasswordUseCase = sendHostPasswordUseCase;
         this.configResolver = configResolver;
     }
@@ -39,7 +43,8 @@ public class TerminalWebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(
-                new TerminalWebSocketHandler(openTerminalSessionUseCase, sendHostPasswordUseCase),
+                new TerminalWebSocketHandler(
+                    openTerminalSessionUseCase, endTerminalSessionUseCase, sendHostPasswordUseCase),
                 "/machines/*/terminal")
             .setAllowedOriginPatterns(allowedOriginPatterns(configResolver.getDomain()).toArray(String[]::new));
     }

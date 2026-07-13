@@ -91,6 +91,24 @@ public final class PersistentShell {
     }
 
     /**
+     * The command that ends a pane's persistent shell for good: {@code tmux kill-session} for that pane's
+     * session, and nothing else.
+     *
+     * <p><b>Ending is not the same as disconnecting.</b> A dropped WebSocket must leave the session alive —
+     * that is the whole point of a persistent shell, and it is what lets a reconnect (or a Vaier redeploy)
+     * reattach. But closing a pane is the operator saying "I am done with this shell", and without this
+     * command that shell would stay detached on the machine forever, still running whatever was in it. The
+     * two cases are indistinguishable from the socket alone, so the browser has to say which one it means.
+     *
+     * <p>Idempotent: the session may already be gone (the host rebooted, the operator killed it by hand), so
+     * the command swallows the failure and still exits 0 — ending a shell that is already ended is success.
+     */
+    public static String endCommand(String paneId) {
+        String name = singleQuote(sessionName(paneId));
+        return "tmux kill-session -t " + name + " 2>/dev/null || true";
+    }
+
+    /**
      * The probe run just before opening the shell: it reports whether tmux is installed and, if so,
      * whether this pane's session already exists — echoing exactly one of {@value #MARKER_ABSENT},
      * {@value #MARKER_ATTACH}, {@value #MARKER_NEW}. Read with {@link #readProbe}. Runs over the ordinary

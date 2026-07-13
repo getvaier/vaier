@@ -114,7 +114,7 @@
         // promptShowing / claude are this shell's action state, pushed by the server. They live on the
         // shell rather than in the menu because the menu is transient — it must be able to open at any
         // moment and show the truth immediately, without asking the server again.
-        const state = { id, pane, tab, term, fit, ws: null, machine: machineName, paneId: randomPaneId(),
+        const state = { id, pane, tab, term, fit, ws: null, machine: machineName, paneId: claimPaneId(machineName),
             retries: 0, reconnectTimer: 0, raf: 0, shellMode: null, pendingBanner: false, bannerTimer: 0,
             promptShowing: false, claude: null,
             loginScanTimer: 0, claudeLoginUrl: null, awaitingLoginCode: false, loginBanner: null };
@@ -198,6 +198,46 @@
     function randomPaneId() {
         try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* fall back */ }
         return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    }
+
+    // --- pane ids that outlive the page --------------------------------------------------------------
+    //
+    // A pane id names a tmux session on the machine, and that session outlives the browser by design. So the
+    // id has to outlive the browser too: held only in memory, a reload would forget every id, mint fresh ones
+    // on the next open, and strand the old sessions on the host with no way to ever name them again — running
+    // forever, invisible. Persisting the ids means a reload reattaches to the shells you already have instead
+    // of leaking them. An id is released only when its shell is explicitly ended.
+    const PANE_STORE_KEY = 'vaier.terminal.panes';
+
+    function readPaneStore() {
+        try { return JSON.parse(localStorage.getItem(PANE_STORE_KEY)) || {}; } catch (e) { return {}; }
+    }
+    function writePaneStore(store) {
+        try { localStorage.setItem(PANE_STORE_KEY, JSON.stringify(store)); } catch (e) { /* private mode */ }
+    }
+
+    // The pane id to open a shell on `machineName` with: the first id we already own for that machine and are
+    // not already showing (so the shell it names is reattached, not orphaned), else a fresh one.
+    function claimPaneId(machineName) {
+        const store = readPaneStore();
+        const owned = store[machineName] || [];
+        const onScreen = new Set([..._terminals.values()]
+            .filter(s => s.machine === machineName).map(s => s.paneId));
+        const reusable = owned.find(pid => !onScreen.has(pid));
+        if (reusable) return reusable;
+
+        const fresh = randomPaneId();
+        store[machineName] = owned.concat(fresh);
+        writePaneStore(store);
+        return fresh;
+    }
+
+    // The shell for this pane has been ended for good, so stop owning its id.
+    function releasePaneId(machineName, paneId) {
+        const store = readPaneStore();
+        const owned = (store[machineName] || []).filter(pid => pid !== paneId);
+        if (owned.length) store[machineName] = owned; else delete store[machineName];
+        writePaneStore(store);
     }
 
     // On a reconnect, wait for the server's shell-mode frame before writing the banner. If it never comes
@@ -378,6 +418,14 @@
         clearTimeout(s.reconnectTimer);
         clearTimeout(s.bannerTimer);
         clearTimeout(s.loginScanTimer);
+        // Closing a pane is the operator saying "I am done with this shell" — and it is the only thing that
+        // says so. The server cannot tell an intentional close from a dropped tunnel, and a persistent shell
+        // is built to survive the latter, so without this frame the tmux session would stay on the machine
+        // forever, still running whatever was inside it. Send it before the socket goes.
+        if (s.ws && s.ws.readyState === WebSocket.OPEN) {
+            try { s.ws.send(JSON.stringify({ type: 'end-shell' })); } catch (e) { /* best effort */ }
+        }
+        releasePaneId(s.machine, s.paneId);
         if (s.ws) try { s.ws.onclose = null; s.ws.close(); } catch (e) { /* ignore */ }
         if (s.term) try { s.term.dispose(); } catch (e) { /* ignore */ }
         if (s.pane && s.pane.parentNode) s.pane.parentNode.removeChild(s.pane);

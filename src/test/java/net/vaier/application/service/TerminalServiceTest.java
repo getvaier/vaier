@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
@@ -326,5 +327,37 @@ class TerminalServiceTest {
             service.sendPassword("nas", sshSession, "Password: ");
 
         assertThat(result).isEqualTo(SendHostPasswordUseCase.SendPasswordResult.FAILED);
+    }
+
+    // --- ending a shell (the leak fix): an explicit close must kill the tmux session -------------
+
+    @Test
+    void endTerminal_killsThePanesTmuxSession_onThatMachine() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
+        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", ""));
+
+        service.endTerminal("nuc", "pane1");
+
+        // Without this the session lingers detached on the host forever, still running whatever was in it.
+        ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(forRunningSshCommands).run(target.capture(), command.capture());
+        assertThat(target.getValue().host()).isEqualTo("10.13.13.9");
+        assertThat(command.getValue()).contains("tmux kill-session -t 'vaier-pane1'");
+    }
+
+    @Test
+    void endTerminal_unreachableHost_doesNotThrow() {
+        // Ending a shell is best-effort cleanup on a close path — a host that is down or has no credential
+        // must not surface an error to the operator, who has already closed the pane and moved on.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
+        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
+
+        assertThatCode(() -> service.endTerminal("nuc", "pane1")).doesNotThrowAnyException();
+        verify(forRunningSshCommands, never()).run(any(), any());
     }
 }

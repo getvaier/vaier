@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.EndTerminalSessionUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase;
 import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
 import net.vaier.application.SendHostPasswordUseCase;
@@ -36,12 +37,14 @@ import static org.mockito.Mockito.when;
 class TerminalWebSocketHandlerTest {
 
     @Mock OpenTerminalSessionUseCase openTerminalSessionUseCase;
+    @Mock EndTerminalSessionUseCase endTerminalSessionUseCase;
     @Mock SendHostPasswordUseCase sendHostPasswordUseCase;
     @Mock WebSocketSession wsSession;
     @Mock SshSession sshSession;
 
     private TerminalWebSocketHandler handler() {
-        return new TerminalWebSocketHandler(openTerminalSessionUseCase, sendHostPasswordUseCase);
+        return new TerminalWebSocketHandler(
+            openTerminalSessionUseCase, endTerminalSessionUseCase, sendHostPasswordUseCase);
     }
 
     private Map<String, Object> attrs() {
@@ -304,5 +307,41 @@ class TerminalWebSocketHandlerTest {
         byte[] payload = new byte[binary.getPayload().remaining()];
         binary.getPayload().get(payload);
         assertThat(new String(payload, StandardCharsets.UTF_8)).isEqualTo("hello");
+    }
+
+    // --- ending a shell: only an explicit close kills the tmux session ---------------------------
+
+    @Test
+    void endShellFrame_endsThePanesPersistentShell_andClosesTheSocket() throws Exception {
+        attrs();
+        when(wsSession.getUri()).thenReturn(
+            URI.create("wss://host/machines/nas/terminal?pane=pane1"));
+        when(openTerminalSessionUseCase.openTerminal(eq("nas"), eq("pane1"), any()))
+            .thenReturn(opened(sshSession));
+        TerminalWebSocketHandler handler = handler();
+        handler.afterConnectionEstablished(wsSession);
+
+        handler.handleTextMessage(wsSession, new TextMessage("{\"type\":\"end-shell\"}"));
+
+        // The operator closed the pane: the shell is done, so the session must not outlive it.
+        verify(endTerminalSessionUseCase).endTerminal("nas", "pane1");
+    }
+
+    @Test
+    void droppedSocket_doesNotEndTheShell() {
+        attrs();
+        when(wsSession.getUri()).thenReturn(
+            URI.create("wss://host/machines/nas/terminal?pane=pane1"));
+        when(openTerminalSessionUseCase.openTerminal(eq("nas"), eq("pane1"), any()))
+            .thenReturn(opened(sshSession));
+        TerminalWebSocketHandler handler = handler();
+        handler.afterConnectionEstablished(wsSession);
+
+        handler.afterConnectionClosed(wsSession, CloseStatus.NO_CLOSE_FRAME);
+
+        // This is the whole promise of a persistent shell: a dropped tunnel, a closed laptop or a Vaier
+        // redeploy must leave the session alive so the reconnect can reattach to it.
+        verify(endTerminalSessionUseCase, never()).endTerminal(any(), any());
+        verify(sshSession).close();
     }
 }

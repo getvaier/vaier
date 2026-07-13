@@ -100,4 +100,28 @@ class PersistentShellTest {
         assertThat(PersistentShell.readProbe(null)).isEqualTo(PersistentShell.Continuity.NEW);
         assertThat(PersistentShell.readProbe("some banner noise")).isEqualTo(PersistentShell.Continuity.NEW);
     }
+
+    // --- ending a shell: an explicit close kills the session, a dropped connection does not ---------
+
+    @Test
+    void endCommand_killsThisPanesSessionOnly() {
+        String cmd = PersistentShell.endCommand("pane1");
+        // Closing a pane is "I am done with this shell" — the tmux session must go, or it lingers detached
+        // forever with whatever was running inside it. Scoped by name, so no other session is touched.
+        assertThat(cmd).contains("tmux kill-session -t 'vaier-pane1'");
+    }
+
+    @Test
+    void endCommand_survivesAnAlreadyDeadSession() {
+        // The session may be gone already (host rebooted, operator killed it). Ending it is idempotent:
+        // the command must still exit 0 so the close path never reports a spurious failure.
+        assertThat(PersistentShell.endCommand("pane1")).contains("|| true");
+    }
+
+    @Test
+    void endCommand_reducesAHostilePaneIdToTheSafeSessionName() {
+        // Same guarantee as sessionName: a hostile pane id can never break out of the command line.
+        assertThat(PersistentShell.endCommand("a b;rm -rf/")).contains("-t 'vaier-abrm-rf'");
+        assertThat(PersistentShell.endCommand("a b;rm -rf/")).doesNotContain("rm -rf/");
+    }
 }
