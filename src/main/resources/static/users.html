@@ -412,7 +412,7 @@
 
         // Stable key for a group set, so a Save button can stay disabled until the set actually changes.
         function groupsKey(groups) {
-            return [...groups].sort().join(' ');
+            return [...groups].sort().join('\x00');
         }
 
         function mountGroupsPicker(containerId, pickerId, initial, perServiceOnly, saveBtnId) {

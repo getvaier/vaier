@@ -1193,7 +1193,7 @@
         if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
         const input = state.loginBanner.querySelector('.term-login-input');
         const code = input.value.trim();
-        if (!code || /[\s -]/.test(code)) return;
+        if (!code || /[\s\x00-\x1f\x7f]/.test(code)) return;
         state.ws.send(new TextEncoder().encode(code + '\r'));
         input.value = '';
     }
