@@ -940,8 +940,10 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
     now the entire disk story; see the disk-pressure-alerts entry above.
   - **#317 — Docker health over SSH + close the `apalveien5` 2375 hole.** 🔲
 
-**Backlog:** **SFTP** (file transfer over the same session) is deferred — V1 scope is the interactive
-terminal plus saved snippets only. Further remote-telemetry watchers (reboot detection, systemd service
+**Backlog:** SFTP *over the terminal session itself* remains out of scope — the terminal's V1 scope is the
+interactive shell plus saved snippets. (Vaier does speak SFTP now, but as its own feature: see **6.20
+Explorer**, which browses a machine's files over a separate SFTP connection sharing the terminal's
+credential vault and host-key trust.) Further remote-telemetry watchers (reboot detection, systemd service
 health, load/temperature) are backlog under #313.
 
 ---
@@ -971,11 +973,76 @@ Domain: `BackupServer`, `BackupRepository`, `BackupJob`, `BackupRun` + `BackupRu
 
 **Backlog (deferred):**
 - **The Vaier server as a backup client ✅** — the Vaier server is the one machine in the fleet that *is* the Docker host rather than something behind the tunnel, so it inherited no relay LAN routes: `traefik-lan-routes` and `LanRouteAdapter` write into container network namespaces, never the host's. A backup job for the Vaier server therefore failed every readiness check — `borg info` could not reach the backup server because the *host* had no route to the relay's LAN (`ip route get 192.168.3.3` left via the default gateway). The `host-lan-routes` service now mirrors `traefik-lan-routes` into the host's own netns, installing each relay peer's `lanCidr` via the wireguard container. Because the host cannot use Docker DNS, wireguard's bridge address is **pinned** (`x-wireguard-bridge-ip`, high in the subnet so Docker's sequential allocator can never collide with it) rather than mounting the Docker socket into a `NET_ADMIN` host-netns container. `wireguard-masquerade` already SNATs `172.20.0.0/16` out of `wg0`, and a host packet routed at the bridge is sourced from `172.20.0.1`, so return traffic needs no extra rule. borg itself still has to be installed on the host via **Prepare client**, and its key trusted via **Authorize host**, like any other client.
-- **Restore from the UI ([#319](https://github.com/getvaier/vaier/issues/319))** — browsing archives exists, but there is no in-UI restore/extract yet; recovery is via the borg CLI for now.
-- **Browse an archive's files and download a selection 🔲** — the archive browser lists archives but not their *contents*. Planned: open an archive to list the files inside it (`borg list <repo>::<archive>`), select one or more, and download them — a single file streamed as-is, several bundled into a zip. This is the first slice of restore-from-the-UI and needs care on three fronts: the extract runs on a **backup client** that is trusted on the server (Vaier itself is not), so the bytes come back over SSH; an archive can hold millions of paths, so listing must page or stream rather than materialise; and a download must never let a crafted archive path escape its staging directory.
+- **Restore from the UI — superseded by [#321](https://github.com/getvaier/vaier/issues/321) (Explorer).** [#319](https://github.com/getvaier/vaier/issues/319) proposed a restore modal hanging off the archive list; it is closed in favour of the Explorer, where restore is not a feature of its own but one destination of a general copy (see **6.20**). Until Explorer's Time slice lands, recovery is still via the borg CLI.
+- **Browse an archive's files and download a selection 🔲 — folded into [#321](https://github.com/getvaier/vaier/issues/321).** Now Explorer slices 2 (download) and 3 (archive browsing via `borg mount`), rather than a separate archive-contents browser.
 - **`borg check` weekly integrity verification** — a scheduled repository consistency check, separate from the nightly create/prune.
 - **Per-archive size** via `borg info` — surface each archive's original/compressed/dedup size in the archive list.
 - **True append-only hardening** — a separate management key so the client key can be genuinely append-only while prune/compact run under the management key (V1's `appendOnly` flag only documents the intent; the shipped key is delete-capable).
+
+---
+
+### 6.20 Explorer 🟡 (in progress — epic [#321](https://github.com/getvaier/vaier/issues/321))
+
+One file browser across the fleet. A file has a coordinate — a **machine**, a **path**, and a point in
+time — and Vaier is the only node with SSH to every machine, so it is the only place a fleet-wide file
+tree can be assembled. **Replaces [#319](https://github.com/getvaier/vaier/issues/319)** (the stopgap
+restore modal): restore is not a feature of its own, it is one destination of a general copy.
+
+Browse, cross-machine copy and download are **Community**; the time rail, coverage and restore are
+**Enterprise** (they are Fleet Backup features).
+
+**Slices:**
+- [x] **1 — Browse ✅.** `sshd-sftp` dependency, `ForBrowsingRemoteFiles` port + `MinaSftpAdapter`,
+  `GET /machines/{name}/files?path=…` directory listings on any SSH-capable machine, and the read-only
+  Explorer page over them. Community, and authenticated like every other machine endpoint.
+- [ ] **2 — Move.** Clipboard, cross-machine Transfer (streaming, tracked, SSE-settled), download to
+  browser, size warning. Community.
+- [ ] **3 — Time.** `borg mount` lifecycle, the time rail, archive overlay on the tree, restore as
+  paste-from-the-past. Enterprise.
+- [ ] **4 — Coverage.** Coverage dots, draft-then-save to the backup job, "Uncovered only" filter,
+  one-job-per-machine enforcement. Enterprise.
+- [ ] **5 — Mutate.** Delete, rename/move, new folder, behind a typed-confirmation gate. Community.
+
+**Delivered in slice 1 (backend):**
+- **A shared SSH target resolver.** Resolving a machine name to *where to connect, with which credential,
+  against which pinned host key* was private to `TerminalService`. Explorer needs exactly the same thing,
+  and a second copy of it would have been a second place trust-on-first-use is decided — a security
+  hazard, not just duplication. It is now the driven port **`ForResolvingSshTargets`** with
+  `MachineSshTargetAdapter` behind it, composing the machine registries, the credential vault and the
+  host-key pin store. `TerminalService` depends on the port instead, with no behaviour change. The two
+  *decisions* inside it went to the domain, where they belong: **`SshAddress`** (a peer answers at its
+  tunnel IP, a LAN server at its `lanAddress`, the Vaier server host at its resolved host address —
+  otherwise the machine does not exist) and **`SshTarget.needsPinning`** (pin only an unpinned host that
+  actually presented a key; a mismatch is a refusal, never a silent re-pin). For the same reason the
+  connect + authenticate + host-key-verify machinery itself was extracted from `MinaSshSessionAdapter`
+  into one **`SshConnector`**, now shared by the terminal's PTY/exec channels and the Explorer's SFTP
+  client: one copy of the code that decides a host key is trustworthy.
+- **`domain.FileEntry`** — name, absolute path, directory-or-not, size, modified instant. It owns the
+  decisions: what counts as a browsable **path** (`normalisePath` — absolute, `.`/`..` resolved, a climb
+  above the root **refused rather than clamped**, NUL refused), how a child's path is built from its
+  directory (so a remote answering `readdir` with a path-shaped name cannot fabricate an entry outside
+  the directory listed), and what order a directory reads in (directories before files, then by name).
+  Shell metacharacters are deliberately **preserved**: SFTP is a binary protocol with no command line to
+  inject into, and `$(…)` is a legal Linux filename that must stay reachable.
+- **`ForBrowsingRemoteFiles` + `MinaSftpAdapter`** — a listing owns its whole lifecycle (short-lived
+  `SshClient`, session, SFTP channel, all closed again), so browsing cannot leak an SSH connection per
+  directory clicked. Like a **remote command**, a listing reports the host key the machine presented, so
+  a machine browsed before it ever had a terminal opened on it is still pinned on first use.
+- **`ExplorerService`** (new domain, one service) implementing `BrowseFilesUseCase`, and
+  `ExplorerRestController` (`GET /machines/{machine}/files?path=…`, DTOs as inner records). The path
+  arrives from the browser and is normalised in the domain **before** any machine is resolved or any
+  connection opened — a hostile path is a `400`, never a connection.
+
+**Notes / open risks:**
+- **`borg mount` is still unverified on the fleet** — slice 3's archive browsing rests on it (`/dev/fuse`,
+  `fusermount`, borg built with FUSE). Must be confirmed on Apalveien 5 and Colina 27 before slice 3 is
+  designed; a host that can't mount falls back to `borg list`.
+- **Browsing is not confined to a subtree.** There is no chroot: an operator can browse anywhere the
+  machine's SSH user can read, by design (the fleet's Docker volumes live outside any one home directory).
+  The SSH user's own permissions are the boundary, so path validation exists to reject *nonsense* paths,
+  not to jail a legitimate one.
+- **A symlink to a directory currently lists as a file** (the adapter reports what `readdir` says without
+  a second `stat` round-trip), so it can't be entered. Worth revisiting when the UI lands.
 
 ---
 

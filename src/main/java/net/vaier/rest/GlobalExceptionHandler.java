@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.LastAdminException;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PermissionDeniedException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -44,6 +45,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ApiError> handleNotFound(NotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError.of("NOT_FOUND", e.getMessage()));
+    }
+
+    /**
+     * The <em>machine</em> refused the read, not Vaier — the SSH user is not allowed to see that path. This is
+     * an ordinary state of a fleet whose SSH users are deliberately not root, so it must read as "you cannot
+     * read this", never as a Vaier fault.
+     */
+    @ExceptionHandler(PermissionDeniedException.class)
+    public ResponseEntity<ApiError> handlePermissionDenied(PermissionDeniedException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiError.of("PERMISSION_DENIED", e.getMessage()));
     }
 
     @ExceptionHandler(ConflictException.class)

@@ -351,7 +351,17 @@ is delegated to an external **identity provider**; Vaier owns **authorization** 
 
 ---
 
-## 16. Out-of-language
+## 16. Explorer
+
+| Term | Definition |
+|------|------------|
+| **Explorer** | One file tree spanning the fleet: the place an operator browses the files on any machine Vaier can reach over SSH. Vaier sits at the VPN hub and is the only node with SSH to every machine, so it is the only place such a tree can exist. Reads a machine's filesystem over SFTP, authenticating from the **credential vault** and trusting the machine's key by the same **host-key pin** as the **web terminal**. |
+| **File entry** | One line in the **Explorer**: a file or a directory on a machine, carrying its name, its absolute **path**, whether it is a directory, its size in bytes, and when it was last modified. |
+| **Path** | Where a **file entry** lives on its machine — always absolute, and always the real location: redundant separators and `.`/`..` steps are resolved away, and a path that would climb above the root is not a path at all. |
+
+---
+
+## 17. Out-of-language
 
 Terms that look like they belong here but don't — these are explicitly **not** Vaier vocabulary because the underlying concept is out of scope:
 

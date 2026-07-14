@@ -15,21 +15,14 @@ import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.HostCredentialView;
-import net.vaier.domain.LanAnchor;
-import net.vaier.domain.LanServer;
-import net.vaier.domain.NoHostCredentialException;
-import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PasswordPrompt;
 import net.vaier.domain.PersistentShell;
 import net.vaier.domain.SshTarget;
-import net.vaier.domain.port.ForGettingPeerConfigurations;
-import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForOpeningSshSessions;
 import net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener;
 import net.vaier.domain.port.ForOpeningSshSessions.SshSession;
 import net.vaier.domain.port.ForPersistingHostCredentials;
-import net.vaier.domain.port.ForPersistingLanServers;
-import net.vaier.domain.port.ForResolvingVaierServerSshAddress;
+import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForRunningSshCommands;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import org.springframework.stereotype.Service;
@@ -57,9 +50,7 @@ public class TerminalService implements
     ClearHostKeyUseCase {
 
     private final ForPersistingHostCredentials forPersistingHostCredentials;
-    private final ForGettingPeerConfigurations forGettingPeerConfigurations;
-    private final ForPersistingLanServers forPersistingLanServers;
-    private final ForResolvingVaierServerSshAddress forResolvingVaierServerSshAddress;
+    private final ForResolvingSshTargets forResolvingSshTargets;
     private final ForOpeningSshSessions forOpeningSshSessions;
     private final ForRunningSshCommands forRunningSshCommands;
     private final ForTrackingHostKeys forTrackingHostKeys;
@@ -81,7 +72,7 @@ public class TerminalService implements
 
     @Override
     public OpenedTerminal openTerminal(String machineName, String paneId, SshOutputListener onOutput) {
-        SshTarget target = buildTarget(machineName);
+        SshTarget target = forResolvingSshTargets.resolve(machineName);
         // Probe first (a normal exec run, the same host-key trust as any command): is tmux installed on
         // this machine, and does the pane's session already exist? The domain reads it into a truthful
         // continuity, so the reconnect banner can say "reattached" only when it really was. This first
@@ -107,7 +98,7 @@ public class TerminalService implements
         // whose key no longer matches is not something they can act on from here — and leaving the session
         // behind on an unreachable host is no worse than the state we were already in. Log and move on.
         try {
-            forRunningSshCommands.run(buildTarget(machineName), PersistentShell.endCommand(paneId));
+            forRunningSshCommands.run(forResolvingSshTargets.resolve(machineName), PersistentShell.endCommand(paneId));
             log.info("Ended terminal session {} on {}", PersistentShell.sessionName(paneId), machineName);
         } catch (RuntimeException e) {
             log.warn("Could not end terminal session {} on {}: {}",
@@ -117,7 +108,7 @@ public class TerminalService implements
 
     @Override
     public CommandResult run(String machineName, String command) {
-        SshTarget target = buildTarget(machineName);
+        SshTarget target = forResolvingSshTargets.resolve(machineName);
         // Same host-key trust as the shell path: a changed key throws HostKeyMismatchException.
         CommandResult result = forRunningSshCommands.run(target, command);
 
@@ -152,47 +143,12 @@ public class TerminalService implements
     }
 
     /**
-     * Assemble the {@link SshTarget} for a machine — the one copy of the resolve-address + load-vault-
-     * credential + read-pinned-fingerprint logic shared by {@link #openTerminal} and {@link #run}, so
-     * both connect and TOFU-pin identically. The returned target carries the previously pinned
-     * fingerprint (null when the host has never been pinned), which the callers use to decide whether to
-     * pin on first use.
-     */
-    private SshTarget buildTarget(String machineName) {
-        String host = resolveSshAddress(machineName);
-        HostCredential credential = forPersistingHostCredentials.getByMachine(machineName)
-            .orElseThrow(() -> new NoHostCredentialException(machineName));
-        String pinned = forTrackingHostKeys.getFingerprint(machineName).orElse(null);
-        return SshTarget.on(host, credential, pinned);
-    }
-
-    /**
      * Trust-on-first-use: if the target had nothing pinned and the connect presented a fingerprint,
      * record it so later connects can enforce it. Shared by the shell and exec paths.
      */
     private void pinOnFirstUse(String machineName, SshTarget target, String presentedFingerprint) {
-        if (target.pinnedFingerprint() == null && presentedFingerprint != null) {
+        if (target.needsPinning(presentedFingerprint)) {
             forTrackingHostKeys.pin(machineName, presentedFingerprint);
         }
-    }
-
-    /**
-     * The SSH host for a machine — a domain decision by machine kind: a VPN peer's <b>tunnel IP</b>, a
-     * LAN server's <b>lanAddress</b>, or the resolved host address for the <b>Vaier server</b> itself.
-     * Throws {@link NotFoundException} when no machine bears the name.
-     */
-    private String resolveSshAddress(String machineName) {
-        if (LanAnchor.VAIER_SERVER_NAME.equals(machineName)) {
-            return forResolvingVaierServerSshAddress.resolve();
-        }
-        Optional<PeerConfiguration> peer = forGettingPeerConfigurations.getAllPeerConfigs().stream()
-            .filter(p -> machineName.equals(p.name()))
-            .findFirst();
-        if (peer.isPresent()) {
-            return peer.get().ipAddress();
-        }
-        return LanServer.findByName(machineName, forPersistingLanServers.getAll())
-            .map(LanServer::lanAddress)
-            .orElseThrow(() -> new NotFoundException("Machine not found: " + machineName));
     }
 }

@@ -7,20 +7,15 @@ import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.LanAnchor;
-import net.vaier.domain.LanServer;
-import net.vaier.domain.MachineType;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PersistentShell;
 import net.vaier.domain.SshTarget;
-import net.vaier.domain.port.ForGettingPeerConfigurations;
-import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForOpeningSshSessions;
 import net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener;
 import net.vaier.domain.port.ForOpeningSshSessions.SshSession;
 import net.vaier.domain.port.ForPersistingHostCredentials;
-import net.vaier.domain.port.ForPersistingLanServers;
-import net.vaier.domain.port.ForResolvingVaierServerSshAddress;
+import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForRunningSshCommands;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import org.junit.jupiter.api.Test;
@@ -31,14 +26,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,9 +40,7 @@ import static org.mockito.Mockito.when;
 class TerminalServiceTest {
 
     @Mock ForPersistingHostCredentials forPersistingHostCredentials;
-    @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
-    @Mock ForPersistingLanServers forPersistingLanServers;
-    @Mock ForResolvingVaierServerSshAddress forResolvingVaierServerSshAddress;
+    @Mock ForResolvingSshTargets forResolvingSshTargets;
     @Mock ForOpeningSshSessions forOpeningSshSessions;
     @Mock ForRunningSshCommands forRunningSshCommands;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
@@ -60,6 +51,12 @@ class TerminalServiceTest {
 
     private HostCredential passwordCred(String machine) {
         return new HostCredential(machine, "root", AuthMethod.PASSWORD, "pw", null, false);
+    }
+
+    /** Stub the resolver port: a machine now becomes an SshTarget in one place (MachineSshTargetAdapter). */
+    private void machineResolvesTo(String machine, String host, String pinnedFingerprint) {
+        when(forResolvingSshTargets.resolve(machine))
+            .thenReturn(SshTarget.on(host, passwordCred(machine), pinnedFingerprint));
     }
 
     // --- credential vault (slice 1, unchanged) ---
@@ -95,10 +92,7 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_peer_resolvesTunnelIp_opensPersistentShell_pinsOnFirstUse() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.empty());
+        machineResolvesTo("nuc", "10.13.13.9", null);
         // The probe (a remote command) is the first connection — it presents the fingerprint and pins it.
         when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:fresh", "VAIER_TMUX_NEW"));
         when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
@@ -118,10 +112,7 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_existingTmuxSession_reportsReattached() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        machineResolvesTo("nuc", "10.13.13.9", "SHA256:pinned");
         when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", "VAIER_TMUX_ATTACH"));
         when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
@@ -132,10 +123,7 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_tmuxAbsent_reportsPlain() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        machineResolvesTo("nuc", "10.13.13.9", "SHA256:pinned");
         when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", "VAIER_TMUX_ABSENT"));
         when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
@@ -146,11 +134,7 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_lanServer_resolvesLanAddress() {
-        lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(
-            new LanServer("nas", "192.168.3.50", true, 2375)));
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(passwordCred("nas")));
-        when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(Optional.of("SHA256:pinned"));
+        machineResolvesTo("nas", "192.168.3.50", "SHA256:pinned");
         when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", "VAIER_TMUX_NEW"));
         when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
@@ -165,12 +149,7 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_vaierServer_resolvesHostAddress() {
-        lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
-        lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
-        when(forResolvingVaierServerSshAddress.resolve()).thenReturn("172.17.0.1");
-        when(forPersistingHostCredentials.getByMachine(LanAnchor.VAIER_SERVER_NAME))
-            .thenReturn(Optional.of(passwordCred(LanAnchor.VAIER_SERVER_NAME)));
-        when(forTrackingHostKeys.getFingerprint(LanAnchor.VAIER_SERVER_NAME)).thenReturn(Optional.empty());
+        machineResolvesTo(LanAnchor.VAIER_SERVER_NAME, "172.17.0.1", null);
         when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:host", "VAIER_TMUX_NEW"));
         when(forOpeningSshSessions.open(any(), any(), any())).thenReturn(sshSession);
 
@@ -183,9 +162,7 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_noCredential_throwsNoHostCredential_andDoesNotOpen() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
+        when(forResolvingSshTargets.resolve("nuc")).thenThrow(new NoHostCredentialException("nuc"));
 
         assertThatThrownBy(() -> service.openTerminal("nuc", "pane1", onOutput))
             .isInstanceOf(NoHostCredentialException.class);
@@ -194,8 +171,8 @@ class TerminalServiceTest {
 
     @Test
     void openTerminal_unknownMachine_throwsNotFound() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
-        when(forPersistingLanServers.getAll()).thenReturn(List.of());
+        when(forResolvingSshTargets.resolve("ghost"))
+            .thenThrow(new NotFoundException("Machine not found: ghost"));
 
         assertThatThrownBy(() -> service.openTerminal("ghost", "pane1", onOutput))
             .isInstanceOf(NotFoundException.class);
@@ -211,10 +188,7 @@ class TerminalServiceTest {
 
     @Test
     void run_resolvesTarget_fromSameAddressCredentialAndPinLogic() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        machineResolvesTo("nuc", "10.13.13.9", "SHA256:pinned");
         when(forRunningSshCommands.run(any(), any()))
             .thenReturn(new CommandResult(0, "hello", "", false, "SHA256:pinned"));
 
@@ -230,10 +204,7 @@ class TerminalServiceTest {
 
     @Test
     void run_firstUseUnpinnedHost_pinsPresentedFingerprint() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.empty());
+        machineResolvesTo("nuc", "10.13.13.9", null);
         when(forRunningSshCommands.run(any(), any()))
             .thenReturn(new CommandResult(0, "ok", "", false, "SHA256:fresh"));
 
@@ -247,9 +218,7 @@ class TerminalServiceTest {
 
     @Test
     void run_noCredential_throwsNoHostCredential_andDoesNotRun() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
+        when(forResolvingSshTargets.resolve("nuc")).thenThrow(new NoHostCredentialException("nuc"));
 
         assertThatThrownBy(() -> service.run("nuc", "echo hi"))
             .isInstanceOf(NoHostCredentialException.class);
@@ -333,10 +302,7 @@ class TerminalServiceTest {
 
     @Test
     void endTerminal_killsThePanesTmuxSession_onThatMachine() {
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        machineResolvesTo("nuc", "10.13.13.9", "SHA256:pinned");
         when(forRunningSshCommands.run(any(), any())).thenReturn(probe("SHA256:pinned", ""));
 
         service.endTerminal("nuc", "pane1");
@@ -353,9 +319,7 @@ class TerminalServiceTest {
     void endTerminal_unreachableHost_doesNotThrow() {
         // Ending a shell is best-effort cleanup on a close path — a host that is down or has no credential
         // must not surface an error to the operator, who has already closed the pane and moved on.
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
+        when(forResolvingSshTargets.resolve("nuc")).thenThrow(new NoHostCredentialException("nuc"));
 
         assertThatCode(() -> service.endTerminal("nuc", "pane1")).doesNotThrowAnyException();
         verify(forRunningSshCommands, never()).run(any(), any());

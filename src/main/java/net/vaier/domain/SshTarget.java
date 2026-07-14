@@ -33,4 +33,18 @@ public record SshTarget(String host, int port, String username, AuthMethod authM
         return new SshTarget(host, DEFAULT_PORT, credential.username(), credential.authMethod(),
             credential.secret(), credential.passphrase(), pinnedFingerprint);
     }
+
+    /**
+     * Trust-on-first-use: whether the fingerprint this machine just presented should be pinned — true
+     * only when nothing was pinned yet and the host actually presented a key. A machine whose key already
+     * matches is not re-pinned, and a {@link HostKeyTrust#MISMATCH mismatch} is a refusal, never a
+     * silent re-pin over the old key.
+     *
+     * <p>Every path that connects to a machine — the shell, a remote command, an Explorer listing — asks
+     * this one question, so the rule is decided here rather than hand-rolled in each service.
+     */
+    public boolean needsPinning(String presentedFingerprint) {
+        return presentedFingerprint != null
+            && HostKeyTrust.evaluate(pinnedFingerprint, presentedFingerprint) == HostKeyTrust.PIN_NEW;
+    }
 }

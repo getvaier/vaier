@@ -254,6 +254,10 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected DeleteHostCredentialUseCase deleteHostCredentialUseCase;
 
+    // --- Explorer use cases ---
+    @MockBean
+    protected BrowseFilesUseCase browseFilesUseCase;
+
     // --- Server location use case ---
     @MockBean
     protected GetServerLocationUseCase getServerLocationUseCase;
