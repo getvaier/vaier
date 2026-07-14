@@ -1,9 +1,11 @@
 package net.vaier.application.service;
 
+import net.vaier.application.GetMachineDiskUsageUseCase.MachineFilesystemUco;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.DiskUnreadableException;
+import net.vaier.domain.DiskWatch;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
@@ -15,6 +17,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import net.vaier.domain.port.ForPersistingDiskWatches;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingSshTargets;
@@ -57,6 +60,7 @@ class MachineServiceTest {
     @Mock ForResolvingSshTargets forResolvingSshTargets;
     @Mock ForRunningSshCommands forRunningSshCommands;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
+    @Mock ForPersistingDiskWatches forPersistingDiskWatches;
     @Mock ConfigResolver configResolver;
 
     MachineService service;
@@ -71,7 +75,7 @@ class MachineServiceTest {
         service = new MachineService(forGettingPeerConfigurations, forGettingVpnClients, forGettingLanServers,
             forResolvingServerLanCidr, forUpdatingPeerConfigurations, forPersistingLanServers,
             forPersistingAppConfiguration, forResolvingSshTargets, forRunningSshCommands,
-            forTrackingHostKeys, configResolver);
+            forTrackingHostKeys, forPersistingDiskWatches, configResolver);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -313,49 +317,127 @@ class MachineServiceTest {
             .save(org.mockito.ArgumentMatchers.any());
     }
 
-    // --- a machine's disk (#323 slice C) -------------------------------------------------------------
+    // --- a machine's filesystems (#323 slice C, fixed by #325) ---------------------------------------
     //
-    // RemoteDiskWatcher has computed this on a schedule since the disk alerts shipped — but it only ever
-    // emailed about it, so the number Vaier already knew could not be looked at. The reading is taken over
-    // the one SSH exec port every other remote command uses; the service orchestrates and the domain
-    // decides (RemoteDiskUsage owns how df is read and what counts as over threshold).
+    // The reading used to be one number from `df -P /` — the root filesystem and only the root filesystem.
+    // On the NAS that is the 2.3 GB DSM system partition, 88% by design, while /volume1 (11.6 TB, every borg
+    // backup) was invisible. So the service now reads every real filesystem, and the domain decides all of
+    // it: RemoteDiskUsage owns how df is read, which rows are real, and what counts as a breach.
 
     private static final SshTarget UNPINNED =
         new SshTarget("10.13.13.6", 22, "geir", AuthMethod.PASSWORD, "secret", null, null);
 
-    private static final String DF_OUTPUT = """
+    /** The real `df -P` from the NAS, trimmed to two of the eight aufs aliases (#325). */
+    private static final String NAS_DF = """
+        Filesystem             1024-blocks       Used  Available Capacity Mounted on
+        /dev/md0                   2385528    1988940     277804      88% /
+        tmpfs                      2021044       1988    2019056       1% /tmp
+        /dev/mapper/cachedev_0   115404288     512932  114875740       1% /volume2
+        /dev/mapper/cachedev_1 11614435576 4494352836 7119963956      39% /volume1
+        none                   11614435576 4494352836 7119963956      39% /volume1/@docker/aufs/mnt/b5720e8
+        none                   11614435576 4494352836 7119963956      39% /volume1/@docker/aufs/mnt/1e756f0
+        """;
+
+    private static final String LINUX_DF = """
         Filesystem     1024-blocks      Used Available Capacity Mounted on
         /dev/root         30298176  18178905  10566487      63% /
         """;
 
     @Test
-    void diskUsage_readsDfOverTheSameSshExecPortEveryOtherCommandUses() {
-        when(forResolvingSshTargets.resolve("Apalveien 5")).thenReturn(UNPINNED);
-        when(forRunningSshCommands.run(UNPINNED, "df -P /"))
-            .thenReturn(new CommandResult(0, DF_OUTPUT, "", false, null));
-        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+    void diskUsage_readsEveryRealFilesystem_notJustRoot() {
+        // The #325 regression test at the service seam: /volume1 must come back, and the pseudo-filesystems
+        // and the aufs aliases must not.
+        when(forResolvingSshTargets.resolve("NAS")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(UNPINNED, "df -P"))
+            .thenReturn(new CommandResult(0, NAS_DF, "", false, null));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(85);
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of());
 
-        var usage = service.getDiskUsage("Apalveien 5");
+        var filesystems = service.getDiskUsage("NAS");
 
-        assertThat(usage.machineName()).isEqualTo("Apalveien 5");
-        assertThat(usage.usedPercent()).isEqualTo(63);
-        assertThat(usage.thresholdPercent()).isEqualTo(80);
-        assertThat(usage.aboveThreshold()).isFalse();
+        assertThat(filesystems).extracting(MachineFilesystemUco::mountPoint)
+            .containsExactly("/", "/volume2", "/volume1");
     }
 
     @Test
-    void diskUsage_asksTheDomainWhetherItIsOverThreshold_neverRecomputesIt() {
-        // The predicate is RemoteDiskUsage.isAbove — the same one the alert email is sent from. A second
+    void diskUsage_carriesTheSizeAndFreeSpace_soAPercentageMeansSomething() {
+        when(forResolvingSshTargets.resolve("NAS")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(any(), anyString()))
+            .thenReturn(new CommandResult(0, NAS_DF, "", false, null));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(85);
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of());
+
+        var volume1 = service.getDiskUsage("NAS").stream()
+            .filter(fs -> fs.mountPoint().equals("/volume1")).findFirst().orElseThrow();
+
+        assertThat(volume1.usedPercent()).isEqualTo(39);
+        assertThat(volume1.availableKb()).isEqualTo(7119963956L);
+        assertThat(volume1.available()).isEqualTo("6.6 TiB");
+        assertThat(volume1.size()).isEqualTo("10.8 TiB");
+    }
+
+    @Test
+    void diskUsage_readsDfOverTheSameSshExecPortEveryOtherCommandUses() {
+        when(forResolvingSshTargets.resolve("Apalveien 5")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(UNPINNED, "df -P"))
+            .thenReturn(new CommandResult(0, LINUX_DF, "", false, null));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of());
+
+        var filesystems = service.getDiskUsage("Apalveien 5");
+
+        assertThat(filesystems).singleElement().satisfies(root -> {
+            assertThat(root.machineName()).isEqualTo("Apalveien 5");
+            assertThat(root.mountPoint()).isEqualTo("/");
+            assertThat(root.usedPercent()).isEqualTo(63);
+            assertThat(root.thresholdPercent()).isEqualTo(80);
+            assertThat(root.watched()).isTrue();
+            assertThat(root.aboveThreshold()).isFalse();
+        });
+    }
+
+    @Test
+    void diskUsage_asksTheDomainWhetherEachFilesystemBreaches_neverRecomputesIt() {
+        // The predicate is RemoteDiskUsage.breaches — the same one the alert email is sent from. A second
         // comparison here would be a second definition of "under pressure", and they would drift.
         when(forResolvingSshTargets.resolve("Colina 27")).thenReturn(UNPINNED);
         when(forRunningSshCommands.run(any(), anyString()))
-            .thenReturn(new CommandResult(0, "/dev/root 100 91 9 91% /", "", false, null));
+            .thenReturn(new CommandResult(0,
+                "Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+                    + "/dev/root 100 91 9 91% /\n", "", false, null));
         when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of());
 
-        var usage = service.getDiskUsage("Colina 27");
+        var root = service.getDiskUsage("Colina 27").get(0);
 
-        assertThat(usage.usedPercent()).isEqualTo(91);
-        assertThat(usage.aboveThreshold()).isTrue();
+        assertThat(root.usedPercent()).isEqualTo(91);
+        assertThat(root.aboveThreshold()).isTrue();
+    }
+
+    @Test
+    void diskUsage_appliesEachFilesystemsOwnWatch_muteAndOwnThreshold() {
+        // The NAS's / is 88% by design. Given its own 95% threshold it is not a breach; /volume2 is muted
+        // and never breaches whatever it reads; /volume1 has no watch, so it is watched at the global 85%.
+        when(forResolvingSshTargets.resolve("NAS")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(any(), anyString()))
+            .thenReturn(new CommandResult(0, NAS_DF, "", false, null));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(85);
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of(
+            new DiskWatch("NAS", "/", true, 95),
+            new DiskWatch("NAS", "/volume2", false, null)));
+
+        var byMount = service.getDiskUsage("NAS").stream()
+            .collect(java.util.stream.Collectors.toMap(MachineFilesystemUco::mountPoint, fs -> fs));
+
+        assertThat(byMount.get("/").usedPercent()).isEqualTo(88);
+        assertThat(byMount.get("/").thresholdPercent()).isEqualTo(95);
+        assertThat(byMount.get("/").aboveThreshold()).isFalse();     // 88% is normal here, and Vaier knows
+
+        assertThat(byMount.get("/volume2").watched()).isFalse();
+        assertThat(byMount.get("/volume2").aboveThreshold()).isFalse();
+
+        assertThat(byMount.get("/volume1").watched()).isTrue();      // never silently unwatched
+        assertThat(byMount.get("/volume1").thresholdPercent()).isEqualTo(85);
     }
 
     @Test
@@ -364,8 +446,9 @@ class MachineServiceTest {
         // where an unpinned host gets pinned — trust-on-first-use, exactly as the shell and SFTP paths do.
         when(forResolvingSshTargets.resolve("Apalveien 5")).thenReturn(UNPINNED);
         when(forRunningSshCommands.run(any(), anyString()))
-            .thenReturn(new CommandResult(0, DF_OUTPUT, "", false, "SHA256:abc"));
+            .thenReturn(new CommandResult(0, LINUX_DF, "", false, "SHA256:abc"));
         when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of());
 
         service.getDiskUsage("Apalveien 5");
 
@@ -388,7 +471,9 @@ class MachineServiceTest {
     }
 
     @Test
-    void diskUsage_thatCannotBeParsed_saysSo_ratherThanGuessing() {
+    void diskUsage_withNoRealFilesystemAtAll_saysSo_ratherThanShowingAnEmptyList() {
+        // A df that ran but yielded nothing Vaier recognises is "cannot tell", not "this machine has no
+        // disks". An empty list would render as a machine with nothing to watch — the #325 silence again.
         when(forResolvingSshTargets.resolve("nas")).thenReturn(UNPINNED);
         when(forRunningSshCommands.run(any(), anyString()))
             .thenReturn(new CommandResult(0, "Filesystem 1024-blocks Used Available Capacity Mounted on",
@@ -396,5 +481,46 @@ class MachineServiceTest {
 
         assertThatThrownBy(() -> service.getDiskUsage("nas"))
             .isInstanceOf(DiskUnreadableException.class);
+    }
+
+    // --- setting a filesystem's watch (#325) ----------------------------------------------------------
+
+    @Test
+    void setDiskWatch_persistsTheWatchForThatOneFilesystem() {
+        service.setDiskWatch("NAS", "/", true, 95);
+
+        var saved = ArgumentCaptor.forClass(DiskWatch.class);
+        verify(forPersistingDiskWatches).save(saved.capture());
+        assertThat(saved.getValue()).isEqualTo(new DiskWatch("NAS", "/", true, 95));
+    }
+
+    @Test
+    void setDiskWatch_withNoThresholdOfItsOwn_fallsBackToTheGlobalOne() {
+        service.setDiskWatch("NAS", "/volume1", true, null);
+
+        var saved = ArgumentCaptor.forClass(DiskWatch.class);
+        verify(forPersistingDiskWatches).save(saved.capture());
+        assertThat(saved.getValue().thresholdPercent()).isNull();
+    }
+
+    @Test
+    void setDiskWatch_canMuteAFilesystem() {
+        service.setDiskWatch("NAS", "/volume2", false, null);
+
+        var saved = ArgumentCaptor.forClass(DiskWatch.class);
+        verify(forPersistingDiskWatches).save(saved.capture());
+        assertThat(saved.getValue().watched()).isFalse();
+    }
+
+    @Test
+    void getDiskWatches_resolvesAnUnconfiguredFilesystem_toWatchedByDefault() {
+        // What the scheduled watcher reads. Nothing is ever silently unwatched — the failure #325 fixes is
+        // silence about the disk that matters, so an unseen mount nags rather than hides.
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of(new DiskWatch("NAS", "/", false, null)));
+
+        var watches = service.getDiskWatches();
+
+        assertThat(watches.forFilesystem("NAS", "/").watched()).isFalse();
+        assertThat(watches.forFilesystem("NAS", "/volume1").watched()).isTrue();
     }
 }

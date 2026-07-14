@@ -22,7 +22,7 @@ class DiskFillHistoryTest {
         history.record(hours(0), 80);
         history.record(hours(1), 81);
 
-        assertThat(history.forecast("nas")).isEmpty();
+        assertThat(history.forecast("nas", "/volume1")).isEmpty();
     }
 
     @Test
@@ -32,7 +32,7 @@ class DiskFillHistoryTest {
         history.record(hours(1), 50);
         history.record(hours(2), 50);
 
-        assertThat(history.forecast("nas")).isEmpty();
+        assertThat(history.forecast("nas", "/volume1")).isEmpty();
     }
 
     @Test
@@ -42,7 +42,7 @@ class DiskFillHistoryTest {
         history.record(hours(1), 55);
         history.record(hours(2), 50);
 
-        assertThat(history.forecast("nas")).isEmpty();
+        assertThat(history.forecast("nas", "/volume1")).isEmpty();
     }
 
     @Test
@@ -53,7 +53,7 @@ class DiskFillHistoryTest {
         history.record(hours(5.0 / 60.0), 81);
         history.record(hours(10.0 / 60.0), 82);
 
-        assertThat(history.forecast("nas")).isEmpty();
+        assertThat(history.forecast("nas", "/volume1")).isEmpty();
     }
 
     @Test
@@ -64,7 +64,7 @@ class DiskFillHistoryTest {
         history.record(hours(2), 82);
         history.record(hours(3), 83);
 
-        Optional<DiskFillForecast> forecast = history.forecast("nas");
+        Optional<DiskFillForecast> forecast = history.forecast("nas", "/volume1");
 
         assertThat(forecast).isPresent();
         assertThat(forecast.get().machineName()).isEqualTo("nas");
@@ -84,7 +84,7 @@ class DiskFillHistoryTest {
         history.record(hours(4), 83);
         history.record(hours(5), 85);
 
-        Optional<DiskFillForecast> forecast = history.forecast("nas");
+        Optional<DiskFillForecast> forecast = history.forecast("nas", "/volume1");
 
         assertThat(forecast).isPresent();
         assertThat(forecast.get().fillRatePercentPerHour()).isBetween(0.5, 1.5);
@@ -98,7 +98,7 @@ class DiskFillHistoryTest {
         history.record(hours(0.5), 91);
         history.record(hours(2), 93);
 
-        Optional<DiskFillForecast> forecast = history.forecast("nas");
+        Optional<DiskFillForecast> forecast = history.forecast("nas", "/volume1");
 
         assertThat(forecast).isPresent();
         assertThat(forecast.get().fillRatePercentPerHour()).isGreaterThan(0.0);
@@ -114,7 +114,7 @@ class DiskFillHistoryTest {
             history.record(hours(100 + i), 88 + i);
         }
 
-        Optional<DiskFillForecast> forecast = history.forecast("nas");
+        Optional<DiskFillForecast> forecast = history.forecast("nas", "/volume1");
 
         assertThat(forecast).isPresent();
         assertThat(forecast.get().currentPercent()).isEqualTo(99);
@@ -132,7 +132,7 @@ class DiskFillHistoryTest {
         history.record(hours(2), 79);
         history.record(hours(3), 80);
 
-        Optional<DiskFillForecast> forecast = history.forecast("nas");
+        Optional<DiskFillForecast> forecast = history.forecast("nas", "/volume1");
 
         assertThat(forecast).isPresent();
         assertThat(forecast.get().runway()).isLessThan(Duration.ofHours(24));

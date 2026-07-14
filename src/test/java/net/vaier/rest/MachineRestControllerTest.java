@@ -3,7 +3,8 @@ package net.vaier.rest;
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachineDiskUsageUseCase;
-import net.vaier.application.GetMachineDiskUsageUseCase.MachineDiskUsageUco;
+import net.vaier.application.GetMachineDiskUsageUseCase.MachineFilesystemUco;
+import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
@@ -36,6 +37,7 @@ class MachineRestControllerTest {
     @Mock GetHostCredentialUseCase getHostCredentialUseCase;
     @Mock ClearHostKeyUseCase clearHostKeyUseCase;
     @Mock GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
+    @Mock SetDiskWatchUseCase setDiskWatchUseCase;
 
     @InjectMocks MachineRestController controller;
 
@@ -149,31 +151,79 @@ class MachineRestControllerTest {
         verify(clearHostKeyUseCase).clearHostKey("nas");
     }
 
-    // --- a machine's disk (#323 slice C) ---
+    // --- a machine's filesystems (#323 slice C, fixed by #325) ---
     //
-    // The one endpoint slice C adds. It is a sibling of /machines/{machine}/files: a non-whitelisted path
-    // under /machines, so it sits behind the admin auth chain automatically — reading a machine's disk is
-    // never anonymous. (The whitelist is an explicit Path() list on the vaier-public Traefik router in
-    // docker-compose.yml; nothing under /machines is on it.)
+    // A sibling of /machines/{machine}/files: a non-whitelisted path under /machines, so it sits behind the
+    // admin auth chain automatically — reading or configuring a machine's disks is never anonymous. (The
+    // whitelist is an explicit Path() list on the vaier-public Traefik router in docker-compose.yml; nothing
+    // under /machines is on it.)
+
+    private static MachineFilesystemUco filesystem(String machine, String mount, int usedPercent,
+                                                   int threshold, boolean watched, boolean above) {
+        return new MachineFilesystemUco(machine, "/dev/sda1", mount, 1000L, 500L, 500L, "1.0 MiB",
+            "500.0 KiB", usedPercent, threshold, watched, above);
+    }
 
     @Test
-    void disk_reportsTheUsageAndTheThresholdItIsJudgedAgainst() {
-        when(getMachineDiskUsageUseCase.getDiskUsage("Apalveien 5"))
-            .thenReturn(new MachineDiskUsageUco("Apalveien 5", 63, 80, false));
+    void disk_reportsEveryFilesystem_notJustRoot() {
+        // The #325 fix at the REST seam: /volume1 (39%, the volume that holds every borg backup) has to come
+        // back alongside / (88%, the DSM system partition), or the operator still cannot see the disk that
+        // matters.
+        when(getMachineDiskUsageUseCase.getDiskUsage("NAS")).thenReturn(List.of(
+            filesystem("NAS", "/", 88, 95, true, false),
+            filesystem("NAS", "/volume1", 39, 85, true, false)));
 
-        var response = controller.disk("Apalveien 5");
+        var response = controller.disk("NAS");
 
-        assertThat(response.machine()).isEqualTo("Apalveien 5");
-        assertThat(response.usedPercent()).isEqualTo(63);
-        assertThat(response.thresholdPercent()).isEqualTo(80);
-        assertThat(response.aboveThreshold()).isFalse();
+        assertThat(response).extracting(MachineRestController.FilesystemResponse::mountPoint)
+            .containsExactly("/", "/volume1");
+    }
+
+    @Test
+    void disk_reportsTheUsageTheSizeAndTheThresholdEachFilesystemIsJudgedAgainst() {
+        when(getMachineDiskUsageUseCase.getDiskUsage("Apalveien 5")).thenReturn(List.of(
+            new MachineFilesystemUco("Apalveien 5", "/dev/root", "/", 30298176L, 18178905L, 10566487L,
+                "28.9 GiB", "10.1 GiB", 63, 80, true, false)));
+
+        var root = controller.disk("Apalveien 5").get(0);
+
+        assertThat(root.machine()).isEqualTo("Apalveien 5");
+        assertThat(root.mountPoint()).isEqualTo("/");
+        assertThat(root.usedPercent()).isEqualTo(63);
+        assertThat(root.size()).isEqualTo("28.9 GiB");
+        assertThat(root.available()).isEqualTo("10.1 GiB");
+        assertThat(root.thresholdPercent()).isEqualTo(80);
+        assertThat(root.watched()).isTrue();
+        assertThat(root.aboveThreshold()).isFalse();
     }
 
     @Test
     void disk_carriesTheDomainsOwnPressureVerdict_theBrowserNeverRecomputesIt() {
-        when(getMachineDiskUsageUseCase.getDiskUsage("Colina 27"))
-            .thenReturn(new MachineDiskUsageUco("Colina 27", 91, 80, true));
+        when(getMachineDiskUsageUseCase.getDiskUsage("Colina 27")).thenReturn(List.of(
+            filesystem("Colina 27", "/", 91, 80, true, true)));
 
-        assertThat(controller.disk("Colina 27").aboveThreshold()).isTrue();
+        assertThat(controller.disk("Colina 27").get(0).aboveThreshold()).isTrue();
+    }
+
+    // --- setting one filesystem's watch (#325) ---
+
+    @Test
+    void setDiskWatch_takesTheMountPointInTheBody_becauseAMountPointContainsSlashes() {
+        // /volume1/@docker/... in a path variable would be a routing nightmare and an encoding bug waiting to
+        // happen. The mount point travels in the body, where a slash is just a character.
+        var response = controller.setDiskWatch("NAS",
+            new MachineRestController.DiskWatchRequest("/volume1", true, 90));
+
+        verify(setDiskWatchUseCase).setDiskWatch("NAS", "/volume1", true, 90);
+        assertThat(response.mountPoint()).isEqualTo("/volume1");
+        assertThat(response.watched()).isTrue();
+        assertThat(response.thresholdPercent()).isEqualTo(90);
+    }
+
+    @Test
+    void setDiskWatch_canMuteAFilesystem_andCanClearItsOwnThreshold() {
+        controller.setDiskWatch("NAS", new MachineRestController.DiskWatchRequest("/", false, null));
+
+        verify(setDiskWatchUseCase).setDiskWatch("NAS", "/", false, null);
     }
 }

@@ -6,6 +6,7 @@ import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachineDiskUsageUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
+import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.domain.Machine;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,6 +32,7 @@ public class MachineRestController {
     private final GetHostCredentialUseCase getHostCredentialUseCase;
     private final ClearHostKeyUseCase clearHostKeyUseCase;
     private final GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
+    private final SetDiskWatchUseCase setDiskWatchUseCase;
 
     @GetMapping
     public List<MachineResponse> list() {
@@ -68,29 +71,63 @@ public class MachineRestController {
     }
 
     /**
-     * A machine's disk, read now (#323 slice C) — the one endpoint the Explorer tree needed that Vaier did
-     * not already have. {@code RemoteDiskWatcher} has computed this on a schedule since the disk alerts
-     * shipped, but only ever emailed about it; this lets the operator look at it.
+     * A machine's filesystems, read now (#323 slice C, fixed by #325). {@code RemoteDiskWatcher} has computed
+     * this on a schedule since the disk alerts shipped, but only ever emailed about it — and until #325 it
+     * read {@code df -P /}, so it saw the root filesystem and only the root filesystem. On the NAS that is
+     * the 2.3 GB DSM system partition (88% by design) while {@code /volume1} — 11.6 TB, every borg backup —
+     * was invisible. So this returns <b>every</b> real filesystem.
      *
      * <p>A sibling of {@code /machines/{machine}/files}: a non-whitelisted path under {@code /machines}, so
-     * it sits behind the admin auth chain automatically. Reading a machine's disk is never anonymous.
+     * it sits behind the admin auth chain automatically. Reading a machine's disks is never anonymous.
      *
      * <p>A disk that cannot be read is a {@code DiskUnreadableException} → {@code 502}, carrying the reason
-     * verbatim. It is never a {@code 0%}.
+     * verbatim. It is never a {@code 0%} and never an empty list.
      */
     @GetMapping("/{machine}/disk")
-    public DiskResponse disk(@PathVariable String machine) {
-        var usage = getMachineDiskUsageUseCase.getDiskUsage(machine);
-        return new DiskResponse(usage.machineName(), usage.usedPercent(), usage.thresholdPercent(),
-            usage.aboveThreshold());
+    public List<FilesystemResponse> disk(@PathVariable String machine) {
+        return getMachineDiskUsageUseCase.getDiskUsage(machine).stream()
+            .map(fs -> new FilesystemResponse(fs.machineName(), fs.device(), fs.mountPoint(),
+                fs.sizeKb(), fs.usedKb(), fs.availableKb(), fs.size(), fs.available(),
+                fs.usedPercent(), fs.thresholdPercent(), fs.watched(), fs.aboveThreshold()))
+            .toList();
     }
 
     /**
-     * A disk reading, with the threshold it is judged against and the domain's verdict on it. The verdict
-     * travels rather than the browser recomputing it, so "under pressure" means one thing in the alert
-     * email and in the Explorer.
+     * Watch or mute one filesystem on one machine, optionally at its own threshold (#325).
+     *
+     * <p>The mount point travels in the <b>body</b>, not the path: a mount point contains slashes
+     * ({@code /volume1}, and worse), and a path variable carrying them is a routing problem and an encoding
+     * bug waiting to happen. In a body a slash is just a character.
      */
-    record DiskResponse(String machine, int usedPercent, int thresholdPercent, boolean aboveThreshold) {}
+    @PutMapping("/{machine}/disk/watch")
+    public DiskWatchResponse setDiskWatch(@PathVariable String machine,
+                                          @RequestBody DiskWatchRequest request) {
+        setDiskWatchUseCase.setDiskWatch(machine, request.mountPoint(), request.watched(),
+            request.thresholdPercent());
+        return new DiskWatchResponse(machine, request.mountPoint(), request.watched(),
+            request.thresholdPercent());
+    }
+
+    /**
+     * One filesystem, with its size, the threshold it was judged against (its own or the global one), whether
+     * Vaier watches it, and the domain's verdict on it. The verdict travels rather than the browser
+     * recomputing it, so "under pressure" means one thing in the alert email and in the Explorer.
+     *
+     * <p>The raw {@code *Kb} block counts travel alongside the human-readable {@code size}/{@code available}
+     * so a client can sort or graph on them without re-parsing a rendered string.
+     */
+    record FilesystemResponse(String machine, String device, String mountPoint,
+                              long sizeKb, long usedKb, long availableKb,
+                              String size, String available,
+                              int usedPercent, int thresholdPercent, boolean watched,
+                              boolean aboveThreshold) {}
+
+    /** @param thresholdPercent this filesystem's own threshold (1–100), or null to use the global one. */
+    record DiskWatchRequest(String mountPoint, boolean watched, Integer thresholdPercent) {}
+
+    /** The watch as it now stands, echoed back so the Explorer can render it without a re-read. */
+    record DiskWatchResponse(String machine, String mountPoint, boolean watched,
+                             Integer thresholdPercent) {}
 
     /**
      * Forget the pinned SSH host key for a machine (#308), so the next terminal connect re-pins on

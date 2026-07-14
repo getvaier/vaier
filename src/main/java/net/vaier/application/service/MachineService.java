@@ -1,13 +1,17 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.GetDiskWatchesUseCase;
 import net.vaier.application.GetMachineDiskUsageUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
+import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.DiskUnreadableException;
+import net.vaier.domain.DiskWatch;
+import net.vaier.domain.DiskWatches;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
@@ -23,6 +27,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import net.vaier.domain.port.ForPersistingDiskWatches;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingSshTargets;
@@ -40,7 +45,8 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase,
-    SetMachineSshAccessUseCase, GetMachineDiskUsageUseCase, ForGettingMachines {
+    SetMachineSshAccessUseCase, GetMachineDiskUsageUseCase, GetDiskWatchesUseCase,
+    SetDiskWatchUseCase, ForGettingMachines {
 
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingVpnClients forGettingVpnClients;
@@ -52,6 +58,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     private final ForResolvingSshTargets forResolvingSshTargets;
     private final ForRunningSshCommands forRunningSshCommands;
     private final ForTrackingHostKeys forTrackingHostKeys;
+    private final ForPersistingDiskWatches forPersistingDiskWatches;
     private final ConfigResolver configResolver;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
@@ -64,6 +71,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                           ForResolvingSshTargets forResolvingSshTargets,
                           ForRunningSshCommands forRunningSshCommands,
                           ForTrackingHostKeys forTrackingHostKeys,
+                          ForPersistingDiskWatches forPersistingDiskWatches,
                           ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -75,25 +83,29 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         this.forResolvingSshTargets = forResolvingSshTargets;
         this.forRunningSshCommands = forRunningSshCommands;
         this.forTrackingHostKeys = forTrackingHostKeys;
+        this.forPersistingDiskWatches = forPersistingDiskWatches;
         this.configResolver = configResolver;
     }
 
     /**
-     * A machine's disk, read now (#323 slice C). The scheduled {@code RemoteDiskWatcher} has taken this
-     * same reading for as long as the disk alerts have existed, but it only ever emailed about it — so the
-     * number Vaier already knew could not be looked at.
+     * A machine's filesystems, read now (#323 slice C, fixed by #325). The scheduled
+     * {@code RemoteDiskWatcher} has taken this same reading for as long as the disk alerts have existed, but
+     * it only ever emailed about it — and until #325 it read {@code df -P /}, so what it saw was the root
+     * filesystem and only the root filesystem. Now it is every real filesystem, each with its size.
      *
-     * <p>Orchestration only: the driven ports resolve the machine to an SSH target and run the command,
-     * and the domain decides everything — {@link RemoteDiskUsage#DF_COMMAND} is how a reading is taken,
-     * {@code parse} is how it is read, and {@code isAbove} is what counts as pressure. This is the same
-     * exec port every other remote command goes through, so there is no second way to reach a host, and
-     * an unpinned machine is pinned on first use exactly as the shell and SFTP paths pin it.
+     * <p>Orchestration only: the driven ports resolve the machine to an SSH target, run the command and load
+     * the watches, and the domain decides everything — {@link RemoteDiskUsage#DF_COMMAND} is how a reading is
+     * taken, {@code parseList} is how it is read (and which rows are real filesystems at all), and
+     * {@code judge} is what counts as pressure. This is the same exec port every other remote command goes
+     * through, so there is no second way to reach a host, and an unpinned machine is pinned on first use
+     * exactly as the shell and SFTP paths pin it.
      *
-     * <p>A {@code df} that failed, timed out or cannot be parsed throws {@link DiskUnreadableException}.
-     * It never returns a zero: a disk Vaier could not read is not a disk with room on it.
+     * <p>A {@code df} that failed, timed out, or yielded no real filesystem at all throws
+     * {@link DiskUnreadableException}. It never returns an empty list: a machine whose disks Vaier could not
+     * read is not a machine with nothing to watch.
      */
     @Override
-    public MachineDiskUsageUco getDiskUsage(String machineName) {
+    public List<MachineFilesystemUco> getDiskUsage(String machineName) {
         SshTarget target = forResolvingSshTargets.resolve(machineName);
         CommandResult result = forRunningSshCommands.run(target, RemoteDiskUsage.DF_COMMAND);
         target.pinOnFirstUse(machineName, result.hostKeyFingerprint(), forTrackingHostKeys);
@@ -103,12 +115,47 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                 result.timedOut());
             throw new DiskUnreadableException(machineName);
         }
-        RemoteDiskUsage usage = RemoteDiskUsage.parse(machineName, result.stdout())
-            .orElseThrow(() -> new DiskUnreadableException(machineName));
+        List<RemoteDiskUsage> filesystems = RemoteDiskUsage.parseList(machineName, result.stdout());
+        if (filesystems.isEmpty()) {
+            throw new DiskUnreadableException(machineName);
+        }
 
-        int threshold = configResolver.getDiskMonitorThresholdPercent();
-        return new MachineDiskUsageUco(machineName, usage.usedPercent(), threshold,
-            usage.isAbove(threshold));
+        int globalThreshold = configResolver.getDiskMonitorThresholdPercent();
+        DiskWatches watches = getDiskWatches();
+        return filesystems.stream()
+            .map(fs -> {
+                // One call, one verdict — the same RemoteDiskUsage.judge the scheduled watcher asks before it
+                // sends the alert email. Neither of them recombines "how full" with "how full is too full".
+                RemoteDiskUsage.DiskVerdict verdict =
+                    fs.judge(watches.forFilesystem(machineName, fs.mountPoint()), globalThreshold);
+                return new MachineFilesystemUco(machineName, fs.device(), fs.mountPoint(),
+                    fs.sizeKb(), fs.usedKb(), fs.availableKb(), fs.sizeHuman(), fs.availableHuman(),
+                    fs.usedPercent(), verdict.thresholdPercent(), verdict.watched(), verdict.breaching());
+            })
+            .toList();
+    }
+
+    /**
+     * The fleet's disk watches (#325). Read by the Explorer's disk Inspector and by the scheduled
+     * {@code RemoteDiskWatcher} alike, so both judge a filesystem against the same watch.
+     *
+     * <p>Never returns "no watch" for a filesystem: {@link DiskWatches#forFilesystem} resolves an
+     * unconfigured one to watched, at the global threshold.
+     */
+    @Override
+    public DiskWatches getDiskWatches() {
+        return new DiskWatches(forPersistingDiskWatches.getAll());
+    }
+
+    /**
+     * Watch or mute one filesystem on one machine, optionally at its own threshold (#325) — the knob that
+     * makes a fleet-wide disk alert usable, because {@code /} at 88% is normal on the NAS and an emergency on
+     * Apalveien 5. The {@link DiskWatch} record validates itself; the service only persists it.
+     */
+    @Override
+    public void setDiskWatch(String machineName, String mountPoint, boolean watched,
+                             Integer thresholdPercent) {
+        forPersistingDiskWatches.save(new DiskWatch(machineName, mountPoint, watched, thresholdPercent));
     }
 
     @Override

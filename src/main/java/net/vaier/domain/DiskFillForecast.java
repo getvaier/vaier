@@ -3,8 +3,8 @@ package net.vaier.domain;
 import java.time.Duration;
 
 /**
- * A projection of when a machine's root filesystem will fill, derived from the recent fill trend of the
- * same {@code df} readings the disk-pressure watcher already takes. Where {@link RemoteDiskUsage} answers
+ * A projection of when <b>one filesystem</b> on a machine will fill, derived from the recent fill trend of
+ * the same {@code df} readings the disk-pressure watcher already takes. Where {@link RemoteDiskUsage} answers
  * "is the disk already too full?" (a <b>level</b>), this answers "how long until it is?" (a <b>trend</b>):
  * it carries the current fullness, the fill rate in percent-per-hour, and the <b>runway</b> — the
  * projected time until the filesystem reaches 100%.
@@ -14,13 +14,19 @@ import java.time.Duration;
  * the disk reaches the level threshold, so a filling disk pages once as a forecast and then the existing
  * disk-pressure alert takes over — the operator is never paged twice for one disk.
  *
+ * <p><b>#325.</b> A forecast is per <em>filesystem</em>, not per machine: it was keyed on the machine alone
+ * back when Vaier only ever read {@code df -P /} and a machine had exactly one disk to speak of. A machine
+ * has several, they fill at their own rates, and the forecast must name the one it means — a runway is
+ * meaningless without the mount it belongs to.
+ *
  * @param machineName             the machine the forecast is for
+ * @param mountPoint              the filesystem the forecast is for (e.g. {@code /volume1})
  * @param currentPercent          the most recent used percentage (0–100)
  * @param fillRatePercentPerHour  least-squares slope of recent samples, in percent-of-capacity per hour
  * @param runway                  projected time until the filesystem reaches 100%
  */
-public record DiskFillForecast(String machineName, int currentPercent, double fillRatePercentPerHour,
-                               Duration runway) {
+public record DiskFillForecast(String machineName, String mountPoint, int currentPercent,
+                               double fillRatePercentPerHour, Duration runway) {
 
     /**
      * The fixed early-warning horizon: when the {@link #runway} drops below 24h the forecast warrants an
@@ -40,7 +46,8 @@ public record DiskFillForecast(String machineName, int currentPercent, double fi
 
     /** Subject line for the early-warning email. */
     public String forecastSubject() {
-        return "[Vaier] Disk on " + machineName + " projected full in ~" + approxRunwayHours() + "h";
+        return "[Vaier] " + machineName + " " + mountPoint + " projected full in ~" + approxRunwayHours()
+            + "h";
     }
 
     /**
@@ -50,7 +57,7 @@ public record DiskFillForecast(String machineName, int currentPercent, double fi
     public String forecastBody(String baseDomain) {
         StringBuilder body = new StringBuilder();
         body.append("Machine: ").append(machineName).append("\n");
-        body.append("Monitored path: /\n");
+        body.append("Filesystem: ").append(mountPoint).append("\n");
         body.append("Used: ").append(currentPercent).append("%\n");
         body.append("Fill rate: ").append(String.format(java.util.Locale.ROOT, "%.1f", fillRatePercentPerHour))
             .append("%/h\n");

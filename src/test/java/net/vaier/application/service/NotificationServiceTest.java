@@ -246,7 +246,7 @@ class NotificationServiceTest {
         when(configResolver.getDomain()).thenReturn("example.com");
 
         service.notifyAdminsOfDiskFillForecast(
-                new net.vaier.domain.DiskFillForecast("nas", 80, 1.0, java.time.Duration.ofHours(18)));
+                new net.vaier.domain.DiskFillForecast("nas", "/volume1", 80, 1.0, java.time.Duration.ofHours(18)));
 
         ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
         ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
@@ -266,7 +266,7 @@ class NotificationServiceTest {
         when(configResolver.getDomain()).thenReturn("example.com");
 
         service.notifyAdminsOfDiskFillForecastCleared(
-                new net.vaier.domain.DiskFillForecastCleared("nas", 60));
+                new net.vaier.domain.DiskFillForecastCleared("nas", "/volume1", 60));
 
         ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);

@@ -364,12 +364,63 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     background: rgba(244, 135, 113, .08);
 }
 
-/* --- the disk meter --------------------------------------------------------------------------------- */
+/* --- filesystems and their meters -------------------------------------------------------------------- */
 
-/* The one new figure in the shell. The bar is how full the disk is; the tick is what that is being judged
-   against — the alert threshold the domain compares to, drawn where it actually falls. Without it the
-   operator would have to do the comparison in their head, and that comparison is a decision Vaier has
-   already made (RemoteDiskUsage.isAbove) and emails about. */
+/* One block per real filesystem (#325). Vaier used to show a single number from `df -P /` — on the NAS that
+   is the 2.3 GB DSM system partition, 88% by design, while /volume1 (11.6 TB of borg backups) was invisible.
+   The block reuses the card's surface rather than inventing one: same background, same border, same radius. */
+.ex-fs {
+    max-width: 620px;
+    margin-bottom: 10px;
+    padding: 12px 13px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-2);
+    transition: border-color .12s, opacity .12s, background .5s ease;
+}
+/* A breaching filesystem borrows the error note's exact framing — one red, one meaning, page-wide. */
+.ex-fs.is-over { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .04); }
+/* Muted: Vaier is not judging this disk, and the block recedes to say so. Never hidden — a muted filesystem
+   the operator has forgotten about is still theirs to see. */
+.ex-fs.is-muted { opacity: .55; }
+
+.ex-fs-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 9px; }
+/* Mount point and device are coordinates, so they are mono — the shell's one type rule. */
+.ex-fs-mount { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+.ex-fs-dev { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+.ex-fs-size {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ex-fs-ctl {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px;
+    margin-top: 10px;
+    font-size: 12px; color: var(--text-muted);
+}
+.ex-fs-ctl label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.ex-fs-ctl input[type='checkbox'] { accent-color: var(--accent); cursor: pointer; }
+.ex-thresh {
+    width: 56px;
+    padding: 3px 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    color: var(--text);
+    font-family: var(--mono); font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.ex-thresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ex-thresh:disabled { color: var(--text-dim); cursor: not-allowed; }
+
+/* The shell's one figure, now once per filesystem. The bar is how full it is; the tick is what that is being
+   judged against — its own threshold or the fleet-wide fallback, drawn where it actually falls. Without it
+   the operator would do the comparison in their head, and that comparison is a decision Vaier has already
+   made (RemoteDiskUsage.breaches) and emails about. Two filesystems with two different ticks is the whole
+   point of #325 made visible. */
 .ex-meter {
     position: relative;
     display: flex;
@@ -400,6 +451,17 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     width: 0;
     border-left: 1px dashed var(--text-dim);
 }
+/* A muted filesystem loses its tick entirely (the JS never draws one) and its fill goes grey: muting is not
+   a quieter alert, it is the absence of one, and the figure has to say so rather than imply a judgement that
+   is not being made. */
+.ex-meter.is-muted .ex-meter-fill {
+    background: linear-gradient(90deg, rgba(122, 106, 83, .14), rgba(122, 106, 83, .26));
+    border-right-color: var(--text-dim);
+}
+
+/* Inside a filesystem block the meter is the block's figure, not a standalone one: the block owns the
+   spacing and the width. */
+.ex-fs .ex-meter { margin-bottom: 0; max-width: none; }
 .ex-meter-label {
     position: relative;
     margin-left: auto;

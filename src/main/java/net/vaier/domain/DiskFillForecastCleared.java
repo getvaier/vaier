@@ -12,13 +12,14 @@ package net.vaier.domain;
  * it.
  *
  * @param machineName    the machine whose fill forecast cleared
+ * @param mountPoint     the filesystem whose fill forecast cleared (#325)
  * @param currentPercent the used percentage at the moment the forecast cleared (0–100)
  */
-public record DiskFillForecastCleared(String machineName, int currentPercent) {
+public record DiskFillForecastCleared(String machineName, String mountPoint, int currentPercent) {
 
     /** Subject line for the fill-forecast all-clear email. */
     public String clearedSubject() {
-        return "[Vaier] Disk on " + machineName + " fill forecast cleared";
+        return "[Vaier] " + machineName + " " + mountPoint + " fill forecast cleared";
     }
 
     /**
@@ -28,8 +29,8 @@ public record DiskFillForecastCleared(String machineName, int currentPercent) {
     public String clearedBody(String baseDomain) {
         StringBuilder body = new StringBuilder();
         body.append("Machine: ").append(machineName).append("\n");
-        body.append("Monitored path: /\n");
-        body.append("Disk on ").append(machineName)
+        body.append("Filesystem: ").append(mountPoint).append("\n");
+        body.append(mountPoint).append(" on ").append(machineName)
             .append(" is no longer trending toward full, now at ").append(currentPercent).append("%.\n");
         if (baseDomain != null && !baseDomain.isBlank()) {
             body.append("\nVaier UI: https://")

@@ -83,7 +83,7 @@
         access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
         containers: new Map(),           // machine name -> its containers, as Vaier last scraped them
         containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
-        disks: new Map(),                // machine name -> its disk reading: state, usage, the failure's words
+        disks: new Map(),                // machine name -> its filesystems: state, the list, the failure's words
         roots: new Map(),                // machine name -> where its file tree begins (its SFTP root, #326)
         palSel: 0,
     };
@@ -315,27 +315,28 @@
         }
     }
 
-    // One machine's disk, read when it is looked at (#323 slice C). Vaier has computed this on a schedule
-    // since the disk alerts shipped and only ever emailed about it; this is the same reading, looked at.
+    // One machine's filesystems, read when they are looked at (#323 slice C, every filesystem since #325).
+    // Vaier has computed this on a schedule since the disk alerts shipped and only ever emailed about it;
+    // this is the same reading, looked at.
     async function loadDisk(machine) {
         const held = S.disks.get(machine);
-        if (held && (held.state === 'loading' || held.state === 'ready')) return;
-        S.disks.set(machine, { state: 'loading', usage: null, error: null });
+        if (held && held.state === 'loading') return;
+        S.disks.set(machine, { state: 'loading', filesystems: null, error: null });
         try {
             const res = await fetch('/machines/' + encodeURIComponent(machine) + '/disk');
             const body = await res.json();
             if (res.ok) {
-                S.disks.set(machine, { state: 'ready', usage: body, error: null });
+                S.disks.set(machine, { state: 'ready', filesystems: body, error: null });
             } else {
                 // The server's own sentence, verbatim — "Vaier could not read the disk on X. The machine may
                 // be asleep..." says everything a status code cannot. A disk Vaier failed to read is never
                 // painted as a disk with room on it.
-                S.disks.set(machine, { state: 'error', usage: null,
-                    error: body.message || 'Vaier could not read the disk on ' + machine + '.' });
+                S.disks.set(machine, { state: 'error', filesystems: null,
+                    error: body.message || 'Vaier could not read the disks on ' + machine + '.' });
             }
         } catch (e) {
-            S.disks.set(machine, { state: 'error', usage: null,
-                error: 'Vaier could not read the disk on ' + machine + '.' });
+            S.disks.set(machine, { state: 'error', filesystems: null,
+                error: 'Vaier could not read the disks on ' + machine + '.' });
         }
         render();
     }
@@ -697,7 +698,7 @@
                 shell:      'A terminal on this machine',
                 containers: containersOn(m.name).length + ' seen by Vaier',
                 services:   servicesOn(m.name).length + ' published from here',
-                disk:       'How full its root filesystem is',
+                disk:       'Its filesystems, and how full they are',
             };
             inside.forEach((kid) => {
                 grid.appendChild(card(iconFor(kid.kind, kid.name), kid.name, kid.kind !== 'shell',
@@ -852,13 +853,18 @@
 
     // --- disk -------------------------------------------------------------------------------------------
     //
-    // The reading Vaier has taken on a schedule ever since the disk alerts shipped, and until now only ever
-    // emailed about. The verdict is the server's: RemoteDiskUsage.isAbove decides what counts as pressure,
-    // once, for the alert email and for this pane alike. The browser paints it; it never re-decides it.
+    // Every real filesystem on the machine, not just the root one (#325). Vaier used to read `df -P /` — on
+    // the NAS that is the 2.3 GB DSM system partition, 88% by design and never moving, while /volume1 (11.6
+    // TB, every borg backup) was invisible and could have filled to 100% in silence.
+    //
+    // The verdict is the server's, always: RemoteDiskUsage.breaches resolves mute, the filesystem's own
+    // threshold and the global fallback — once, for the alert email and for this pane alike. The browser
+    // paints what it is told and never re-decides it, which is why changing a threshold re-reads rather than
+    // recomputing locally.
 
     function renderDisk(pane) {
         const machine = S.path[1];
-        pane.appendChild(paneHead(machine + ' / disk', true, 'Root filesystem'));
+        pane.appendChild(paneHead(machine + ' / disk', true, 'Filesystems'));
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -868,42 +874,131 @@
 
         const held = S.disks.get(machine);
         if (!held || held.state === 'loading') {
-            return body.appendChild(note('Reading the disk on ' + machine + '…', false));
+            return body.appendChild(note('Reading the disks on ' + machine + '…', false));
         }
         if (held.state === 'error') return body.appendChild(note(held.error, true));
 
-        const usage = held.usage;
-        body.appendChild(meter(usage.usedPercent, usage.thresholdPercent, usage.aboveThreshold));
-        body.appendChild(kv([
-            ['Used', usage.usedPercent + '%'],
-            ['Alert threshold', usage.thresholdPercent + '%'],
-            ['Status', usage.aboveThreshold ? 'Over the alert threshold' : 'Below the alert threshold'],
-            ['Monitored path', '/'],
-        ]));
-        body.appendChild(note(usage.aboveThreshold
-            ? 'This disk is over the alert threshold, so Vaier has already emailed the admins about it. The '
-              + 'threshold is set on Settings.'
-            : 'Vaier reads this with df over SSH, on a schedule, and emails the admins when a disk crosses '
-              + 'the alert threshold. The threshold is set on Settings.', false));
+        held.filesystems.forEach(fs => body.appendChild(filesystemBlock(fs, machine)));
+
+        body.appendChild(note('Vaier reads these with df over SSH, on a schedule, and emails the admins when '
+            + 'a watched filesystem crosses its threshold. A filesystem with no threshold of its own is '
+            + 'judged against the fleet-wide one, set on Settings. Mute the ones that are full by design — '
+            + 'a DSM system partition sits near-full forever — but mute them deliberately: everything Vaier '
+            + 'has not been told about is watched.', false));
     }
 
-    // The one new figure in the shell, and it earns its place: the bar shows how full the disk is, and the
-    // tick shows what that is being judged against. A bar without the threshold on it would make the operator
-    // do the comparison in their head — and that comparison is a decision the domain has already made.
-    function meter(usedPercent, thresholdPercent, above) {
+    // One filesystem: what it is, how full, what it is judged against, and whether Vaier is watching at all.
+    // Mount point and device are coordinates, so they are mono — the shell's one type rule.
+    function filesystemBlock(fs, machine) {
+        const block = document.createElement('div');
+        block.className = 'ex-fs' + (fs.aboveThreshold ? ' is-over' : '') + (fs.watched ? '' : ' is-muted');
+
+        const top = document.createElement('div');
+        top.className = 'ex-fs-top';
+
+        const mount = document.createElement('span');
+        mount.className = 'ex-fs-mount';
+        mount.textContent = fs.mountPoint;
+        top.appendChild(mount);
+
+        const dev = document.createElement('span');
+        dev.className = 'ex-fs-dev';
+        dev.textContent = fs.device;
+        top.appendChild(dev);
+
+        const size = document.createElement('span');
+        size.className = 'ex-fs-size';
+        size.textContent = fs.size + ' · ' + fs.available + ' free';
+        top.appendChild(size);
+        block.appendChild(top);
+
+        block.appendChild(meter(fs.usedPercent, fs.thresholdPercent, fs.aboveThreshold, fs.watched));
+        block.appendChild(watchControl(fs, machine));
+        return block;
+    }
+
+    // The mute switch and the threshold. Both write to PUT /machines/{machine}/disk/watch — the mount point
+    // travels in the body, because a mount point is full of slashes and a path variable carrying them is an
+    // encoding bug waiting to happen.
+    function watchControl(fs, machine) {
+        const ctl = document.createElement('div');
+        ctl.className = 'ex-fs-ctl';
+
+        const watchLabel = document.createElement('label');
+        const watch = document.createElement('input');
+        watch.type = 'checkbox';
+        watch.checked = fs.watched;
+        watch.addEventListener('change',
+            () => saveWatch(machine, fs.mountPoint, watch.checked, fs.thresholdPercent));
+        const watchText = document.createElement('span');
+        watchText.textContent = 'Watch';
+        watchLabel.append(watch, watchText);
+        ctl.appendChild(watchLabel);
+
+        const threshLabel = document.createElement('label');
+        const threshText = document.createElement('span');
+        threshText.textContent = 'Alert above';
+        const thresh = document.createElement('input');
+        thresh.type = 'number';
+        thresh.className = 'ex-thresh';
+        thresh.min = '1';
+        thresh.max = '100';
+        thresh.value = fs.thresholdPercent;
+        thresh.disabled = !fs.watched;
+        thresh.addEventListener('change',
+            () => saveWatch(machine, fs.mountPoint, fs.watched, Number(thresh.value)));
+        const pct = document.createElement('span');
+        pct.textContent = '%';
+        threshLabel.append(threshText, thresh, pct);
+        ctl.appendChild(threshLabel);
+        return ctl;
+    }
+
+    // Write the watch, then re-read the machine's disks. The re-read is the point: the breach verdict is the
+    // domain's, so a new threshold has to come back FROM the server rather than being recomputed here. The
+    // email and this pane can never disagree, because only one of them ever decides.
+    async function saveWatch(machine, mountPoint, watched, thresholdPercent) {
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/disk/watch', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mountPoint, watched, thresholdPercent })
+            });
+            if (!res.ok) {
+                alert('Vaier could not save the watch on ' + mountPoint + '.');
+                return;
+            }
+        } catch (e) {
+            alert('Vaier could not save the watch on ' + mountPoint + '.');
+            return;
+        }
+        S.disks.delete(machine);
+        loadDisk(machine);
+    }
+
+    // The shell's one figure, once per filesystem. The bar is how full it is; the tick is what that is being
+    // judged against — its own threshold or the fleet-wide one, drawn where it actually falls. Without it the
+    // operator would do the comparison in their head, and that comparison is a decision Vaier has already
+    // made (RemoteDiskUsage.breaches) and emails about.
+    //
+    // A muted filesystem loses its tick, because nothing is being judged: muting is not a quieter alert, it
+    // is the absence of one, and the figure should say so.
+    function meter(usedPercent, thresholdPercent, above, watched) {
         const wrap = document.createElement('div');
-        wrap.className = 'ex-meter' + (above ? ' is-over' : '');
+        wrap.className = 'ex-meter' + (above ? ' is-over' : '') + (watched ? '' : ' is-muted');
 
         const fill = document.createElement('span');
         fill.className = 'ex-meter-fill';
         fill.style.width = usedPercent + '%';
         wrap.appendChild(fill);
 
-        const tick = document.createElement('span');
-        tick.className = 'ex-meter-tick';
-        tick.style.left = thresholdPercent + '%';
-        tick.title = 'Alert threshold: ' + thresholdPercent + '%';
-        wrap.appendChild(tick);
+        if (watched) {
+            const tick = document.createElement('span');
+            tick.className = 'ex-meter-tick';
+            tick.style.left = thresholdPercent + '%';
+            tick.title = 'Alert threshold: ' + thresholdPercent + '%';
+            wrap.appendChild(tick);
+        }
 
         const label = document.createElement('span');
         label.className = 'ex-meter-label';

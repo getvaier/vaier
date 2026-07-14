@@ -422,11 +422,11 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theOnlyMutatingCallInTheShell_isTheUnpublishThatReallyExists() throws IOException {
-        // Exactly one verb ships in slice C, because exactly one is backed: DELETE /published-services/{dns}.
-        // Publishing (POST /publish) needs a form — subdomain, auth mode, path prefix, redirect — and stays
-        // on the Infrastructure bridge rather than being half-built here. This pins that promise: if a second
-        // mutating fetch ever appears in the shell, this test says so.
+    void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
+        // Two verbs ship, because exactly two are backed: DELETE /published-services/{dns} (slice C) and
+        // PUT /machines/{machine}/disk/watch (#325). Publishing (POST /publish) needs a form — subdomain,
+        // auth mode, path prefix, redirect — and stays on the Infrastructure bridge rather than being
+        // half-built here. This pins that promise: if a third mutating fetch ever appears, this test says so.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);
@@ -434,8 +434,10 @@ class ExplorerShellTest {
         while (m.find()) {
             methods.add(m.group(1));
         }
-        assertThat(methods).as("the shell's mutating calls").containsExactly("DELETE");
+        assertThat(methods).as("the shell's mutating calls")
+            .containsExactlyInAnyOrder("PUT", "DELETE");
         assertThat(js).contains("/published-services/");
+        assertThat(js).contains("/disk/watch");
 
         // and it asks before it does it — unpublishing tears down a route and a DNS record
         int from = js.indexOf("async function unpublish(");
@@ -499,19 +501,49 @@ class ExplorerShellTest {
     }
 
     @Test
-    void aDisk_isReadWhenItIsLookedAt_andSaysWhatItIsJudgedAgainst() throws IOException {
-        // The one endpoint slice C adds. The threshold and the verdict come from the server (the domain's
-        // RemoteDiskUsage.isAbove, the same predicate the alert email is sent from) — the browser renders
-        // them, it never recomputes "under pressure" from the percentage.
+    void everyFilesystem_isListed_notJustTheRootOne() throws IOException {
+        // #325. The disk pane used to render one reading, because the server only ever took one: `df -P /`.
+        // On the NAS that is the DSM system partition (88% by design) and /volume1 — 11.6 TB of borg backups
+        // — was invisible. The pane walks the server's list now.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderDisk(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function", from));
+        assertThat(body).contains("held.filesystems.forEach");
+    }
+
+    @Test
+    void eachFilesystem_saysWhatItIsJudgedAgainst_andTheVerdictIsTheServers() throws IOException {
+        // The threshold and the verdict come from the server (the domain's RemoteDiskUsage.breaches, the same
+        // predicate the alert email is sent from) — the browser renders them, it never recomputes "under
+        // pressure" from the percentage.
         String js = read("explorer-shell.js");
         assertThat(js).contains("/disk");
 
-        int from = js.indexOf("function renderDisk(");
+        int from = js.indexOf("function filesystemBlock(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    function", from));
         assertThat(body).contains("thresholdPercent");
         assertThat(body).contains("aboveThreshold");
+        assertThat(body).contains("mountPoint");
+        assertThat(body).contains("size").contains("available");   // a percentage alone means nothing
         assertThat(body).as("the verdict is the server's").doesNotContain(" > ");
+    }
+
+    @Test
+    void changingAWatch_reReadsFromTheServer_ratherThanRecomputingTheVerdict() throws IOException {
+        // The breach verdict is the domain's. A new threshold has to come back FROM the server, or the pane
+        // and the alert email would each be deciding "under pressure" for themselves — and they would drift.
+        // The mount point travels in the body: a mount point is full of slashes.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function saveWatch(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function", from));
+        assertThat(body).contains("'PUT'");
+        assertThat(body).contains("/disk/watch");
+        assertThat(body).contains("mountPoint");             // in the body, never in the path
+        assertThat(body).contains("loadDisk(machine)");      // the server re-decides
+        assertThat(body).as("the verdict is never recomputed here").doesNotContain(" > ");
     }
 
     @Test
@@ -525,6 +557,7 @@ class ExplorerShellTest {
         String body = js.substring(from, js.indexOf("\n    }", from));
         assertThat(body).contains("error");        // the server's own message is kept, verbatim
         assertThat(body).doesNotContain("usedPercent: 0");
+        assertThat(body).doesNotContain("filesystems: []");   // never "this machine has no disks"
     }
 
     @Test

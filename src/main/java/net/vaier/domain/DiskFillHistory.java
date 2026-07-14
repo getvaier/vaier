@@ -9,7 +9,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * A short per-machine history of {@code df} readings, kept only to project the disk-fill trend. It is a
+ * A short per-filesystem history of {@code df} readings, kept only to project the disk-fill trend (#325: it
+ * was per-machine, back when Vaier read only the root filesystem). It is a
  * ring buffer capped at {@link #MAX_SAMPLES}: each new reading is appended and the oldest is evicted, so
  * the forecast always reflects the recent past rather than the whole uptime.
  *
@@ -44,10 +45,11 @@ public class DiskFillHistory {
     }
 
     /**
-     * Project a {@link DiskFillForecast} from the retained samples, or empty when there is nothing worth
-     * warning about (too few samples, too short a span, or a flat/draining slope).
+     * Project a {@link DiskFillForecast} for {@code mountPoint} on {@code machineName} from the retained
+     * samples, or empty when there is nothing worth warning about (too few samples, too short a span, or a
+     * flat/draining slope).
      */
-    public synchronized Optional<DiskFillForecast> forecast(String machineName) {
+    public synchronized Optional<DiskFillForecast> forecast(String machineName, String mountPoint) {
         List<Sample> snapshot = new ArrayList<>(samples);
         if (snapshot.size() < MIN_SAMPLES) {
             return Optional.empty();
@@ -85,6 +87,7 @@ public class DiskFillHistory {
         int currentPercent = snapshot.get(snapshot.size() - 1).percent();
         double runwayHours = (100.0 - currentPercent) / slopePercentPerHour;
         Duration runway = Duration.ofSeconds(Math.round(runwayHours * 3600.0));
-        return Optional.of(new DiskFillForecast(machineName, currentPercent, slopePercentPerHour, runway));
+        return Optional.of(new DiskFillForecast(machineName, mountPoint, currentPercent,
+            slopePercentPerHour, runway));
     }
 }
