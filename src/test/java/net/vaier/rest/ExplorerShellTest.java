@@ -128,10 +128,15 @@ class ExplorerShellTest {
 
     @Test
     void theShell_callsOnlyEndpointsThatAlreadyExist() throws IOException {
-        // Slice A is a new front for the API Vaier already has. A fetch to anything else would mean an
-        // endpoint was opened to make the tree work — which is exactly what this slice must not do.
-        List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me");
-        Matcher m = Pattern.compile("fetch\\('([^']+)'").matcher(read("explorer-shell.js"));
+        // The shell is a new front for the API Vaier already has. Slice A opened nothing; slice C opens
+        // exactly one endpoint (GET /machines/{machine}/disk), because the disk was the one thing Vaier
+        // computed on a schedule and never exposed. Everything else here — containers, published services,
+        // access rules — was already reachable, and a fetch to anything outside this list would mean an
+        // endpoint was invented to make the tree look finished.
+        List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
+                                       "/docker-services", "/published-services", "/access/services");
+        String js = read("explorer-shell.js");
+        Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
         while (m.find()) {
             found++;
@@ -282,8 +287,12 @@ class ExplorerShellTest {
         assertThat(js).contains("lan-servers-updated");
         assertThat(js).doesNotContain("setInterval");
         assertThat(js).doesNotContain("setTimeout");
-        // exactly one stream — a second EventSource would be a second connection for data already on the first
-        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(1);
+        // LAN liveness in particular still costs no second connection: it rides the vpn-peers stream that is
+        // already open. (Slice C adds a second EventSource for a *different* topic, published-services — the
+        // stream count itself is pinned by theShell_holdsExactlyTwoStreams below.)
+        int fleetStream = js.indexOf("new EventSource('/vpn/peers/events')");
+        assertThat(fleetStream).isPositive();
+        assertThat(js.indexOf("lan-servers-updated")).isGreaterThan(fleetStream);
     }
 
     // --- 12. slice B: directories are entries -----------------------------------------------------------
@@ -376,5 +385,254 @@ class ExplorerShellTest {
         assertThat(body).contains("childrenOf(");
         assertThat(body).as("the palette must never reach for the network").doesNotContain("fetch(")
             .doesNotContain("readDir(");
+    }
+
+    // --- 13. slice C: containers, services and disk are entries ----------------------------------------
+
+    @Test
+    void aMachineGrowsOnlyTheEntriesVaierCanActuallyReach() throws IOException {
+        // The tree must be honest about a machine rather than uniform. A machine with no SSH has no files,
+        // no shell and no disk; a machine that runs no Docker must not grow an empty `containers` entry that
+        // opens onto nothing. /machines already carries both facts (sshAccess, runsDocker) — the tree asks
+        // them, it does not guess.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("if (kind === 'machine') {");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n        }", from));
+
+        assertThat(body).contains("sshAccess");
+        assertThat(body).contains("runsDocker");
+        assertThat(body).contains("'files'").contains("'shell'").contains("'containers'")
+            .contains("'services'").contains("'disk'");
+    }
+
+    @Test
+    void noContainerVerbIsShipped_becauseNoEndpointBacksOne() throws IOException {
+        // The point of the slice, and the precedent #321 set: shipping a control dead is a lie about what
+        // works. DockerServiceRestController exposes only @GetMappings — Vaier cannot start, stop or restart
+        // a container, and cannot fetch its logs. So the Inspector shows what Vaier knows and offers nothing
+        // it cannot do. (Adding those endpoints is its own change, with its own security thinking.)
+        String js = read("explorer-shell.js");
+        for (String verb : List.of("Restart", "Stop", "Start container", "Logs", "/restart", "/stop",
+                                   "/start")) {
+            assertThat(js).as("a container verb (%s) with no endpoint behind it", verb).doesNotContain(verb);
+        }
+        // and nothing mutating is ever sent at a container
+        assertThat(js).doesNotContain("'/docker-services', {").doesNotContain("/containers/");
+    }
+
+    @Test
+    void theOnlyMutatingCallInTheShell_isTheUnpublishThatReallyExists() throws IOException {
+        // Exactly one verb ships in slice C, because exactly one is backed: DELETE /published-services/{dns}.
+        // Publishing (POST /publish) needs a form — subdomain, auth mode, path prefix, redirect — and stays
+        // on the Infrastructure bridge rather than being half-built here. This pins that promise: if a second
+        // mutating fetch ever appears in the shell, this test says so.
+        String js = read("explorer-shell.js");
+
+        Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);
+        List<String> methods = new java.util.ArrayList<>();
+        while (m.find()) {
+            methods.add(m.group(1));
+        }
+        assertThat(methods).as("the shell's mutating calls").containsExactly("DELETE");
+        assertThat(js).contains("/published-services/");
+
+        // and it asks before it does it — unpublishing tears down a route and a DNS record
+        int from = js.indexOf("async function unpublish(");
+        assertThat(from).isPositive();
+        assertThat(js.substring(from, js.indexOf("\n    }", from))).contains("confirm(");
+    }
+
+    @Test
+    void aPublishedService_isFiledUnderTheMachineItRunsOn_byTheRuleTheInfrastructurePageAlreadyUses()
+            throws IOException {
+        // A published service is one thing with three homes: a container on a machine, a Traefik route and a
+        // DNS record. Which machine it belongs to is decided exactly as vpn-peers.js decides it — a LAN
+        // service by its LAN server (falling back to the relay peer when no registered LAN server matches),
+        // and everything else by its host name, with the hub's own routes on the Vaier server. A second rule
+        // here would put the same service under two different machines in two different pages.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function machineOfService(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).contains("isLanService");
+        assertThat(body).contains("lanServerName").contains("hostName");
+        assertThat(body).contains("VAIER_SERVER");
+    }
+
+    @Test
+    void theInspectorForAService_saysWhereItsThreeHomesAre() throws IOException {
+        // The single namespace exists precisely to hold this relationship together: the route, the machine
+        // it is backed by, and the DNS record are three faces of one service. The Inspector names all three.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderService(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function", from));
+
+        assertThat(body).contains("dnsAddress");       // the DNS record
+        assertThat(body).contains("hostAddress");      // the backend it routes to
+        assertThat(body).contains("image");            // the container behind it
+    }
+
+    @Test
+    void serviceLiveness_arrivesOnTheStreamThatAlreadyCarriesIt_neverOnAPoll() throws IOException {
+        // published-services is an existing SSE topic: PublishingService, the controller and DockerEventListener
+        // all publish on it. The shell listens. It does not poll — that is a hard project rule, and it is why
+        // a second EventSource is right here and a setInterval never is.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("new EventSource('/published-services/events')");
+        assertThat(js).contains("service-updated");
+        assertThat(js).doesNotContain("setInterval");
+    }
+
+    @Test
+    void theShell_holdsExactlyTwoStreams_oneForTheFleetAndOneForItsServices() throws IOException {
+        // Slice A held one. Slice C adds the second, deliberately: `published-services` is a different topic
+        // on a different controller, and vpn-peers.js already holds both — so this is the shape the codebase
+        // already has, not a new one. Two is the ceiling: a third would mean a topic was invented rather than
+        // listened to.
+        String js = read("explorer-shell.js");
+        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(2);
+        assertThat(js).doesNotContain("setInterval");
+        assertThat(js).doesNotContain("setTimeout");
+    }
+
+    @Test
+    void aDisk_isReadWhenItIsLookedAt_andSaysWhatItIsJudgedAgainst() throws IOException {
+        // The one endpoint slice C adds. The threshold and the verdict come from the server (the domain's
+        // RemoteDiskUsage.isAbove, the same predicate the alert email is sent from) — the browser renders
+        // them, it never recomputes "under pressure" from the percentage.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("/disk");
+
+        int from = js.indexOf("function renderDisk(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function", from));
+        assertThat(body).contains("thresholdPercent");
+        assertThat(body).contains("aboveThreshold");
+        assertThat(body).as("the verdict is the server's").doesNotContain(" > ");
+    }
+
+    @Test
+    void aDiskThatCannotBeRead_saysSo_andIsNeverPaintedAsAnEmptyDisk() throws IOException {
+        // DiskUnreadableException -> 502 carrying its own sentence ("Vaier could not read the disk on ...").
+        // An asleep machine must read as "Vaier cannot tell", never as 0% — a disk Vaier failed to read is
+        // not a disk with room on it.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function loadDisk(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("error");        // the server's own message is kept, verbatim
+        assertThat(body).doesNotContain("usedPercent: 0");
+    }
+
+    @Test
+    void thePalette_findsContainersAndServices_becauseTheyAreEntriesNow() throws IOException {
+        // ⌘K walks childrenOf, so anything that is an entry is findable by its path. Containers and services
+        // are entries now, which is the whole claim of the slice: one namespace, one search.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function childrenOf(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).contains("'container'");
+        assertThat(body).contains("'service'");
+        // and childrenOf still never reaches for the network — the palette cannot start a fleet-wide scrape
+        assertThat(body).doesNotContain("fetch(").doesNotContain("await");
+    }
+
+    @Test
+    void aPeersContainers_areFiledUnderItsMachineName_notItsWireGuardDirectoryName() throws IOException {
+        // The three-way identity split, which slice A already met on the stats stream: /docker-services/peers
+        // keys containers by the peer's *id* — the WireGuard directory name ("apalveien5") — while the tree,
+        // /machines and every SSH lookup use the canonical machine name ("Apalveien 5"). Filing containers
+        // under the id would put them under a machine that does not exist in the tree, and every peer would
+        // show an empty `containers` entry while Vaier could see its containers perfectly well.
+        //
+        // The shell already holds the id -> name map (S.peerNames, built in loadFleet for exactly this
+        // reason). loadContainers must go through it.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function loadContainers(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("peer containers must be keyed by machine name, via the id -> name map")
+            .contains("peerNames");
+    }
+
+    @Test
+    void theInfrastructureBridge_survivesSliceC() throws IOException {
+        // The epic said slice C "retires" vpn-peers.html. It does not: that page still owns machine creation,
+        // the LAN scan, the world map, SSH credentials, setup scripts, allowed groups and discovered
+        // candidates. The bridge stays until parity is real — regressing function to make the tree look
+        // finished would be the worst trade in the epic.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("vpn-peers.html");
+        assertThat(Files.exists(STATIC.resolve("vpn-peers.html"))).isTrue();
+        assertThat(Files.exists(STATIC.resolve("vpn-peers.js"))).isTrue();
+    }
+
+    // --- 14. #326: a machine's file tree begins at its SFTP root ----------------------------------------
+    //
+    // The NAS chroots its SFTP subsystem into /volume1 while its exec channel sees the real root, so one
+    // directory has two names. The browser cannot deduce which — it has to be told, on every listing — and
+    // until it is told it must not assume "/". Both Explorers read directories through the one reader, so the
+    // invariant is asserted on all three assets.
+
+    @Test
+    void theOneDirectoryReader_asksForNoPathUntilTheMachineHasSaidWhereItsTreeBegins() throws IOException {
+        String js = read("explorer-listing.js");
+
+        // The old reader always sent ?path=..., so opening a machine meant sending "/". On the NAS "/" is the
+        // one path SFTP cannot answer — it is above the jail. Omitting the parameter is the question "where
+        // does this machine's tree begin?", and only the machine can answer it.
+        assertThat(js).doesNotContain("/files?path=");
+        assertThat(js).contains("path == null");
+    }
+
+    @Test
+    void theOneDirectoryReader_carriesTheRootAndTheResolvedPathBack_notABareArrayOfEntries() throws IOException {
+        String js = read("explorer-listing.js");
+
+        // The listing is now { root, path, entries }: a bare array had nowhere to carry the root, and a
+        // browser that assumed "/" opened the NAS on a path it cannot answer.
+        assertThat(js).contains("body.root");
+        assertThat(js).contains("body.path");
+        assertThat(js).contains("body.entries");
+    }
+
+    @Test
+    void theFileBrowser_opensAMachineAtItsOwnRoot_notAtASlashItAssumed() throws IOException {
+        String js = read("explorer.js");
+
+        // The backup file browser must keep working, and it must not keep the assumption that broke: no
+        // hardcoded root constant, and the root it paints its crumbs from is the one the machine reported.
+        assertThat(js).doesNotContain("const ROOT = '/'");
+        assertThat(js).contains("result.root");
+    }
+
+    @Test
+    void theShell_opensAMachineAtItsOwnRoot_andRemembersWhereEachMachinesTreeBegins() throws IOException {
+        String js = read("explorer-shell.js");
+
+        // A tree path under `files` is no longer just the machine path with a slash in front: it hangs off
+        // the machine's root. The old one-line assumption is gone, and the root is remembered per machine —
+        // one machine's jail must never be pinned onto another's paths.
+        assertThat(js).doesNotContain("const remotePath = (path) => '/' + path.slice(3).join('/');");
+        assertThat(js).contains("roots");
+        assertThat(js).contains("result.root");
+    }
+
+    @Test
+    void aPathOutsideTheJail_isShownAsTheServersOwnSentence_neverAsAnEmptyFolder() throws IOException {
+        // The reader already passes Vaier's ApiError message through verbatim, and that is exactly what must
+        // happen to "/volume2 is not reachable over SFTP...". No asset may turn a refusal into an empty
+        // listing — so neither Explorer is allowed to paint entries when the read came back an error.
+        String listing = read("explorer-listing.js");
+        assertThat(listing).contains("err.message");
+
+        assertThat(read("explorer.js")).contains("result.error");
+        assertThat(read("explorer-shell.js")).contains("entry.error");
     }
 }

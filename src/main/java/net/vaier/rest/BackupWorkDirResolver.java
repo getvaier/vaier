@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.domain.CommandResult;
+import net.vaier.domain.SshHome;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -35,8 +36,14 @@ public class BackupWorkDirResolver {
     /** Always writable by any SSH user; used when {@code $HOME} cannot be resolved. */
     static final String FALLBACK_WORK_DIR = "/tmp/vaier-backup";
 
-    /** Prints {@code $HOME} with {@code printf %s} — no trailing newline — so the resolved path is exact. */
-    static final String HOME_PROBE = "printf %s \"$HOME\"";
+    /**
+     * The one {@code $HOME} probe, owned by the domain ({@link SshHome}) rather than spelled out here.
+     *
+     * <p>The Explorer asks a machine the same question, to work out where its SFTP subsystem is rooted (#326).
+     * Two spellings of one probe would be two ways of reaching a host that could quietly drift apart — and
+     * Vaier has been bitten before by code paths that disagreed about a machine.
+     */
+    static final String HOME_PROBE = SshHome.PROBE_COMMAND;
 
     private final RunRemoteCommandUseCase remoteCommand;
 
@@ -81,12 +88,12 @@ public class BackupWorkDirResolver {
         }
         try {
             CommandResult result = remoteCommand.run(machineName, HOME_PROBE);
-            if (!result.timedOut() && result.exitCode() == 0 && result.stdout() != null) {
-                String home = result.stdout().strip();
-                if (!home.isBlank() && home.startsWith("/")) {
-                    homeCache.put(machineName, home);
-                    return java.util.Optional.of(home);
-                }
+            // What counts as a usable $HOME is the domain's rule, held once on SshHome: a probe that timed
+            // out, exited non-zero, or answered blank or relative has told Vaier nothing about this machine.
+            java.util.Optional<String> home = SshHome.in(result);
+            if (home.isPresent()) {
+                homeCache.put(machineName, home.get());
+                return home;
             }
         } catch (Exception e) {
             log.debug("Could not resolve $HOME on {} for backup work dir: {}",

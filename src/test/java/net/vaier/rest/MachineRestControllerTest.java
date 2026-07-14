@@ -2,6 +2,8 @@ package net.vaier.rest;
 
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
+import net.vaier.application.GetMachineDiskUsageUseCase;
+import net.vaier.application.GetMachineDiskUsageUseCase.MachineDiskUsageUco;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
@@ -33,6 +35,7 @@ class MachineRestControllerTest {
     @Mock SetMachineSshAccessUseCase setMachineSshAccessUseCase;
     @Mock GetHostCredentialUseCase getHostCredentialUseCase;
     @Mock ClearHostKeyUseCase clearHostKeyUseCase;
+    @Mock GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
 
     @InjectMocks MachineRestController controller;
 
@@ -144,5 +147,33 @@ class MachineRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(clearHostKeyUseCase).clearHostKey("nas");
+    }
+
+    // --- a machine's disk (#323 slice C) ---
+    //
+    // The one endpoint slice C adds. It is a sibling of /machines/{machine}/files: a non-whitelisted path
+    // under /machines, so it sits behind the admin auth chain automatically — reading a machine's disk is
+    // never anonymous. (The whitelist is an explicit Path() list on the vaier-public Traefik router in
+    // docker-compose.yml; nothing under /machines is on it.)
+
+    @Test
+    void disk_reportsTheUsageAndTheThresholdItIsJudgedAgainst() {
+        when(getMachineDiskUsageUseCase.getDiskUsage("Apalveien 5"))
+            .thenReturn(new MachineDiskUsageUco("Apalveien 5", 63, 80, false));
+
+        var response = controller.disk("Apalveien 5");
+
+        assertThat(response.machine()).isEqualTo("Apalveien 5");
+        assertThat(response.usedPercent()).isEqualTo(63);
+        assertThat(response.thresholdPercent()).isEqualTo(80);
+        assertThat(response.aboveThreshold()).isFalse();
+    }
+
+    @Test
+    void disk_carriesTheDomainsOwnPressureVerdict_theBrowserNeverRecomputesIt() {
+        when(getMachineDiskUsageUseCase.getDiskUsage("Colina 27"))
+            .thenReturn(new MachineDiskUsageUco("Colina 27", 91, 80, true));
+
+        assertThat(controller.disk("Colina 27").aboveThreshold()).isTrue();
     }
 }

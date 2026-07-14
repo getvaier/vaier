@@ -19,6 +19,19 @@ import java.util.Optional;
 public record RemoteDiskUsage(String machineName, int usedPercent) {
 
     /**
+     * {@code df -P /} — the command a disk reading is taken with. POSIX ({@code -P}) output guarantees a
+     * single, non-wrapping data row with a stable {@code Capacity} (Use%) column even for long device
+     * names, and scoping to {@code /} keeps the result to the root filesystem so there is exactly one row
+     * to parse.
+     *
+     * <p>It lives here, next to {@link #parse}, because how a disk reading is <em>taken</em> and how it is
+     * <em>read</em> are one decision: change the command and the parser must change with it. The scheduled
+     * watcher and the on-demand read share this constant, so the alert email and the Explorer can never
+     * end up measuring two different things.
+     */
+    public static final String DF_COMMAND = "df -P /";
+
+    /**
      * Read the used percentage from {@code df -P /} output. POSIX ({@code -P}) output is a header row
      * followed by one data row per filesystem, with a {@code Capacity} column rendered as {@code NN%}.
      * Returns empty when the output is blank, header-only, or has no percentage column (an unreachable

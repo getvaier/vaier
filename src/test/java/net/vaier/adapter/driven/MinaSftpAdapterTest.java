@@ -7,8 +7,10 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SshAuthException;
 import net.vaier.domain.SshConnectException;
+import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
+import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory;
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
 import org.apache.sshd.sftp.server.SftpSubsystemFactory;
@@ -50,6 +52,13 @@ class MinaSftpAdapterTest {
         server.setPasswordAuthenticator((u, p, s) -> "test".equals(u) && "secret".equals(p));
         server.start();
         return server.getPort();
+    }
+
+    /** The NAS's shape: an SFTP subsystem chrooted into {@code remoteRoot}, with no jail on the exec channel. */
+    private int startChrootedServer() throws Exception {
+        int port = startServer();
+        server.setFileSystemFactory(new VirtualFileSystemFactory(remoteRoot.toAbsolutePath()));
+        return port;
     }
 
     private SshTarget target(int port, String password, String pinnedFingerprint) {
@@ -157,6 +166,80 @@ class MinaSftpAdapterTest {
         } finally {
             Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
         }
+    }
+
+    // --- where the SFTP subsystem thinks the filesystem begins (#326) ---------------------------------
+
+    @Test
+    void home_reportsThePathTheSftpChannelCanonicalisesDotTo() throws Exception {
+        int port = startServer();
+
+        // Half of the pair of answers SftpRoot is resolved from: what SFTP calls the SSH user's home. On an
+        // unjailed server that is a real absolute path on the machine, and the exec channel would say the same.
+        assertThat(adapter.home(target(port))).startsWith("/");
+    }
+
+    @Test
+    void home_onAChrootedSftpSubsystem_reportsTheHomeAsTheJailSeesIt_notAsTheMachineDoes() throws Exception {
+        // The NAS, reproduced: DSM chroots its SFTP subsystem to /volume1 while leaving the exec channel on
+        // the real root. Here the jail is the temp dir, so SFTP calls the user's home "/" where the machine
+        // itself calls it <tempdir>. Those two answers are exactly what SftpRoot.resolve takes the difference
+        // of — and without this one, Vaier has no way to ask the jailed half of the machine anything.
+        int port = startChrootedServer();
+        Files.createDirectory(remoteRoot.resolve("homes"));
+
+        assertThat(adapter.home(target(port))).isEqualTo("/");
+
+        // and the listing is jail-relative too — /homes here, not <tempdir>/homes. This is the bug #326 fixes:
+        // the same directory has two coordinates, and only the exec channel's one is the machine's own.
+        assertThat(adapter.list(target(port), "/").entries()).extracting(FileEntry::path).containsExactly("/homes");
+    }
+
+    @Test
+    void firstDirectory_findsTheHomeInsideTheJail_whenTheJailWillNotSayWhereItIs() throws Exception {
+        // The NAS's real shape, and the reason home() alone is not enough: a chrooted subsystem canonicalises
+        // "." to "/" — the jail root itself — which says nothing about where that root is on the machine. So
+        // the home is *found* instead: the machine says its home is physically <tempdir>/homes/geir, and the
+        // jail is asked which of that path's names it can see. It sees /homes/geir, and the difference is the
+        // jail.
+        int port = startChrootedServer();
+        Files.createDirectories(remoteRoot.resolve("homes/geir"));
+        String trueHome = remoteRoot.toAbsolutePath() + "/homes/geir";
+
+        assertThat(adapter.firstDirectory(target(port), SftpRoot.jailCandidates(trueHome)))
+            .contains("/homes/geir");
+
+        // And that is exactly what the domain takes the difference of.
+        assertThat(SftpRoot.resolve(trueHome, "/homes/geir").orElseThrow().path())
+            .isEqualTo(remoteRoot.toAbsolutePath().toString());
+    }
+
+    @Test
+    void firstDirectory_onAnUnjailedServer_matchesTheTrueHomeItself_soNothingIsEverInvented() throws Exception {
+        // The safety property, end to end: with no jail, the very first candidate — the machine's own home —
+        // is visible, so the search stops there and resolves to NONE. An ordinary machine cannot be handed a
+        // jail it does not have.
+        int port = startServer();
+        Files.createDirectories(remoteRoot.resolve("homes/geir"));
+        String trueHome = remoteRoot.toAbsolutePath() + "/homes/geir";
+
+        assertThat(adapter.firstDirectory(target(port), SftpRoot.jailCandidates(trueHome))).contains(trueHome);
+        assertThat(SftpRoot.resolve(trueHome, trueHome).orElseThrow()).isEqualTo(SftpRoot.NONE);
+    }
+
+    @Test
+    void firstDirectory_whenTheJailCanSeeNoneOfThem_answersNothing_ratherThanAGuess() throws Exception {
+        int port = startChrootedServer();
+
+        assertThat(adapter.firstDirectory(target(port), List.of("/nowhere/at/all", "/at/all"))).isEmpty();
+    }
+
+    @Test
+    void firstDirectory_ignoresAFileOfTheRightName_becauseAHomeIsADirectory() throws Exception {
+        int port = startChrootedServer();
+        Files.writeString(remoteRoot.resolve("geir"), "not a home");
+
+        assertThat(adapter.firstDirectory(target(port), List.of("/geir"))).isEmpty();
     }
 
     @Test

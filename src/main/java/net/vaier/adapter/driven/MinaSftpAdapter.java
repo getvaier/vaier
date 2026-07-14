@@ -66,6 +66,66 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
     }
 
     /**
+     * What the SFTP subsystem canonicalises {@code .} to on first connect — the SSH user's home, in the
+     * coordinates SFTP itself speaks. On a chrooted subsystem that is a path inside the jail, and comparing
+     * it with the exec channel's {@code $HOME} is what reveals the jail ({@link net.vaier.domain.SftpRoot}).
+     *
+     * <p>Translation only: the adapter asks the protocol its own question and hands back the string. What the
+     * answer <em>means</em> — whether this machine is jailed, and where — is the domain's to decide.
+     */
+    @Override
+    public String home(SshTarget target) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            String home = sftp.canonicalPath(SELF);
+            log.debug("SFTP on {} canonicalises \".\" to {}", target.host(), home);
+            return home;
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, SELF);
+        }
+    }
+
+    /**
+     * Asks the SFTP subsystem, over one connection, which of {@code paths} it can see as a directory — and
+     * stops at the first. Translation only: the candidates and their order are the domain's
+     * ({@link net.vaier.domain.SftpRoot#jailCandidates}), and what a hit <em>means</em> is the domain's too.
+     *
+     * <p>One session for the whole search, not one per candidate: a machine on the far side of a VPN answers
+     * a connect in the better part of a second, and a home three directories deep would otherwise cost three
+     * of them. A candidate that is absent, or that the SSH user may not stat, is simply not a match — the
+     * search moves on rather than failing, because a machine legitimately cannot see most of the names asked
+     * about (that is the entire point of asking).
+     */
+    @Override
+    public java.util.Optional<String> firstDirectory(SshTarget target, List<String> paths) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            for (String path : paths) {
+                if (isDirectory(sftp, path)) {
+                    log.debug("SFTP on {} can see {}", target.host(), path);
+                    return java.util.Optional.of(path);
+                }
+            }
+            return java.util.Optional.empty();
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, String.join(", ", paths));
+        }
+    }
+
+    /** Whether the SFTP subsystem sees a directory at {@code path}. Anything it cannot stat is simply not one. */
+    private static boolean isDirectory(SftpClient sftp, String path) {
+        try {
+            return sftp.stat(path).isDirectory();
+        } catch (IOException | UncheckedIOException e) {
+            return false;
+        }
+    }
+
+    /**
      * The remote's answer, as the domain sees it. A directory that is not there and a directory the SSH user
      * may not read are <b>ordinary states of a fleet</b>, not faults — Vaier's SSH users are not root on most
      * machines, so much of a filesystem is legitimately unreadable. Collapsing them into a transport failure

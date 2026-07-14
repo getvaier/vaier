@@ -38,28 +38,38 @@
     function createBrowser() {
         let inFlight = 0;
 
-        // Resolves to { entries }, { error } — or { stale: true } when a newer listing has been asked for
-        // since, which the caller must simply drop on the floor.
+        // Resolves to { root, path, entries }, { error } — or { stale: true } when a newer listing has been
+        // asked for since, which the caller must simply drop on the floor.
+        //
+        // `path` may be null, and that is a question rather than a default: "where does this machine's tree
+        // begin?" (#326). A machine whose SFTP subsystem is chrooted — the NAS is jailed into /volume1 —
+        // cannot be asked about "/" at all, so the reader must never invent one. The answer comes back with
+        // the root that resolved it, and the caller learns where it is standing from the reply.
         async function list(machine, path) {
             const ticket = ++inFlight;
+            const where = path == null ? 'the file root' : path;
             try {
-                const res = await fetch('/machines/' + encodeURIComponent(machine)
-                    + '/files?path=' + encodeURIComponent(path));
+                const res = await fetch('/machines/' + encodeURIComponent(machine) + '/files'
+                    + (path == null ? '' : '?path=' + encodeURIComponent(path)));
                 if (ticket !== inFlight) return { stale: true };
 
                 if (!res.ok) {
                     // Vaier answers a failure with an ApiError envelope, and its message is already written
-                    // for the operator — "Not allowed to read /root as geir." says more than any status code
-                    // could. Pass it through verbatim; only a silent server gets a message of ours.
+                    // for the operator — "Not allowed to read /root as geir.", or "/volume2 is not reachable
+                    // over SFTP; this machine's SFTP service is rooted at /volume1." — which says more than
+                    // any status code could. Pass it through verbatim; only a silent server gets a message of
+                    // ours. A refusal is never painted as an empty folder.
                     const err = await res.json().catch(() => null);
                     if (ticket !== inFlight) return { stale: true };
                     return { error: (err && err.message)
-                        || 'Could not list ' + path + ' on ' + machine + '.' };
+                        || 'Could not list ' + where + ' on ' + machine + '.' };
                 }
 
-                const entries = await res.json();
+                const body = await res.json();
                 if (ticket !== inFlight) return { stale: true };
-                return { entries: entries };
+                // The entries are at the machine's TRUE coordinates — the ones df, borg and the operator's own
+                // terminal use — and `root` says where its tree begins.
+                return { root: body.root, path: body.path, entries: body.entries };
             } catch (e) {
                 if (ticket !== inFlight) return { stale: true };
                 return { error: 'Could not reach ' + machine + '.' };

@@ -44,11 +44,11 @@ import java.util.Optional;
 public class RemoteDiskWatcher {
 
     /**
-     * {@code df -P /} — POSIX ({@code -P}) output guarantees a single, non-wrapping data row with a
-     * stable {@code Capacity} (Use%) column even for long device names, and scoping to {@code /} keeps
-     * the result to the root filesystem so there is exactly one row to parse.
+     * The command a disk reading is taken with. It lives on {@link RemoteDiskUsage#DF_COMMAND}, next to the
+     * parser that reads it: the scheduled watcher and the Explorer's on-demand read (#323) share it, so the
+     * alert email and the tree can never end up measuring two different things.
      */
-    static final String DF_COMMAND = "df -P /";
+    static final String DF_COMMAND = RemoteDiskUsage.DF_COMMAND;
 
     private final GetMachinesUseCase machines;
     private final GetHostCredentialUseCase credentials;

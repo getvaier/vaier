@@ -358,7 +358,7 @@ Vaier ships an SMTP notifier that carries Vaier's admin alert emails (machine up
 **Host-monitoring follow-ups (backlog):**
 - Monitor host CPU and memory pressure alongside disk, with their own thresholds and alerts.
 - Per-mount monitoring (not just the host root) — e.g. a separate data volume — each with its own threshold.
-- An in-UI disk widget (a usage gauge on the Machines page / Settings) so the operator sees current host disk usage without waiting for an alert email — could surface the **disk-fill forecast** (current runway + fill rate) alongside the level gauge.
+- ~~An in-UI disk widget so the operator sees current disk usage without waiting for an alert email~~ — the **level** half shipped in [#323](https://github.com/getvaier/vaier/issues/323) slice C: a machine's **disk** entry in the **Explorer** reads `df` on demand (`GET /machines/{machine}/disk`) and renders `usedPercent` against the **disk alert threshold**, with the domain's own `isAbove` verdict. Still open: surfacing the **disk-fill forecast** (**runway** + fill rate) beside it — that needs a *history* of samples, which today is private state inside the scheduled `RemoteDiskWatcher`'s `RemoteDiskForecastTracker`, so a single on-demand reading cannot produce it.
 - Make the **forecast horizon** configurable (it is a fixed 24h constant today), and/or expose the per-machine fill-rate history as a trend sparkline.
 
 ---
@@ -1033,14 +1033,55 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
   arrives from the browser and is normalised in the domain **before** any machine is resolved or any
   connection opened — a hostile path is a `400`, never a connection.
 
+**Delivered after slice 1 — the SFTP root ✅ ([#326](https://github.com/getvaier/vaier/issues/326)):**
+
+A file's coordinate is *(machine, path, point in time)*, and on the NAS that was quietly false. DSM chroots
+its SFTP subsystem into `/volume1` but not its exec channel, so the Explorer called geir's home `/homes/geir`
+while `df`, borg and the operator's own terminal all called it `/volume1/homes/geir` — one directory, two
+coordinates. Everything downstream would have inherited the lie: slice 4's coverage compares a **backup
+job**'s source paths against the tree and would have reported a backed-up directory as **uncovered**.
+
+- **`domain.SftpRoot`** — the value object, and the decision. The jail is the *difference* between the two
+  channels' names for the SSH user's home: when the SFTP name is a tail of the machine's own name, what is
+  left in front of it is the jail. It maps both ways (`toJailPath` down into the jail for the SFTP call,
+  `anchor` back out onto the machine's true paths), and **refuses to guess** — two homes that do not line up
+  resolve to `NONE`, which changes nothing about a machine's paths. Not knowing is safe; a wrong prefix would
+  silently corrupt every path on the machine, in both directions.
+- **The NAS answers neither probe the way the issue predicted**, which is worth recording because it shaped
+  the design:
+  - `$HOME` over the exec channel is `/var/services/homes/geir` — a DSM **symlink** onto the physical
+    `/volume1/homes/geir`. A chroot is a *physical* subtree, so an aliased home can never line up with one.
+    Hence `SshHome.PHYSICAL_PROBE_COMMAND` (`cd "$HOME" && pwd -P`), used for root resolution only; the
+    backup work dir keeps asking the plain way, since it only needs to *reach* the home.
+  - SFTP's `realpath(".")` is **`/`** — the jail root itself, which says nothing about *where* that root is.
+    So when the direct answer does not line up, the home is **located** instead: `SftpRoot.jailCandidates`
+    names the paths a jail could know the home by (the home itself, then each shorter tail, never `/`), and
+    the SFTP subsystem is asked which it can see. **The true home is always the first candidate**, so an
+    unjailed machine matches immediately and can never be handed a jail it does not have — the property that
+    makes the search safe to run fleet-wide.
+- **`ForResolvingSftpRoots` + `CachingSftpRootAdapter`** — the exec home over the existing
+  `ForRunningSshCommands` (no third way to reach a host) and the SFTP half over `ForBrowsingRemoteFiles`
+  (`home`, plus `firstDirectory` for the search, which probes all candidates over **one** connection).
+  Resolved once and cached: a root does not move, and without the cache every directory clicked would cost
+  extra SSH connections to a machine behind a VPN. A machine that cannot be *reached* is not cached — a host
+  that was merely asleep must not be branded rootless for the life of the process. **`domain.SshHome`** owns
+  the `$HOME` probes, which `BackupWorkDirResolver` now shares rather than spelling out a second time.
+- **The Explorer speaks the machine's coordinates.** `GET /machines/{machine}/files` now answers
+  `{root, path, entries}` rather than a bare array — an array had nowhere to carry the root, and the browser
+  cannot deduce it. Omitting `path` asks *where does this machine's tree begin?*, since a chrooted machine
+  cannot be asked about `/` at all. A path above the root (`/volume2` on the NAS) is a `400` carrying its own
+  sentence — **never an empty directory**, and never the jail's contents under another path's name.
+
 **Notes / open risks:**
 - **`borg mount` is still unverified on the fleet** — slice 3's archive browsing rests on it (`/dev/fuse`,
   `fusermount`, borg built with FUSE). Must be confirmed on Apalveien 5 and Colina 27 before slice 3 is
   designed; a host that can't mount falls back to `borg list`.
-- **Browsing is not confined to a subtree.** There is no chroot: an operator can browse anywhere the
-  machine's SSH user can read, by design (the fleet's Docker volumes live outside any one home directory).
-  The SSH user's own permissions are the boundary, so path validation exists to reject *nonsense* paths,
-  not to jail a legitimate one.
+- **Browsing is not confined to a subtree by Vaier** — but the *machine* may confine it. There is no chroot
+  of Vaier's making: an operator can browse anywhere the machine's SSH user can read, by design (the fleet's
+  Docker volumes live outside any one home directory), and the SSH user's own permissions are the boundary.
+  Where an SSH daemon chroots its own SFTP subsystem, that jail is real and Vaier maps around it (the **SFTP
+  root**, above); what lies above it cannot be browsed at all, however readable it is over SSH. Path
+  validation still exists to reject *nonsense* paths, not to jail a legitimate one.
 - **A symlink to a directory currently lists as a file** (the adapter reports what `readdir` says without
   a second `stat` round-trip), so it can't be entered. Worth revisiting when the UI lands.
 
@@ -1099,13 +1140,79 @@ Three things this buys that a set of pages structurally cannot:
   green dot there would be a claim Vaier cannot make. The **Vaier server** is up because it is serving the
   page; it is never probed. Refreshes on the `lan-servers-updated` event **already published on the
   `vpn-peers` topic** the shell is subscribed to — no new endpoint, no new topic, no poll.
-- [ ] **C — Machines.** Containers, published services and disk mounted under each machine. Retires
-  `vpn-peers.html` — the bulk of the epic's lift lives here.
+- [x] **C — Machines ✅.** A machine's **containers**, **published services** and **disk** are **entries**, so
+  ⌘K finds them and the Inspector renders them. The machine grows them **conditionally and honestly** — it is
+  not a uniform template: `files` + `shell` only with **SSH access**, `containers` only when it **runs Docker**,
+  `services` only when something is actually published from it, `disk` only with SSH access. Both facts already
+  travel on `GET /machines` (`sshAccess`, `runsDocker`), so the tree *asks* rather than assumes, and never
+  opens an entry onto nothing.
+  **Containers are read-only, deliberately.** `DockerServiceRestController` is `@GetMapping`s only: Vaier has
+  no endpoint to start, stop or restart a container, and none to fetch logs. So **no container verb ships** —
+  the Inspector shows image, version, state, ports, networks and container id, and offers nothing Vaier cannot
+  honour. A control that looks like a verb and does nothing is a lie about what works; a test pins the absence
+  (`noContainerVerbIsShipped_becauseNoEndpointBacksOne`). Container control is its own change with its own
+  security thinking (see backlog).
+  **A published service is one thing with three homes** — a container on a machine, a Traefik route, a DNS
+  record — and the Inspector says so: DNS record + **DNS state**, route state, backend, **path prefix**, the
+  backing container's image/version, **auth mode** and **allowed groups** (read from `/access/services`). Which
+  machine a service is filed under is decided by the rule `vpn-peers.js` already uses (a **LAN service** by its
+  LAN server, falling back to the relay peer; the hub's own routes on the **Vaier server**; everything else by
+  host) — a second rule would file one service under two machines on two pages. **One verb ships**, because one
+  is backed: **Unpublish** (`DELETE /published-services/{dnsName}`, path-prefix-aware), behind a confirmation,
+  since it tears down a route and a DNS record. **Publishing is deliberately not in the tree** — it needs a
+  subdomain / auth-mode / backend form and stays on Infrastructure rather than being half-built here.
+  **Liveness, still never polled.** The shell now holds a **second** `EventSource`, on the existing
+  `published-services` topic (`service-updated`, `publish-traefik-active`, `publish-rolled-back`) — a different
+  topic on a different controller, and the shape `vpn-peers.js` already has. Two streams is the ceiling; a test
+  pins the count. The containers scrape is fired unawaited at init (so ⌘K can find a container nobody went
+  looking for) and re-read on that stream; services are awaited (the tree cannot be honest about a `services`
+  entry before it knows there is one); a disk is read only when its entry is looked at — a fleet-wide `df` on
+  page load would wake every sleeping machine to answer a question nobody asked.
+  **Exactly one new endpoint: `GET /machines/{machine}/disk`.** `RemoteDiskWatcher` has taken this reading on a
+  schedule since the disk alerts shipped and only ever *emailed* about it — the number Vaier already knew could
+  not be looked at. `GetMachineDiskUsageUseCase` on `MachineService` runs `df -P /` over the same
+  `ForRunningSshCommands` exec port every other **remote command** uses (pinning an unpinned host on first use
+  like every other SSH path), and returns `usedPercent`, `thresholdPercent` and `aboveThreshold` — **the
+  domain's own verdict** (`RemoteDiskUsage.isAbove`, the same predicate the alert email is sent from), so the
+  browser paints "under pressure" and never re-decides it. It is a sibling of `/machines/{machine}/files`: a
+  non-whitelisted path under `/machines`, so it is behind the admin auth chain — reading a machine's disk is
+  never anonymous. The `df -P /` string moved onto `RemoteDiskUsage.DF_COMMAND`, next to the parser that reads
+  it, so the watcher and the on-demand read can never measure two different things. A disk that cannot be read
+  throws the new `DiskUnreadableException` → **502** carrying its own sentence ("Vaier could not read the disk
+  on X. The machine may be asleep…") rather than falling through to a generic 500 — and is **never rendered as
+  0%**: a disk Vaier failed to read is not a disk with room on it. The **disk forecast / runway is deliberately
+  not exposed** — `RemoteDiskForecastTracker` needs a *history* of samples and is private state inside the
+  scheduled watcher; a single on-demand reading cannot produce a trend (see backlog).
+  **The Infrastructure bridge stays.** The epic optimistically said this slice retires `vpn-peers.html`. It does
+  not, and a test pins that too: that page still owns machine creation, the LAN scan, the world map, SSH
+  credentials, setup scripts, allowed groups and discovered candidates. Regressing function to make the tree
+  look finished would be the worst trade in the epic — the bridge goes when parity is real, not before.
+  Refactor along the way: trust-on-first-use had been copied into `TerminalService` and `ExplorerService`; the
+  third copy (the disk read) is what made it worth having exactly one, so the rule now lives on
+  `SshTarget.pinOnFirstUse` and every SSH path (shell, exec, SFTP, disk) pins from it.
 - [ ] **D — Time.** The archive rail (§6.20 slice 3). Scrubbing back re-lights the Inspector in the past's
   palette (`data-past`, defined in slice A and unused until now); the past has no liveness to report, so the
   status dots go out. Restore is not a feature — it is a paste into the present.
 - [ ] **E — The rest.** DNS, access, settings. `admin.html` and the iframes are deleted, and the bridge with
   them.
+
+**Backlog (deliberately deferred out of slice C):**
+- **Container control endpoints** — start / stop / restart a container, and read its logs. Vaier has none: the
+  Docker adapters read, and the **docker socket proxy**'s allowlist is what stands between Vaier and a fleet-wide
+  remote-exec surface. This is its own change with its own security thinking (who may restart what, whether it
+  goes through the socket proxy or the machine's SSH, what an audit trail looks like) — not a button bolted onto
+  the Inspector. Until it exists, the Inspector says plainly that the machine's **shell** is where that is done.
+- **Publish from the tree.** Unpublish shipped because `DELETE /published-services/{dnsName}` exists; publishing
+  needs a form (subdomain, **auth mode**, **path prefix**, backend, root redirect) and the **publishable
+  service** candidate feed behind it. It stays on **Infrastructure** until the tree can host that form honestly.
+- **The disk forecast in the Inspector.** `GET /machines/{machine}/disk` reports level, not trend: the
+  **runway** and fill rate come from `RemoteDiskForecastTracker`, which needs a *history* of samples and is
+  private state inside the scheduled `RemoteDiskWatcher`. Exposing **runway** means exposing that history (a
+  read port onto the tracker, or persisting the samples) — a real design decision, not a field to add. Folds
+  together with the host-monitoring backlog item in §6.9.
+- **Retiring the Infrastructure bridge.** Only once the tree reaches parity: machine creation, the **LAN
+  scanner**, the map, **host credentials**, backup setup scripts, **allowed groups**, and the discovered-candidate
+  → publish flow all still live only on `vpn-peers.html`.
 
 **Decided up front — where the tree does not fit:**
 - **Wizards.** Fleet backup is a guided flow; a tree cannot teach. It stays a flow, rendered as the Inspector

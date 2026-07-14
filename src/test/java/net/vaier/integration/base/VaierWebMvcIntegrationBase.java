@@ -244,6 +244,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected ClearHostKeyUseCase clearHostKeyUseCase;
 
+    @MockBean
+    protected GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
+
     // --- Host credential (web terminal, credential vault) use cases ---
     @MockBean
     protected SaveHostCredentialUseCase saveHostCredentialUseCase;

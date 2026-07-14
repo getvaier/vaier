@@ -346,6 +346,72 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-note.is-error { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .06); }
 .ex-note code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
 
+/* --- containers and services (#323 slice C) --------------------------------------------------------- */
+
+/* A container and a published service are listed on the same surface a directory is, because in one
+   namespace they are the same kind of thing: an entry with a coordinate. Only the columns differ — an image
+   and a backend address need the room a file size does not. */
+.ex-listing.is-wide .ex-lhead,
+.ex-listing.is-wide .ex-lrow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) 108px; }
+.ex-listing.is-wide .ex-lmeta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ex-listing.is-wide .ex-lmeta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The only destructive verb in the shell. It stays quiet until reached for — a control that shouts before
+   it is needed teaches the operator to ignore it. */
+.ex-btn.is-danger:hover {
+    color: var(--red);
+    border-color: var(--red);
+    background: rgba(244, 135, 113, .08);
+}
+
+/* --- the disk meter --------------------------------------------------------------------------------- */
+
+/* The one new figure in the shell. The bar is how full the disk is; the tick is what that is being judged
+   against — the alert threshold the domain compares to, drawn where it actually falls. Without it the
+   operator would have to do the comparison in their head, and that comparison is a decision Vaier has
+   already made (RemoteDiskUsage.isAbove) and emails about. */
+.ex-meter {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 26px;
+    max-width: 620px;
+    margin-bottom: 18px;
+    padding: 0 10px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    overflow: hidden;
+}
+.ex-meter-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, rgba(78, 201, 176, .18), rgba(78, 201, 176, .34));
+    border-right: 1px solid var(--green);
+    transition: width .4s ease;
+}
+.ex-meter.is-over .ex-meter-fill {
+    background: linear-gradient(90deg, rgba(244, 135, 113, .18), rgba(244, 135, 113, .36));
+    border-right-color: var(--red);
+}
+.ex-meter-tick {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 0;
+    border-left: 1px dashed var(--text-dim);
+}
+.ex-meter-label {
+    position: relative;
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+    .ex-meter-fill { transition: none; }
+}
+
 /* --- the bridge: a page not yet ported, framed whole ------------------------------------------------ */
 
 .ex-bridge {

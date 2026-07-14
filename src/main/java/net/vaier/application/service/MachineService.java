@@ -1,13 +1,19 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.GetMachineDiskUsageUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.config.ConfigResolver;
+import net.vaier.domain.CommandResult;
+import net.vaier.domain.DiskUnreadableException;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.RemoteDiskUsage;
+import net.vaier.domain.SshTarget;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingLanServers;
@@ -19,6 +25,9 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import net.vaier.domain.port.ForResolvingSshTargets;
+import net.vaier.domain.port.ForRunningSshCommands;
+import net.vaier.domain.port.ForTrackingHostKeys;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.stereotype.Service;
 
@@ -31,7 +40,7 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase,
-    SetMachineSshAccessUseCase, ForGettingMachines {
+    SetMachineSshAccessUseCase, GetMachineDiskUsageUseCase, ForGettingMachines {
 
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingVpnClients forGettingVpnClients;
@@ -40,6 +49,10 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForPersistingLanServers forPersistingLanServers;
     private final ForPersistingAppConfiguration forPersistingAppConfiguration;
+    private final ForResolvingSshTargets forResolvingSshTargets;
+    private final ForRunningSshCommands forRunningSshCommands;
+    private final ForTrackingHostKeys forTrackingHostKeys;
+    private final ConfigResolver configResolver;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
                           ForGettingVpnClients forGettingVpnClients,
@@ -47,7 +60,11 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                           ForResolvingServerLanCidr forResolvingServerLanCidr,
                           ForUpdatingPeerConfigurations forUpdatingPeerConfigurations,
                           ForPersistingLanServers forPersistingLanServers,
-                          ForPersistingAppConfiguration forPersistingAppConfiguration) {
+                          ForPersistingAppConfiguration forPersistingAppConfiguration,
+                          ForResolvingSshTargets forResolvingSshTargets,
+                          ForRunningSshCommands forRunningSshCommands,
+                          ForTrackingHostKeys forTrackingHostKeys,
+                          ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forGettingLanServers = forGettingLanServers;
@@ -55,6 +72,43 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         this.forUpdatingPeerConfigurations = forUpdatingPeerConfigurations;
         this.forPersistingLanServers = forPersistingLanServers;
         this.forPersistingAppConfiguration = forPersistingAppConfiguration;
+        this.forResolvingSshTargets = forResolvingSshTargets;
+        this.forRunningSshCommands = forRunningSshCommands;
+        this.forTrackingHostKeys = forTrackingHostKeys;
+        this.configResolver = configResolver;
+    }
+
+    /**
+     * A machine's disk, read now (#323 slice C). The scheduled {@code RemoteDiskWatcher} has taken this
+     * same reading for as long as the disk alerts have existed, but it only ever emailed about it — so the
+     * number Vaier already knew could not be looked at.
+     *
+     * <p>Orchestration only: the driven ports resolve the machine to an SSH target and run the command,
+     * and the domain decides everything — {@link RemoteDiskUsage#DF_COMMAND} is how a reading is taken,
+     * {@code parse} is how it is read, and {@code isAbove} is what counts as pressure. This is the same
+     * exec port every other remote command goes through, so there is no second way to reach a host, and
+     * an unpinned machine is pinned on first use exactly as the shell and SFTP paths pin it.
+     *
+     * <p>A {@code df} that failed, timed out or cannot be parsed throws {@link DiskUnreadableException}.
+     * It never returns a zero: a disk Vaier could not read is not a disk with room on it.
+     */
+    @Override
+    public MachineDiskUsageUco getDiskUsage(String machineName) {
+        SshTarget target = forResolvingSshTargets.resolve(machineName);
+        CommandResult result = forRunningSshCommands.run(target, RemoteDiskUsage.DF_COMMAND);
+        target.pinOnFirstUse(machineName, result.hostKeyFingerprint(), forTrackingHostKeys);
+
+        if (result.timedOut() || result.exitCode() != 0) {
+            log.debug("df on {} failed (exit={}, timedOut={})", machineName, result.exitCode(),
+                result.timedOut());
+            throw new DiskUnreadableException(machineName);
+        }
+        RemoteDiskUsage usage = RemoteDiskUsage.parse(machineName, result.stdout())
+            .orElseThrow(() -> new DiskUnreadableException(machineName));
+
+        int threshold = configResolver.getDiskMonitorThresholdPercent();
+        return new MachineDiskUsageUco(machineName, usage.usedPercent(), threshold,
+            usage.isAbove(threshold));
     }
 
     @Override

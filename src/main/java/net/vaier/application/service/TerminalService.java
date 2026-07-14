@@ -145,10 +145,11 @@ public class TerminalService implements
     /**
      * Trust-on-first-use: if the target had nothing pinned and the connect presented a fingerprint,
      * record it so later connects can enforce it. Shared by the shell and exec paths.
+     *
+     * <p>The rule itself lives on {@link SshTarget#pinOnFirstUse} — every path that reaches a machine over
+     * SSH (shell, exec, SFTP listing, disk reading) pins the same way, from one copy.
      */
     private void pinOnFirstUse(String machineName, SshTarget target, String presentedFingerprint) {
-        if (target.needsPinning(presentedFingerprint)) {
-            forTrackingHostKeys.pin(machineName, presentedFingerprint);
-        }
+        target.pinOnFirstUse(machineName, presentedFingerprint, forTrackingHostKeys);
     }
 }

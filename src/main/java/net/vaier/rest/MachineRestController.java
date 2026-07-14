@@ -3,6 +3,7 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
+import net.vaier.application.GetMachineDiskUsageUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
@@ -28,6 +29,7 @@ public class MachineRestController {
     private final SetMachineSshAccessUseCase setMachineSshAccessUseCase;
     private final GetHostCredentialUseCase getHostCredentialUseCase;
     private final ClearHostKeyUseCase clearHostKeyUseCase;
+    private final GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
 
     @GetMapping
     public List<MachineResponse> list() {
@@ -64,6 +66,31 @@ public class MachineRestController {
         boolean effective = setMachineSshAccessUseCase.setMachineSshAccess(machine, enabled);
         return new SshAccessResponse(effective);
     }
+
+    /**
+     * A machine's disk, read now (#323 slice C) — the one endpoint the Explorer tree needed that Vaier did
+     * not already have. {@code RemoteDiskWatcher} has computed this on a schedule since the disk alerts
+     * shipped, but only ever emailed about it; this lets the operator look at it.
+     *
+     * <p>A sibling of {@code /machines/{machine}/files}: a non-whitelisted path under {@code /machines}, so
+     * it sits behind the admin auth chain automatically. Reading a machine's disk is never anonymous.
+     *
+     * <p>A disk that cannot be read is a {@code DiskUnreadableException} → {@code 502}, carrying the reason
+     * verbatim. It is never a {@code 0%}.
+     */
+    @GetMapping("/{machine}/disk")
+    public DiskResponse disk(@PathVariable String machine) {
+        var usage = getMachineDiskUsageUseCase.getDiskUsage(machine);
+        return new DiskResponse(usage.machineName(), usage.usedPercent(), usage.thresholdPercent(),
+            usage.aboveThreshold());
+    }
+
+    /**
+     * A disk reading, with the threshold it is judged against and the domain's verdict on it. The verdict
+     * travels rather than the browser recomputing it, so "under pressure" means one thing in the alert
+     * email and in the Explorer.
+     */
+    record DiskResponse(String machine, int usedPercent, int thresholdPercent, boolean aboveThreshold) {}
 
     /**
      * Forget the pinned SSH host key for a machine (#308), so the next terminal connect re-pins on

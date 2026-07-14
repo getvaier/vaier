@@ -1,8 +1,13 @@
 package net.vaier.application.service;
 
+import net.vaier.config.ConfigResolver;
+import net.vaier.domain.AuthMethod;
+import net.vaier.domain.CommandResult;
+import net.vaier.domain.DiskUnreadableException;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.SshTarget;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
@@ -12,6 +17,9 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
+import net.vaier.domain.port.ForResolvingSshTargets;
+import net.vaier.domain.port.ForRunningSshCommands;
+import net.vaier.domain.port.ForTrackingHostKeys;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.NotFoundException;
@@ -27,8 +35,14 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class MachineServiceTest {
@@ -40,6 +54,10 @@ class MachineServiceTest {
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForPersistingLanServers forPersistingLanServers;
     @Mock ForPersistingAppConfiguration forPersistingAppConfiguration;
+    @Mock ForResolvingSshTargets forResolvingSshTargets;
+    @Mock ForRunningSshCommands forRunningSshCommands;
+    @Mock ForTrackingHostKeys forTrackingHostKeys;
+    @Mock ConfigResolver configResolver;
 
     MachineService service;
 
@@ -52,7 +70,8 @@ class MachineServiceTest {
     void setUp() {
         service = new MachineService(forGettingPeerConfigurations, forGettingVpnClients, forGettingLanServers,
             forResolvingServerLanCidr, forUpdatingPeerConfigurations, forPersistingLanServers,
-            forPersistingAppConfiguration);
+            forPersistingAppConfiguration, forResolvingSshTargets, forRunningSshCommands,
+            forTrackingHostKeys, configResolver);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -292,5 +311,90 @@ class MachineServiceTest {
         org.mockito.Mockito.verifyNoInteractions(forUpdatingPeerConfigurations);
         org.mockito.Mockito.verify(forPersistingLanServers, org.mockito.Mockito.never())
             .save(org.mockito.ArgumentMatchers.any());
+    }
+
+    // --- a machine's disk (#323 slice C) -------------------------------------------------------------
+    //
+    // RemoteDiskWatcher has computed this on a schedule since the disk alerts shipped — but it only ever
+    // emailed about it, so the number Vaier already knew could not be looked at. The reading is taken over
+    // the one SSH exec port every other remote command uses; the service orchestrates and the domain
+    // decides (RemoteDiskUsage owns how df is read and what counts as over threshold).
+
+    private static final SshTarget UNPINNED =
+        new SshTarget("10.13.13.6", 22, "geir", AuthMethod.PASSWORD, "secret", null, null);
+
+    private static final String DF_OUTPUT = """
+        Filesystem     1024-blocks      Used Available Capacity Mounted on
+        /dev/root         30298176  18178905  10566487      63% /
+        """;
+
+    @Test
+    void diskUsage_readsDfOverTheSameSshExecPortEveryOtherCommandUses() {
+        when(forResolvingSshTargets.resolve("Apalveien 5")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(UNPINNED, "df -P /"))
+            .thenReturn(new CommandResult(0, DF_OUTPUT, "", false, null));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+
+        var usage = service.getDiskUsage("Apalveien 5");
+
+        assertThat(usage.machineName()).isEqualTo("Apalveien 5");
+        assertThat(usage.usedPercent()).isEqualTo(63);
+        assertThat(usage.thresholdPercent()).isEqualTo(80);
+        assertThat(usage.aboveThreshold()).isFalse();
+    }
+
+    @Test
+    void diskUsage_asksTheDomainWhetherItIsOverThreshold_neverRecomputesIt() {
+        // The predicate is RemoteDiskUsage.isAbove — the same one the alert email is sent from. A second
+        // comparison here would be a second definition of "under pressure", and they would drift.
+        when(forResolvingSshTargets.resolve("Colina 27")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(any(), anyString()))
+            .thenReturn(new CommandResult(0, "/dev/root 100 91 9 91% /", "", false, null));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+
+        var usage = service.getDiskUsage("Colina 27");
+
+        assertThat(usage.usedPercent()).isEqualTo(91);
+        assertThat(usage.aboveThreshold()).isTrue();
+    }
+
+    @Test
+    void diskUsage_pinsTheHostKeyOnFirstUse_likeEveryOtherSshPath() {
+        // A machine may have its disk read before a terminal was ever opened on it, so this connect is
+        // where an unpinned host gets pinned — trust-on-first-use, exactly as the shell and SFTP paths do.
+        when(forResolvingSshTargets.resolve("Apalveien 5")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(any(), anyString()))
+            .thenReturn(new CommandResult(0, DF_OUTPUT, "", false, "SHA256:abc"));
+        when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(80);
+
+        service.getDiskUsage("Apalveien 5");
+
+        verify(forTrackingHostKeys).pin("Apalveien 5", "SHA256:abc");
+    }
+
+    @Test
+    void diskUsage_thatCannotBeRead_saysSo_ratherThanReportingAnEmptyDisk() {
+        // df failed (a sleeping machine, a df that exited non-zero). "Cannot tell" must never render as
+        // 0% — a disk Vaier could not read is not a disk with room on it.
+        when(forResolvingSshTargets.resolve("nas")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(any(), anyString()))
+            .thenReturn(new CommandResult(1, "", "df: command not found", false, null));
+
+        assertThatThrownBy(() -> service.getDiskUsage("nas"))
+            .isInstanceOf(DiskUnreadableException.class)
+            .hasMessageContaining("nas");
+
+        verify(configResolver, never()).getDiskMonitorThresholdPercent();
+    }
+
+    @Test
+    void diskUsage_thatCannotBeParsed_saysSo_ratherThanGuessing() {
+        when(forResolvingSshTargets.resolve("nas")).thenReturn(UNPINNED);
+        when(forRunningSshCommands.run(any(), anyString()))
+            .thenReturn(new CommandResult(0, "Filesystem 1024-blocks Used Available Capacity Mounted on",
+                "", false, null));
+
+        assertThatThrownBy(() -> service.getDiskUsage("nas"))
+            .isInstanceOf(DiskUnreadableException.class);
     }
 }

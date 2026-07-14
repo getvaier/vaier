@@ -47,4 +47,21 @@ public record SshTarget(String host, int port, String username, AuthMethod authM
         return presentedFingerprint != null
             && HostKeyTrust.evaluate(pinnedFingerprint, presentedFingerprint) == HostKeyTrust.PIN_NEW;
     }
+
+    /**
+     * Trust-on-first-use, carried out: pin what the machine presented, if and only if
+     * {@link #needsPinning} says it should be. The port is handed in and called here, so the rule and the
+     * act of recording it stay together.
+     *
+     * <p>Every path that reaches a machine over SSH — the shell, a remote command, an Explorer listing, a
+     * disk reading — must pin on first use, or a machine touched only by that path would never gain a
+     * pinned key and could never detect one changing. Each service used to keep its own copy of this
+     * three-line dance; a third copy (the disk read) is what made it worth having exactly one.
+     */
+    public void pinOnFirstUse(String machineName, String presentedFingerprint,
+                              net.vaier.domain.port.ForTrackingHostKeys hostKeys) {
+        if (needsPinning(presentedFingerprint)) {
+            hostKeys.pin(machineName, presentedFingerprint);
+        }
+    }
 }

@@ -25,6 +25,9 @@
         users:   '<circle cx="6" cy="6" r="2.4"/><path d="M1.8 13.5c.3-2.4 2.2-3.8 4.2-3.8s3.9 1.4 4.2 3.8"/><path d="M11 4.2a2.2 2.2 0 0 1 0 4.3M12 9.9c1.4.5 2.3 1.8 2.5 3.6"/>',
         gear:    '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8L3.5 3.5"/>',
         book:    '<path d="M2.5 2.5h7a2 2 0 0 1 2 2v9"/><path d="M2.5 2.5v9a2 2 0 0 0 2 2h7"/><path d="M4.5 5.5H9M4.5 8H8"/>',
+        box:     '<rect x="2.2" y="4.4" width="11.6" height="8.6" rx="1"/><path d="M2.2 7.3h11.6M5.6 4.4v2.9"/>',
+        route:   '<circle cx="8" cy="8" r="6.2"/><path d="M1.9 8h12.2"/><path d="M8 1.8c1.7 1.9 2.6 3.9 2.6 6.2S9.7 12.3 8 14.2C6.3 12.3 5.4 10.3 5.4 8S6.3 3.7 8 1.8z"/>',
+        disk:    '<rect x="2" y="3.4" width="12" height="9.2" rx="1"/><circle cx="8" cy="8" r="2.3"/><circle cx="8" cy="8" r=".45" fill="currentColor" stroke="none"/>',
     };
 
     // Trusted constant markup — never interpolate anything but a key of ICON into this.
@@ -76,6 +79,12 @@
         peerNames: new Map(),            // peer id -> machine name (the SSE keys stats by id, not by name)
         lan: new Map(),                  // machine name -> its LAN server (the domain's MachineStatus)
         dirs: new Map(),                 // dirKey -> one directory's read: its state, its children, its reader
+        services: [],                    // GET /published-services/discover — the whole fleet's routes
+        access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
+        containers: new Map(),           // machine name -> its containers, as Vaier last scraped them
+        containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
+        disks: new Map(),                // machine name -> its disk reading: state, usage, the failure's words
+        roots: new Map(),                // machine name -> where its file tree begins (its SFTP root, #326)
         palSel: 0,
     };
 
@@ -95,6 +104,9 @@
             return BRIDGES.some((b) => b.name === path[1]) ? 'bridge' : 'machine';
         }
         if (path[2] === 'shell') return 'shell';
+        if (path[2] === 'disk') return 'disk';
+        if (path[2] === 'containers') return path.length === 3 ? 'containers' : 'container';
+        if (path[2] === 'services') return path.length === 3 ? 'services' : 'service';
         if (path[2] === 'files') return path.length === 3 ? 'files' : 'dir';
         return 'fleet';
     }
@@ -102,8 +114,38 @@
     const machineOf = (path) => S.machines.find((m) => m.name === path[1]) || null;
     const bridgeOf = (path) => BRIDGES.find((b) => b.name === path[1]) || null;
 
-    // A tree path under `files` and a path on the machine are the same path, written twice.
-    const remotePath = (path) => '/' + path.slice(3).join('/');
+    // A tree path under `files` and a path on the machine are the same path, written twice — but a machine's
+    // tree does not begin at "/". It begins at its SFTP root (#326): the NAS jails its SFTP subsystem into
+    // /volume1, so its `files` entry IS /volume1, and everything below hangs off that. Until the machine has
+    // told us where that is, the path is null — which means "wherever this machine's tree begins", the one
+    // question only the machine can answer.
+    function remotePath(path) {
+        const root = S.roots.get(path[1]);
+        if (root === undefined) return null;
+        const segs = path.slice(3);
+        if (!segs.length) return root;
+        return (root === '/' ? '' : root) + '/' + segs.join('/');
+    }
+
+    // --- which machine a published service lives on ----------------------------------------------------
+    //
+    // A published service is one thing with three homes: a container on a machine, a Traefik route, and a DNS
+    // record. The tree files it under the machine, and it decides which machine by the rule vpn-peers.js
+    // already uses — a LAN service by its LAN server (falling back to the relay peer when no registered LAN
+    // server matches its address), the hub's own routes on the Vaier server, everything else by its host. A
+    // second rule here would put the same service under two different machines in two different pages.
+    function machineOfService(s) {
+        if (s.isLanService) return s.lanServerName || s.hostName;
+        if (!s.hostName || !String(s.hostName).trim() || s.hostName === VAIER_SERVER) return VAIER_SERVER;
+        return s.hostName;
+    }
+
+    // A route is addressed by its DNS name, and a path-prefixed route shares that name with its siblings —
+    // so the entry is named by both, exactly as the unpublish call is.
+    const serviceName = (s) => (s.shortName || s.name) + (s.pathPrefix || '');
+
+    const servicesOn = (machine) => S.services.filter((s) => machineOfService(s) === machine);
+    const containersOn = (machine) => S.containers.get(machine) || [];
 
     function childrenOf(path) {
         const kind = kindOf(path);
@@ -113,10 +155,23 @@
         }
         if (kind === 'machine') {
             const m = machineOf(path);
-            // Only a machine Vaier can reach over SSH has anything inside it to show yet.
-            return m && m.sshAccess
-                ? [{ name: 'files', kind: 'files' }, { name: 'shell', kind: 'shell' }]
-                : [];
+            if (!m) return [];
+            // Honest and conditional: a machine grows only the entries Vaier can actually reach on it. No SSH
+            // means no files, no shell and no disk; a machine that runs no Docker must not grow an empty
+            // `containers` entry that opens onto nothing. /machines already carries both facts — the tree
+            // asks them rather than assuming every machine is the same machine.
+            const kids = [];
+            if (m.sshAccess) kids.push({ name: 'files', kind: 'files' }, { name: 'shell', kind: 'shell' });
+            if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
+            if (servicesOn(m.name).length) kids.push({ name: 'services', kind: 'services' });
+            if (m.sshAccess) kids.push({ name: 'disk', kind: 'disk' });
+            return kids;
+        }
+        if (kind === 'containers') {
+            return containersOn(path[1]).map((c) => ({ name: c.containerName, kind: 'container' }));
+        }
+        if (kind === 'services') {
+            return servicesOn(path[1]).map((s) => ({ name: serviceName(s), kind: 'service' }));
         }
         if (kind === 'files' || kind === 'dir') {
             // Whatever the cache already holds, and nothing more. This function is called on every repaint,
@@ -139,7 +194,9 @@
     // A machine name carries spaces ("Apalveien 5") and a path carries slashes, so the two are joined
     // on a separator that can appear in neither. Written as an escape — never as a raw control byte.
     const DIR_SEP = '\u0000';
-    const dirKey = (machine, path) => machine + DIR_SEP + path;
+    // A path is always absolute, so the empty string is free to mean "the root, wherever it turns out to be"
+    // — the slot a read is parked in before the machine has said where its tree begins.
+    const dirKey = (machine, path) => machine + DIR_SEP + (path == null ? '' : path);
 
     const dirStateOf = (path) => {
         const entry = S.dirs.get(dirKey(path[1], remotePath(path)));
@@ -179,6 +236,106 @@
         } else {
             entry.state = 'ready';
             entry.entries = result.entries;
+            entry.path = result.path;
+
+            // Where this machine's tree begins, straight from the machine. Remembered per machine — one
+            // machine's jail must never be pinned onto another's paths.
+            if (result.root != null) S.roots.set(machine, result.root);
+
+            // We may have asked "where does your tree begin?" (rpath null) and been answered "/volume1". The
+            // slot belongs to the directory the server actually read, so re-key it — otherwise the very next
+            // repaint would compute the real path, miss the cache, and read the same directory all over again.
+            if (result.path !== rpath) {
+                S.dirs.delete(k);
+                S.dirs.set(dirKey(machine, result.path), entry);
+            }
+        }
+        render();
+    }
+
+    // --- containers, services and disks -----------------------------------------------------------------
+    //
+    // Three reads, three different shapes of truth, and none of them polled:
+    //
+    //   containers — a fleet-wide Docker scrape. Read once at start (so ⌘K can find a container without the
+    //                operator having gone looking for it first) and re-read only when the backend says a
+    //                container changed state, on the stream it already publishes that on.
+    //   services   — the published routes. Read at start because the tree cannot be honest without them: the
+    //                `services` entry exists only on a machine that actually has some.
+    //   disk       — one machine, read when its disk entry is looked at. A fleet-wide df on page load would
+    //                wake every sleeping machine to answer a question nobody asked.
+
+    // Vaier scrapes Docker per kind of machine, so this is three endpoints and one map. All three already
+    // exist — this is the Infrastructure page's own data, re-filed under the machines it belongs to.
+    //
+    // The filing is the whole difficulty. A peer's containers arrive keyed by the peer's *id* — the WireGuard
+    // directory name, "apalveien5" — while the tree, /machines and every SSH lookup speak the canonical
+    // machine name, "Apalveien 5". Filing them by id would hang them under a machine that does not exist in
+    // the tree, and every peer would show an empty `containers` entry while Vaier could see its containers
+    // perfectly well. The shell already holds the id -> name map for exactly this reason (the stats stream is
+    // keyed by id too), so containers go through it. LAN servers and the Vaier server already carry their
+    // canonical names.
+    async function loadContainers() {
+        const next = new Map();
+        try {
+            const [peers, server, lan] = await Promise.all([
+                fetch('/docker-services/peers').then((r) => (r.ok ? r.json() : [])),
+                fetch('/docker-services/vaier-server').then((r) => (r.ok ? r.json() : null)),
+                fetch('/docker-services/lan-servers').then((r) => (r.ok ? r.json() : [])),
+            ]);
+            (peers || []).forEach((p) => {
+                next.set(S.peerNames.get(p.peerName) || p.peerName, p.containers || []);
+            });
+            (lan || []).forEach((l) => next.set(l.name, l.containers || []));
+            if (server) next.set(VAIER_SERVER, server.containers || []);
+            S.containers = next;
+            S.containersRead = true;
+        } catch (e) {
+            // A fleet whose Docker hosts are asleep is a fleet, not a failure. The machines still stand; they
+            // simply have no containers to show, and the Inspector says which case it is.
+            S.containersRead = true;
+        }
+        render();
+    }
+
+    // The routes, and the groups allowed through them. The access rules are keyed by the route's DNS name —
+    // the same key the Access page writes them under.
+    async function loadServices() {
+        try {
+            const res = await fetch('/published-services/discover', { cache: 'no-store' });
+            S.services = res.ok ? await res.json() : [];
+        } catch (e) {
+            S.services = [];
+        }
+        try {
+            const res = await fetch('/access/services', { cache: 'no-store' });
+            S.access = res.ok ? await res.json() : {};
+        } catch (e) {
+            S.access = {};
+        }
+    }
+
+    // One machine's disk, read when it is looked at (#323 slice C). Vaier has computed this on a schedule
+    // since the disk alerts shipped and only ever emailed about it; this is the same reading, looked at.
+    async function loadDisk(machine) {
+        const held = S.disks.get(machine);
+        if (held && (held.state === 'loading' || held.state === 'ready')) return;
+        S.disks.set(machine, { state: 'loading', usage: null, error: null });
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/disk');
+            const body = await res.json();
+            if (res.ok) {
+                S.disks.set(machine, { state: 'ready', usage: body, error: null });
+            } else {
+                // The server's own sentence, verbatim — "Vaier could not read the disk on X. The machine may
+                // be asleep..." says everything a status code cannot. A disk Vaier failed to read is never
+                // painted as a disk with room on it.
+                S.disks.set(machine, { state: 'error', usage: null,
+                    error: body.message || 'Vaier could not read the disk on ' + machine + '.' });
+            }
+        } catch (e) {
+            S.disks.set(machine, { state: 'error', usage: null,
+                error: 'Vaier could not read the disk on ' + machine + '.' });
         }
         render();
     }
@@ -193,14 +350,16 @@
     }
 
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
-                       shell: 'shell' };
+                       shell: 'shell', containers: 'box', container: 'box', services: 'route',
+                       service: 'route', disk: 'disk' };
     const iconFor = (kind, name) => (kind === 'bridge'
         ? (BRIDGES.find((b) => b.name === name) || {}).icon
         : ICON_FOR[kind]) || 'file';
 
-    // Mono for anything with a coordinate, sans for anything human. A machine name and a path are addresses;
-    // "Backups" is a word.
-    const MONO_KINDS = new Set(['machine', 'files', 'dir', 'file']);
+    // Mono for anything with a coordinate, sans for anything human. A machine name, a path, a container name
+    // and a DNS name are addresses; "Backups" is a word.
+    const MONO_KINDS = new Set(['machine', 'files', 'dir', 'file', 'containers', 'container', 'services',
+                                'service', 'disk']);
 
     // --- liveness --------------------------------------------------------------------------------------
     //
@@ -449,6 +608,11 @@
         if (kind === 'machine') return renderMachine(pane);
         if (kind === 'bridge') return renderBridge(pane);
         if (kind === 'shell') return renderShell(pane);
+        if (kind === 'containers') return renderContainers(pane);
+        if (kind === 'container') return renderContainer(pane);
+        if (kind === 'services') return renderServices(pane);
+        if (kind === 'service') return renderService(pane);
+        if (kind === 'disk') return renderDisk(pane);
         return renderDirectory(pane);
     }
 
@@ -519,20 +683,309 @@
         ]));
 
         body.appendChild(section('Inside this machine'));
-        if (!m.sshAccess) {
-            body.appendChild(note('Vaier has no SSH access to this machine, so it has no files and no shell '
-                + 'to open. Give it an SSH credential on its Infrastructure card and both appear here.',
+        const inside = childrenOf(S.path);
+        if (!inside.length) {
+            body.appendChild(note('Vaier cannot reach anything inside this machine. It has no SSH access, so '
+                + 'no files, no shell and no disk reading; it runs no Docker Vaier knows of; and nothing is '
+                + 'published from it. Give it an SSH credential on its Infrastructure card and it opens up.',
                 false));
         } else {
             const grid = document.createElement('div');
             grid.className = 'ex-grid';
-            grid.appendChild(card('dir', 'files', true, 'Browse over SFTP',
-                () => go(['fleet', m.name, 'files'])));
-            grid.appendChild(card('shell', 'shell', false, 'A terminal on this machine',
-                () => go(['fleet', m.name, 'shell'])));
+            const NOTE = {
+                files:      'Browse over SFTP',
+                shell:      'A terminal on this machine',
+                containers: containersOn(m.name).length + ' seen by Vaier',
+                services:   servicesOn(m.name).length + ' published from here',
+                disk:       'How full its root filesystem is',
+            };
+            inside.forEach((kid) => {
+                grid.appendChild(card(iconFor(kid.kind, kid.name), kid.name, kid.kind !== 'shell',
+                    NOTE[kid.name], () => go(['fleet', m.name, kid.name])));
+            });
             body.appendChild(grid);
         }
         pane.appendChild(body);
+    }
+
+    // --- containers: what Vaier can see, and nothing it cannot do ---------------------------------------
+    //
+    // Read-only, and that is not an omission to paper over. DockerServiceRestController exposes GETs and
+    // nothing else — Vaier has no endpoint to start, stop or restart a container, and none to fetch its
+    // logs. So this Inspector shows what Vaier genuinely knows and offers no control it cannot honour.
+    // A button that looks like a verb and does nothing is a lie about what works, and the fleet is exactly
+    // the place where an operator must be able to trust what the screen says.
+
+    function renderContainers(pane) {
+        const machine = S.path[1];
+        const found = containersOn(machine);
+        pane.appendChild(paneHead(machine + ' / containers', true,
+            found.length + (found.length === 1 ? ' container' : ' containers')));
+
+        const body = document.createElement('div');
+        body.className = 'ex-pane-body';
+
+        if (!S.containersRead) {
+            body.appendChild(note('Reading the fleet’s containers…', false));
+            pane.appendChild(body);
+            return;
+        }
+        if (!found.length) {
+            body.appendChild(note('Vaier scraped this machine’s Docker and found no containers. Either '
+                + 'none are running, or the machine is not answering on its Docker port.', false));
+            pane.appendChild(body);
+            return;
+        }
+
+        const rows = document.createElement('div');
+        rows.className = 'ex-listing is-wide';
+        rows.appendChild(listHead(['Name', 'Image', 'State']));
+        found.forEach((c) => {
+            rows.appendChild(listRow(
+                'box', c.containerName, () => go(['fleet', machine, 'containers', c.containerName]),
+                [c.image || '—', c.state || 'unknown'],
+                c.state === 'running' ? 'OK' : 'DOWN'));
+        });
+        body.appendChild(rows);
+        pane.appendChild(body);
+    }
+
+    function renderContainer(pane) {
+        const machine = S.path[1];
+        const name = S.path[3];
+        const c = containersOn(machine).find((x) => x.containerName === name);
+        if (!c) {
+            return pane.appendChild(note('Vaier no longer sees a container by that name on ' + machine + '.',
+                true));
+        }
+
+        pane.appendChild(paneHead(name, true, machine));
+        const body = document.createElement('div');
+        body.className = 'ex-pane-body';
+
+        const ports = (c.ports || []).map((p) => (p.publicPort ? p.publicPort + '→' : '')
+            + p.privatePort + '/' + (p.type || 'tcp')).join('  ');
+
+        body.appendChild(kv([
+            ['Image', c.image],
+            ['Version', c.version],
+            ['State', c.state],
+            ['Ports', ports],
+            ['Networks', (c.networks || []).join(', ')],
+            ['Container id', (c.containerId || '').slice(0, 12)],
+        ]));
+
+        body.appendChild(note('This is everything Vaier knows about the container: it reads Docker, and it '
+            + 'has no endpoint to control one. Nothing here can start or stop it, and Vaier will not show '
+            + 'you a control it cannot honour. Use the machine’s shell for that.', false));
+        pane.appendChild(body);
+    }
+
+    // --- services: a route, a machine and a DNS record are one thing ------------------------------------
+
+    function renderServices(pane) {
+        const machine = S.path[1];
+        const found = servicesOn(machine);
+        pane.appendChild(paneHead(machine + ' / services', true,
+            found.length + (found.length === 1 ? ' published service' : ' published services')));
+
+        const body = document.createElement('div');
+        body.className = 'ex-pane-body';
+        const rows = document.createElement('div');
+        rows.className = 'ex-listing is-wide';
+        rows.appendChild(listHead(['Published at', 'Backend', 'State']));
+        found.forEach((s) => {
+            rows.appendChild(listRow('route', s.dnsAddress || serviceName(s),
+                () => go(['fleet', machine, 'services', serviceName(s)]),
+                [(s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : ''), s.state || 'UNKNOWN'],
+                s.state));
+        });
+        body.appendChild(rows);
+
+        body.appendChild(note('Publishing a new service needs a subdomain, an auth mode and a backend to '
+            + 'point at — that form still lives on Infrastructure, so publishing is done there. What can '
+            + 'be done from here is unpublishing, on each service.', false));
+        pane.appendChild(body);
+    }
+
+    function renderService(pane) {
+        const machine = S.path[1];
+        const s = servicesOn(machine).find((x) => serviceName(x) === S.path[3]);
+        if (!s) return pane.appendChild(note('That service is no longer published from ' + machine + '.',
+            true));
+
+        const head = paneHead(s.dnsAddress || serviceName(s), true, machine);
+        const actions = document.createElement('div');
+        actions.className = 'ex-pane-actions';
+        const del = document.createElement('button');
+        del.className = 'ex-btn is-danger';
+        del.textContent = 'Unpublish';
+        del.onclick = () => unpublish(s, machine);
+        actions.appendChild(del);
+        head.appendChild(actions);
+        pane.appendChild(head);
+
+        const body = document.createElement('div');
+        body.className = 'ex-pane-body';
+
+        const groups = S.access[s.dnsAddress] || [];
+        body.appendChild(kv([
+            ['DNS record', s.dnsAddress],
+            ['DNS state', s.dnsState],
+            ['Route', s.state],
+            ['Backend', (s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : '')],
+            ['Path prefix', s.pathPrefix],
+            ['Container image', s.image],
+            ['Version', s.version],
+            ['Auth', s.authMode === 'social' ? 'Social login' : 'Open to anyone'],
+            ['Allowed groups', groups.length ? groups.join(', ') : 'Any signed-in user'],
+        ]));
+
+        // The point of the single namespace, said plainly. These three are not three things that happen to
+        // share a name — they are one service, and when one of them is wrong the service is down.
+        body.appendChild(note('A published service is one thing with three homes: a container on '
+            + machine + ', a route through Traefik, and a DNS record at ' + (s.dnsAddress || 'its name')
+            + '. Unpublishing removes the route and the DNS record. The container keeps running — the '
+            + 'machine that hosts it does not notice.', false));
+        pane.appendChild(body);
+    }
+
+    // --- disk -------------------------------------------------------------------------------------------
+    //
+    // The reading Vaier has taken on a schedule ever since the disk alerts shipped, and until now only ever
+    // emailed about. The verdict is the server's: RemoteDiskUsage.isAbove decides what counts as pressure,
+    // once, for the alert email and for this pane alike. The browser paints it; it never re-decides it.
+
+    function renderDisk(pane) {
+        const machine = S.path[1];
+        pane.appendChild(paneHead(machine + ' / disk', true, 'Root filesystem'));
+
+        const body = document.createElement('div');
+        body.className = 'ex-pane-body';
+        pane.appendChild(body);
+
+        if (!S.disks.has(machine)) loadDisk(machine);      // it re-renders when it lands
+
+        const held = S.disks.get(machine);
+        if (!held || held.state === 'loading') {
+            return body.appendChild(note('Reading the disk on ' + machine + '…', false));
+        }
+        if (held.state === 'error') return body.appendChild(note(held.error, true));
+
+        const usage = held.usage;
+        body.appendChild(meter(usage.usedPercent, usage.thresholdPercent, usage.aboveThreshold));
+        body.appendChild(kv([
+            ['Used', usage.usedPercent + '%'],
+            ['Alert threshold', usage.thresholdPercent + '%'],
+            ['Status', usage.aboveThreshold ? 'Over the alert threshold' : 'Below the alert threshold'],
+            ['Monitored path', '/'],
+        ]));
+        body.appendChild(note(usage.aboveThreshold
+            ? 'This disk is over the alert threshold, so Vaier has already emailed the admins about it. The '
+              + 'threshold is set on Settings.'
+            : 'Vaier reads this with df over SSH, on a schedule, and emails the admins when a disk crosses '
+              + 'the alert threshold. The threshold is set on Settings.', false));
+    }
+
+    // The one new figure in the shell, and it earns its place: the bar shows how full the disk is, and the
+    // tick shows what that is being judged against. A bar without the threshold on it would make the operator
+    // do the comparison in their head — and that comparison is a decision the domain has already made.
+    function meter(usedPercent, thresholdPercent, above) {
+        const wrap = document.createElement('div');
+        wrap.className = 'ex-meter' + (above ? ' is-over' : '');
+
+        const fill = document.createElement('span');
+        fill.className = 'ex-meter-fill';
+        fill.style.width = usedPercent + '%';
+        wrap.appendChild(fill);
+
+        const tick = document.createElement('span');
+        tick.className = 'ex-meter-tick';
+        tick.style.left = thresholdPercent + '%';
+        tick.title = 'Alert threshold: ' + thresholdPercent + '%';
+        wrap.appendChild(tick);
+
+        const label = document.createElement('span');
+        label.className = 'ex-meter-label';
+        label.textContent = usedPercent + '%';
+        wrap.appendChild(label);
+        return wrap;
+    }
+
+    // Unpublish is the one verb slice C ships, because it is the one verb the backend actually has:
+    // DELETE /published-services/{dnsName}. It tears down a Traefik route and a DNS record, so it asks first.
+    async function unpublish(s, machine) {
+        const label = s.dnsAddress || serviceName(s);
+        if (!confirm('Unpublish ' + label + '?\n\nThis removes its Traefik route and its DNS record. '
+            + 'The container on ' + machine + ' keeps running.')) return;
+
+        const query = s.pathPrefix ? '?pathPrefix=' + encodeURIComponent(s.pathPrefix) : '';
+        try {
+            const res = await fetch('/published-services/' + encodeURIComponent(s.dnsAddress) + query,
+                { method: 'DELETE' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert(err.message || 'Vaier could not unpublish ' + label + '.');
+                return;
+            }
+        } catch (e) {
+            alert('Vaier could not unpublish ' + label + '.');
+            return;
+        }
+        // Stand where the service used to be: its parent. The route is gone, so the entry is gone with it.
+        await loadServices();
+        go(['fleet', machine, 'services']);
+    }
+
+    // Two shapes the Inspector lists things in, built once: a container list and a service list are the same
+    // kind of surface as a directory listing, because in one namespace they are the same kind of thing.
+    function listHead(labels) {
+        const head = document.createElement('div');
+        head.className = 'ex-lhead';
+        labels.forEach((h) => {
+            const cell = document.createElement('span');
+            cell.textContent = h;
+            head.appendChild(cell);
+        });
+        return head;
+    }
+
+    function listRow(icon, name, onClick, meta, state) {
+        const row = document.createElement('div');
+        row.className = 'ex-lrow';
+
+        const btn = document.createElement('button');
+        btn.className = 'ex-lname';
+        btn.innerHTML = svg(icon, 'ex-ico');
+        const nm = document.createElement('span');
+        nm.className = 'ex-nm';
+        nm.textContent = name;
+        btn.appendChild(nm);
+        btn.onclick = onClick;
+        row.appendChild(btn);
+
+        meta.forEach((value, i) => {
+            const cell = document.createElement('span');
+            cell.className = 'ex-lmeta';
+            // The last column is a state, and a state has a colour — the same four the fleet's dots use.
+            if (i === meta.length - 1 && state !== undefined) {
+                cell.appendChild(stateDot(state));
+            }
+            const text = document.createElement('span');
+            text.textContent = value;
+            cell.appendChild(text);
+            row.appendChild(cell);
+        });
+        return row;
+    }
+
+    // A published service's State is the domain's own (OK / UNKNOWN / anything else is down) — read exactly
+    // as the Infrastructure page reads it, so one service cannot be green on one page and red on the other.
+    function stateDot(state) {
+        const el = document.createElement('span');
+        const key = state === 'OK' ? 'is-up' : (state === 'UNKNOWN' ? 'is-idle' : 'is-down');
+        el.className = 'ex-dot ' + key;
+        return el;
     }
 
     // The terminal itself is in the dock, not in the pane: the tree, the address bar and the shell are all on
@@ -566,9 +1019,10 @@
     // standing on, whatever landed while it was waiting.
     function renderDirectory(pane) {
         const machine = S.path[1];
-        const path = remotePath(S.path);
+        const path = remotePath(S.path);          // null until the machine has said where its tree begins
+        const shown = path == null ? 'files' : path;
 
-        pane.appendChild(paneHead(path, true, machine));
+        pane.appendChild(paneHead(shown, true, machine));
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -581,7 +1035,8 @@
 
         const entry = S.dirs.get(dirKey(machine, path));
         if (!entry || entry.state === 'loading') {
-            return rows.appendChild(note('Listing ' + path + ' on ' + machine + '…', false));
+            return rows.appendChild(note('Listing ' + (path == null ? 'the file root' : path)
+                + ' on ' + machine + '…', false));
         }
         // The server's own sentence, verbatim — "Not allowed to read /root as geir." says more than any
         // status code could.
@@ -794,6 +1249,24 @@
         events.addEventListener('lan-servers-updated', () => loadLanServers().then(paintDots));
     }
 
+    // The fleet's second stream, and the last one. `published-services` is a different topic on a different
+    // controller — PublishingService, the published-services controller and DockerEventListener all publish
+    // on it — and vpn-peers.js already holds both streams open, so this is the shape the codebase has, not a
+    // new one. It is what keeps the services (and the containers behind them) honest without a single poll:
+    // the backend watches, the backend pushes, the browser listens.
+    function watchServices() {
+        const events = new EventSource('/published-services/events');
+        const refresh = () => {
+            loadContainers();                       // re-renders when it lands
+            loadServices().then(render);
+        };
+        // A route was published, updated, unpublished — or a container behind one changed state
+        // (DockerEventListener publishes `container-state-changed` on this same event).
+        events.addEventListener('service-updated', refresh);
+        events.addEventListener('publish-traefik-active', refresh);
+        events.addEventListener('publish-rolled-back', refresh);
+    }
+
     // --- the dock ------------------------------------------------------------------------------------------
 
     function watchDock() {
@@ -892,9 +1365,20 @@
 
     async function init() {
         watchDock();
-        await loadFleet();
+        // The services are awaited because the tree cannot be honest without them: a `services` entry exists
+        // only on a machine that actually publishes something, and a tree that grew one a moment later would
+        // have been lying for that moment.
+        await Promise.all([loadFleet(), loadServices()]);
         render();
+
+        // The containers are not awaited. The fleet-wide Docker scrape can take seconds against a sleeping
+        // host, and no part of the first paint depends on it — the `containers` entry is decided by
+        // /machines' runsDocker, not by what the scrape finds. It fills itself in when it lands, which is
+        // also what lets ⌘K find a container the operator never went looking for.
+        loadContainers();
+
         watchFleet();
+        watchServices();
         loadUser();
     }
 

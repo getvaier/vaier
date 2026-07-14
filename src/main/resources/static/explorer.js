@@ -14,11 +14,14 @@
 (function () {
     'use strict';
 
-    const ROOT = '/';
-
     let machines = [];
     let machine = null;
-    let cwd = ROOT;
+
+    // Where this machine's file tree begins, and where in it we are standing — both learnt from the machine
+    // itself, never assumed (#326). The NAS's SFTP subsystem is chrooted into /volume1, so its tree begins
+    // there and "/" is a path it cannot answer at all. Null until it has told us.
+    let root = null;
+    let cwd = null;
 
     const listing = VaierListing.createBrowser();   // owns the newest-listing-wins guard
     const formatSize = VaierListing.formatSize;
@@ -62,23 +65,28 @@
         machineLabel.textContent = machine + ' ·';
         host.appendChild(machineLabel);
 
-        const parts = cwd.split('/').filter(Boolean);
+        if (root == null || cwd == null) return;   // the machine has not said where its tree begins yet
+
+        // The first crumb IS the machine's root — on the NAS that reads /volume1, not "/". There is nothing
+        // above it to climb to, and offering "/" would offer a path SFTP can never answer.
         const rootCrumb = document.createElement('button');
         rootCrumb.className = 'ex-crumb';
-        rootCrumb.textContent = '/';
-        rootCrumb.onclick = () => browse(ROOT);
+        rootCrumb.textContent = root;
+        rootCrumb.onclick = () => browse(root);
         host.appendChild(rootCrumb);
 
-        let acc = '';
+        // Only the part of the path below the root is walkable, so only that part becomes crumbs.
+        const below = cwd === root ? '' : cwd.slice(root === '/' ? 1 : root.length + 1);
+        const parts = below.split('/').filter(Boolean);
+
+        let acc = root === '/' ? '' : root;
         parts.forEach((part, i) => {
             acc += '/' + part;
             const here = i === parts.length - 1;
-            if (i > 0) {
-                const sep = document.createElement('span');
-                sep.className = 'ex-crumb-sep';
-                sep.textContent = '/';
-                host.appendChild(sep);
-            }
+            const sep = document.createElement('span');
+            sep.className = 'ex-crumb-sep';
+            sep.textContent = '/';
+            host.appendChild(sep);
             if (here) {
                 const span = document.createElement('span');
                 span.className = 'ex-crumb-here';
@@ -140,13 +148,19 @@
     // --- loading ----------------------------------------------------------------------------------
 
     // A machine that is asleep, unreachable or missing a credential is an ordinary state for a fleet, not a
-    // crash — say which one it is, in the terms the operator can act on.
+    // crash — say which one it is, in the terms the operator can act on. So is a path outside the machine's
+    // SFTP root: "/volume2 is not reachable over SFTP..." is the server's own sentence, and it is shown as
+    // such — never as an empty folder.
+    //
+    // `path` is null when we do not yet know where this machine's tree begins; the machine answers with the
+    // directory it actually read, and the crumbs are painted from that.
     async function browse(path) {
         cwd = path;
         paintCrumbs();
         $('exCount').textContent = '';
         $('exRows').textContent = '';
-        $('exRows').appendChild(note('Listing ' + path + ' on ' + machine + '…', false));
+        $('exRows').appendChild(note(
+            'Listing ' + (path == null ? 'the file root' : path) + ' on ' + machine + '…', false));
 
         const result = await listing.list(machine, path);
         if (result.stale) return;             // a newer listing has already been asked for
@@ -157,13 +171,19 @@
             $('exCount').textContent = '';
             return;
         }
+        // Where the machine says its tree begins, and which directory it actually read.
+        root = result.root;
+        cwd = result.path;
+        paintCrumbs();
         paintRows(result.entries);
     }
 
     function openMachine(name) {
         machine = name;
+        root = null;
+        cwd = null;
         paintFleet();
-        browse(ROOT);
+        browse(null);   // the machine says where its tree begins — the browser does not assume "/"
     }
 
     async function init() {

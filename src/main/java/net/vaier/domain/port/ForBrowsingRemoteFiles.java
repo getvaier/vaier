@@ -22,6 +22,32 @@ public interface ForBrowsingRemoteFiles {
     DirectoryListing list(SshTarget target, String path);
 
     /**
+     * The SSH user's home <em>as this SFTP subsystem sees it</em> — the absolute path it canonicalises
+     * {@code .} to. One half of the pair of answers {@link net.vaier.domain.SftpRoot} is resolved from: an
+     * SFTP subsystem chrooted into {@code /volume1} answers {@code /homes/geir} where the exec channel, on
+     * the same machine, answers {@code /volume1/homes/geir}. The difference is the jail.
+     *
+     * <p>Only the SFTP channel can answer this — that is the whole point of asking it. The exec channel's
+     * half comes from {@link net.vaier.domain.port.ForRunningSshCommands}, not from here.
+     */
+    String home(SshTarget target);
+
+    /**
+     * The first of {@code paths} this SFTP subsystem can see as a directory, or empty when it can see none of
+     * them — asked over a single connection, in the order given.
+     *
+     * <p>The fallback for a machine whose SFTP subsystem will not say where it is. {@link #home} is the direct
+     * question, and on a chrooted machine it answers {@code /} — the jail root itself, which says nothing. So
+     * the SSH user's home is <em>located</em> instead: the exec channel says where it physically is, and this
+     * asks the jailed half which of that path's names it knows it by.
+     *
+     * <p><b>The order is the domain's</b> ({@link net.vaier.domain.SftpRoot#jailCandidates}), and so is the
+     * meaning of a hit. The adapter probes and reports; it does not choose the candidates and does not decide
+     * what a match implies.
+     */
+    java.util.Optional<String> firstDirectory(SshTarget target, List<String> paths);
+
+    /**
      * What one directory holds, plus the host-key fingerprint the machine presented while reading it.
      * The entries are as the remote reported them — unordered; listing order is a domain decision
      * ({@link FileEntry#listing}).
