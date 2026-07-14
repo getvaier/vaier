@@ -397,6 +397,17 @@ services:
     # Measured steady-state RSS is ~340 MB. Without the explicit percentage the JVM
     # would fall back to its 25% default and starve itself down to a 192 MB heap.
     mem_limit: 768m
+    # The host runs earlyoom with `--prefer '(java|mvn|buildkitd)$'` so a heavy build dies before
+    # anything else. Vaier is itself a JVM, which made the *running app* a preferred victim: memory
+    # pressure from a build would push the 1.9 GB box over the line and earlyoom would kill Vaier
+    # rather than the build.
+    #
+    # earlyoom ranks by /proc/<pid>/oom_score and adds +300 to a preferred name. -500 was NOT enough:
+    # it left Vaier at 362 + 300 = 662, still the highest-scoring process whenever no build was
+    # running, so it was killed anyway. -900 floors the app's own score at ~0, so even carrying the
+    # +300 preference it sits below an idle agent (~300) and far below a surefire JVM (~1000).
+    # It reserves no memory; it only decides who dies last.
+    oom_score_adj: -900
     cap_add:
       # Needed by VpnNetworkSetupAdapter and LanRouteAdapter, which shell out to
       # `ip route` inside this container to install routes for the VPN subnet
