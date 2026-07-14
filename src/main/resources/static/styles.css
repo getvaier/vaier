@@ -23,6 +23,14 @@
     --red:          #f48771;
     --orange:       #ce9178;
     --yellow:       #dcdcaa;
+    /* Depth, drawn rather than counted: the hairline that runs down a level of the Explorer's tree. Dimmer
+       than --border, because a guide is not an edge. */
+    --rail:         #1e2733;
+    /* Two corners, and only two: --radius-1 for controls and inputs, --radius-2 for surfaces that read as
+       objects (cards, dialogs, the palette). Vaier's older pages predate these and still carry seven raw
+       radius values between them; new work uses the tokens. */
+    --radius-1:     3px;
+    --radius-2:     6px;
     --mono:         'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
     /* Display face — used with restraint on the wordmark, page chrome, and the launchpad hero.
        Self-hosted (no CDN) so it works offline and under a strict CSP. */

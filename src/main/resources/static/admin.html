@@ -68,7 +68,10 @@
                 </svg>
                 <span class="link-label">Infrastructure</span>
             </button>
-            <button class="topbar-item" data-page="explorer.html" data-hash="explorer">
+            <!-- The Explorer name now belongs to the tree shell (#323), which is a page of its own and not a
+                 section of this one. This tab keeps the #321 file browser reachable under its own name while
+                 the shell is built; it retires with the last slice, along with admin.html itself. -->
+            <button class="topbar-item" data-page="explorer-files.html" data-hash="explorer">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M1.5 4.2a1 1 0 0 1 1-1h3l1.4 1.6h6.6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>
                 </svg>

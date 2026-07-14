@@ -5,26 +5,73 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
     <title>Explorer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="explorer.css">
+    <link rel="stylesheet" href="vendor/xterm/5.3.0/xterm.css">
+    <link rel="stylesheet" href="explorer-shell.css">
 </head>
 <body>
-    <div class="ex">
-        <!-- The fleet, as the roots of one tree: every machine Vaier can reach over SSH. -->
-        <aside class="ex-fleet">
-            <div class="ex-fleet-head"><span class="ex-col-label">Fleet</span></div>
-            <div id="exFleet"></div>
-        </aside>
+    <!-- The Explorer shell (#323 slice A): one tree spanning the fleet, and the renderer for whatever is
+         selected in it. Unlike every page before it this is not a section inside admin.html's iframe — the
+         iframe only ever existed to keep the terminal dock's SSH sessions alive across tab switches, and here
+         the dock is simply part of the page. -->
+    <div class="ex-app" data-past="0">
 
-        <section class="ex-dir">
-            <div class="ex-bar">
-                <nav class="ex-crumbs" id="exCrumbs" aria-label="Path"></nav>
-                <span class="ex-count" id="exCount"></span>
+        <header class="topbar">
+            <a href="/launchpad.html" class="topbar-brand" aria-label="Vaier">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <circle cx="8" cy="8" r="2.2" fill="currentColor" stroke="none"/>
+                    <line x1="2.5" y1="3.5" x2="6" y2="6.5"/><line x1="13.5" y1="3.5" x2="10" y2="6.5"/>
+                    <line x1="2.5" y1="12.5" x2="6" y2="9.5"/><line x1="13.5" y1="12.5" x2="10" y2="9.5"/>
+                    <circle cx="2.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="3.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="2.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                    <circle cx="13.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+                <span>V<span class="brand-ai">ai</span>er</span>
+            </a>
+
+            <!-- The address bar is the chrome: where you are is the only navigation state there is. -->
+            <nav class="ex-addressbar" id="exCrumbs" aria-label="Path"></nav>
+
+            <button class="ex-kbd" id="exPalBtn">Search the fleet <span>⌘K</span></button>
+            <div class="topbar-user" id="topbarUser"></div>
+        </header>
+
+        <div class="ex-main">
+            <nav class="ex-tree" id="exTree" aria-label="Fleet"></nav>
+            <main class="ex-pane" id="exPane"></main>
+        </div>
+
+        <!-- The terminal dock, mounted directly in the shell. Markup and ids are terminal-dock.js's, byte for
+             byte as admin.html carries them — the dock itself did not have to change to move in here. -->
+        <section class="term-panel" id="terminalPanel" style="display:none">
+            <div class="term-dock-panes" id="terminalPanes">
+                <div class="term-empty" id="terminalEmpty">
+                    No shells open. Open one from a machine's <strong>shell</strong> entry in the tree.
+                </div>
             </div>
-            <div class="ex-rows" id="exRows"></div>
+            <!-- On-screen keys a phone's soft keyboard can't send (Esc, Tab, Ctrl, Alt, arrows). Populated and
+                 wired by terminal-dock.js; shown only on a phone while a shell is open. -->
+            <div class="term-keybar" id="terminalKeys" role="group" aria-label="Terminal keys"></div>
         </section>
     </div>
 
-    <script src="explorer.js"></script>
+    <!-- One namespace, one search: every entry in the tree, by its path. -->
+    <div class="ex-scrim" id="exScrim">
+        <div class="ex-pal" role="dialog" aria-label="Search the fleet">
+            <input id="exPalInput" placeholder="Go to a path — machine, files, shell…"
+                   autocomplete="off" spellcheck="false">
+            <div class="ex-pal-list" id="exPalList"></div>
+        </div>
+    </div>
+
+    <script src="avatar.js"></script>
+    <script src="vendor/xterm/5.3.0/xterm.js"></script>
+    <script src="vendor/xterm/5.3.0/xterm-addon-fit.js"></script>
+    <script src="vendor/xterm/5.3.0/xterm-addon-web-links.js"></script>
+    <script src="terminal-dock.js"></script>
+    <script src="explorer-listing.js"></script>
+    <script src="explorer-shell.js"></script>
 </body>
 </html>

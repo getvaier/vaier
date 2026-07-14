@@ -1046,6 +1046,77 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
 
 ---
 
+### 6.21 Explorer becomes Vaier's only UI 🟡 (in progress — epic [#323](https://github.com/getvaier/vaier/issues/323))
+
+The **Explorer** (§6.20) stops being *a page for files* and becomes **the tree that is Vaier's operator UI**.
+Every page we have today collapses into a renderer for whatever is selected in it — one explorer, many
+Inspectors. A file has a coordinate (machine, **path**, point in time) and so does a container, a published
+service, an **archive**; Vaier is the only machine with SSH to every other, so it is the only place that
+namespace can be assembled.
+
+Three things this buys that a set of pages structurally cannot:
+
+- **It kills the iframe.** `admin.html` renders its sections in `<iframe>`s for exactly one reason: to keep
+  the **web terminal**'s live SSH sessions alive across tab switches. Once a `shell` is just an **entry** on
+  a machine, the dock lives in the shell and the iframe has no job left — and with it go the trapped modals
+  and the missing app-level toast layer.
+- **Coverage becomes a property of a path.** A **backup job**'s source paths and a machine's file tree are the
+  same namespace, so Vaier can flag an uncovered directory *while the operator is standing in it* — the
+  production gap today (jobs cover `/home/geir` only; Home Assistant's database and every Docker volume are
+  unprotected) is invisible to a separate Backups page.
+- **One search.** One address space means one ⌘K over the whole fleet.
+
+**Slices:**
+- [x] **A — The shell ✅.** `explorer.html` is the tree shell: tree rail (fleet root → machines → `files`,
+  `shell`), the **path** as the address bar, the **Inspector**, and ⌘K over every entry. The terminal dock
+  moved in unchanged — the shell is the first Vaier page that is not a section inside an iframe. Machine
+  liveness arrives on the existing `vpn-peers` SSE topic (the frontend never polls). The file browser shipped
+  in §6.20 slice 1 keeps working under its own name (`explorer-files.html`) as the backup, and both read a
+  directory through one shared `explorer-listing.js`. Sections not yet ported (Infrastructure, Backups, Users,
+  Settings, Concepts) are **bridged**: they are entries in the tree whose Inspector is the existing page,
+  framed whole — explicitly transitional scaffolding that each later slice deletes. Token additions: `--rail`
+  (depth hairlines), `--radius-1` / `--radius-2` (there were seven raw radii and no token). Also fixes the
+  latent height bug in `explorer.css` (it subtracted a topbar that is not in the document).
+- [x] **B — Files in the tree ✅.** A directory is an **entry**. Expanding one reads it **lazily over SFTP**
+  (`GET /machines/{machine}/files`, one directory per expand — never eagerly, never recursively: the fleet is
+  on the far side of a VPN, and a tree that walks it eagerly is a tree that hangs). **Only directories become
+  rows in the rail** — the rail carries structure, the Inspector lists the contents. Expanding also selects,
+  so one SFTP round trip fills both; collapsing does not navigate away. A directory's children are **cached by
+  machine and path**, so collapsing and re-expanding costs nothing, and a machine leaving the fleet takes its
+  cached directories with it. Each directory owns its own `VaierListing` reader — and therefore its own
+  monotonic ticket — so a re-read supersedes the read before it while several slow directories expanded at
+  once all land (a single shared ticket would strand the earlier ones spinning forever). A directory that
+  cannot be read **fails visibly and locally**: the row wears the failure and carries the server's own
+  sentence ("Not allowed to read /root as geir."), and the Inspector shows it in full — it never pretends to
+  be empty and never spins forever. ⌘K finds every directory the operator has already expanded, by walking the
+  cache — it never crawls the fleet to build an index.
+  **Liveness, corrected.** The rail's status dot knew only WireGuard **peers**, so every **LAN server** — the
+  NAS, the NUCs, the Roon boxes, the machines the operator actually SSHes into — sat grey, and grey claimed
+  "Vaier has no idea" when Vaier already knew. The dot now folds in `GET /lan-servers`, whose `status` is a
+  **`MachineStatus`** the domain has already decided (`MachineStatus.forLanServer`), so the browser picks a
+  colour and never recombines reachability with the Docker scrape: `OK` → up, `DEGRADED` → amber (on the
+  network, Docker scrape failing), `DOWN` → down, `UNKNOWN` → **idle, never green** — no probe has run, and a
+  green dot there would be a claim Vaier cannot make. The **Vaier server** is up because it is serving the
+  page; it is never probed. Refreshes on the `lan-servers-updated` event **already published on the
+  `vpn-peers` topic** the shell is subscribed to — no new endpoint, no new topic, no poll.
+- [ ] **C — Machines.** Containers, published services and disk mounted under each machine. Retires
+  `vpn-peers.html` — the bulk of the epic's lift lives here.
+- [ ] **D — Time.** The archive rail (§6.20 slice 3). Scrubbing back re-lights the Inspector in the past's
+  palette (`data-past`, defined in slice A and unused until now); the past has no liveness to report, so the
+  status dots go out. Restore is not a feature — it is a paste into the present.
+- [ ] **E — The rest.** DNS, access, settings. `admin.html` and the iframes are deleted, and the bridge with
+  them.
+
+**Decided up front — where the tree does not fit:**
+- **Wizards.** Fleet backup is a guided flow; a tree cannot teach. It stays a flow, rendered as the Inspector
+  for a machine's backup entry.
+- **The map.** Peer geography is not hierarchical: it becomes a view of the fleet root.
+- **The launchpad stays a separate page** — different audience, unauthenticated, different job.
+- **Creation.** "New machine" is not an entry until it exists; it is a persistent affordance at the end of the
+  fleet.
+
+---
+
 ## 7. End-to-End Workflows
 
 ### 7.1 New service on a peer (primary workflow)

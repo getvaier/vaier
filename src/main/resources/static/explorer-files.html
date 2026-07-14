@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="explorer.css">
+</head>
+<body>
+    <div class="ex">
+        <!-- The fleet, as the roots of one tree: every machine Vaier can reach over SSH. -->
+        <aside class="ex-fleet">
+            <div class="ex-fleet-head"><span class="ex-col-label">Fleet</span></div>
+            <div id="exFleet"></div>
+        </aside>
+
+        <section class="ex-dir">
+            <div class="ex-bar">
+                <nav class="ex-crumbs" id="exCrumbs" aria-label="Path"></nav>
+                <span class="ex-count" id="exCount"></span>
+            </div>
+            <div class="ex-rows" id="exRows"></div>
+        </section>
+    </div>
+
+    <script src="explorer-listing.js"></script>
+    <script src="explorer.js"></script>
+</body>
+</html>

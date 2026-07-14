@@ -1,0 +1,437 @@
+/* Explorer shell — the fleet as one tree (#323, slice A).
+
+   Page-scoped layout for the tree rail, the address bar, the Inspector and the ⌘K palette. Every colour and
+   radius comes from the tokens in styles.css; the topbar itself is styles.css's, unchanged. Prefix: ex-,
+   because styles.css already owns .btn and .card and this page is not the place to redefine them.
+
+   One type rule runs through the whole thing: mono for anything with a coordinate (machine names, paths,
+   container names, addresses), sans for anything human (prose, labels, empty states). In a namespace UI the
+   address is the content. */
+
+/* The past is a different light, not a different badge — when the archive rail lands (slice D), scrubbing
+   back re-lights the shell from these tokens rather than pinning a badge on it. Nothing in slice A sets
+   data-past, so nothing here fires yet; the definitions land now so the rail has somewhere to arrive. */
+[data-past='1'] {
+    --bg-panel:     #191510;
+    --bg-card:      #201a13;
+    --bg-hover:     #2b2318;
+    --border:       #3a2f20;
+    --border-hi:    #56452e;
+    --rail:         #2a2117;
+    --text:         #eae0d2;
+    --text-muted:   #ab9b83;
+    --text-dim:     #7a6a53;
+    --accent:       #d9a05b;
+    --accent-hover: #eebb7c;
+}
+
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+
+.ex-app {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 48px 1fr auto;   /* topbar · tree+inspector · dock */
+    transition: background .5s ease;
+}
+
+/* --- topbar: the path IS the chrome ---------------------------------------------------------------- */
+
+.ex-addressbar {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    height: 28px;
+    padding: 0 9px;
+    margin: 0 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    transition: border-color .5s ease, background .5s ease;
+}
+.ex-addressbar::-webkit-scrollbar { display: none; }
+
+.ex-crumb {
+    padding: 2px 4px;
+    border: 0;
+    background: none;
+    border-radius: var(--radius-1);
+    color: var(--text-muted);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color .12s;
+}
+.ex-crumb:hover { color: var(--accent); }
+.ex-crumb-sep { color: var(--text-dim); flex: none; }
+.ex-crumb-here { color: var(--text); font-weight: 500; padding: 2px 4px; white-space: nowrap; }
+
+.ex-kbd {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 9px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+}
+.ex-kbd:hover { color: var(--text-muted); border-color: var(--border-hi); }
+
+/* --- main ------------------------------------------------------------------------------------------ */
+
+.ex-main {
+    display: grid;
+    grid-template-columns: 258px minmax(0, 1fr);
+    min-height: 0;
+}
+
+/* --- the tree -------------------------------------------------------------------------------------- */
+
+.ex-tree {
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 8px 0 20px;
+    transition: background .5s ease, border-color .5s ease;
+}
+.ex-tree::-webkit-scrollbar { width: 9px; }
+.ex-tree::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 9999px;
+    border: 3px solid var(--bg-panel);
+}
+
+.ex-col-label {
+    padding: 4px 14px 8px;
+    font-family: var(--display);
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.ex-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 3px 10px 3px 0;
+    background: none;
+    border: 0;
+    text-align: left;
+    color: var(--text-muted);
+    position: relative;
+    cursor: pointer;
+}
+.ex-row:hover { background: var(--bg-hover); color: var(--text); }
+.ex-row.is-sel { background: var(--bg-card); color: var(--text); }
+.ex-row.is-sel::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    transition: background .5s ease;
+}
+.ex-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.ex-twist {
+    flex: none;
+    width: 12px; height: 12px;
+    color: var(--text-dim);
+    transition: transform .12s ease;
+}
+.ex-twist.is-open { transform: rotate(90deg); }
+.ex-twist.is-leaf { visibility: hidden; }
+
+.ex-ico { flex: none; width: 14px; height: 14px; }
+
+/* Depth is read, not counted: one hairline runs down each level of the tree. Only its offset is set per
+   level, by the script that knows the depth. */
+.ex-guide {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: var(--rail);
+    pointer-events: none;
+    transition: background .5s ease;
+}
+
+.ex-lbl {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* An identifier is an address, not a word. */
+.ex-lbl.is-id { font-family: var(--mono); font-size: 12px; }
+.ex-lbl.is-word { font-size: 12.5px; }
+
+/* The domain's four-state MachineStatus, in four colours — the same four the fleet page uses. UNKNOWN is
+   grey on purpose: it means no probe has run, and a green dot there would be a claim Vaier cannot make. */
+.ex-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.ex-dot.is-up { background: var(--green); box-shadow: 0 0 6px rgba(78, 201, 176, .5); }
+.ex-dot.is-degraded { background: var(--yellow); }   /* on the network, but its Docker scrape is failing */
+.ex-dot.is-down { background: var(--red); }
+.ex-dot.is-idle { background: var(--text-dim); }
+[data-past='1'] .ex-dot { display: none; }   /* the past has no liveness to report */
+
+/* A directory whose read failed. It does not pretend to be empty, and it does not spin forever — it says so,
+   and the reason (the server's own sentence) is on the row's title and in full in the Inspector. */
+.ex-row.is-failed .ex-lbl,
+.ex-row.is-failed .ex-ico { color: var(--red); }
+
+/* A directory being read. The fleet is behind a VPN and a sleeping machine can take seconds to answer, so the
+   twist breathes rather than sitting there looking like a leaf. It always resolves: open, leaf, or failed. */
+.ex-twist.is-busy { animation: ex-breathe 1s ease-in-out infinite; }
+@keyframes ex-breathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+    .ex-twist.is-busy { animation: none; opacity: .5; }
+}
+
+/* --- inspector ------------------------------------------------------------------------------------- */
+
+.ex-pane {
+    overflow-y: auto;
+    min-width: 0;
+    background: var(--bg);
+    transition: background .5s ease;
+}
+.ex-pane::-webkit-scrollbar { width: 10px; }
+.ex-pane::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 9999px;
+    border: 3px solid var(--bg);
+}
+
+.ex-pane-head {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    transition: background .5s ease, border-color .5s ease;
+}
+.ex-pane-title {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+}
+.ex-pane-title .is-id { font-family: var(--mono); font-weight: 500; font-size: 14px; }
+.ex-pane-sub { color: var(--text-dim); font-size: 12px; }
+.ex-pane-actions { margin-left: auto; display: flex; gap: 6px; }
+.ex-pane-body { padding: 16px 18px 40px; }
+
+.ex-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-1);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
+}
+.ex-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
+.ex-btn .ex-ico { width: 13px; height: 13px; }
+
+/* file listing */
+.ex-listing { display: flex; flex-direction: column; }
+.ex-lhead, .ex-lrow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 92px 148px;
+    gap: 12px;
+    align-items: center;
+    padding: 5px 10px;
+}
+.ex-lhead {
+    font-family: var(--display);
+    font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    transition: border-color .5s ease;
+}
+.ex-lrow { border-bottom: 1px solid transparent; }
+.ex-lrow:hover { background: var(--bg-card); }
+.ex-lname {
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    text-align: left;
+    font-family: var(--mono); font-size: 12.5px;
+    color: var(--text);
+}
+.ex-lname .ex-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.ex-lname { cursor: pointer; }
+button.ex-lname:hover .ex-nm { color: var(--accent); text-decoration: underline; }
+button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ex-lmeta {
+    font-family: var(--mono); font-size: 11.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+/* cards */
+.ex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.ex-card {
+    display: block;
+    width: 100%;
+    padding: 12px 13px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-2);
+    text-align: left;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color .12s, background .5s ease;
+}
+.ex-card:hover { border-color: var(--accent); background: var(--bg-hover); }
+.ex-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ex-card-top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.ex-card-top .ex-ico { width: 15px; height: 15px; }
+.ex-card-name {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--mono); font-size: 12.5px;
+    color: var(--text);
+}
+.ex-card-name.is-word { font-family: inherit; }
+.ex-card-note { font-size: 11.5px; color: var(--text-dim); }
+
+.ex-kv {
+    display: grid;
+    grid-template-columns: 128px minmax(0, 1fr);
+    gap: 3px 14px;
+    margin-bottom: 18px;
+    max-width: 620px;
+}
+.ex-kv dt { color: var(--text-dim); font-size: 12px; }
+.ex-kv dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+
+.ex-sect {
+    margin: 22px 0 10px;
+    font-family: var(--display);
+    font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-dim);
+}
+.ex-sect:first-child { margin-top: 0; }
+
+.ex-note {
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    color: var(--text-muted);
+    max-width: 640px;
+    transition: border-color .5s ease;
+}
+.ex-note.is-error { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .06); }
+.ex-note code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+
+/* --- the bridge: a page not yet ported, framed whole ------------------------------------------------ */
+
+.ex-bridge {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: var(--bg);
+}
+.ex-pane.is-bridged { overflow: hidden; }
+
+/* --- terminal dock ---------------------------------------------------------------------------------- */
+
+/* The dock is a row of the shell, not a page inside it — no iframe stands between a shell and its host any
+   more. It is sized here; everything inside it is terminal-dock.js's, unchanged. */
+#terminalPanel {
+    height: min(42vh, 460px);
+    border-top: 1px solid var(--border);
+}
+
+/* --- ⌘K: one namespace, one search ------------------------------------------------------------------ */
+
+.ex-scrim {
+    position: fixed; inset: 0;
+    background: rgba(6, 9, 13, .72);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    z-index: 200;
+}
+.ex-scrim.is-on { display: flex; }
+
+.ex-pal {
+    width: min(560px, 92vw);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-2);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .55);
+    overflow: hidden;
+}
+.ex-pal input {
+    width: 100%;
+    padding: 14px 16px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    outline: none;
+}
+.ex-pal input::placeholder { color: var(--text-dim); }
+.ex-pal-list { max-height: 320px; overflow-y: auto; padding: 6px; }
+.ex-pal-item {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%;
+    padding: 7px 10px;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-1);
+    text-align: left;
+    color: var(--text-muted);
+    font-family: inherit;
+    cursor: pointer;
+}
+.ex-pal-item.is-on { background: var(--bg-hover); color: var(--text); }
+.ex-pal-item .ex-pth {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--mono); font-size: 12.5px;
+}
+.ex-pal-item .ex-pth mark { background: none; color: var(--accent); }
+.ex-pal-item .ex-kind {
+    font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-dim);
+}
+.ex-pal-empty { padding: 22px 16px; color: var(--text-dim); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+    .ex-app *, .ex-app { transition: none !important; animation: none !important; }
+}
+
+@media (max-width: 760px) {
+    .ex-main { grid-template-columns: minmax(0, 1fr); }
+    .ex-tree { display: none; }
+    .ex-lhead, .ex-lrow { grid-template-columns: minmax(0, 1fr) 80px; }
+    .ex-lhead span:last-child, .ex-lrow .ex-lmeta:last-child { display: none; }
+}

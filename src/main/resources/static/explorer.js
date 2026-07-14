@@ -7,6 +7,10 @@
 //
 // This slice browses and nothing else: no time rail, no clipboard, no coverage. Those arrive with their own
 // slices, and shipping their controls dead would be a lie about what works.
+//
+// Superseded by the Explorer shell (#323): this page is the backup while the tree is built, and it reads a
+// directory through the same explorer-listing.js the shell does, so the two can never disagree about what a
+// directory holds.
 (function () {
     'use strict';
 
@@ -15,31 +19,14 @@
     let machines = [];
     let machine = null;
     let cwd = ROOT;
-    let inFlight = 0;          // only the newest listing may paint; a slow host must not overwrite a fast one
+
+    const listing = VaierListing.createBrowser();   // owns the newest-listing-wins guard
+    const formatSize = VaierListing.formatSize;
+    const formatTime = VaierListing.formatTime;
 
     const $ = (id) => document.getElementById(id);
 
     // --- formatting -------------------------------------------------------------------------------
-
-    function formatSize(entry) {
-        if (entry.directory) return '—';
-        const bytes = entry.size;
-        if (bytes == null) return '—';
-        const units = ['B', 'K', 'M', 'G', 'T'];
-        let n = bytes;
-        let i = 0;
-        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-        return (n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)) + units[i];
-    }
-
-    function formatTime(iso) {
-        if (!iso) return '';
-        const d = new Date(iso);
-        if (isNaN(d)) return '';
-        return d.toLocaleString(undefined, {
-            day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-        });
-    }
 
     function icon(isDir) {
         const path = isDir
@@ -161,30 +148,16 @@
         $('exRows').textContent = '';
         $('exRows').appendChild(note('Listing ' + path + ' on ' + machine + '…', false));
 
-        const ticket = ++inFlight;
-        try {
-            const res = await fetch('/machines/' + encodeURIComponent(machine)
-                + '/files?path=' + encodeURIComponent(path));
-            if (ticket !== inFlight) return;   // a newer listing has already been asked for
+        const result = await listing.list(machine, path);
+        if (result.stale) return;             // a newer listing has already been asked for
 
-            if (!res.ok) {
-                // Vaier answers a failure with an ApiError envelope, and its message is already written for
-                // the operator — "Not allowed to read /root as geir." says more than any status code could.
-                const err = await res.json().catch(() => null);
-                $('exRows').textContent = '';
-                $('exRows').appendChild(note(
-                    (err && err.message) || 'Could not list ' + path + ' on ' + machine + '.', true));
-                $('exCount').textContent = '';
-                return;
-            }
-            const entries = await res.json();
-            if (ticket !== inFlight) return;
-            paintRows(entries);
-        } catch (e) {
-            if (ticket !== inFlight) return;
+        if (result.error) {
             $('exRows').textContent = '';
-            $('exRows').appendChild(note('Could not reach ' + machine + '.', true));
+            $('exRows').appendChild(note(result.error, true));
+            $('exCount').textContent = '';
+            return;
         }
+        paintRows(result.entries);
     }
 
     function openMachine(name) {
