@@ -7,6 +7,8 @@ import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.ResolveFileCoordinateUseCase;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.MountedArchive;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
@@ -18,7 +20,12 @@ import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * The Explorer domain service — one file tree spanning the fleet. Vaier sits at the VPN hub and is the
@@ -123,28 +130,122 @@ public class ExplorerService implements BrowseFilesUseCase, ResolveFileCoordinat
         return root.toJailPath(mounted.machinePath(requested));
     }
 
+    private static final String OCTET_STREAM = "application/octet-stream";
+    private static final String ZIP = "application/zip";
+
     /**
-     * Open a file for download: resolve its coordinate, stat it, and refuse a directory up front (a folder
-     * download is not supported yet) so the browser gets a clean 400 rather than a broken stream. The bytes
-     * are streamed lazily by the returned writer, opening the SFTP read only when invoked, so memory stays
-     * flat. A download is a read, so {@code at} may name an archive — the past is fine.
+     * Open a file or directory for download: resolve its coordinate, stat it, and branch. A file streams
+     * as-is; a directory streams as a zip of its whole tree ({@link #openDirectoryForDownload}). Either way
+     * the bytes are streamed lazily by the returned writer, opening the SFTP read(s) only when invoked, so
+     * memory stays flat. A download is a read, so {@code at} may name an archive — the past is fine, and so
+     * is zipping it.
      */
     @Override
     public Download openForDownload(String machineName, String path, String at) {
         ResolvedFileCoordinate coordinate = resolve(machineName, path, at);
         RemoteStat stat = forBrowsingRemoteFiles.stat(coordinate.target(), coordinate.path());
         if (stat.directory()) {
-            throw new IllegalArgumentException("Downloading a folder isn't supported yet.");
+            return openDirectoryForDownload(machineName, path, coordinate);
         }
         String filename = basename(coordinate.path());
         log.debug("Opening {} on {} for download ({} bytes)", filename, machineName, stat.sizeBytes());
-        return new Download(filename, stat.sizeBytes(),
+        return new Download(filename, stat.sizeBytes(), OCTET_STREAM,
             out -> forBrowsingRemoteFiles.download(coordinate.target(), coordinate.path(), out));
     }
 
-    /** The last segment of a resolved path — the download's filename. */
+    /**
+     * A directory, zipped on the way to the browser. The zip filename is the directory's own basename — the
+     * requested path's, not the (possibly jail- or mount-mapped) coordinate SFTP was actually asked for — or,
+     * when the requested path is a root with no basename of its own ({@code /}), the machine's name stands in
+     * for it. The size is not known ahead of time: a zip's byte count is not the sum of the files it holds,
+     * so {@code Content-Length} must not be guessed at and is reported as {@code -1}.
+     */
+    private Download openDirectoryForDownload(String machineName, String requestedPath,
+                                               ResolvedFileCoordinate coordinate) {
+        String dirname = basename(FileEntry.normalisePath(requestedPath));
+        String zipFilename = (dirname.isEmpty() ? machineName : dirname) + ".zip";
+        log.debug("Opening directory {} on {} for a zip download", coordinate.path(), machineName);
+        return new Download(zipFilename, -1, ZIP,
+            out -> streamZip(coordinate.target(), coordinate.path(), out));
+    }
+
+    /** The last segment of a path — a download's filename, or a directory's own name inside its zip. */
     private static String basename(String path) {
         return path.substring(path.lastIndexOf('/') + 1);
+    }
+
+    /**
+     * Walk {@code rootPath} on {@code target} and stream it into a zip written to {@code out} — flat memory,
+     * one file at a time straight into the zip, never buffering the archive whole.
+     */
+    private void streamZip(SshTarget target, String rootPath, OutputStream out) {
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            zipDirectory(target, rootPath, "", zip);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * One directory of the walk, entries named relative to the zip's root ({@code prefix}, joined with
+     * forward slashes so the zip unpacks the same way on every OS). A directory this SSH user cannot read,
+     * or that has vanished mid-walk, is an ordinary state of a fleet ({@link PermissionDeniedException},
+     * {@link NotFoundException}) — it is simply left out of the zip, not allowed to fail a download that may
+     * already have sent bytes for other files. An empty directory becomes a zip directory entry of its own,
+     * the only way a zip can carry a folder with nothing in it; the root itself never needs one.
+     */
+    private void zipDirectory(SshTarget target, String path, String prefix, ZipOutputStream zip)
+            throws IOException {
+        List<FileEntry> entries;
+        try {
+            entries = FileEntry.listing(forBrowsingRemoteFiles.list(target, path).entries());
+        } catch (NotFoundException | PermissionDeniedException e) {
+            log.warn("Skipping {} on {} in zip download ({})", path, target.host(), e.getMessage());
+            return;
+        }
+        if (entries.isEmpty()) {
+            if (!prefix.isEmpty()) {
+                zip.putNextEntry(new ZipEntry(prefix + "/"));
+                zip.closeEntry();
+            }
+            return;
+        }
+        for (FileEntry entry : entries) {
+            String entryName = prefix.isEmpty() ? entry.name() : prefix + "/" + entry.name();
+            if (entry.directory()) {
+                zipDirectory(target, entry.path(), entryName, zip);
+            } else {
+                zipFile(target, entry, entryName, zip);
+            }
+        }
+    }
+
+    /**
+     * One file of the walk, streamed straight into its own zip entry. A file this SSH user cannot read, or
+     * that has vanished mid-walk ({@link PermissionDeniedException}, {@link NotFoundException}), must not
+     * fail the whole zip — headers, and possibly other files' bytes, may already be on their way to the
+     * browser by the time one file turns out unreadable, so the download has to degrade, not 500.
+     *
+     * <p><b>The resilience rule, and why it lands where it does.</b> The zip entry is already open — its
+     * local header already written to the stream — by the time {@code download} can fail, because writing
+     * straight into the entry (no buffering, so memory stays flat for files of any size) requires starting
+     * the entry first. There is no undoing that once it has happened. So an unreadable file cannot vanish
+     * from the archive without cost: the alternative would be to verify every file is readable before opening
+     * its entry, which would spend a second round trip on every file in the tree to protect against the rare
+     * one that fails. Instead the entry stays, empty, in its rightful place in the tree — the zip is still
+     * whole and every other file streams through untouched — rather than paying that cost for the common
+     * case to avoid an empty entry in the rare one.
+     */
+    private void zipFile(SshTarget target, FileEntry entry, String entryName, ZipOutputStream zip)
+            throws IOException {
+        try {
+            zip.putNextEntry(new ZipEntry(entryName));
+            forBrowsingRemoteFiles.download(target, entry.path(), zip);
+            zip.closeEntry();
+        } catch (NotFoundException | PermissionDeniedException e) {
+            log.warn("Skipping {} on {} in zip download ({})", entry.path(), target.host(), e.getMessage());
+            zip.closeEntry();
+        }
     }
 
     /**

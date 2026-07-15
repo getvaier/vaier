@@ -1,11 +1,13 @@
 package net.vaier.application.service;
 
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
@@ -23,13 +25,23 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -397,16 +409,141 @@ class ExplorerServiceTest {
     }
 
     @Test
-    void openForDownload_ofADirectory_isRefused_becauseAFolderDownloadIsNotSupportedYet() {
+    void openForDownload_givesAnOctetStreamContentType_forAFile() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir/notes.txt")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(false, 120));
+
+        var download = service.openForDownload("apalveien5", "/home/geir/notes.txt", null);
+
+        assertThat(download.contentType()).isEqualTo("application/octet-stream");
+    }
+
+    // --- slice 2 follow-up: a directory downloads as a zip of its whole tree -----------------------------
+
+    @Test
+    void openForDownload_ofADirectory_zipsTheWholeTree_withEntryNamesRelativeToTheDirectory() throws Exception {
         machineResolves("apalveien5", "SHA256:pinned");
         when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
             .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir"))).thenReturn(new DirectoryListing(List.of(
+            FileEntry.in("/home/geir", "notes.txt", false, 7, WHEN),
+            FileEntry.in("/home/geir", "docs", true, 4096, WHEN)), "SHA256:pinned"));
+        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir/docs"))).thenReturn(new DirectoryListing(List.of(
+            FileEntry.in("/home/geir/docs", "readme.md", false, 6, WHEN)), "SHA256:pinned"));
+        writes(forBrowsingRemoteFiles, "/home/geir/notes.txt", "top-lvl");
+        writes(forBrowsingRemoteFiles, "/home/geir/docs/readme.md", "nested");
 
-        assertThatThrownBy(() -> service.openForDownload("apalveien5", "/home/geir", null))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("folder");
-        // A directory is refused before any bytes are streamed.
-        verify(forBrowsingRemoteFiles, never()).download(any(), any(), any());
+        Download download = service.openForDownload("apalveien5", "/home/geir", null);
+
+        assertThat(download.filename()).isEqualTo("geir.zip");
+        assertThat(download.contentType()).isEqualTo("application/zip");
+        // A zip's byte count isn't known until it's built, and isn't the sum of the files it holds.
+        assertThat(download.sizeBytes()).isEqualTo(-1);
+        assertThat(unzip(download)).containsOnly(
+            entry("notes.txt", "top-lvl"),
+            entry("docs/readme.md", "nested"));
+    }
+
+    @Test
+    void openForDownload_ofADirectory_makesAnEmptySubdirectory_aZipDirectoryEntry() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir"))).thenReturn(new DirectoryListing(List.of(
+            FileEntry.in("/home/geir", "empty", true, 4096, WHEN)), "SHA256:pinned"));
+        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir/empty")))
+            .thenReturn(new DirectoryListing(List.of(), "SHA256:pinned"));
+
+        Download download = service.openForDownload("apalveien5", "/home/geir", null);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        download.writer().accept(out);
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(out.toByteArray()))) {
+            ZipEntry only = zip.getNextEntry();
+            assertThat(only.getName()).isEqualTo("empty/");
+            assertThat(only.isDirectory()).isTrue();
+            assertThat(zip.getNextEntry()).isNull();
+        }
+    }
+
+    @Test
+    void openForDownload_ofTheRootDirectory_fallsBackToTheMachineName_forTheZipFilename() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+
+        Download download = service.openForDownload("apalveien5", "/", null);
+
+        // "/" has no basename of its own to zip under, so the machine's own name stands in for it. The walk
+        // itself is lazy (only the writer opens it), so nothing about listing is stubbed or verified here.
+        assertThat(download.filename()).isEqualTo("apalveien5.zip");
+    }
+
+    /**
+     * The resilience rule for a file that turns out unreadable mid-walk: it is not allowed to sink the whole
+     * zip, but it is also not silently re-verified before every file is streamed — that would cost a second
+     * round trip per file, for every file, to protect against the rare one that fails. The zip entry for it
+     * is already open (its header is already in the stream) by the time {@code download} can fail, so what
+     * lands in the archive is an empty entry for that one file, in its rightful place in the tree, while
+     * every other file streams through untouched and the download completes normally rather than a 500.
+     */
+    @Test
+    void openForDownload_ofADirectory_leavesAnEmptyEntry_forAFileItCannotRead_ratherThanFailingTheWholeZip()
+            throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir"))).thenReturn(new DirectoryListing(List.of(
+            FileEntry.in("/home/geir", "secret.txt", false, 3, WHEN),
+            FileEntry.in("/home/geir", "notes.txt", false, 7, WHEN)), "SHA256:pinned"));
+        doThrow(new PermissionDeniedException("Not allowed to read /home/geir/secret.txt"))
+            .when(forBrowsingRemoteFiles).download(any(), eq("/home/geir/secret.txt"), any());
+        writes(forBrowsingRemoteFiles, "/home/geir/notes.txt", "top-lvl");
+
+        Download download = service.openForDownload("apalveien5", "/home/geir", null);
+
+        assertThat(unzip(download)).containsOnly(
+            entry("notes.txt", "top-lvl"),
+            entry("secret.txt", ""));
+    }
+
+    @Test
+    void openForDownload_ofADirectory_inThePast_zipsTheArchivedTree() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+        when(forBrowsingRemoteFiles.stat(any(), eq(MOUNTPOINT + "/home/geir")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+        when(forBrowsingRemoteFiles.list(any(), eq(MOUNTPOINT + "/home/geir"))).thenReturn(new DirectoryListing(
+            List.of(FileEntry.in(MOUNTPOINT + "/home/geir", "notes.txt", false, 3, WHEN)), "SHA256:pinned"));
+        writes(forBrowsingRemoteFiles, MOUNTPOINT + "/home/geir/notes.txt", "old");
+
+        // A download is a read, so zipping the past is fine too — same rule as a single-file download.
+        Download download = service.openForDownload("apalveien5", "/home/geir", "ab12");
+
+        assertThat(unzip(download)).containsOnly(entry("notes.txt", "old"));
+    }
+
+    private static void writes(ForBrowsingRemoteFiles mock, String path, String content) {
+        doAnswer(inv -> {
+            ((java.io.OutputStream) inv.getArgument(2)).write(content.getBytes());
+            return null;
+        }).when(mock).download(any(), eq(path), any());
+    }
+
+    private static Map<String, String> unzip(Download download) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        download.writer().accept(out);
+        Map<String, String> entries = new LinkedHashMap<>();
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(out.toByteArray()))) {
+            ZipEntry e;
+            while ((e = zip.getNextEntry()) != null) {
+                if (!e.isDirectory()) {
+                    entries.put(e.getName(), new String(zip.readAllBytes()));
+                }
+            }
+        }
+        return entries;
     }
 
     @Test

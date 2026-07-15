@@ -60,11 +60,13 @@ public class ExplorerRestController {
     }
 
     /**
-     * Download one file from a machine — the Explorer's "the browser is a download" destination (#321,
-     * slice 2). The bytes are streamed straight through Vaier from the machine's SFTP service, so memory
-     * stays flat regardless of size. {@code at} may name an archive: a download is a read, so the past is
-     * fine. A directory is refused with a {@code 400} up front (folder download is a later slice) rather than
-     * a broken stream, because the use case stats before any header or byte is written.
+     * Download one file or directory from a machine — the Explorer's "the browser is a download"
+     * destination (#321, slice 2). The bytes are streamed straight through Vaier from the machine's SFTP
+     * service, so memory stays flat regardless of size. {@code at} may name an archive: a download is a
+     * read, so the past is fine — zipping it included. A file streams as-is; a directory streams as a zip of
+     * its whole tree, built by the use case as it walks. A zip's size is not known ahead of time, so
+     * {@code Content-Length} is only set when the use case reports one (a file always does; a directory
+     * never does — {@link Download#sizeBytes()} is {@code -1}).
      */
     @GetMapping("/machines/{machine}/files/download")
     public ResponseEntity<StreamingResponseBody> download(@PathVariable String machine,
@@ -74,12 +76,14 @@ public class ExplorerRestController {
             LogSafe.forLog(path), LogSafe.forLog(machine), LogSafe.forLog(at));
         Download download = downloadFileUseCase.openForDownload(machine, path, at);
         StreamingResponseBody body = download.writer()::accept;
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION,
                 "attachment; filename=\"" + sanitiseFilename(download.filename()) + "\"")
-            .contentLength(download.sizeBytes())
-            .contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .body(body);
+            .contentType(MediaType.parseMediaType(download.contentType()));
+        if (download.sizeBytes() >= 0) {
+            response = response.contentLength(download.sizeBytes());
+        }
+        return response.body(body);
     }
 
     /**

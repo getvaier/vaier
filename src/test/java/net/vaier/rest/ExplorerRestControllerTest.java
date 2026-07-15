@@ -170,7 +170,7 @@ class ExplorerRestControllerTest {
     void download_streamsTheFile_asAnAttachment_withItsNameSizeAndBytes() throws Exception {
         byte[] payload = "hello download".getBytes();
         when(downloadFileUseCase.openForDownload("apalveien5", "/home/geir/notes.txt", null))
-            .thenReturn(new Download("notes.txt", payload.length, out -> {
+            .thenReturn(new Download("notes.txt", payload.length, "application/octet-stream", out -> {
                 try {
                     out.write(payload);
                 } catch (java.io.IOException e) {
@@ -196,7 +196,7 @@ class ExplorerRestControllerTest {
     @Test
     void download_fromAnArchive_isAllowed_becauseADownloadIsARead() throws Exception {
         when(downloadFileUseCase.openForDownload("apalveien5", "/home/geir/notes.txt", "ab12"))
-            .thenReturn(new Download("notes.txt", 3, out -> {
+            .thenReturn(new Download("notes.txt", 3, "application/octet-stream", out -> {
                 try {
                     out.write("old".getBytes());
                 } catch (java.io.IOException e) {
@@ -214,15 +214,29 @@ class ExplorerRestControllerTest {
     }
 
     @Test
-    void download_ofADirectory_isABadRequest_withTheFolderMessage() throws Exception {
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new GlobalExceptionHandler()).build();
-        when(downloadFileUseCase.openForDownload(any(), any(), any()))
-            .thenThrow(new IllegalArgumentException("Downloading a folder isn't supported yet."));
+    void download_ofADirectory_streamsAZip_withTheZipContentType_andNoContentLength() throws Exception {
+        // The zip is built by the use case; the controller only wires the handle to the response. -1 stands
+        // for "not known ahead of time" — a zip's byte count isn't the sum of the files it holds.
+        byte[] zipBytes = {1, 2, 3};
+        when(downloadFileUseCase.openForDownload("apalveien5", "/home/geir", null))
+            .thenReturn(new Download("geir.zip", -1, "application/zip", out -> {
+                try {
+                    out.write(zipBytes);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }));
 
-        mockMvc.perform(get("/machines/apalveien5/files/download").param("path", "/home/geir"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("Downloading a folder isn't supported yet."));
+        ResponseEntity<StreamingResponseBody> response = controller.download("apalveien5", "/home/geir", null);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.valueOf("application/zip"));
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+            .isEqualTo("attachment; filename=\"geir.zip\"");
+        assertThat(response.getHeaders().getContentLength()).isEqualTo(-1);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        response.getBody().writeTo(out);
+        assertThat(out.toByteArray()).isEqualTo(zipBytes);
     }
 
     @Test

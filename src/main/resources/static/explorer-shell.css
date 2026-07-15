@@ -271,24 +271,25 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 .ex-lrow { position: relative; border-bottom: 1px solid transparent; }
 .ex-lrow:hover { background: var(--bg-card); }
 
-/* Per-row actions ride over the Modified column, revealed on hover — and always reachable by keyboard
-   (focus-within) and on touch, where there is no hover. A quiet cluster: the row is the content. */
+/* Per-row actions ride over the Modified column. They stay visible — copy and download are the point of a
+   file browser, not an easter egg — dimmed until the row is hovered or focused, then full strength. */
 .ex-lactions {
     position: absolute;
     right: 8px; top: 0; bottom: 0;
     display: flex; align-items: center; gap: 2px;
-    padding-left: 18px;
-    background: linear-gradient(to right, transparent, var(--bg-card) 22%);
-    opacity: 0;
+    padding-left: 24px;
+    background: linear-gradient(to right, transparent, var(--bg-card) 30%);
+    opacity: .62;
     transition: opacity .12s ease;
 }
 .ex-lrow:hover .ex-lactions, .ex-lrow:focus-within .ex-lactions { opacity: 1; }
+.ex-lrow:hover .ex-lactions { background: linear-gradient(to right, transparent, var(--bg-card) 30%); }
 .ex-iconbtn {
     display: flex; align-items: center; justify-content: center;
-    width: 26px; height: 24px;
+    width: 27px; height: 24px;
     padding: 0;
     background: none; border: 0; border-radius: var(--radius-1);
-    color: var(--text-dim);
+    color: var(--text-muted);
     cursor: pointer;
     transition: color .12s, background .12s;
 }
@@ -781,17 +782,32 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     pointer-events: none;
 }
 .ex-toast-item {
-    max-width: 340px;
-    padding: 9px 13px;
+    display: flex; align-items: center; gap: 10px;
+    max-width: 360px;
+    padding: 8px 8px 8px 13px;
     background: var(--bg-hover);
     border: 1px solid var(--border-hi);
     border-radius: var(--radius-1);
     color: var(--text);
     font-size: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+    pointer-events: auto;   /* the container is click-through; a toast itself is not, so its X can be clicked */
     /* A whole lifetime in CSS: rise, hold, fade — then animationend removes it. No JS timer keeps the clock. */
-    animation: ex-toast-life 4.6s ease forwards;
+    animation: ex-toast-life 5.4s ease forwards;
 }
+.ex-toast-item:hover { animation-play-state: paused; }   /* reading it stops the countdown */
+.ex-toast-msg { flex: 1; min-width: 0; }
+.ex-toast-x {
+    flex: none;
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    padding: 0; background: none; border: 0; border-radius: var(--radius-1);
+    color: var(--text-dim); cursor: pointer;
+    transition: color .12s, background .12s;
+}
+.ex-toast-x:hover { color: var(--text); background: var(--bg-card); }
+.ex-toast-x:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.ex-toast-x .ex-ico { width: 12px; height: 12px; }
 @keyframes ex-toast-life {
     0% { opacity: 0; transform: translateY(6px); }
     6% { opacity: 1; transform: none; }

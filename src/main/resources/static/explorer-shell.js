@@ -34,6 +34,7 @@
         check:   '<path d="M2.8 8.4l3.1 3.4L13.2 4.6"/>',
         warn:    '<path d="M8 2.4l6.1 11.1H1.9z"/><path d="M8 6.4v3.3"/><circle cx="8" cy="11.4" r=".5" fill="currentColor" stroke="none"/>',
         cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
+        refresh: '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.4v3.1h-3.1"/>',
     };
 
     // Trusted constant markup — never interpolate anything but a key of ICON into this.
@@ -1230,9 +1231,24 @@
         const machine = S.path[1];
         loadArchives(machine);                    // fills the rail; not awaited — it re-renders when it lands
         const path = remotePath(S.path);          // null until the machine has said where its tree begins
-        const shown = path == null ? 'files' : path;
 
-        pane.appendChild(paneHead(shown, true, machine));
+        // The path lives in the address bar and nowhere else — the head names the machine and how much is
+        // here, not the location again. A refresh re-reads this one directory over SFTP: the fleet changes
+        // under Vaier (a Transfer just landed, a shell just wrote a file), and the cache is otherwise sticky.
+        const loaded = S.dirs.get(dirKey(machine, path, S.at));
+        const count = loaded && loaded.state === 'ready' ? loaded.entries.length : null;
+        const sub = count == null ? null : count + (count === 1 ? ' item' : ' items');
+        const head = paneHead(machine, true, sub);
+        const actions = document.createElement('div');
+        actions.className = 'ex-pane-actions';
+        const refresh = el('button', 'ex-iconbtn');
+        refresh.innerHTML = svg('refresh', 'ex-ico');
+        refresh.title = 'Refresh';
+        refresh.setAttribute('aria-label', 'Refresh this folder');
+        refresh.onclick = () => refreshDir(machine, path);
+        actions.appendChild(refresh);
+        head.appendChild(actions);
+        pane.appendChild(head);
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -1256,14 +1272,14 @@
 
         const result = { entries: entry.entries };
 
-        const head = document.createElement('div');
-        head.className = 'ex-lhead';
+        const lhead = document.createElement('div');
+        lhead.className = 'ex-lhead';
         ['Name', 'Size', 'Modified'].forEach((h) => {
             const cell = document.createElement('span');
             cell.textContent = h;
-            head.appendChild(cell);
+            lhead.appendChild(cell);
         });
-        rows.appendChild(head);
+        rows.appendChild(lhead);
 
         if (!result.entries.length) return rows.appendChild(note('This folder is empty.', false));
 
@@ -1307,16 +1323,14 @@
         copy.onclick = () => clipCopy(machine, entry);
         box.appendChild(copy);
 
-        // Only a file downloads — a folder would have to be zipped, which is a later slice. Downloading the
-        // past is fine: it is a read, and the invariant is only about writing.
-        if (!entry.directory) {
-            const dl = el('button', 'ex-iconbtn');
-            dl.innerHTML = svg('download', 'ex-ico');
-            dl.title = 'Download';
-            dl.setAttribute('aria-label', 'Download ' + entry.name);
-            dl.onclick = () => download(machine, entry);
-            box.appendChild(dl);
-        }
+        // A file downloads as itself; a folder downloads as a zip of its whole tree. Downloading the past is
+        // fine either way — it is a read, and the invariant is only ever about writing.
+        const dl = el('button', 'ex-iconbtn');
+        dl.innerHTML = svg('download', 'ex-ico');
+        dl.title = entry.directory ? 'Download as zip' : 'Download';
+        dl.setAttribute('aria-label', dl.title + ' ' + entry.name);
+        dl.onclick = () => download(machine, entry);
+        box.appendChild(dl);
         return box;
     }
 
@@ -1354,7 +1368,8 @@
         if (S.at) params.set('at', S.at);
         const a = document.createElement('a');
         a.href = '/machines/' + encodeURIComponent(machine) + '/files/download?' + params.toString();
-        a.download = entry.name;
+        // A folder arrives as a zip; the server sets the real filename, this is just the browser's hint.
+        a.download = entry.directory ? entry.name + '.zip' : entry.name;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1406,6 +1421,13 @@
     }
 
     const parentDir = (p) => { const i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.slice(0, i); };
+
+    // Re-read one directory over SFTP, dropping its cached slot so the read really happens. render() then
+    // sees it unread and fetches it (renderDirectory), exactly as a first open would.
+    function refreshDir(machine, path) {
+        S.dirs.delete(dirKey(machine, path, S.at));
+        render();
+    }
 
     // Ask the backend to carry one coordinate into a destination directory. The Transfer comes back with an
     // id; from there its progress arrives over the transfers stream, so nothing here polls.
@@ -1517,8 +1539,13 @@
         events.addEventListener('transfer-settled', (e) => {
             const d = JSON.parse(e.data);
             const tr = S.transfers.get(d.id);
-            if (tr) { tr.state = d.state; tr.error = d.error; renderClip(); }
-            else loadTransfers();   // settled one we never saw start (another tab, a reconnect) — repaint from truth
+            if (!tr) return loadTransfers();   // settled one we never saw start (another tab, a reconnect)
+            tr.state = d.state;
+            tr.error = d.error;
+            // A landed copy changed a directory. Drop its cached slot so the new file shows — and repaint the
+            // whole shell, not just the tray, in case that directory is the one on screen (then it re-reads).
+            if (d.state === 'DONE') { S.dirs.delete(dirKey(tr.destMachine, tr.destPath, '')); render(); }
+            else renderClip();
         });
     }
 
@@ -1538,10 +1565,17 @@
     function toast(message) {
         const host = $('exToast');
         const t = el('div', 'ex-toast-item');
-        t.textContent = message;
-        // Self-dismissing on a pure-CSS lifetime, not a JS timer: the shell holds no clock of its own — the
-        // backend keeps time and the stream delivers it — so the toast lives out a CSS animation and removes
-        // itself when it ends.
+        const msg = el('span', 'ex-toast-msg');
+        msg.textContent = message;
+        const x = el('button', 'ex-toast-x');
+        x.innerHTML = svg('cross', 'ex-ico');
+        x.title = 'Dismiss';
+        x.setAttribute('aria-label', 'Dismiss');
+        x.onclick = () => t.remove();
+        t.append(msg, x);
+        // Two ways out, no JS clock either way: the X closes it now, and a pure-CSS lifetime closes it on its
+        // own (animationend removes it — hovering pauses that countdown so a message being read does not
+        // vanish). The shell keeps no timer of its own; the backend keeps time and the stream delivers it.
         t.addEventListener('animationend', () => t.remove());
         host.appendChild(t);
     }

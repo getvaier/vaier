@@ -1133,8 +1133,14 @@ job**'s source paths against the tree and would have reported a backed-up direct
   a capped settled tail, so a reconnecting browser can repaint), `GET /transfers/events` (the **`transfers`**
   SSE topic, publishing throttled `transfer-progress` and a final `transfer-settled`), and
   `GET /machines/{machine}/files/download` (streams the file as an `attachment`, `at` allowed since a download
-  is a read; a folder is a `400` "Downloading a folder isn't supported yet."). All admin-authed, never
-  anonymous. The **Clipboard** UI and the source-size **size warning** are the frontend half.
+  is a read). A directory downloads as a zip of its whole tree, built by walking it and streaming each file
+  straight into the zip — flat memory, never buffered whole; entry names are relative to the directory
+  (`sub/file.txt`), an empty subdirectory becomes a zip directory entry, and `Content-Length` is omitted (a
+  zip's size isn't known ahead of time). A file that turns out unreadable mid-walk leaves an empty entry in
+  its place rather than failing the whole download — by the time that failure can happen the entry is already
+  open in the stream, and probing every file first to avoid it would cost a second round trip per file, for
+  every file, to protect against the rare one that fails. All admin-authed, never anonymous. The **Clipboard**
+  UI and the source-size **size warning** are the frontend half.
 
 ---
 
