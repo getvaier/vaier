@@ -3,12 +3,15 @@ package net.vaier.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.BrowseFilesUseCase;
+import net.vaier.application.DownloadFileUseCase;
+import net.vaier.application.ResolveFileCoordinateUseCase;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
+import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
 import net.vaier.domain.port.ForMountingArchives;
 import net.vaier.domain.port.ForResolvingSftpRoots;
 import net.vaier.domain.port.ForResolvingSshTargets;
@@ -29,7 +32,7 @@ import java.util.List;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class ExplorerService implements BrowseFilesUseCase {
+public class ExplorerService implements BrowseFilesUseCase, ResolveFileCoordinateUseCase, DownloadFileUseCase {
 
     private final ForResolvingSshTargets forResolvingSshTargets;
     private final ForBrowsingRemoteFiles forBrowsingRemoteFiles;
@@ -90,6 +93,58 @@ public class ExplorerService implements BrowseFilesUseCase {
         List<FileEntry> archiveEntries = mounted.anchor(root.anchor(listing.entries()));
         log.debug("Listed {} in archive {} on {}", directory, at, machineName);
         return new MachineDirectory(SftpRoot.NONE, directory, FileEntry.listing(archiveEntries), at);
+    }
+
+    /**
+     * Resolve a file's coordinate to the SFTP target and the real on-host path — the same mapping
+     * {@link #listDirectory} applies, factored out so the Transfer relay and the download path do not carry a
+     * second copy of it. The path is required and concrete: a coordinate to move or download is a real file,
+     * never "wherever the tree begins". The trust boundary still stands in front — a hostile path is refused
+     * here, before a machine is resolved or an archive mounted.
+     */
+    @Override
+    public ResolvedFileCoordinate resolve(String machineName, String path, String at) {
+        String requested = FileEntry.normalisePath(path);
+        SshTarget target = forResolvingSshTargets.resolve(machineName);
+        SftpRoot root = forResolvingSftpRoots.rootFor(machineName, target);
+        return new ResolvedFileCoordinate(target, sftpPathFor(machineName, root, requested, at));
+    }
+
+    /**
+     * Where SFTP must actually be asked for a requested coordinate: the jail path in the present, and the
+     * archive-mount path composed over the jail in the past. This is the one down-mapping the whole Explorer
+     * shares — {@link #listPresent}/{@link #listPast} map a browse the same way.
+     */
+    private String sftpPathFor(String machineName, SftpRoot root, String requested, String at) {
+        if (at == null || at.isBlank()) {
+            return root.toJailPath(requested);
+        }
+        MountedArchive mounted = forMountingArchives.mount(machineName, at);
+        return root.toJailPath(mounted.machinePath(requested));
+    }
+
+    /**
+     * Open a file for download: resolve its coordinate, stat it, and refuse a directory up front (a folder
+     * download is not supported yet) so the browser gets a clean 400 rather than a broken stream. The bytes
+     * are streamed lazily by the returned writer, opening the SFTP read only when invoked, so memory stays
+     * flat. A download is a read, so {@code at} may name an archive — the past is fine.
+     */
+    @Override
+    public Download openForDownload(String machineName, String path, String at) {
+        ResolvedFileCoordinate coordinate = resolve(machineName, path, at);
+        RemoteStat stat = forBrowsingRemoteFiles.stat(coordinate.target(), coordinate.path());
+        if (stat.directory()) {
+            throw new IllegalArgumentException("Downloading a folder isn't supported yet.");
+        }
+        String filename = basename(coordinate.path());
+        log.debug("Opening {} on {} for download ({} bytes)", filename, machineName, stat.sizeBytes());
+        return new Download(filename, stat.sizeBytes(),
+            out -> forBrowsingRemoteFiles.download(coordinate.target(), coordinate.path(), out));
+    }
+
+    /** The last segment of a resolved path — the download's filename. */
+    private static String basename(String path) {
+        return path.substring(path.lastIndexOf('/') + 1);
     }
 
     /**

@@ -1007,8 +1007,11 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
 - [x] **1 — Browse ✅.** `sshd-sftp` dependency, `ForBrowsingRemoteFiles` port + `MinaSftpAdapter`,
   `GET /machines/{name}/files?path=…` directory listings on any SSH-capable machine, and the read-only
   Explorer page over them. Community, and authenticated like every other machine endpoint.
-- [ ] **2 — Move.** Clipboard, cross-machine Transfer (streaming, tracked, SSE-settled), download to
-  browser, size warning. Community.
+- [ ] **2 — Move 🟡 (backend delivered).** Clipboard, cross-machine Transfer (streaming, tracked,
+  SSE-settled), download to browser, size warning. Community. *(The backend landed — cross-machine
+  **Transfer**, **download**, and transfer tracking with SSE; see **Delivered in slice 2** below. The
+  **Clipboard** UI and the **size warning** are the frontend half, in progress. **Coverage** (slice 4) and
+  delete/rename/new-folder (slice 5) remain.)*
 - [ ] **3 — Time.** `borg mount` lifecycle, the time rail, archive overlay on the tree, restore as
   paste-from-the-past. Enterprise. *(The `borg mount` lifecycle backend and the **time-rail UI** both landed via
   §6.21 slice D — mount-on-demand, idempotent, idle-swept, with the rail scrubbing a machine's archives newest-first
@@ -1101,6 +1104,37 @@ job**'s source paths against the tree and would have reported a backed-up direct
   validation still exists to reject *nonsense* paths, not to jail a legitimate one.
 - **A symlink to a directory currently lists as a file** (the adapter reports what `readdir` says without
   a second `stat` round-trip), so it can't be entered. Worth revisiting when the UI lands.
+
+**Delivered in slice 2 (backend — the Clipboard's engine):**
+- **A file has a coordinate; the destination names the operation.** A different machine is a **copy**; the
+  browser is a **download**. Vaier sits at the VPN hub and is the only node with SSH to every machine, so a
+  cross-machine copy is an SFTP read from A relayed through Vaier's own JVM to an SFTP write on B — no
+  host-to-host trust, no keys between peers, nothing new in the network model.
+- **The relay runs in Vaier's JVM, not detached on a host.** Unlike `BackupRunner`'s host-detached
+  `nohup`+`.rc` borg pattern (which can't apply to a cross-machine relay without host-to-host trust), a
+  **Transfer** runs on a background `ExecutorService` and lives in an in-memory registry — an ephemeral live
+  operation, not persisted history. It deliberately does **not** reuse the backup run store (which keys one
+  latest run per job and a Transfer would clobber). Streaming uses a fixed buffer, so memory stays flat
+  regardless of file size. A Vaier restart simply loses in-flight transfers (acceptable for V1).
+- **`ForBrowsingRemoteFiles` gains the byte-moving primitives** (translation-only on `MinaSftpAdapter`, same
+  error mapping as `list`): `stat`, `download` (stream a file to an `OutputStream`), `mkdirs` (idempotent),
+  and `copyFile` (the flat-memory relay holding both SSH sessions, reporting cumulative bytes). A directory is
+  walked with `list`; a file streams via `copyFile`. The item is copied **into** the destination directory
+  keeping its basename, and `totalBytes` is measured by a pre-walk so progress has a denominator.
+- **`Transfer` is a domain entity** owning the decisions: both paths absolute, a live-source copy onto its own
+  file refused as a no-op (but a **past-source** one onto the same live path is a **restore**, and is
+  allowed), and forward-only state (`RUNNING` → `DONE`/`FAILED`). **You can only paste into the present** — a
+  transfer's destination never carries a time coordinate; its source may be a past archive.
+- **The coordinate mapping is not re-implemented.** `ExplorerService` exposes `ResolveFileCoordinateUseCase`
+  — the very mapping browsing uses (the SFTP jail in the present, the archive mount over the jail in the past)
+  — and the `TransferRunner` (in `rest/`, beside `BackupRunner`) and the download path both resolve through
+  it, so a second copy can never drift.
+- **Endpoints.** `POST /transfers` (start; 400 on a non-absolute path or a no-op), `GET /transfers` (live +
+  a capped settled tail, so a reconnecting browser can repaint), `GET /transfers/events` (the **`transfers`**
+  SSE topic, publishing throttled `transfer-progress` and a final `transfer-settled`), and
+  `GET /machines/{machine}/files/download` (streams the file as an `attachment`, `at` allowed since a download
+  is a read; a folder is a `400` "Downloading a folder isn't supported yet."). All admin-authed, never
+  anonymous. The **Clipboard** UI and the source-size **size warning** are the frontend half.
 
 ---
 

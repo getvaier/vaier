@@ -128,13 +128,15 @@ class ExplorerShellTest {
 
     @Test
     void theShell_callsOnlyEndpointsThatAlreadyExist() throws IOException {
-        // The shell is a new front for the API Vaier already has. Slice A opened nothing; slice C opens
-        // exactly one endpoint (GET /machines/{machine}/disk), because the disk was the one thing Vaier
-        // computed on a schedule and never exposed. Everything else here — containers, published services,
-        // access rules — was already reachable, and a fetch to anything outside this list would mean an
-        // endpoint was invented to make the tree look finished.
+        // The shell is a new front for the API Vaier already has. Slice A opened nothing; slice C opened
+        // exactly one endpoint (GET /machines/{machine}/disk); slice 2 (Move) opens the transfers side —
+        // GET/POST /transfers — because a cross-machine copy is a genuinely new operation Vaier could not do
+        // before. Everything else here was already reachable, and a fetch to anything outside this list would
+        // mean an endpoint was invented to make the tree look finished. (The download is an <a href>, not a
+        // fetch, so it does not appear here.)
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
-                                       "/docker-services", "/published-services", "/access/services");
+                                       "/docker-services", "/published-services", "/access/services",
+                                       "/transfers");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
@@ -423,10 +425,11 @@ class ExplorerShellTest {
 
     @Test
     void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
-        // Two verbs ship, because exactly two are backed: DELETE /published-services/{dns} (slice C) and
-        // PUT /machines/{machine}/disk/watch (#325). Publishing (POST /publish) needs a form — subdomain,
-        // auth mode, path prefix, redirect — and stays on the Infrastructure bridge rather than being
-        // half-built here. This pins that promise: if a third mutating fetch ever appears, this test says so.
+        // Three verbs ship now, each backed by a real endpoint: DELETE /published-services/{dns} (slice C),
+        // PUT /machines/{machine}/disk/watch (#325), and POST /transfers (slice 2 — starting a cross-machine
+        // copy, the Clipboard's engine). Publishing (POST /publish) still needs a form and stays on the
+        // Infrastructure bridge rather than being half-built here. This pins the set: a fourth mutating verb
+        // would have to be added here consciously, so an invented one shows up as a failure.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);
@@ -435,9 +438,10 @@ class ExplorerShellTest {
             methods.add(m.group(1));
         }
         assertThat(methods).as("the shell's mutating calls")
-            .containsExactlyInAnyOrder("PUT", "DELETE");
+            .containsExactlyInAnyOrder("PUT", "DELETE", "POST");
         assertThat(js).contains("/published-services/");
         assertThat(js).contains("/disk/watch");
+        assertThat(js).contains("'/transfers'");
 
         // and it asks before it does it — unpublishing tears down a route and a DNS record
         int from = js.indexOf("async function unpublish(");
@@ -489,13 +493,15 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theShell_holdsExactlyTwoStreams_oneForTheFleetAndOneForItsServices() throws IOException {
-        // Slice A held one. Slice C adds the second, deliberately: `published-services` is a different topic
-        // on a different controller, and vpn-peers.js already holds both — so this is the shape the codebase
-        // already has, not a new one. Two is the ceiling: a third would mean a topic was invented rather than
-        // listened to.
+    void theShell_holdsThreeStreams_theFleet_itsServices_andItsTransfers() throws IOException {
+        // Slice A held one; slice C added `published-services` (a real, existing topic); slice 2 (Move) adds
+        // `transfers` — the third and newest, carrying a copy's live progress so the browser watches rather
+        // than polls. Each is a real backend topic listened to, never invented. Three is the ceiling now: a
+        // fourth EventSource would have to be added here consciously. And still no clock of the shell's own —
+        // no setInterval, and no setTimeout (the toast lives out a CSS animation, not a JS timer).
         String js = read("explorer-shell.js");
-        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(2);
+        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(3);
+        assertThat(js).contains("new EventSource('/transfers/events')");
         assertThat(js).doesNotContain("setInterval");
         assertThat(js).doesNotContain("setTimeout");
     }

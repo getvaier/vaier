@@ -333,4 +333,93 @@ class ExplorerServiceTest {
         assertThat(directory.at()).isNull();
         assertThat(directory.path()).isEqualTo("/home");
     }
+
+    // --- slice 2: resolving a coordinate for the Transfer relay (the same mapping browsing uses) --------
+
+    @Test
+    void resolve_inThePresent_givesTheTarget_andTheJailMappedPath() {
+        machineIsJailedIn("NAS", "/volume1");
+
+        var resolved = service.resolve("NAS", "/volume1/homes/geir", null);
+
+        // The browser's path is a TRUE coordinate; SFTP, inside the jail, must be asked for the jail path —
+        // exactly what listDirectory maps a browse down to.
+        assertThat(resolved.path()).isEqualTo("/homes/geir");
+        assertThat(resolved.target().host()).isEqualTo("10.13.13.6");
+    }
+
+    @Test
+    void resolve_onAnUnjailedMachine_isTheTruePathItself() {
+        machineResolves("apalveien5", "SHA256:pinned");
+
+        assertThat(service.resolve("apalveien5", "/home/geir/notes.txt", null).path())
+            .isEqualTo("/home/geir/notes.txt");
+    }
+
+    @Test
+    void resolve_inThePast_mountsTheArchive_andMapsUnderTheMountpoint() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+
+        var resolved = service.resolve("apalveien5", "/home/geir/notes.txt", "ab12");
+
+        // A restore's source is the past: the read happens under the mountpoint, same as a past browse.
+        assertThat(resolved.path()).isEqualTo(MOUNTPOINT + "/home/geir/notes.txt");
+    }
+
+    @Test
+    void resolve_normalisesThePath_andRefusesAClimb_beforeAnyConnection() {
+        assertThatThrownBy(() -> service.resolve("apalveien5", "/../../etc/passwd", null))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forResolvingSshTargets, never()).resolve(any());
+    }
+
+    // --- slice 2: opening a file for download ----------------------------------------------------------
+
+    @Test
+    void openForDownload_givesTheFilenameSizeAndBytes_forAFile() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir/notes.txt")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(false, 120));
+        // The writer opens the SFTP read lazily; here it writes a marker so we can prove it streamed.
+        org.mockito.Mockito.doAnswer(inv -> {
+            ((java.io.OutputStream) inv.getArgument(2)).write("payload".getBytes());
+            return null;
+        }).when(forBrowsingRemoteFiles).download(any(), eq("/home/geir/notes.txt"), any());
+
+        var download = service.openForDownload("apalveien5", "/home/geir/notes.txt", null);
+
+        assertThat(download.filename()).isEqualTo("notes.txt");
+        assertThat(download.sizeBytes()).isEqualTo(120);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        download.writer().accept(out);
+        assertThat(out.toString()).isEqualTo("payload");
+    }
+
+    @Test
+    void openForDownload_ofADirectory_isRefused_becauseAFolderDownloadIsNotSupportedYet() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+
+        assertThatThrownBy(() -> service.openForDownload("apalveien5", "/home/geir", null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("folder");
+        // A directory is refused before any bytes are streamed.
+        verify(forBrowsingRemoteFiles, never()).download(any(), any(), any());
+    }
+
+    @Test
+    void openForDownload_inThePast_resolvesUnderTheMountpoint() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+        when(forBrowsingRemoteFiles.stat(any(), eq(MOUNTPOINT + "/home/geir/notes.txt")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(false, 120));
+
+        var download = service.openForDownload("apalveien5", "/home/geir/notes.txt", "ab12");
+
+        // A download is a read, so the past is fine — the file is read under the mountpoint.
+        assertThat(download.filename()).isEqualTo("notes.txt");
+        verify(forBrowsingRemoteFiles).stat(any(), eq(MOUNTPOINT + "/home/geir/notes.txt"));
+    }
 }

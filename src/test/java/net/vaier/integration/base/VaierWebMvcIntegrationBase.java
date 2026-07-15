@@ -270,6 +270,16 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected ListMachineArchivesUseCase listMachineArchivesUseCase;
 
+    @MockBean
+    protected DownloadFileUseCase downloadFileUseCase;
+
+    // --- Explorer Transfer (Clipboard) use cases ---
+    @MockBean
+    protected StartTransferUseCase startTransferUseCase;
+
+    @MockBean
+    protected GetTransfersUseCase getTransfersUseCase;
+
     // --- Server location use case ---
     @MockBean
     protected GetServerLocationUseCase getServerLocationUseCase;

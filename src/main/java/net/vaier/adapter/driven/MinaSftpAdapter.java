@@ -42,6 +42,9 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
     private static final String SELF = ".";
     private static final String PARENT = "..";
 
+    /** The fixed relay buffer: the whole point is that memory stays flat regardless of a file's size. */
+    private static final int COPY_BUFFER_BYTES = 64 * 1024;
+
     @Override
     public DirectoryListing list(SshTarget target, String path) {
         try (Connection conn = SshConnector.establish(target);
@@ -113,6 +116,107 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
 
         } catch (IOException | UncheckedIOException e) {
             throw translate(e, target, String.join(", ", paths));
+        }
+    }
+
+    @Override
+    public RemoteStat stat(SshTarget target, String path) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            SftpClient.Attributes attrs = sftp.stat(path);
+            return new RemoteStat(attrs.isDirectory(), Math.max(0, attrs.getSize()));
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, path);
+        }
+    }
+
+    @Override
+    public void download(SshTarget target, String path, java.io.OutputStream out) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session());
+             java.io.InputStream in = sftp.read(path)) {
+
+            in.transferTo(out);
+            log.debug("Downloaded {} from {}", path, target.host());
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, path);
+        }
+    }
+
+    @Override
+    public void mkdirs(SshTarget target, String path) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            mkdirsOver(sftp, path);
+            log.debug("Ensured directory {} on {}", path, target.host());
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, path);
+        }
+    }
+
+    /**
+     * The flat-memory relay. Both ends' sessions are held open at once — a source read stream and a dest
+     * write stream — and piped with one fixed buffer, so memory stays flat however large the file is. Every
+     * client, session and stream the relay opened is closed again before it returns.
+     */
+    @Override
+    public long copyFile(SshTarget srcTarget, String srcPath, SshTarget destTarget, String destPath,
+                         java.util.function.LongConsumer onBytes) {
+        try (Connection srcConn = SshConnector.establish(srcTarget);
+             SftpClient srcSftp = SftpClientFactory.instance().createSftpClient(srcConn.session());
+             Connection destConn = SshConnector.establish(destTarget);
+             SftpClient destSftp = SftpClientFactory.instance().createSftpClient(destConn.session());
+             java.io.InputStream in = srcSftp.read(srcPath);
+             java.io.OutputStream out = destSftp.write(destPath)) {
+
+            byte[] buffer = new byte[COPY_BUFFER_BYTES];
+            long copied = 0;
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+                copied += read;
+                onBytes.accept(copied);
+            }
+            log.debug("Relayed {} bytes from {}:{} to {}:{}",
+                copied, srcTarget.host(), srcPath, destTarget.host(), destPath);
+            return copied;
+
+        } catch (IOException | UncheckedIOException e) {
+            // Either end can be the failing one; the message names the pair so a failure is diagnosable.
+            throw translate(e, destTarget, srcTarget.host() + ":" + srcPath + " -> " + destPath);
+        }
+    }
+
+    /**
+     * Create {@code path} and every parent it needs over an open SFTP session, idempotently. SFTP has no
+     * {@code mkdir -p}, so each ancestor is created in turn and an already-present one is not an error — the
+     * whole point is that laying down a destination tree can be repeated safely.
+     */
+    private static void mkdirsOver(SftpClient sftp, String path) throws IOException {
+        String normalised = FileEntry.normalisePath(path);
+        if ("/".equals(normalised)) {
+            return;
+        }
+        StringBuilder prefix = new StringBuilder();
+        for (String segment : normalised.substring(1).split("/")) {
+            prefix.append('/').append(segment);
+            String dir = prefix.toString();
+            if (!isDirectory(sftp, dir)) {
+                try {
+                    sftp.mkdir(dir);
+                } catch (IOException e) {
+                    // A racing create, or a directory that appeared between the check and the mkdir, is fine;
+                    // only a still-absent directory afterwards is a real failure.
+                    if (!isDirectory(sftp, dir)) {
+                        throw e;
+                    }
+                }
+            }
         }
     }
 

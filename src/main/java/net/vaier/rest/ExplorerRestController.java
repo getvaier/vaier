@@ -4,14 +4,19 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.DownloadFileUseCase;
+import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.util.List;
 
@@ -37,6 +42,7 @@ public class ExplorerRestController {
 
     private final BrowseFilesUseCase browseFilesUseCase;
     private final ListMachineArchivesUseCase listMachineArchivesUseCase;
+    private final DownloadFileUseCase downloadFileUseCase;
 
     /**
      * Browse one directory on one machine. With {@code at} naming an archive, the same directory is read
@@ -51,6 +57,37 @@ public class ExplorerRestController {
             LogSafe.forLog(path), LogSafe.forLog(machine), LogSafe.forLog(at));
         MachineDirectory directory = browseFilesUseCase.listDirectory(machine, path, at);
         return ResponseEntity.ok(DirectoryResponse.from(directory));
+    }
+
+    /**
+     * Download one file from a machine — the Explorer's "the browser is a download" destination (#321,
+     * slice 2). The bytes are streamed straight through Vaier from the machine's SFTP service, so memory
+     * stays flat regardless of size. {@code at} may name an archive: a download is a read, so the past is
+     * fine. A directory is refused with a {@code 400} up front (folder download is a later slice) rather than
+     * a broken stream, because the use case stats before any header or byte is written.
+     */
+    @GetMapping("/machines/{machine}/files/download")
+    public ResponseEntity<StreamingResponseBody> download(@PathVariable String machine,
+                                                          @RequestParam String path,
+                                                          @RequestParam(required = false) String at) {
+        log.info("Downloading {} from machine {} at archive {}",
+            LogSafe.forLog(path), LogSafe.forLog(machine), LogSafe.forLog(at));
+        Download download = downloadFileUseCase.openForDownload(machine, path, at);
+        StreamingResponseBody body = download.writer()::accept;
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + sanitiseFilename(download.filename()) + "\"")
+            .contentLength(download.sizeBytes())
+            .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .body(body);
+    }
+
+    /**
+     * A filename safe to place inside a {@code Content-Disposition} header: no quotes, backslashes or CR/LF,
+     * so a crafted filename cannot break out of the quoted value or inject a header.
+     */
+    private static String sanitiseFilename(String filename) {
+        return filename.replaceAll("[\"\\\\\r\n]", "_");
     }
 
     /**

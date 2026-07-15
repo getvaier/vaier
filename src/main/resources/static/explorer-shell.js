@@ -28,6 +28,12 @@
         box:     '<rect x="2.2" y="4.4" width="11.6" height="8.6" rx="1"/><path d="M2.2 7.3h11.6M5.6 4.4v2.9"/>',
         route:   '<circle cx="8" cy="8" r="6.2"/><path d="M1.9 8h12.2"/><path d="M8 1.8c1.7 1.9 2.6 3.9 2.6 6.2S9.7 12.3 8 14.2C6.3 12.3 5.4 10.3 5.4 8S6.3 3.7 8 1.8z"/>',
         disk:    '<rect x="2" y="3.4" width="12" height="9.2" rx="1"/><circle cx="8" cy="8" r="2.3"/><circle cx="8" cy="8" r=".45" fill="currentColor" stroke="none"/>',
+        copy:    '<rect x="5.5" y="5.5" width="8" height="8.2" rx="1.2"/><path d="M3.4 10.5H3a1 1 0 0 1-1-1V3.2a1 1 0 0 1 1-1h6.3a1 1 0 0 1 1 1v.4"/>',
+        download:'<path d="M8 2v7.5"/><path d="M4.7 6.5L8 9.8l3.3-3.3"/><path d="M2.5 13.5h11"/>',
+        clip:    '<rect x="3" y="2.6" width="10" height="11.4" rx="1.2"/><path d="M5.8 2.6V2a.9.9 0 0 1 .9-.9h2.6a.9.9 0 0 1 .9.9v.6z"/><path d="M5.6 7.2h4.8M5.6 9.7h4.8M5.6 12.2h2.8"/>',
+        check:   '<path d="M2.8 8.4l3.1 3.4L13.2 4.6"/>',
+        warn:    '<path d="M8 2.4l6.1 11.1H1.9z"/><path d="M8 6.4v3.3"/><circle cx="8" cy="11.4" r=".5" fill="currentColor" stroke="none"/>',
+        cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
     };
 
     // Trusted constant markup — never interpolate anything but a key of ICON into this.
@@ -87,8 +93,15 @@
         roots: new Map(),                // (machine, at) -> where a file tree begins (its SFTP root, #326)
         at: null,                        // the archive being browsed, or null for the present — the live filesystem
         archives: new Map(),             // machine name -> { state, list, error }: its archives, the rail's stops
+        clipboard: [],                   // held file coordinates {machine, path, at, name, directory, size} — the Clipboard
+        transfers: new Map(),            // id -> a live/settled Transfer, streamed in over the transfers SSE topic
         palSel: 0,
     };
+
+    // A file large enough to be worth a second thought before it crosses the fleet over WireGuard. The
+    // Transfer streams flat-memory whatever the size, so this is a courtesy, not a limit. (A settings field
+    // to tune it is a later slice; the default is deliberate, not a placeholder.)
+    const TRANSFER_WARN_BYTES = 1024 * 1024 * 1024;   // 1 GiB
 
     // Directory reads go through VaierListing — one reader per directory, created in readDir. A single shared
     // reader would make concurrent expands cancel one another.
@@ -1224,6 +1237,7 @@
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
         body.appendChild(renderRail(machine));    // above the listing; nothing when the machine has no archives
+        body.appendChild(renderPasteBar(machine, path));   // "Paste here", only in the present with a full Clipboard
         const rows = document.createElement('div');
         rows.className = 'ex-listing';
         body.appendChild(rows);
@@ -1274,8 +1288,291 @@
             time.className = 'ex-lmeta';
             time.textContent = VaierListing.formatTime(entry.modifiedAt);
 
-            row.append(name, size, time);
+            row.append(name, size, time, rowActions(machine, entry));
             rows.appendChild(row);
+        });
+    }
+
+    // Per-entry actions, revealed on hover (and always present to the keyboard): put a file or directory on the
+    // Clipboard, or download a file straight to the browser. Copy carries the entry's whole coordinate —
+    // machine, path, and the archive being viewed — so a thing copied from the past is pasted as a restore.
+    function rowActions(machine, entry) {
+        const box = el('div', 'ex-lactions');
+
+        const copy = el('button', 'ex-iconbtn');
+        copy.innerHTML = svg('copy', 'ex-ico');
+        copy.title = onClipboard(machine, entry.path) ? 'On the Clipboard' : 'Copy to the Clipboard';
+        copy.setAttribute('aria-label', copy.title);
+        if (onClipboard(machine, entry.path)) copy.classList.add('is-on');
+        copy.onclick = () => clipCopy(machine, entry);
+        box.appendChild(copy);
+
+        // Only a file downloads — a folder would have to be zipped, which is a later slice. Downloading the
+        // past is fine: it is a read, and the invariant is only about writing.
+        if (!entry.directory) {
+            const dl = el('button', 'ex-iconbtn');
+            dl.innerHTML = svg('download', 'ex-ico');
+            dl.title = 'Download';
+            dl.setAttribute('aria-label', 'Download ' + entry.name);
+            dl.onclick = () => download(machine, entry);
+            box.appendChild(dl);
+        }
+        return box;
+    }
+
+    // --- the Clipboard: file coordinates in the hand, and the Transfers that carry them ------------------
+    //
+    // The Clipboard holds coordinates (machine, path, time), not bytes. Paste names the operation by its
+    // destination: another machine is a copy, the same machine at a past coordinate is a restore, the browser
+    // is a download. This is the copy/paste half; a Transfer (below) is the byte-moving half the backend runs.
+
+    const clipId = (machine, path, at) => machine + DIR_SEP + path + DIR_SEP + (at || '');
+    const onClipboard = (machine, path) =>
+        S.clipboard.some((c) => c.machine === machine && c.path === path && (c.at || '') === (S.at || ''));
+
+    // Copy toggles: a second click on an entry already held takes it back off, so the same button both puts a
+    // thing on the Clipboard and reconsiders it, and its lit state always tells the truth.
+    function clipCopy(machine, entry) {
+        const id = clipId(machine, entry.path, S.at);
+        const at = S.at;
+        const has = S.clipboard.some((c) => clipId(c.machine, c.path, c.at) === id);
+        S.clipboard = has
+            ? S.clipboard.filter((c) => clipId(c.machine, c.path, c.at) !== id)
+            : S.clipboard.concat([{ machine: machine, path: entry.path, at: at,
+                                    name: entry.name, directory: entry.directory, size: entry.size }]);
+        render();
+    }
+
+    const clipClear = () => { S.clipboard = []; render(); };
+    const clipRemove = (id) => { S.clipboard = S.clipboard.filter((c) => clipId(c.machine, c.path, c.at) !== id); render(); };
+
+    // A download is a paste whose destination is the browser: Vaier streams the file's bytes straight through.
+    // The coordinate travels as the same (path, at) the listing carries, so a file from an archive downloads
+    // its past self. A hidden anchor click is how a browser is handed a stream to save.
+    function download(machine, entry) {
+        const params = new URLSearchParams({ path: entry.path });
+        if (S.at) params.set('at', S.at);
+        const a = document.createElement('a');
+        a.href = '/machines/' + encodeURIComponent(machine) + '/files/download?' + params.toString();
+        a.download = entry.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    // "Paste here" belongs to a directory in the present, and only there — the invariant is that you can only
+    // paste into the present, so time-travelling hides it rather than offering a write that would be refused.
+    // It also needs a real destination path (the machine has said where its tree begins) and a non-empty
+    // Clipboard. Absent any of those, nothing is drawn.
+    function renderPasteBar(machine, destPath) {
+        if (S.at || !S.clipboard.length || destPath == null) return document.createDocumentFragment();
+
+        const bar = el('div', 'ex-pastebar');
+        const label = el('div', 'ex-pastebar-txt');
+        const n = S.clipboard.length;
+        label.textContent = 'Clipboard: ' + n + (n === 1 ? ' item' : ' items');
+        bar.appendChild(label);
+
+        const paste = el('button', 'ex-btn is-accent');
+        paste.innerHTML = svg('clip', 'ex-ico');
+        const verb = el('span');
+        verb.textContent = 'Paste here';
+        paste.appendChild(verb);
+        paste.onclick = () => pasteHere(machine, destPath);
+        bar.appendChild(paste);
+        return bar;
+    }
+
+    // Paste every held coordinate into the directory in front of you: one Transfer per item. A big file gets a
+    // second thought first — the copy streams flat-memory whatever the size, but a multi-GB volume crossing
+    // WireGuard is worth confirming. A copy onto its own coordinate is a no-op the backend refuses; we skip it
+    // here too, so pasting into a folder you copied from does nothing rather than erroring.
+    async function pasteHere(destMachine, destPath) {
+        const items = S.clipboard.filter((c) => !(c.machine === destMachine && parentDir(c.path) === destPath && !c.at));
+        if (!items.length) { toast('Nothing to paste here — those items already live in this folder.'); return; }
+
+        const heavy = items.filter((c) => !c.directory && c.size > TRANSFER_WARN_BYTES);
+        const folders = items.filter((c) => c.directory);
+        if (heavy.length || folders.length) {
+            const lines = [];
+            heavy.forEach((c) => lines.push(c.name + ' — ' + VaierListing.formatSize({ size: c.size }) + ', over the fleet'));
+            if (folders.length) lines.push(folders.length + (folders.length === 1 ? ' folder' : ' folders')
+                + ' — every file inside is copied');
+            const ok = await confirmModal('Copy across the fleet?',
+                'These cross WireGuard between machines:\n' + lines.join('\n'), 'Copy');
+            if (!ok) return;
+        }
+        items.forEach((c) => startTransfer(c, destMachine, destPath));
+    }
+
+    const parentDir = (p) => { const i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.slice(0, i); };
+
+    // Ask the backend to carry one coordinate into a destination directory. The Transfer comes back with an
+    // id; from there its progress arrives over the transfers stream, so nothing here polls.
+    async function startTransfer(item, destMachine, destPath) {
+        try {
+            const res = await fetch('/transfers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sourceMachine: item.machine, sourcePath: item.path, at: item.at || null,
+                                       destMachine: destMachine, destPath: destPath }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => null);
+                return toast((err && err.message) || ('Could not start the copy of ' + item.name + '.'));
+            }
+            const t = await res.json();
+            S.transfers.set(t.id, t);
+            render();
+        } catch (e) {
+            toast('Could not reach Vaier to start the copy.');
+        }
+    }
+
+    // The tray: the one app-level surface the shell has (the iframe that trapped every overlay is gone). It
+    // holds what is on the Clipboard and every Transfer in flight, docked out of the way until there is
+    // something to show. It never sets data-past — a Transfer is always a move in the present.
+    function renderClip() {
+        const host = $('exClip');
+        host.textContent = '';
+        const live = Array.from(S.transfers.values());
+        if (!S.clipboard.length && !live.length) { host.classList.remove('is-on'); return; }
+        host.classList.add('is-on');
+
+        if (S.clipboard.length) {
+            const head = el('div', 'ex-clip-head');
+            const t = el('span', 'ex-clip-title');
+            t.textContent = 'Clipboard';
+            const clear = el('button', 'ex-clip-clear');
+            clear.textContent = 'Clear';
+            clear.onclick = clipClear;
+            head.append(t, clear);
+            host.appendChild(head);
+
+            S.clipboard.forEach((c) => {
+                const item = el('div', 'ex-clip-item');
+                item.innerHTML = svg(c.directory ? 'dir' : 'file', 'ex-ico');
+                const co = el('span', 'ex-clip-coord');
+                co.textContent = c.machine + ':' + c.path + (c.at ? ' (past)' : '');
+                co.title = co.textContent;
+                const x = el('button', 'ex-iconbtn');
+                x.innerHTML = svg('cross', 'ex-ico');
+                x.title = 'Remove';
+                x.setAttribute('aria-label', 'Remove ' + c.name + ' from the Clipboard');
+                x.onclick = () => clipRemove(clipId(c.machine, c.path, c.at));
+                item.append(co, x);
+                host.appendChild(item);
+            });
+        }
+
+        // Newest transfer first, so the one you just started is at the top.
+        live.slice().reverse().forEach((tr) => host.appendChild(transferRow(tr)));
+    }
+
+    function transferRow(tr) {
+        const row = el('div', 'ex-xfer is-' + (tr.state || 'running').toLowerCase());
+
+        const line = el('div', 'ex-xfer-line');
+        const icon = tr.state === 'DONE' ? 'check' : tr.state === 'FAILED' ? 'warn' : 'copy';
+        line.innerHTML = svg(icon, 'ex-ico');
+        const coord = el('span', 'ex-xfer-coord');
+        coord.textContent = shortName(tr.sourcePath) + ' → ' + tr.destMachine;
+        coord.title = tr.sourceMachine + ':' + tr.sourcePath + '  →  ' + tr.destMachine + ':' + tr.destPath;
+        line.appendChild(coord);
+        row.appendChild(line);
+
+        if (tr.state === 'FAILED') {
+            row.appendChild(note(tr.error || 'The copy failed.', true));
+        } else {
+            const bar = el('div', 'ex-xfer-bar');
+            const fill = el('div', 'ex-xfer-fill');
+            const pct = tr.totalBytes ? Math.min(100, Math.round((tr.bytesCopied / tr.totalBytes) * 100)) : null;
+            fill.style.width = (tr.state === 'DONE' ? 100 : (pct == null ? 40 : pct)) + '%';
+            if (pct == null && tr.state !== 'DONE') fill.classList.add('is-indeterminate');
+            bar.appendChild(fill);
+            row.appendChild(bar);
+
+            const meta = el('div', 'ex-xfer-meta');
+            meta.textContent = tr.state === 'DONE'
+                ? 'Copied · ' + VaierListing.formatSize({ size: tr.bytesCopied })
+                : VaierListing.formatSize({ size: tr.bytesCopied })
+                  + (tr.totalBytes ? ' of ' + VaierListing.formatSize({ size: tr.totalBytes }) : '');
+            row.appendChild(meta);
+        }
+        return row;
+    }
+
+    const shortName = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); };
+
+    // The transfers stream — the byte-moving half. The backend runs the copy and pushes progress; the browser
+    // listens and repaints the tray, never polling. A settled transfer stays in the tray as its own record
+    // (done or failed) until the operator has seen it; it is not swept from under them.
+    function watchTransfers() {
+        const events = new EventSource('/transfers/events');
+        events.addEventListener('transfer-progress', (e) => {
+            const d = JSON.parse(e.data);
+            const tr = S.transfers.get(d.id);
+            if (tr) { tr.bytesCopied = d.bytesCopied; tr.totalBytes = d.totalBytes; renderClip(); }
+        });
+        events.addEventListener('transfer-settled', (e) => {
+            const d = JSON.parse(e.data);
+            const tr = S.transfers.get(d.id);
+            if (tr) { tr.state = d.state; tr.error = d.error; renderClip(); }
+            else loadTransfers();   // settled one we never saw start (another tab, a reconnect) — repaint from truth
+        });
+    }
+
+    async function loadTransfers() {
+        try {
+            const res = await fetch('/transfers', { cache: 'no-store' });
+            if (!res.ok) return;
+            (await res.json()).forEach((t) => S.transfers.set(t.id, t));
+            renderClip();
+        } catch (e) { /* no transfers is not a failure */ }
+    }
+
+    // --- app-level chrome the shell finally has: a toast, and a typed confirm ----------------------------
+
+    // A brief, self-dismissing line for the things that used to have nowhere to go — a copy that could not
+    // start, a paste with nothing to do. Errors state what happened; they do not apologise.
+    function toast(message) {
+        const host = $('exToast');
+        const t = el('div', 'ex-toast-item');
+        t.textContent = message;
+        // Self-dismissing on a pure-CSS lifetime, not a JS timer: the shell holds no clock of its own — the
+        // backend keeps time and the stream delivers it — so the toast lives out a CSS animation and removes
+        // itself when it ends.
+        t.addEventListener('animationend', () => t.remove());
+        host.appendChild(t);
+    }
+
+    // A confirmation the operator has to mean — the size warning before a heavy copy. Built on demand over its
+    // own scrim (the shell has an overlay layer now), resolves true on confirm and false on cancel or Escape.
+    function confirmModal(title, bodyText, confirmLabel) {
+        return new Promise((resolve) => {
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title');
+            h.textContent = title;
+            const b = el('div', 'ex-dialog-body');
+            b.textContent = bodyText;   // never markup: it carries machine names and paths, the operator's own text
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn');
+            cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent');
+            ok.textContent = confirmLabel || 'Confirm';
+            actions.append(cancel, ok);
+            dialog.append(h, b, actions);
+            scrim.appendChild(dialog);
+            document.body.appendChild(scrim);
+
+            const close = (result) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(result); };
+            const onKey = (e) => { if (e.key === 'Escape') close(false); };
+            scrim.onclick = (e) => { if (e.target === scrim) close(false); };
+            cancel.onclick = () => close(false);
+            ok.onclick = () => close(true);
+            document.addEventListener('keydown', onKey);
+            ok.focus();
         });
     }
 
@@ -1420,6 +1717,7 @@
         renderTree();
         renderCrumbs();
         renderPane();
+        renderClip();
     }
 
     // --- the fleet, and the stream that keeps it honest ---------------------------------------------------
@@ -1620,6 +1918,8 @@
 
         watchFleet();
         watchServices();
+        watchTransfers();
+        loadTransfers();
         loadUser();
     }
 

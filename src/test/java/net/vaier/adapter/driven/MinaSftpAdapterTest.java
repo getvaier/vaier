@@ -9,6 +9,7 @@ import net.vaier.domain.SshAuthException;
 import net.vaier.domain.SshConnectException;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SshTarget;
+import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory;
 import org.apache.sshd.server.SshServer;
@@ -252,6 +253,95 @@ class MinaSftpAdapterTest {
 
         // Every SFTP client, session and SshClient the adapter opened must be closed again — a browse that
         // leaks a session would pin an SSH connection per directory the operator clicks.
+        assertThat(server.getActiveSessions()).isEmpty();
+    }
+
+    // --- slice 2: the byte-moving primitives (stat / download / mkdirs / copyFile) ---------------------
+
+    @Test
+    void stat_reportsWhetherAPathIsADirectory_andItsSize() throws Exception {
+        int port = startServer();
+        Files.writeString(remoteRoot.resolve("notes.txt"), "hello sftp");
+        Files.createDirectory(remoteRoot.resolve("media"));
+
+        ForBrowsingRemoteFiles.RemoteStat file = adapter.stat(target(port), remote("notes.txt"));
+        assertThat(file.directory()).isFalse();
+        assertThat(file.sizeBytes()).isEqualTo("hello sftp".getBytes(StandardCharsets.UTF_8).length);
+
+        ForBrowsingRemoteFiles.RemoteStat dir = adapter.stat(target(port), remote("media"));
+        assertThat(dir.directory()).isTrue();
+    }
+
+    @Test
+    void stat_ofAPathThatIsNotThere_throwsNotFound() throws Exception {
+        int port = startServer();
+
+        assertThatThrownBy(() -> adapter.stat(target(port), remote("ghost")))
+            .isInstanceOf(NotFoundException.class)
+            .hasMessageContaining("ghost");
+    }
+
+    @Test
+    void download_streamsAFilesBytesIntoTheOutputStream() throws Exception {
+        int port = startServer();
+        byte[] payload = "the quick brown fox".repeat(500).getBytes(StandardCharsets.UTF_8);
+        Files.write(remoteRoot.resolve("big.bin"), payload);
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        adapter.download(target(port), remote("big.bin"), out);
+
+        assertThat(out.toByteArray()).isEqualTo(payload);
+    }
+
+    @Test
+    void mkdirs_createsANestedTree_andIsIdempotent() throws Exception {
+        int port = startServer();
+
+        adapter.mkdirs(target(port), remote("a/b/c"));
+        adapter.mkdirs(target(port), remote("a/b/c")); // again — must not throw
+
+        assertThat(Files.isDirectory(remoteRoot.resolve("a/b/c"))).isTrue();
+    }
+
+    @Test
+    void copyFile_pipesBytesFromSourceToDestination_reportingProgress_andReturningTheTotal() throws Exception {
+        // Two independent servers stand in for two machines; Vaier's JVM relays between them.
+        int srcPort = startServer();
+        SshServer destServer = SshServer.setUpDefaultServer();
+        Path destRoot = Files.createTempDirectory("sftp-dest");
+        try {
+            destServer.setPort(0);
+            destServer.setKeyPairProvider(new SimpleGeneratorHostKeyProvider());
+            destServer.setSubsystemFactories(List.of(new SftpSubsystemFactory()));
+            destServer.setPasswordAuthenticator((u, p, s) -> "test".equals(u) && "secret".equals(p));
+            destServer.start();
+
+            byte[] payload = "relayed-through-vaier\n".repeat(1000).getBytes(StandardCharsets.UTF_8);
+            Files.write(remoteRoot.resolve("src.bin"), payload);
+
+            java.util.concurrent.atomic.AtomicLong lastReported = new java.util.concurrent.atomic.AtomicLong();
+            long total = adapter.copyFile(
+                target(srcPort), remote("src.bin"),
+                target(destServer.getPort()), destRoot.resolve("dst.bin").toAbsolutePath().toString(),
+                lastReported::set);
+
+            assertThat(total).isEqualTo(payload.length);
+            assertThat(lastReported.get()).isEqualTo(payload.length);
+            assertThat(Files.readAllBytes(destRoot.resolve("dst.bin"))).isEqualTo(payload);
+        } finally {
+            destServer.stop(true);
+        }
+    }
+
+    @Test
+    void copyFile_leavesNoSessionBehindOnEitherEnd() throws Exception {
+        int srcPort = startServer();
+        Files.writeString(remoteRoot.resolve("s.txt"), "s");
+
+        adapter.copyFile(target(srcPort), remote("s.txt"),
+            target(srcPort), remote("d.txt"), b -> { });
+
+        // Both the source read-stream and the destination write-stream, and both their sessions, are closed.
         assertThat(server.getActiveSessions()).isEmpty();
     }
 }

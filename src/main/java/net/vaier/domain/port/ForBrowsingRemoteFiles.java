@@ -48,10 +48,48 @@ public interface ForBrowsingRemoteFiles {
     java.util.Optional<String> firstDirectory(SshTarget target, List<String> paths);
 
     /**
+     * Whether the file at {@code path} on {@code target} is a directory, and how many bytes it is — the
+     * one question a transfer or a download asks before it moves anything (a directory is walked, a file is
+     * streamed; the size is a download's {@code Content-Length} and a transfer's progress denominator).
+     * Fails with the same domain SSH exceptions as {@link #list}.
+     */
+    RemoteStat stat(SshTarget target, String path);
+
+    /**
+     * Stream the file at {@code path} on {@code target} into {@code out} — the byte source for an HTTP
+     * download, piped with a fixed buffer so memory stays flat regardless of file size. The caller owns
+     * {@code out}; this owns the SFTP session and closes it. Fails with the same domain SSH exceptions as
+     * {@link #list}.
+     */
+    void download(SshTarget target, String path, java.io.OutputStream out);
+
+    /**
+     * Create the directory at {@code path} on {@code target}, and every parent it needs — idempotent, so an
+     * already-present directory is fine. The dest side of a transfer calls this to lay down the tree before
+     * copying files into it. Fails with the same domain SSH exceptions as {@link #list}.
+     */
+    void mkdirs(SshTarget target, String path);
+
+    /**
+     * The flat-memory relay: open an SFTP read stream on {@code srcTarget}/{@code srcPath} and an SFTP write
+     * stream on {@code destTarget}/{@code destPath} and pipe one into the other with a fixed buffer, calling
+     * {@code onBytes} with the cumulative byte count as it goes, and returning the total copied. Both
+     * sessions are held open concurrently for the duration and both are closed before returning — Vaier's
+     * JVM is the only relay point, so neither machine ever needs SSH to the other. Fails with the same domain
+     * SSH exceptions as {@link #list}.
+     */
+    long copyFile(SshTarget srcTarget, String srcPath, SshTarget destTarget, String destPath,
+                  java.util.function.LongConsumer onBytes);
+
+    /**
      * What one directory holds, plus the host-key fingerprint the machine presented while reading it.
      * The entries are as the remote reported them — unordered; listing order is a domain decision
      * ({@link FileEntry#listing}).
      */
     record DirectoryListing(List<FileEntry> entries, String hostKeyFingerprint) {
+    }
+
+    /** Whether a path is a directory, and its size in bytes — the answer to {@link #stat}. */
+    record RemoteStat(boolean directory, long sizeBytes) {
     }
 }

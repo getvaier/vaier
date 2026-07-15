@@ -2,6 +2,8 @@ package net.vaier.rest;
 
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.DownloadFileUseCase;
+import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
@@ -14,9 +16,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +40,7 @@ class ExplorerRestControllerTest {
 
     @Mock BrowseFilesUseCase browseFilesUseCase;
     @Mock ListMachineArchivesUseCase listMachineArchivesUseCase;
+    @Mock DownloadFileUseCase downloadFileUseCase;
 
     @InjectMocks ExplorerRestController controller;
 
@@ -156,6 +162,67 @@ class ExplorerRestControllerTest {
             .andExpect(jsonPath("$.entries[0].path").value("/home/geir/notes.txt"));
 
         verify(browseFilesUseCase).listDirectory("apalveien5", "/home/geir", "ab12");
+    }
+
+    // --- slice 2: download ------------------------------------------------------------------------------
+
+    @Test
+    void download_streamsTheFile_asAnAttachment_withItsNameSizeAndBytes() throws Exception {
+        byte[] payload = "hello download".getBytes();
+        when(downloadFileUseCase.openForDownload("apalveien5", "/home/geir/notes.txt", null))
+            .thenReturn(new Download("notes.txt", payload.length, out -> {
+                try {
+                    out.write(payload);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }));
+
+        // Invoked directly (not via MockMvc) so the streamed body is asserted deterministically, without the
+        // async dispatch a StreamingResponseBody otherwise needs.
+        ResponseEntity<StreamingResponseBody> response =
+            controller.download("apalveien5", "/home/geir/notes.txt", null);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_OCTET_STREAM);
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+            .isEqualTo("attachment; filename=\"notes.txt\"");
+        assertThat(response.getHeaders().getContentLength()).isEqualTo(payload.length);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        response.getBody().writeTo(out);
+        assertThat(out.toByteArray()).isEqualTo(payload);
+    }
+
+    @Test
+    void download_fromAnArchive_isAllowed_becauseADownloadIsARead() throws Exception {
+        when(downloadFileUseCase.openForDownload("apalveien5", "/home/geir/notes.txt", "ab12"))
+            .thenReturn(new Download("notes.txt", 3, out -> {
+                try {
+                    out.write("old".getBytes());
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }));
+
+        ResponseEntity<StreamingResponseBody> response =
+            controller.download("apalveien5", "/home/geir/notes.txt", "ab12");
+
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        response.getBody().writeTo(out);
+        assertThat(out.toByteArray()).isEqualTo("old".getBytes());
+        verify(downloadFileUseCase).openForDownload("apalveien5", "/home/geir/notes.txt", "ab12");
+    }
+
+    @Test
+    void download_ofADirectory_isABadRequest_withTheFolderMessage() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+        when(downloadFileUseCase.openForDownload(any(), any(), any()))
+            .thenThrow(new IllegalArgumentException("Downloading a folder isn't supported yet."));
+
+        mockMvc.perform(get("/machines/apalveien5/files/download").param("path", "/home/geir"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Downloading a folder isn't supported yet."));
     }
 
     @Test

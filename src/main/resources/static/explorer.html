@@ -57,6 +57,11 @@
         </section>
     </div>
 
+    <!-- App-level overlay layer — what the iframe never allowed. The Clipboard tray (held coordinates + live
+         Transfers) and a toast slot, docked above the dock, out of the tree's way until there's something to say. -->
+    <aside class="ex-clip" id="exClip" aria-label="Clipboard and transfers"></aside>
+    <div class="ex-toast" id="exToast" role="status" aria-live="polite"></div>
+
     <!-- One namespace, one search: every entry in the tree, by its path. -->
     <div class="ex-scrim" id="exScrim">
         <div class="ex-pal" role="dialog" aria-label="Search the fleet">
