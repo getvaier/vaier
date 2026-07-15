@@ -290,6 +290,108 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     font-variant-numeric: tabular-nums;
 }
 
+/* --- the time rail: the past is a coordinate, and a light source (#323 slice D) ---------------------
+   Time is the axis the vertical tree does not have, so the rail runs horizontal — orthogonal to it. It is
+   a row of discrete stops, one per archive, because a borg archive is a discrete snapshot: a smooth slider
+   would promise a moment between two backups that was never captured. The one liberty this slice takes is
+   the track's gradient — lit at Now, dimming into the past — and it is the whole thesis made visible: light
+   falls off with distance from the present. Standing on a stop sets data-past on the shell, and every
+   surface crossfades to the amber past palette at the top of this file; the reading spells the coordinate
+   out in words. Only the present is ever cold-lit, so "you can only paste into the present" is seen. */
+.ex-rail {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 18px;
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-2);
+    transition: border-color .5s ease, background .5s ease;
+}
+[data-past='1'] .ex-rail { border-color: var(--border-hi); }
+
+/* Now: the way back to the light. In the past it is the one warm exit; clicking it cools the whole shell. */
+.ex-rail-now {
+    flex: none;
+    padding: 3px 11px;
+    background: none;
+    border: 1px solid var(--border-hi);
+    border-radius: 9999px;
+    font-family: var(--display);
+    font-size: .62rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color .2s, background .2s, border-color .2s;
+}
+.ex-rail-now.is-on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+.ex-rail-now:not(.is-on):hover { color: var(--accent); border-color: var(--accent); }
+.ex-rail-now:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The track the stops sit on, lit from Now (left) and falling off into the past (right). */
+.ex-rail-track {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 22px;
+    display: flex;
+    align-items: center;
+}
+.ex-rail-track::before {
+    content: '';
+    position: absolute;
+    left: 2px; right: 2px; top: 50%;
+    height: 1px;
+    transform: translateY(-50%);
+    background: linear-gradient(to right, var(--accent), var(--rail) 88%);
+    opacity: .7;
+    transition: background .5s ease;
+}
+/* One stop per archive, evenly spaced so each is an equal target; the gradient, not the gaps, reads time. */
+.ex-rail-stops {
+    position: relative;
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.ex-rail-stop {
+    flex: none;
+    width: 14px; height: 14px;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+.ex-rail-stop::after {
+    content: '';
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--bg-panel);
+    border: 1.5px solid var(--text-dim);
+    transition: background .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.ex-rail-stop:hover::after { border-color: var(--accent); transform: scale(1.25); }
+.ex-rail-stop.is-on::after {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 7px var(--accent);
+}
+.ex-rail-stop:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 50%; }
+
+/* The reading: the coordinate in words. Mono for the timestamp (it is an address), sans for the rest. */
+.ex-rail-when {
+    flex: none;
+    max-width: 38%;
+    text-align: right;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+.ex-rail-stamp { display: block; font-family: var(--mono); color: var(--text); }
+.ex-rail-ago { color: var(--text-dim); }
+
 /* cards */
 .ex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .ex-card {
@@ -562,4 +664,8 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     .ex-tree { display: none; }
     .ex-lhead, .ex-lrow { grid-template-columns: minmax(0, 1fr) 80px; }
     .ex-lhead span:last-child, .ex-lrow .ex-lmeta:last-child { display: none; }
+    /* The rail wraps: Now over the track, the reading drops to its own line under both. */
+    .ex-rail { flex-wrap: wrap; gap: 10px 12px; }
+    .ex-rail-track { flex: 1 1 100%; order: 3; }
+    .ex-rail-when { max-width: none; flex: 1 1 100%; order: 2; text-align: left; }
 }

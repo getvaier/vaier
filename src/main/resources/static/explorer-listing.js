@@ -45,12 +45,20 @@
         // begin?" (#326). A machine whose SFTP subsystem is chrooted — the NAS is jailed into /volume1 —
         // cannot be asked about "/" at all, so the reader must never invent one. The answer comes back with
         // the root that resolved it, and the caller learns where it is standing from the reply.
-        async function list(machine, path) {
+        //
+        // `at` names an archive to read the same path *inside*, rather than live (#323 slice D) — the machine's
+        // past. Absent, the present, unchanged. The two coordinates travel as query params; a null of either is
+        // simply not sent, so the present-day root question is byte-for-byte the request it always was.
+        async function list(machine, path, at) {
             const ticket = ++inFlight;
             const where = path == null ? 'the file root' : path;
+            const params = new URLSearchParams();
+            if (path != null) params.set('path', path);
+            if (at) params.set('at', at);
+            const query = params.toString();
             try {
                 const res = await fetch('/machines/' + encodeURIComponent(machine) + '/files'
-                    + (path == null ? '' : '?path=' + encodeURIComponent(path)));
+                    + (query ? '?' + query : ''));
                 if (ticket !== inFlight) return { stale: true };
 
                 if (!res.ok) {
@@ -68,8 +76,9 @@
                 const body = await res.json();
                 if (ticket !== inFlight) return { stale: true };
                 // The entries are at the machine's TRUE coordinates — the ones df, borg and the operator's own
-                // terminal use — and `root` says where its tree begins.
-                return { root: body.root, path: body.path, entries: body.entries };
+                // terminal use — and `root` says where its tree begins. In the past those are the paths the
+                // archive captured, and `root` is "/", the archive's own beginning; `at` echoes the archive read.
+                return { root: body.root, path: body.path, at: body.at, entries: body.entries };
             } catch (e) {
                 if (ticket !== inFlight) return { stale: true };
                 return { error: 'Could not reach ' + machine + '.' };

@@ -84,7 +84,9 @@
         containers: new Map(),           // machine name -> its containers, as Vaier last scraped them
         containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
         disks: new Map(),                // machine name -> its filesystems: state, the list, the failure's words
-        roots: new Map(),                // machine name -> where its file tree begins (its SFTP root, #326)
+        roots: new Map(),                // (machine, at) -> where a file tree begins (its SFTP root, #326)
+        at: null,                        // the archive being browsed, or null for the present — the live filesystem
+        archives: new Map(),             // machine name -> { state, list, error }: its archives, the rail's stops
         palSel: 0,
     };
 
@@ -92,6 +94,7 @@
     // reader would make concurrent expands cancel one another.
     const $ = (id) => document.getElementById(id);
     const key = (path) => '/' + path.join('/');
+    const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
 
     // --- what an entry IS, read off its own path -------------------------------------------------------
     //
@@ -119,12 +122,19 @@
     // /volume1, so its `files` entry IS /volume1, and everything below hangs off that. Until the machine has
     // told us where that is, the path is null — which means "wherever this machine's tree begins", the one
     // question only the machine can answer.
+    //
+    // The past has no such question. An archive captured absolute machine paths, and Vaier mounts it rooted at
+    // "/" (the backend answers a past listing with root "/", always), so browsing a machine's history always
+    // begins at "/". That is why the past base is known without asking: it lets a whole path chain resolve in
+    // one pass when you scrub, rather than each depth waiting on the one above it to report a root.
+    const rootKey = (machine, at) => machine + DIR_SEP + (at || '');
     function remotePath(path) {
-        const root = S.roots.get(path[1]);
-        if (root === undefined) return null;
+        const root = S.roots.get(rootKey(path[1], S.at));
+        const base = root !== undefined ? root : (S.at ? '/' : null);
+        if (base == null) return null;
         const segs = path.slice(3);
-        if (!segs.length) return root;
-        return (root === '/' ? '' : root) + '/' + segs.join('/');
+        if (!segs.length) return base;
+        return (base === '/' ? '' : base) + '/' + segs.join('/');
     }
 
     // --- which machine a published service lives on ----------------------------------------------------
@@ -177,7 +187,7 @@
             // Whatever the cache already holds, and nothing more. This function is called on every repaint,
             // so it must never be able to start a read — otherwise a tree that merely redraws would walk the
             // fleet over SFTP, and the fleet is on the far side of a VPN.
-            const entry = S.dirs.get(dirKey(path[1], remotePath(path)));
+            const entry = S.dirs.get(dirKey(path[1], remotePath(path), S.at));
             if (!entry || entry.state !== 'ready') return [];
             // Only directories become entries in the rail. The rail carries structure; the Inspector lists the
             // contents. Duplicating every file into the rail would drown the structure the rail exists to show.
@@ -195,18 +205,21 @@
     // on a separator that can appear in neither. Written as an escape — never as a raw control byte.
     const DIR_SEP = '\u0000';
     // A path is always absolute, so the empty string is free to mean "the root, wherever it turns out to be"
-    // — the slot a read is parked in before the machine has said where its tree begins.
-    const dirKey = (machine, path) => machine + DIR_SEP + (path == null ? '' : path);
+    // — the slot a read is parked in before the machine has said where its tree begins. The archive id joins
+    // the key too: /home on a machine now and /home in last night's archive are the same path a day apart, and
+    // they are not the same directory. The present is the empty archive.
+    const dirKey = (machine, path, at) =>
+        machine + DIR_SEP + (path == null ? '' : path) + DIR_SEP + (at || '');
 
     const dirStateOf = (path) => {
-        const entry = S.dirs.get(dirKey(path[1], remotePath(path)));
+        const entry = S.dirs.get(dirKey(path[1], remotePath(path), S.at));
         return entry ? entry.state : 'unread';
     };
 
     const isDirKind = (kind) => kind === 'files' || kind === 'dir';
 
-    async function readDir(machine, rpath) {
-        const k = dirKey(machine, rpath);
+    async function readDir(machine, rpath, at) {
+        const k = dirKey(machine, rpath, at);
         let entry = S.dirs.get(k);
         if (entry && entry.state === 'loading') return;   // already on its way
         if (!entry) {
@@ -223,7 +236,7 @@
         entry.state = 'loading';
         entry.error = null;
 
-        const result = await entry.reader.list(machine, rpath);
+        const result = await entry.reader.list(machine, rpath, at);
 
         // The slot was dropped under us while we were reading — the machine left the fleet, or the fleet
         // reshaped. A late answer must not resurrect a directory on a machine that is gone.
@@ -238,16 +251,16 @@
             entry.entries = result.entries;
             entry.path = result.path;
 
-            // Where this machine's tree begins, straight from the machine. Remembered per machine — one
-            // machine's jail must never be pinned onto another's paths.
-            if (result.root != null) S.roots.set(machine, result.root);
+            // Where this tree begins, straight from the machine. Remembered per machine *and* time — a jail
+            // ("/volume1") is a fact about the live filesystem, never about an archive rooted at "/".
+            if (result.root != null) S.roots.set(rootKey(machine, at), result.root);
 
             // We may have asked "where does your tree begin?" (rpath null) and been answered "/volume1". The
             // slot belongs to the directory the server actually read, so re-key it — otherwise the very next
             // repaint would compute the real path, miss the cache, and read the same directory all over again.
             if (result.path !== rpath) {
                 S.dirs.delete(k);
-                S.dirs.set(dirKey(machine, result.path), entry);
+                S.dirs.set(dirKey(machine, result.path, at), entry);
             }
         }
         render();
@@ -337,6 +350,23 @@
         } catch (e) {
             S.disks.set(machine, { state: 'error', filesystems: null,
                 error: 'Vaier could not read the disks on ' + machine + '.' });
+        }
+        render();
+    }
+
+    // One machine's archives — the stops on its time rail (#323 slice D). Read once when its files are first
+    // looked at, never polled: a new nightly backup lands on a reload, not under the operator's cursor. A
+    // machine with no backup job answers with an empty list and simply grows no rail — the file browser is
+    // exactly what it was. A failure is the same quiet outcome: no rail, and the present still browses.
+    async function loadArchives(machine) {
+        const held = S.archives.get(machine);
+        if (held && (held.state === 'loading' || held.state === 'ready')) return;   // once per machine
+        S.archives.set(machine, { state: 'loading', list: [], error: null });
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/archives');
+            S.archives.set(machine, { state: 'ready', list: res.ok ? await res.json() : [], error: null });
+        } catch (e) {
+            S.archives.set(machine, { state: 'ready', list: [], error: null });
         }
         render();
     }
@@ -463,7 +493,7 @@
         // itself is the server's own sentence ("Not allowed to read /root as geir.") — selecting the row shows
         // it in full, in the Inspector.
         if (failed) {
-            const entry = S.dirs.get(dirKey(path[1], remotePath(path)));
+            const entry = S.dirs.get(dirKey(path[1], remotePath(path), S.at));
             row.title = (entry && entry.error) || 'This directory could not be read.';
         }
 
@@ -1106,7 +1136,78 @@
         pane.appendChild(frame);
     }
 
-    // --- files ------------------------------------------------------------------------------------------
+    // --- files, and the time rail through them ----------------------------------------------------------
+
+    // The archive being browsed as an object (the stop we are standing on), or null in the present.
+    function currentArchive() {
+        if (!S.at) return null;
+        const held = S.archives.get(S.path[1]);
+        return held && held.list ? held.list.find((a) => a.id === S.at) || null : null;
+    }
+
+    // How far back an archive sits from now — the human half of a coordinate. Read once at paint time from
+    // the clock, never on a timer: the rule is that the browser never polls, and a relative time that ticked
+    // itself forward would be a poll in all but name. Close enough is the point — "3 hours ago" is read
+    // against the other stops, not audited.
+    function timeAgo(iso) {
+        if (!iso) return '';
+        const then = new Date(iso);
+        if (isNaN(then)) return '';
+        const secs = Math.max(0, (Date.now() - then.getTime()) / 1000);
+        const mins = secs / 60, hours = mins / 60, days = hours / 24;
+        const plural = (n, unit) => Math.round(n) + ' ' + unit + (Math.round(n) === 1 ? '' : 's') + ' ago';
+        if (mins < 1) return 'just now';
+        if (hours < 1) return plural(mins, 'minute');
+        if (days < 1) return plural(hours, 'hour');
+        if (days < 30) return plural(days, 'day');
+        return plural(days / 30, 'month');
+    }
+
+    const archiveLabel = (a) => VaierListing.formatTime(a.createdAt) + ' · ' + timeAgo(a.createdAt);
+
+    // The time rail: one stop per archive, laid out newest-nearest-Now so the whole shell reads left-to-past.
+    // It is the only surface that sets the past into motion — every stop's click routes through toArchive,
+    // and Now through toPresent, so the light and the reads move together and nowhere else. A machine with no
+    // archives grows no rail (an empty fragment appends nothing), so the file browser is untouched where
+    // there is no past to show.
+    function renderRail(machine) {
+        const held = S.archives.get(machine);
+        if (!held || held.state !== 'ready' || !held.list.length) return document.createDocumentFragment();
+
+        const rail = el('div', 'ex-rail');
+
+        const now = el('button', 'ex-rail-now' + (S.at ? '' : ' is-on'));
+        now.textContent = 'Now';
+        now.title = 'The live filesystem';
+        now.onclick = toPresent;
+        rail.appendChild(now);
+
+        const track = el('div', 'ex-rail-track');
+        const stops = el('div', 'ex-rail-stops');
+        held.list.forEach((a) => {
+            const stop = el('button', 'ex-rail-stop' + (a.id === S.at ? ' is-on' : ''));
+            stop.title = archiveLabel(a);
+            stop.setAttribute('aria-label', 'Backup from ' + archiveLabel(a));
+            stop.onclick = () => toArchive(machine, a.id);
+            stops.appendChild(stop);
+        });
+        track.appendChild(stops);
+        rail.appendChild(track);
+
+        const when = el('div', 'ex-rail-when');
+        const cur = currentArchive();
+        if (cur) {
+            const stamp = el('span', 'ex-rail-stamp');
+            stamp.textContent = VaierListing.formatTime(cur.createdAt);
+            const ago = el('span', 'ex-rail-ago');
+            ago.textContent = timeAgo(cur.createdAt);
+            when.append(stamp, ago);
+        } else {
+            when.textContent = 'Live filesystem';
+        }
+        rail.appendChild(when);
+        return rail;
+    }
 
     // The Inspector renders a directory from the same cache slot the rail reads, and selecting an unread
     // directory is what fills it. So one SFTP round trip serves both surfaces — and a slow answer can never
@@ -1114,6 +1215,7 @@
     // standing on, whatever landed while it was waiting.
     function renderDirectory(pane) {
         const machine = S.path[1];
+        loadArchives(machine);                    // fills the rail; not awaited — it re-renders when it lands
         const path = remotePath(S.path);          // null until the machine has said where its tree begins
         const shown = path == null ? 'files' : path;
 
@@ -1121,14 +1223,15 @@
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
+        body.appendChild(renderRail(machine));    // above the listing; nothing when the machine has no archives
         const rows = document.createElement('div');
         rows.className = 'ex-listing';
         body.appendChild(rows);
         pane.appendChild(body);
 
-        if (dirStateOf(S.path) === 'unread') readDir(machine, path);   // it re-renders when it lands
+        if (dirStateOf(S.path) === 'unread') readDir(machine, path, S.at);   // it re-renders when it lands
 
-        const entry = S.dirs.get(dirKey(machine, path));
+        const entry = S.dirs.get(dirKey(machine, path, S.at));
         if (!entry || entry.state === 'loading') {
             return rows.appendChild(note('Listing ' + (path == null ? 'the file root' : path)
                 + ' on ' + machine + '…', false));
@@ -1265,12 +1368,55 @@
     // explicit selection and nowhere else. Hung off the Inspector's renderer instead, every repaint (a
     // machine coming online, say) would quietly start another tmux session on the host that nobody asked for.
     function go(path) {
+        // Time is a coordinate on a machine's files, and only there. Stepping off that context — onto a
+        // different machine, or an entry that has no past (a container, a shell, the disk) — returns you to
+        // the present. The past has no meaning there, and carrying the amber light onto a thing that has none
+        // would be a claim about it. Descending deeper into the same files keeps the archive you are in.
+        const stillInPast = S.at && path[1] === S.path[1]
+            && (kindOf(path) === 'files' || kindOf(path) === 'dir');
+        if (!stillInPast) S.at = null;
         S.path = path;
         if (kindOf(path) === 'shell' && window.TerminalDock) TerminalDock.open(path[1]);
         render();
     }
 
+    // Scrubbing the rail. Setting the time re-reads exactly the directory you are standing on — and every
+    // directory above it — at that archive, so the tree and the Inspector relight together instead of the
+    // open branches beneath you flashing empty. It is a bounded walk down one path (the very directories that
+    // were opened to get here), never a crawl across the fleet — the same discipline the rest of the tree
+    // keeps. Then the shell crossfades to the new light, once, in render.
+    function toArchive(machine, id) {
+        if (S.at === id) return;
+        S.at = id;
+        readPathChain(machine);
+        render();
+    }
+
+    function toPresent() {
+        if (!S.at) return;
+        S.at = null;
+        readPathChain(S.path[1]);
+        render();
+    }
+
+    // Read the files subtree from its root down to where you are standing, at the current time. Only the
+    // directories that are still unread in this light are fetched; the rest are already cached. remotePath
+    // resolves every depth in one pass because the past's root is known to be "/" without asking (see
+    // remotePath), so this does not have to wait for each parent to report a root before reading its child.
+    function readPathChain(machine) {
+        const inFiles = S.path[1] === machine
+            && (kindOf(S.path) === 'files' || kindOf(S.path) === 'dir');
+        const full = inFiles ? S.path : ['fleet', machine, 'files'];
+        for (let depth = 3; depth <= full.length; depth++) {
+            const sub = full.slice(0, depth);
+            if (dirStateOf(sub) === 'unread') readDir(machine, remotePath(sub), S.at);
+        }
+    }
+
     function render() {
+        // The past is a different light, not a badge: one attribute on the shell, and every surface crossfades
+        // to the amber past palette (explorer-shell.css). Only the present is ever cold-lit.
+        document.querySelector('.ex-app').setAttribute('data-past', S.at ? '1' : '0');
         renderTree();
         renderCrumbs();
         renderPane();

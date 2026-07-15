@@ -1010,8 +1010,10 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
 - [ ] **2 — Move.** Clipboard, cross-machine Transfer (streaming, tracked, SSE-settled), download to
   browser, size warning. Community.
 - [ ] **3 — Time.** `borg mount` lifecycle, the time rail, archive overlay on the tree, restore as
-  paste-from-the-past. Enterprise. *(The `borg mount` lifecycle backend landed via §6.21 slice D — mount-on-demand,
-  idempotent, idle-swept; the time-rail UI is what remains.)*
+  paste-from-the-past. Enterprise. *(The `borg mount` lifecycle backend and the **time-rail UI** both landed via
+  §6.21 slice D — mount-on-demand, idempotent, idle-swept, with the rail scrubbing a machine's archives newest-first
+  and the shell relighting into the past palette; restore-as-paste is what remains, and it rides on Clipboard/paste
+  from slice 2.)*
 - [ ] **4 — Coverage.** Coverage dots, draft-then-save to the backup job, "Uncovered only" filter,
   one-job-per-machine enforcement. Enterprise.
 - [ ] **5 — Mutate.** Delete, rename/move, new folder, behind a typed-confirmation gate. Community.
@@ -1209,10 +1211,26 @@ Three things this buys that a set of pages structurally cannot:
   Refactor along the way: trust-on-first-use had been copied into `TerminalService` and `ExplorerService`; the
   third copy (the disk read) is what made it worth having exactly one, so the rule now lives on
   `SshTarget.pinOnFirstUse` and every SSH path (shell, exec, SFTP, disk) pins from it.
-- [ ] **D — Time (backend ✅, the rail UI next).** The archive rail (§6.20 slice 3). Scrubbing back re-lights the
+- [x] **D — Time ✅.** The archive rail (§6.20 slice 3). Scrubbing back re-lights the
   Inspector in the past's palette (`data-past`, defined in slice A and unused until now); the past has no liveness
   to report, so the status dots go out. Restore is not a feature — it is a paste into the present.
-  **Delivered in slice D (backend) — the past is a coordinate:**
+  **Delivered in slice D (frontend, `explorer-shell.{js,css}` + `explorer-listing.js`) — the past is seen, not told:**
+  - **The time rail.** A machine's file view grows a horizontal **time rail** — a row of **stops**, one per borg
+    **archive** of that machine, laid out newest-nearest-Now, fed by `GET /machines/{machine}/archives`. It appears
+    only on a machine that has backups; a machine with no backup job grows no rail (an empty fragment appends
+    nothing), so the file browser is untouched where there is no past to show. Archives are read **once** per machine
+    when its files are first opened (never on a timer — consistent with the frontend-never-polls rule), and the
+    relative "how long ago" is computed at paint, not on an interval.
+  - **Scrubbing back mounts the past.** Clicking a stop browses the machine's files as they were in that archive via
+    `?at=<archiveId>` on the existing files endpoint; the whole shell crossfades to the amber `data-past` palette,
+    the liveness dots go dark, and a one-line reading states the archive's timestamp and how long ago it was.
+    Clicking **Now** returns to the live filesystem and cools the shell back. The rail is the only surface that sets
+    the past in motion — every stop routes through one path and Now through another, so the light and the reads move
+    together and nowhere else.
+  - **The invariant is now visible.** *The past is read-only* — you can only browse (and, once Clipboard/paste lands,
+    paste into) the present. The backend enforces it at the kernel (the archive is a read-only FUSE mount); the
+    frontend makes it *seen* rather than told, via the past palette and the one warm "Now" exit.
+  **Delivered earlier in slice D (backend) — the past is a coordinate:**
   - **`borg mount` is the mechanism, and there is only one browse.** A file's third coordinate is *time*, and the
     trick is not to write a second directory lister for the past: mount a backup **archive** as a read-only FUSE
     filesystem on its own machine, and walk it with the exact same SFTP code that walks the live tree. borg strips
