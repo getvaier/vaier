@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.DiskUnreadableException;
@@ -105,8 +106,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of("CONFLICT", e.getMessage()));
     }
 
+    /**
+     * The catch-all. One special case matters for streaming responses (#321): a directory download that fails
+     * partway through has <em>already</em> committed its bytes and its {@code application/zip} content-type to
+     * the wire. There is nothing left to write — serialising an {@link ApiError} over a committed zip response
+     * only throws {@code HttpMessageNotWritableException}, which buries the real failure and cannot reach the
+     * browser anyway. So when the response is already committed, the handler returns {@code null} (handled, no
+     * body) and lets the stream end; otherwise it reports the usual safe, generic {@code 500}.
+     */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handleUnexpected(Exception e) {
+    public ResponseEntity<ApiError> handleUnexpected(Exception e, HttpServletResponse response) {
+        if (response.isCommitted()) {
+            log.warn("Request failed after the response was committed; ending the stream ({})", e.toString());
+            return null;
+        }
         log.error("Unhandled exception serving request", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiError.of(INTERNAL_ERROR_CODE, INTERNAL_ERROR_MESSAGE));

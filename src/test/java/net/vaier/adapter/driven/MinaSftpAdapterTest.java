@@ -19,14 +19,21 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -406,6 +413,90 @@ class MinaSftpAdapterTest {
         } finally {
             Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
         }
+    }
+
+    // --- #321: walking a tree for a zip download, over ONE connection ----------------------------------
+
+    /** A visitor that records what the walk handed it: file relative-path -> content, and empty-dir paths. */
+    private static final class RecordingVisitor implements ForBrowsingRemoteFiles.RemoteTreeVisitor {
+        final Map<String, String> files = new LinkedHashMap<>();
+        final List<String> directories = new ArrayList<>();
+
+        @Override public void directory(String relativePath) {
+            directories.add(relativePath);
+        }
+
+        @Override public void file(String relativePath, InputStream content) throws IOException {
+            files.put(relativePath, new String(content.readAllBytes(), StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void walkTree_visitsEveryFile_andEachEmptyDirectory_namedRelativeToTheRoot() throws Exception {
+        int port = startServer();
+        Files.createDirectories(remoteRoot.resolve("proj/src"));
+        Files.createDirectory(remoteRoot.resolve("proj/empty"));
+        Files.writeString(remoteRoot.resolve("proj/README.md"), "readme");
+        Files.writeString(remoteRoot.resolve("proj/src/App.java"), "class App {}");
+
+        RecordingVisitor visitor = new RecordingVisitor();
+        adapter.walkTree(target(port), remote("proj"), visitor);
+
+        // Files carry their path relative to the walk's root; a non-empty directory (src) is implied by the
+        // files inside it, while an empty directory (empty) is reported in its own right.
+        assertThat(visitor.files).containsOnly(
+            entry("README.md", "readme"),
+            entry("src/App.java", "class App {}"));
+        assertThat(visitor.directories).containsExactly("empty");
+    }
+
+    @Test
+    void walkTree_skipsAFileItCannotRead_ratherThanAbortingTheWholeWalk() throws Exception {
+        Path proj = Files.createDirectory(remoteRoot.resolve("proj"));
+        Files.writeString(proj.resolve("readable.txt"), "ok");
+        Path secret = Files.writeString(proj.resolve("secret.txt"), "shh");
+        Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("---------"));
+        assumeTrue(!Files.isReadable(secret), "running as root — cannot make a file unreadable");
+        int port = startServer();
+
+        RecordingVisitor visitor = new RecordingVisitor();
+        try {
+            adapter.walkTree(target(port), remote("proj"), visitor);
+        } finally {
+            Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rw-------"));
+        }
+
+        // The unreadable file is left out entirely — its stream never opens, so the visitor's entry for it is
+        // never even started — while the walk completes and the readable file streams through.
+        assertThat(visitor.files).containsOnly(entry("readable.txt", "ok"));
+    }
+
+    @Test
+    void walkTree_runsOverOneConnection_neverReconnectingPerFile_andLeavesNoSessionBehind() throws Exception {
+        // The bug #321 fixed: the zip walk opened a fresh SSH connection PER FILE, so a folder of dozens of
+        // files became dozens of connect/authenticate/teardown cycles over the VPN — the download blew past
+        // the request's async timeout and was cut off mid-stream into a corrupt zip. The whole walk, every
+        // directory read and every file read, must run over a SINGLE connection, exactly as delete does.
+        int port = startServer();
+        Files.createDirectories(remoteRoot.resolve("many/deep"));
+        for (int i = 0; i < 20; i++) {
+            Files.writeString(remoteRoot.resolve("many/f" + i + ".txt"), "f" + i);
+            Files.writeString(remoteRoot.resolve("many/deep/g" + i + ".txt"), "g" + i);
+        }
+        AtomicInteger sessionsCreated = new AtomicInteger();
+        server.addSessionListener(new org.apache.sshd.common.session.SessionListener() {
+            @Override public void sessionCreated(org.apache.sshd.common.session.Session session) {
+                sessionsCreated.incrementAndGet();
+            }
+        });
+
+        RecordingVisitor visitor = new RecordingVisitor();
+        adapter.walkTree(target(port), remote("many"), visitor);
+
+        // Every file was seen (40 across two directories) over exactly one SSH session — not one per file.
+        assertThat(visitor.files).hasSize(40);
+        assertThat(sessionsCreated.get()).isEqualTo(1);
+        assertThat(server.getActiveSessions()).isEmpty();
     }
 
     @Test

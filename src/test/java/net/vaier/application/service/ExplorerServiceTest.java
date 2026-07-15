@@ -8,7 +8,6 @@ import net.vaier.domain.FileEntry;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
-import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
@@ -42,7 +41,6 @@ import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -427,13 +425,12 @@ class ExplorerServiceTest {
         machineResolves("apalveien5", "SHA256:pinned");
         when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
             .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
-        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir"))).thenReturn(new DirectoryListing(List.of(
-            FileEntry.in("/home/geir", "notes.txt", false, 7, WHEN),
-            FileEntry.in("/home/geir", "docs", true, 4096, WHEN)), "SHA256:pinned"));
-        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir/docs"))).thenReturn(new DirectoryListing(List.of(
-            FileEntry.in("/home/geir/docs", "readme.md", false, 6, WHEN)), "SHA256:pinned"));
-        writes(forBrowsingRemoteFiles, "/home/geir/notes.txt", "top-lvl");
-        writes(forBrowsingRemoteFiles, "/home/geir/docs/readme.md", "nested");
+        // The single-connection walk hands each file's bytes to the visitor, named relative to the root; the
+        // service turns them into zip entries. That the walk holds one connection is the adapter's contract.
+        walksTree("/home/geir", v -> {
+            v.file("notes.txt", stream("top-lvl"));
+            v.file("docs/readme.md", stream("nested"));
+        });
 
         Download download = service.openForDownload("apalveien5", "/home/geir", null);
 
@@ -451,10 +448,9 @@ class ExplorerServiceTest {
         machineResolves("apalveien5", "SHA256:pinned");
         when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
             .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
-        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir"))).thenReturn(new DirectoryListing(List.of(
-            FileEntry.in("/home/geir", "empty", true, 4096, WHEN)), "SHA256:pinned"));
-        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir/empty")))
-            .thenReturn(new DirectoryListing(List.of(), "SHA256:pinned"));
+        // The walk reports an empty directory as itself — the only way a zip can carry a folder with nothing
+        // in it — and the service maps that to a zip directory entry.
+        walksTree("/home/geir", v -> v.directory("empty"));
 
         Download download = service.openForDownload("apalveien5", "/home/geir", null);
 
@@ -481,43 +477,15 @@ class ExplorerServiceTest {
         assertThat(download.filename()).isEqualTo("apalveien5.zip");
     }
 
-    /**
-     * The resilience rule for a file that turns out unreadable mid-walk: it is not allowed to sink the whole
-     * zip, but it is also not silently re-verified before every file is streamed — that would cost a second
-     * round trip per file, for every file, to protect against the rare one that fails. The zip entry for it
-     * is already open (its header is already in the stream) by the time {@code download} can fail, so what
-     * lands in the archive is an empty entry for that one file, in its rightful place in the tree, while
-     * every other file streams through untouched and the download completes normally rather than a 500.
-     */
-    @Test
-    void openForDownload_ofADirectory_leavesAnEmptyEntry_forAFileItCannotRead_ratherThanFailingTheWholeZip()
-            throws Exception {
-        machineResolves("apalveien5", "SHA256:pinned");
-        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
-            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
-        when(forBrowsingRemoteFiles.list(any(), eq("/home/geir"))).thenReturn(new DirectoryListing(List.of(
-            FileEntry.in("/home/geir", "secret.txt", false, 3, WHEN),
-            FileEntry.in("/home/geir", "notes.txt", false, 7, WHEN)), "SHA256:pinned"));
-        doThrow(new PermissionDeniedException("Not allowed to read /home/geir/secret.txt"))
-            .when(forBrowsingRemoteFiles).download(any(), eq("/home/geir/secret.txt"), any());
-        writes(forBrowsingRemoteFiles, "/home/geir/notes.txt", "top-lvl");
-
-        Download download = service.openForDownload("apalveien5", "/home/geir", null);
-
-        assertThat(unzip(download)).containsOnly(
-            entry("notes.txt", "top-lvl"),
-            entry("secret.txt", ""));
-    }
-
     @Test
     void openForDownload_ofADirectory_inThePast_zipsTheArchivedTree() throws Exception {
         machineResolves("apalveien5", "SHA256:pinned");
         archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
         when(forBrowsingRemoteFiles.stat(any(), eq(MOUNTPOINT + "/home/geir")))
             .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
-        when(forBrowsingRemoteFiles.list(any(), eq(MOUNTPOINT + "/home/geir"))).thenReturn(new DirectoryListing(
-            List.of(FileEntry.in(MOUNTPOINT + "/home/geir", "notes.txt", false, 3, WHEN)), "SHA256:pinned"));
-        writes(forBrowsingRemoteFiles, MOUNTPOINT + "/home/geir/notes.txt", "old");
+        // The past reads under the mountpoint, so the walk is rooted there — same rule as a single-file
+        // download; skipping an unreadable file is the walk's own concern (proven in the adapter test).
+        walksTree(MOUNTPOINT + "/home/geir", v -> v.file("notes.txt", stream("old")));
 
         // A download is a read, so zipping the past is fine too — same rule as a single-file download.
         Download download = service.openForDownload("apalveien5", "/home/geir", "ab12");
@@ -525,11 +493,21 @@ class ExplorerServiceTest {
         assertThat(unzip(download)).containsOnly(entry("notes.txt", "old"));
     }
 
-    private static void writes(ForBrowsingRemoteFiles mock, String path, String content) {
+    /** Drives the mocked single-connection tree walk: the {@code emit} lambda feeds entries to the visitor. */
+    @FunctionalInterface
+    interface TreeWalk {
+        void emit(ForBrowsingRemoteFiles.RemoteTreeVisitor visitor) throws IOException;
+    }
+
+    private void walksTree(String rootPath, TreeWalk walk) {
         doAnswer(inv -> {
-            ((java.io.OutputStream) inv.getArgument(2)).write(content.getBytes());
+            walk.emit(inv.getArgument(2));
             return null;
-        }).when(mock).download(any(), eq(path), any());
+        }).when(forBrowsingRemoteFiles).walkTree(any(), eq(rootPath), any());
+    }
+
+    private static ByteArrayInputStream stream(String content) {
+        return new ByteArrayInputStream(content.getBytes());
     }
 
     private static Map<String, String> unzip(Download download) throws IOException {

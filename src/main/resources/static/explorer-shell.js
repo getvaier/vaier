@@ -111,6 +111,7 @@
         archives: new Map(),             // machine name -> { state, list, error }: its archives, the rail's stops
         clipboard: [],                   // held file coordinates {machine, path, at, name, directory, size} — the Clipboard
         transfers: new Map(),            // id -> a live/settled Transfer, streamed in over the transfers SSE topic
+        sel: new Set(),                  // paths ticked in the current directory listing (multi-select)
         palSel: 0,
     };
 
@@ -1299,8 +1300,21 @@
 
         const result = { entries: entry.entries };
 
+        // A toolbar rises when anything is ticked (Gmail's move): the bulk verbs act on the whole selection
+        // at once. Above the listing so it does not shift the rows.
+        const selBar = renderSelectionBar(machine, result.entries);
+        if (selBar) body.insertBefore(selBar, rows);
+
         const lhead = document.createElement('div');
         lhead.className = 'ex-lhead';
+        // Select-all: on when every row is ticked, dashed when only some are.
+        const allOn = result.entries.length > 0 && result.entries.every((e) => S.sel.has(e.path));
+        const someOn = result.entries.some((e) => S.sel.has(e.path));
+        lhead.appendChild(checkbox(allOn, someOn && !allOn, () => {
+            if (allOn) result.entries.forEach((e) => S.sel.delete(e.path));
+            else result.entries.forEach((e) => S.sel.add(e.path));
+            render();
+        }, 'Select all'));
         ['Name', 'Size', 'Modified'].forEach((h) => {
             const cell = document.createElement('span');
             cell.textContent = h;
@@ -1311,8 +1325,14 @@
         if (!result.entries.length) return rows.appendChild(note('This folder is empty.', false));
 
         result.entries.forEach((entry) => {
+            const ticked = S.sel.has(entry.path);
             const row = document.createElement('div');
-            row.className = 'ex-lrow';
+            row.className = 'ex-lrow' + (ticked ? ' is-ticked' : '');
+
+            const check = checkbox(ticked, false, () => {
+                if (S.sel.has(entry.path)) S.sel.delete(entry.path); else S.sel.add(entry.path);
+                render();
+            }, (ticked ? 'Deselect ' : 'Select ') + entry.name);
 
             const name = document.createElement(entry.directory ? 'button' : 'span');
             name.className = 'ex-lname';
@@ -1331,7 +1351,7 @@
             time.className = 'ex-lmeta';
             time.textContent = VaierListing.formatTime(entry.modifiedAt);
 
-            row.append(name, size, time, rowActions(machine, entry));
+            row.append(check, name, size, time, rowActions(machine, entry));
             rows.appendChild(row);
         });
     }
@@ -1439,6 +1459,99 @@
         } catch (e) {
             toast('Could not reach Vaier to delete ' + entry.name + '.');
         }
+    }
+
+    // A tri-state tick: on, off, or dashed (some-but-not-all, for select-all). A real checkbox so the
+    // keyboard and screen readers get it for free; the label carries the accessible name.
+    function checkbox(checked, indeterminate, onchange, label) {
+        const wrap = el('label', 'ex-check');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = checked;
+        input.indeterminate = !!indeterminate;
+        input.setAttribute('aria-label', label);
+        input.onclick = (e) => e.stopPropagation();   // ticking a row must not also open it
+        input.onchange = onchange;
+        wrap.appendChild(input);
+        return wrap;
+    }
+
+    // The selection toolbar — one set of verbs over everything ticked. Copy adds them all to the Clipboard;
+    // Download sends each (a folder as its zip); Delete takes them all through one typed gate. Present-only
+    // for Delete, same as the per-row verb.
+    function renderSelectionBar(machine, entries) {
+        const chosen = entries.filter((e) => S.sel.has(e.path));
+        if (!chosen.length) return null;
+
+        const bar = el('div', 'ex-selbar');
+        const count = el('div', 'ex-selbar-txt');
+        count.textContent = chosen.length + (chosen.length === 1 ? ' selected' : ' selected');
+        bar.appendChild(count);
+
+        const actions = el('div', 'ex-selbar-actions');
+        actions.appendChild(selVerb('copy', 'Copy', 'ex-btn', () => selCopy(machine, chosen)));
+        actions.appendChild(selVerb('download', 'Download', 'ex-btn', () => selDownload(machine, chosen)));
+        if (!S.at) actions.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => selDelete(machine, chosen)));
+        const clear = el('button', 'ex-iconbtn');
+        clear.innerHTML = svg('cross', 'ex-ico');
+        clear.title = 'Clear selection';
+        clear.setAttribute('aria-label', 'Clear selection');
+        clear.onclick = () => { S.sel = new Set(); render(); };
+        actions.appendChild(clear);
+        bar.appendChild(actions);
+        return bar;
+    }
+
+    function selVerb(icon, text, cls, onclick) {
+        const b = el('button', cls);
+        b.innerHTML = svg(icon, 'ex-ico');
+        const s = el('span');
+        s.textContent = text;
+        b.appendChild(s);
+        b.onclick = onclick;
+        return b;
+    }
+
+    function selCopy(machine, chosen) {
+        chosen.forEach((entry) => {
+            const id = clipId(machine, entry.path, S.at);
+            if (!S.clipboard.some((c) => clipId(c.machine, c.path, c.at) === id)) {
+                S.clipboard.push({ machine: machine, path: entry.path, at: S.at,
+                                   name: entry.name, directory: entry.directory, size: entry.size });
+            }
+        });
+        toast(chosen.length + (chosen.length === 1 ? ' item' : ' items') + ' copied to the Clipboard.');
+        S.sel = new Set();
+        render();
+    }
+
+    function selDownload(machine, chosen) {
+        chosen.forEach((entry) => download(machine, entry));   // each in the same click gesture
+        S.sel = new Set();
+        render();
+    }
+
+    // One gate for the whole batch: name the count, and delete each in turn once the machine name is typed.
+    // A failure on one is reported and the rest still go; the listing is re-read once at the end.
+    async function selDelete(machine, chosen) {
+        const names = chosen.slice(0, 6).map((c) => c.path).join('\n')
+            + (chosen.length > 6 ? '\n…and ' + (chosen.length - 6) + ' more' : '');
+        const ok = await confirmTyped('Delete ' + chosen.length + ' items?',
+            names + '\n\nEverything selected is deleted, folders and all they contain. This cannot be undone. '
+            + 'Type the machine name to confirm.', machine, 'Delete');
+        if (!ok) return;
+        let failed = 0;
+        for (const entry of chosen) {
+            try {
+                const res = await fetch('/machines/' + encodeURIComponent(machine)
+                    + '/files?path=' + encodeURIComponent(entry.path), { method: 'DELETE' });
+                if (!res.ok) failed++;
+            } catch (e) { failed++; }
+        }
+        toast(failed ? ('Deleted ' + (chosen.length - failed) + ' of ' + chosen.length + '; ' + failed + ' could not be removed.')
+                     : ('Deleted ' + chosen.length + (chosen.length === 1 ? ' item.' : ' items.')));
+        S.sel = new Set();
+        refreshDir(machine, remotePath(S.path));
     }
 
     // "Paste here" belongs to a directory in the present, and only there — the invariant is that you can only
@@ -1826,6 +1939,8 @@
         const stillInPast = S.at && path[1] === S.path[1]
             && (kindOf(path) === 'files' || kindOf(path) === 'dir');
         if (!stillInPast) S.at = null;
+        // A tick belongs to the listing it was made in; navigating anywhere clears the multi-selection.
+        if (key(path) !== key(S.path)) S.sel = new Set();
         S.path = path;
         if (kindOf(path) === 'shell' && window.TerminalDock) TerminalDock.open(path[1]);
         render();

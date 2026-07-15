@@ -3,6 +3,8 @@ package net.vaier.domain.port;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.SshTarget;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 /**
@@ -89,6 +91,42 @@ public interface ForBrowsingRemoteFiles {
      * deleted (an archive is read-only). Fails with the same domain SSH exceptions as {@link #list}.
      */
     void delete(SshTarget target, String path);
+
+    /**
+     * Walk the directory tree rooted at {@code rootPath} on {@code target} depth-first over a <b>single</b>
+     * SFTP connection, handing every entry to {@code visitor}: a file with a stream open only for the
+     * duration of the callback ({@link RemoteTreeVisitor#file}), and an empty directory as itself
+     * ({@link RemoteTreeVisitor#directory} — a non-empty directory is implied by the relative paths of the
+     * files inside it and reported no other way). The paths handed to the visitor are <b>relative</b> to
+     * {@code rootPath}, joined with forward slashes, so the caller can name entries without knowing where the
+     * root sits on the machine.
+     *
+     * <p>The whole walk and every file read run over the one connection — exactly the discipline
+     * {@link #delete} uses for a recursive delete — so a deep tree behind a VPN is never a fresh connect,
+     * authenticate and teardown <em>per entry</em>. That per-file reconnect is what turned a directory of
+     * dozens of files into dozens of round trips over the VPN, blew past the request's async timeout, and cut
+     * a download off mid-stream into a corrupt archive.
+     *
+     * <p><b>Resilience.</b> A file or subdirectory this SSH user cannot read, or that vanishes mid-walk, is an
+     * ordinary state of a fleet ({@link net.vaier.domain.NotFoundException},
+     * {@link net.vaier.domain.PermissionDeniedException}) — it is <b>skipped</b>, never allowed to abort a walk
+     * that may already have streamed other entries. A file's stream is opened <em>before</em> the visitor is
+     * called, so a skip never opens the visitor's entry at all: nothing half-written can corrupt the archive.
+     */
+    void walkTree(SshTarget target, String rootPath, RemoteTreeVisitor visitor);
+
+    /**
+     * The sink for {@link #walkTree}: each entry of the tree, named relative to the walk's root. The file
+     * stream is valid only for the duration of {@link #file} — read it through, do not retain it past the call.
+     */
+    interface RemoteTreeVisitor {
+
+        /** An empty directory in the tree — the only directory reported, since files carry their own path. */
+        void directory(String relativePath) throws IOException;
+
+        /** A file in the tree, its bytes readable from {@code content} only until this call returns. */
+        void file(String relativePath, InputStream content) throws IOException;
+    }
 
     /**
      * What one directory holds, plus the host-key fingerprint the machine presented while reading it.

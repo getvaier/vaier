@@ -1139,11 +1139,25 @@ job**'s source paths against the tree and would have reported a backed-up direct
   is a read). A directory downloads as a zip of its whole tree, built by walking it and streaming each file
   straight into the zip — flat memory, never buffered whole; entry names are relative to the directory
   (`sub/file.txt`), an empty subdirectory becomes a zip directory entry, and `Content-Length` is omitted (a
-  zip's size isn't known ahead of time). A file that turns out unreadable mid-walk leaves an empty entry in
-  its place rather than failing the whole download — by the time that failure can happen the entry is already
-  open in the stream, and probing every file first to avoid it would cost a second round trip per file, for
-  every file, to protect against the rare one that fails. All admin-authed, never anonymous. The **Clipboard**
-  UI and the source-size **size warning** are the frontend half.
+  zip's size isn't known ahead of time). **The whole walk runs over one SFTP connection** (`ForBrowsingRemoteFiles.walkTree`,
+  see the zip-corruption fix below). A file that turns out unreadable mid-walk is **skipped** — its stream is
+  opened before the visitor's zip entry, so a permission-denied or vanished file never even opens an entry and
+  simply does not appear in the archive, rather than failing the whole download. All admin-authed, never
+  anonymous. The **Clipboard** UI and the source-size **size warning** are the frontend half.
+- **Zip-download corruption fixed (#321).** The zip walk used to call `download` — a fresh SSH connect +
+  authenticate + teardown — **once per file**. Zipping a folder of dozens of files over the VPN became dozens
+  of sequential connect cycles (~1s each), blew past Spring's default async-request timeout, and cut the
+  response off mid-stream, so the browser received a truncated, corrupt zip (no end-of-central-directory), plus
+  a secondary `HttpMessageNotWritableException` from the error handler trying to serialise an `ApiError` over
+  the committed `application/zip` response. Three-part fix: (1) `ForBrowsingRemoteFiles.walkTree(target, rootPath,
+  RemoteTreeVisitor)` — `MinaSftpAdapter` opens **one** connection and walks the whole tree over it (the same
+  single-connection discipline `delete` already used), calling back `visitor.file(relativePath, stream)` /
+  `visitor.directory(relativePath)`; `ExplorerService` implements the visitor by writing zip entries, so the
+  adapter never learns what a zip is and connection ownership lives in the adapter; (2) `WebConfig.configureAsyncSupport`
+  sets the default async timeout to `-1` (no timeout) so a legitimately long streaming download isn't aborted —
+  SSE emitters set their own `Long.MAX_VALUE` timeout and are unaffected; (3) `GlobalExceptionHandler.handleUnexpected`
+  returns `null` when the response is already committed, so a mid-stream failure ends the stream instead of
+  throwing the secondary serialise error.
 
 **Delivered in slice 5 (backend — delete):**
 - **Delete is present-only and destructive.** A file or directory is removed from a machine's live

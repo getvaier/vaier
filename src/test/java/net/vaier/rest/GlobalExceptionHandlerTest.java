@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.request.ServletWebRequest;
@@ -116,6 +117,33 @@ class GlobalExceptionHandlerTest {
         assertThat(body.code()).isEqualTo("INTERNAL_ERROR");
         assertThat(body.message()).isEqualTo(GENERIC_MESSAGE);
         assertThat(body.message()).doesNotContain("AKIASECRET").doesNotContain("10.0.0.9");
+    }
+
+    @Test
+    void whenTheResponseIsAlreadyCommitted_noErrorBodyIsWritten_soAStreamedDownloadIsNotCorrupted() {
+        // A streaming zip download that fails partway through (#321): its bytes and zip content-type are
+        // already on the wire, so there is nothing to write. Trying to serialise an ApiError over a committed
+        // zip response throws HttpMessageNotWritableException and buries the real failure. The handler must
+        // return null — handled, no body — and let the stream simply end.
+        MockHttpServletResponse committed = new MockHttpServletResponse();
+        committed.setCommitted(true);
+
+        ResponseEntity<ApiError> result = new GlobalExceptionHandler()
+                .handleUnexpected(new RuntimeException("SSH dropped mid-stream"), committed);
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void anUncommittedUnexpectedException_stillProducesTheSafe500Envelope() {
+        MockHttpServletResponse open = new MockHttpServletResponse();
+
+        ResponseEntity<ApiError> result = new GlobalExceptionHandler()
+                .handleUnexpected(new RuntimeException("boom"), open);
+
+        assertThat(result.getStatusCode().value()).isEqualTo(500);
+        assertThat(result.getBody().code()).isEqualTo("INTERNAL_ERROR");
+        assertThat(result.getBody().message()).isEqualTo(GENERIC_MESSAGE);
     }
 
     @Test

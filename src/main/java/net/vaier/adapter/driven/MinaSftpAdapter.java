@@ -160,6 +160,113 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
     }
 
     @Override
+    public void walkTree(SshTarget target, String rootPath, RemoteTreeVisitor visitor) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            // One establish for the whole depth-first walk — every directory read and every file read run over
+            // this one open session, so a deep tree behind a VPN is never a reconnect per entry.
+            walk(sftp, target, rootPath, "", visitor);
+            log.debug("Walked the tree at {} on {}", rootPath, target.host());
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, rootPath);
+        }
+    }
+
+    /**
+     * One directory of the walk over an already-open SFTP session, entries named relative to the walk's root
+     * ({@code prefix}, joined with forward slashes). A directory this SSH user cannot read, or that vanished
+     * mid-walk, is an ordinary state of a fleet ({@link NotFoundException}, {@link PermissionDeniedException})
+     * — that subtree is simply skipped, not allowed to fail a walk that may already have streamed other
+     * entries. An empty directory (below the root — the root itself carries no prefix) is reported as itself,
+     * the one way a caller can learn a folder holds nothing; a non-empty one is implied by the paths of the
+     * entries inside it. The recursion never opens a second connection.
+     */
+    private void walk(SftpClient sftp, SshTarget target, String path, String prefix, RemoteTreeVisitor visitor) {
+        List<SftpClient.DirEntry> children;
+        try {
+            children = childrenOf(sftp, path);
+        } catch (IOException | UncheckedIOException e) {
+            if (skip(translate(e, target, path), path, target)) {
+                return;
+            }
+            throw translate(e, target, path);
+        }
+        if (children.isEmpty()) {
+            if (!prefix.isEmpty()) {
+                emitDirectory(visitor, prefix);
+            }
+            return;
+        }
+        for (SftpClient.DirEntry child : children) {
+            String name = child.getFilename();
+            String childPath = childPath(path, name);
+            String rel = prefix.isEmpty() ? name : prefix + "/" + name;
+            if (child.getAttributes().isDirectory()) {
+                walk(sftp, target, childPath, rel, visitor);
+            } else {
+                emitFile(sftp, target, childPath, rel, visitor);
+            }
+        }
+    }
+
+    /** The entries of {@code path}, with the protocol's own {@code .} and {@code ..} artifacts dropped. */
+    private static List<SftpClient.DirEntry> childrenOf(SftpClient sftp, String path) throws IOException {
+        List<SftpClient.DirEntry> children = new ArrayList<>();
+        for (SftpClient.DirEntry entry : sftp.readDir(path)) {
+            String name = entry.getFilename();
+            if (SELF.equals(name) || PARENT.equals(name)) {
+                continue;
+            }
+            children.add(entry);
+        }
+        return children;
+    }
+
+    /**
+     * Stream one file straight from the open SFTP session into the visitor. The read stream is opened
+     * <em>before</em> the visitor is called — MINA opens the file eagerly, so a permission-denied or a
+     * vanished file surfaces here, and the file is skipped without the visitor's entry ever being started.
+     * Only once a valid stream is in hand does the visitor write it, so a skip can never leave a half-written
+     * entry behind. A failure of the visitor itself (the caller writing the entry), or a read that breaks
+     * mid-stream, is a real failure and aborts the walk.
+     */
+    private void emitFile(SftpClient sftp, SshTarget target, String path, String rel, RemoteTreeVisitor visitor) {
+        java.io.InputStream in;
+        try {
+            in = sftp.read(path);
+        } catch (IOException | UncheckedIOException e) {
+            if (skip(translate(e, target, path), path, target)) {
+                return;
+            }
+            throw translate(e, target, path);
+        }
+        try (java.io.InputStream stream = in) {
+            visitor.file(rel, stream);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static void emitDirectory(RemoteTreeVisitor visitor, String rel) {
+        try {
+            visitor.directory(rel);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Whether {@code translated} is an ordinary unreadable/vanished entry to skip, logging it if so. */
+    private boolean skip(RuntimeException translated, String path, SshTarget target) {
+        if (translated instanceof NotFoundException || translated instanceof PermissionDeniedException) {
+            log.warn("Skipping {} on {} in tree walk ({})", path, target.host(), translated.getMessage());
+            return true;
+        }
+        return false;
+    }
+
+    @Override
     public void delete(SshTarget target, String path) {
         try (Connection conn = SshConnector.establish(target);
              SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {

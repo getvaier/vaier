@@ -8,8 +8,6 @@ import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.ResolveFileCoordinateUseCase;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.MountedArchive;
-import net.vaier.domain.NotFoundException;
-import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
@@ -22,6 +20,7 @@ import net.vaier.domain.port.ForTrackingHostKeys;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.util.List;
@@ -196,75 +195,36 @@ public class ExplorerService
 
     /**
      * Walk {@code rootPath} on {@code target} and stream it into a zip written to {@code out} — flat memory,
-     * one file at a time straight into the zip, never buffering the archive whole.
+     * one file at a time straight into the zip, never buffering the archive whole. The walk itself, and every
+     * file read within it, runs over a <b>single</b> SFTP connection ({@link ForBrowsingRemoteFiles#walkTree})
+     * — a per-file reconnect over the VPN is what once timed the download out mid-stream into a corrupt zip.
+     *
+     * <p>The service owns the zip; the adapter never learns what one is. The walk hands each file's bytes and
+     * each empty directory to the visitor, named relative to the zip's root (forward slashes, so the zip
+     * unpacks the same way on every OS); the visitor turns them into zip entries. A file the SSH user cannot
+     * read, or that vanished mid-walk, is skipped by the walk before its stream is ever opened — so an
+     * unreadable file simply does not appear in the archive, and no half-written entry can corrupt it. An
+     * empty directory becomes a zip directory entry of its own, the only way a zip can carry a folder with
+     * nothing in it.
      */
     private void streamZip(SshTarget target, String rootPath, OutputStream out) {
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
-            zipDirectory(target, rootPath, "", zip);
+            forBrowsingRemoteFiles.walkTree(target, rootPath, new ForBrowsingRemoteFiles.RemoteTreeVisitor() {
+                @Override
+                public void directory(String relativePath) throws IOException {
+                    zip.putNextEntry(new ZipEntry(relativePath + "/"));
+                    zip.closeEntry();
+                }
+
+                @Override
+                public void file(String relativePath, InputStream content) throws IOException {
+                    zip.putNextEntry(new ZipEntry(relativePath));
+                    content.transferTo(zip);
+                    zip.closeEntry();
+                }
+            });
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        }
-    }
-
-    /**
-     * One directory of the walk, entries named relative to the zip's root ({@code prefix}, joined with
-     * forward slashes so the zip unpacks the same way on every OS). A directory this SSH user cannot read,
-     * or that has vanished mid-walk, is an ordinary state of a fleet ({@link PermissionDeniedException},
-     * {@link NotFoundException}) — it is simply left out of the zip, not allowed to fail a download that may
-     * already have sent bytes for other files. An empty directory becomes a zip directory entry of its own,
-     * the only way a zip can carry a folder with nothing in it; the root itself never needs one.
-     */
-    private void zipDirectory(SshTarget target, String path, String prefix, ZipOutputStream zip)
-            throws IOException {
-        List<FileEntry> entries;
-        try {
-            entries = FileEntry.listing(forBrowsingRemoteFiles.list(target, path).entries());
-        } catch (NotFoundException | PermissionDeniedException e) {
-            log.warn("Skipping {} on {} in zip download ({})", path, target.host(), e.getMessage());
-            return;
-        }
-        if (entries.isEmpty()) {
-            if (!prefix.isEmpty()) {
-                zip.putNextEntry(new ZipEntry(prefix + "/"));
-                zip.closeEntry();
-            }
-            return;
-        }
-        for (FileEntry entry : entries) {
-            String entryName = prefix.isEmpty() ? entry.name() : prefix + "/" + entry.name();
-            if (entry.directory()) {
-                zipDirectory(target, entry.path(), entryName, zip);
-            } else {
-                zipFile(target, entry, entryName, zip);
-            }
-        }
-    }
-
-    /**
-     * One file of the walk, streamed straight into its own zip entry. A file this SSH user cannot read, or
-     * that has vanished mid-walk ({@link PermissionDeniedException}, {@link NotFoundException}), must not
-     * fail the whole zip — headers, and possibly other files' bytes, may already be on their way to the
-     * browser by the time one file turns out unreadable, so the download has to degrade, not 500.
-     *
-     * <p><b>The resilience rule, and why it lands where it does.</b> The zip entry is already open — its
-     * local header already written to the stream — by the time {@code download} can fail, because writing
-     * straight into the entry (no buffering, so memory stays flat for files of any size) requires starting
-     * the entry first. There is no undoing that once it has happened. So an unreadable file cannot vanish
-     * from the archive without cost: the alternative would be to verify every file is readable before opening
-     * its entry, which would spend a second round trip on every file in the tree to protect against the rare
-     * one that fails. Instead the entry stays, empty, in its rightful place in the tree — the zip is still
-     * whole and every other file streams through untouched — rather than paying that cost for the common
-     * case to avoid an empty entry in the rare one.
-     */
-    private void zipFile(SshTarget target, FileEntry entry, String entryName, ZipOutputStream zip)
-            throws IOException {
-        try {
-            zip.putNextEntry(new ZipEntry(entryName));
-            forBrowsingRemoteFiles.download(target, entry.path(), zip);
-            zip.closeEntry();
-        } catch (NotFoundException | PermissionDeniedException e) {
-            log.warn("Skipping {} on {} in zip download ({})", entry.path(), target.host(), e.getMessage());
-            zip.closeEntry();
         }
     }
 

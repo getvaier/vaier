@@ -49,7 +49,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     border: 1px solid var(--border);
     border-radius: var(--radius-1);
     font-family: var(--mono);
-    font-size: 13px;
+    font-size: 14px;
     overflow-x: auto;
     scrollbar-width: none;
     transition: border-color .5s ease, background .5s ease;
@@ -177,8 +177,8 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     white-space: nowrap;
 }
 /* An identifier is an address, not a word. */
-.ex-lbl.is-id { font-family: var(--mono); font-size: 13px; }
-.ex-lbl.is-word { font-size: 13.5px; }
+.ex-lbl.is-id { font-family: var(--mono); font-size: 14px; }
+.ex-lbl.is-word { font-size: 14px; }
 
 /* The domain's four-state MachineStatus, in four colours — the same four the fleet page uses. UNKNOWN is
    grey on purpose: it means no probe has run, and a green dot there would be a claim Vaier cannot make. */
@@ -233,7 +233,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     letter-spacing: -.01em;
 }
 .ex-pane-title .is-id { font-family: var(--mono); font-weight: 500; font-size: 15px; }
-.ex-pane-sub { color: var(--text-dim); font-size: 13px; }
+.ex-pane-sub { color: var(--text-dim); font-size: 14px; }
 .ex-pane-actions { margin-left: auto; display: flex; gap: 6px; }
 .ex-pane-body { padding: 16px 18px 40px; }
 
@@ -245,18 +245,18 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     background: var(--bg-card);
     color: var(--text-muted);
     font-family: inherit;
-    font-size: 13px;
+    font-size: 14px;
     cursor: pointer;
     transition: background .12s, color .12s, border-color .12s;
 }
 .ex-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
 .ex-btn .ex-ico { width: 13px; height: 13px; }
 
-/* file listing */
+/* file listing — a leading checkbox column for multi-select, then name, size, modified */
 .ex-listing { display: flex; flex-direction: column; }
 .ex-lhead, .ex-lrow {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 92px 148px;
+    grid-template-columns: 26px minmax(0, 1fr) 92px 148px;
     gap: 12px;
     align-items: center;
     padding: 5px 10px;
@@ -270,6 +270,43 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 }
 .ex-lrow { position: relative; border-bottom: 1px solid transparent; }
 .ex-lrow:hover { background: var(--bg-card); }
+.ex-lrow.is-ticked { background: var(--bg-hover); }
+.ex-lrow.is-ticked::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent);
+}
+
+/* A real checkbox, restyled for the night palette. The label is the hit target; the box is the accent when on. */
+.ex-check { display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.ex-check input {
+    appearance: none; -webkit-appearance: none;
+    width: 15px; height: 15px; margin: 0;
+    border: 1.5px solid var(--text-dim); border-radius: var(--radius-1);
+    background: var(--bg);
+    cursor: pointer; position: relative;
+    transition: border-color .12s, background .12s;
+}
+.ex-check input:hover { border-color: var(--accent); }
+.ex-check input:checked, .ex-check input:indeterminate { background: var(--accent); border-color: var(--accent); }
+.ex-check input:checked::after {
+    content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+    border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.ex-check input:indeterminate::after {
+    content: ''; position: absolute; left: 3px; top: 6px; width: 7px; height: 2px; background: var(--bg);
+}
+.ex-check input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The selection toolbar — Gmail's move: it rises above the listing when anything is ticked. */
+.ex-selbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin-bottom: 12px; padding: 8px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-2);
+}
+.ex-selbar-txt { font-size: 13px; font-weight: 600; color: var(--text); }
+.ex-selbar-actions { display: flex; align-items: center; gap: 8px; }
+.ex-selbar-actions .ex-btn { padding: 4px 10px; }
 
 /* Per-row actions ride over the Modified column. They stay visible — copy and download are the point of a
    file browser, not an easter egg — dimmed until the row is hovered or focused, then full strength. */
@@ -329,7 +366,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     border: 1px dashed var(--border-hi);
     border-radius: var(--radius-2);
 }
-.ex-pastebar-txt { font-size: 13px; color: var(--text-muted); }
+.ex-pastebar-txt { font-size: 14px; color: var(--text-muted); }
 .ex-lname {
     display: flex; align-items: center; gap: 8px;
     min-width: 0;
@@ -337,7 +374,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     background: none;
     border: 0;
     text-align: left;
-    font-family: var(--mono); font-size: 13.5px;
+    font-family: var(--mono); font-size: 14px;
     color: var(--text);
 }
 .ex-lname .ex-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -345,7 +382,7 @@ button.ex-lname { cursor: pointer; }
 button.ex-lname:hover .ex-nm { color: var(--accent); text-decoration: underline; }
 button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ex-lmeta {
-    font-family: var(--mono); font-size: 12.5px;
+    font-family: var(--mono); font-size: 13px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
 }
@@ -473,11 +510,11 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-card-name {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 13.5px;
+    font-family: var(--mono); font-size: 14px;
     color: var(--text);
 }
 .ex-card-name.is-word { font-family: inherit; }
-.ex-card-note { font-size: 12.5px; color: var(--text-dim); }
+.ex-card-note { font-size: 13px; color: var(--text-dim); }
 
 .ex-kv {
     display: grid;
@@ -486,8 +523,8 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     margin-bottom: 18px;
     max-width: 620px;
 }
-.ex-kv dt { color: var(--text-dim); font-size: 13px; }
-.ex-kv dd { margin: 0; font-family: var(--mono); font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.ex-kv dt { color: var(--text-dim); font-size: 14px; }
+.ex-kv dd { margin: 0; font-family: var(--mono); font-size: 14px; color: var(--text); overflow-wrap: anywhere; }
 
 .ex-sect {
     margin: 22px 0 10px;
@@ -506,7 +543,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     transition: border-color .5s ease;
 }
 .ex-note.is-error { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .06); }
-.ex-note code { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+.ex-note code { font-family: var(--mono); font-size: 13px; color: var(--accent); }
 
 /* --- containers and services (#323 slice C) --------------------------------------------------------- */
 
@@ -548,11 +585,11 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 
 .ex-fs-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 9px; }
 /* Mount point and device are coordinates, so they are mono — the shell's one type rule. */
-.ex-fs-mount { font-family: var(--mono); font-size: 13.5px; color: var(--text); }
-.ex-fs-dev { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
+.ex-fs-mount { font-family: var(--mono); font-size: 14px; color: var(--text); }
+.ex-fs-dev { font-family: var(--mono); font-size: 13px; color: var(--text-dim); }
 .ex-fs-size {
     margin-left: auto;
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -561,7 +598,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-fs-ctl {
     display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px;
     margin-top: 10px;
-    font-size: 13px; color: var(--text-muted);
+    font-size: 14px; color: var(--text-muted);
 }
 .ex-fs-ctl label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .ex-fs-ctl input[type='checkbox'] { accent-color: var(--accent); cursor: pointer; }
@@ -572,7 +609,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     border: 1px solid var(--border);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-family: var(--mono); font-size: 13px;
+    font-family: var(--mono); font-size: 14px;
     font-variant-numeric: tabular-nums;
 }
 .ex-thresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -628,7 +665,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     position: relative;
     margin-left: auto;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
 }
@@ -706,7 +743,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-pal-item .ex-pth {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 13.5px;
+    font-family: var(--mono); font-size: 14px;
 }
 .ex-pal-item .ex-pth mark { background: none; color: var(--accent); }
 .ex-pal-item .ex-kind {
@@ -750,7 +787,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-clip-coord {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 12.5px; color: var(--text-muted);
+    font-family: var(--mono); font-size: 13px; color: var(--text-muted);
 }
 .ex-clip-item .ex-iconbtn { flex: none; width: 22px; height: 20px; }
 
@@ -763,7 +800,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-xfer.is-failed .ex-xfer-line > .ex-ico { color: var(--red); }
 .ex-xfer-coord {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 13px; color: var(--text);
+    font-family: var(--mono); font-size: 14px; color: var(--text);
 }
 .ex-xfer-x { flex: none; width: 20px; height: 20px; }
 .ex-xfer.is-expiring { animation: ex-xfer-expire 5.2s ease forwards; }
@@ -796,7 +833,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     border: 1px solid var(--border-hi);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-size: 13px;
+    font-size: 14px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
     pointer-events: auto;   /* the container is click-through; a toast itself is not, so its X can be clicked */
     /* A whole lifetime in CSS: rise, hold, fade — then animationend removes it. No JS timer keeps the clock. */
@@ -838,7 +875,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     box-shadow: 0 20px 50px rgba(0, 0, 0, .55);
 }
 .ex-dialog-title { font-family: var(--display); font-size: 1.06rem; font-weight: 600; color: var(--text); margin-bottom: 10px; }
-.ex-dialog-body { font-size: 13px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap; margin-bottom: 14px; }
+.ex-dialog-body { font-size: 14px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap; margin-bottom: 14px; }
 .ex-dialog-body b, .ex-dialog-coord { font-family: var(--mono); color: var(--text); }
 .ex-dialog-input {
     width: 100%;
@@ -848,7 +885,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     border: 1px solid var(--border-hi);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-family: var(--mono); font-size: 13px;
+    font-family: var(--mono); font-size: 14px;
 }
 .ex-dialog-input:focus { outline: none; border-color: var(--red); }
 .ex-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
@@ -861,7 +898,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 @media (max-width: 760px) {
     .ex-main { grid-template-columns: minmax(0, 1fr); }
     .ex-tree { display: none; }
-    .ex-lhead, .ex-lrow { grid-template-columns: minmax(0, 1fr) 80px; }
+    .ex-lhead, .ex-lrow { grid-template-columns: 24px minmax(0, 1fr) 80px; }
     .ex-lhead span:last-child, .ex-lrow .ex-lmeta:last-child { display: none; }
     /* The rail wraps: Now over the track, the reading drops to its own line under both. */
     .ex-rail { flex-wrap: wrap; gap: 10px 12px; }
