@@ -425,11 +425,10 @@ class ExplorerShellTest {
 
     @Test
     void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
-        // Three verbs ship now, each backed by a real endpoint: DELETE /published-services/{dns} (slice C),
-        // PUT /machines/{machine}/disk/watch (#325), and POST /transfers (slice 2 — starting a cross-machine
-        // copy, the Clipboard's engine). Publishing (POST /publish) still needs a form and stays on the
-        // Infrastructure bridge rather than being half-built here. This pins the set: a fourth mutating verb
-        // would have to be added here consciously, so an invented one shows up as a failure.
+        // Three mutating verbs ship now, each backed by a real endpoint: DELETE (two of them — unpublish a
+        // service, slice C, and delete a file/folder, slice 5), PUT /machines/{machine}/disk/watch (#325), and
+        // POST /transfers (a cross-machine copy, slice 2). Publishing (POST /publish) still needs a form and
+        // stays on the Infrastructure bridge. The distinct verb set is pinned here; an invented one shows up.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);
@@ -437,16 +436,22 @@ class ExplorerShellTest {
         while (m.find()) {
             methods.add(m.group(1));
         }
-        assertThat(methods).as("the shell's mutating calls")
+        assertThat(methods.stream().distinct().toList()).as("the shell's mutating verbs")
             .containsExactlyInAnyOrder("PUT", "DELETE", "POST");
         assertThat(js).contains("/published-services/");
         assertThat(js).contains("/disk/watch");
         assertThat(js).contains("'/transfers'");
+        assertThat(js).contains("/files?path=");   // DELETE a file or folder (slice 5)
 
         // and it asks before it does it — unpublishing tears down a route and a DNS record
         int from = js.indexOf("async function unpublish(");
         assertThat(from).isPositive();
         assertThat(js.substring(from, js.indexOf("\n    }", from))).contains("confirm(");
+
+        // deleting is destructive and irreversible, so it goes through the typed-name gate, not a bare confirm
+        int del = js.indexOf("async function deleteEntry(");
+        assertThat(del).isPositive();
+        assertThat(js.substring(del, js.indexOf("\n    }", del))).contains("confirmTyped(");
     }
 
     @Test

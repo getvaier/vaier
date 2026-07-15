@@ -2,12 +2,16 @@ package net.vaier.rest;
 
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.DeleteFileUseCase;
 import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
+import net.vaier.domain.CannotDeleteSftpRootException;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PathOutsideSftpRootException;
+import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SftpRoot;
 import net.vaier.rest.ExplorerRestController.DirectoryResponse;
 import net.vaier.rest.ExplorerRestController.FileEntryResponse;
@@ -28,8 +32,10 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -41,6 +47,7 @@ class ExplorerRestControllerTest {
     @Mock BrowseFilesUseCase browseFilesUseCase;
     @Mock ListMachineArchivesUseCase listMachineArchivesUseCase;
     @Mock DownloadFileUseCase downloadFileUseCase;
+    @Mock DeleteFileUseCase deleteFileUseCase;
 
     @InjectMocks ExplorerRestController controller;
 
@@ -237,6 +244,62 @@ class ExplorerRestControllerTest {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         response.getBody().writeTo(out);
         assertThat(out.toByteArray()).isEqualTo(zipBytes);
+    }
+
+    // --- slice 5: delete (present-only, destructive) ---------------------------------------------------
+
+    @Test
+    void delete_removesThePath_andAnswers204NoContent() {
+        ResponseEntity<Void> response = controller.delete("apalveien5", "/home/geir/old");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(deleteFileUseCase).delete("apalveien5", "/home/geir/old");
+    }
+
+    @Test
+    void delete_passesThePathThroughVerbatim_asTheQueryParameter() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mockMvc.perform(delete("/machines/apalveien5/files").param("path", "/var/tmp/junk"))
+            .andExpect(status().isNoContent());
+
+        // The path is handed to the domain verbatim — the controller does not sanitise it, the domain does.
+        verify(deleteFileUseCase).delete("apalveien5", "/var/tmp/junk");
+    }
+
+    @Test
+    void delete_ofTheSftpRoot_isABadRequest_carryingTheGuardSentence() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+        doThrow(new CannotDeleteSftpRootException("/volume1")).when(deleteFileUseCase).delete("NAS", "/volume1");
+
+        mockMvc.perform(delete("/machines/NAS/files").param("path", "/volume1"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value(
+                "Refusing to delete /volume1: it is this machine's SFTP root, the whole browsable file tree."));
+    }
+
+    @Test
+    void delete_ofAPathThatIsNotThere_isANotFound() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+        doThrow(new NotFoundException("No such directory: /home/geir/ghost on apalveien5"))
+            .when(deleteFileUseCase).delete("apalveien5", "/home/geir/ghost");
+
+        mockMvc.perform(delete("/machines/apalveien5/files").param("path", "/home/geir/ghost"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void delete_thatTheSshUserMayNotPerform_isForbidden() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+        doThrow(new PermissionDeniedException("Not allowed to read /root as geir."))
+            .when(deleteFileUseCase).delete("apalveien5", "/root");
+
+        mockMvc.perform(delete("/machines/apalveien5/files").param("path", "/root"))
+            .andExpect(status().isForbidden());
     }
 
     @Test

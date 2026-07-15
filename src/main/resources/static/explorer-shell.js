@@ -35,6 +35,21 @@
         warn:    '<path d="M8 2.4l6.1 11.1H1.9z"/><path d="M8 6.4v3.3"/><circle cx="8" cy="11.4" r=".5" fill="currentColor" stroke="none"/>',
         cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
         refresh: '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.4v3.1h-3.1"/>',
+        trash:   '<path d="M3 4.5h10M6.5 4.5V3a.8.8 0 0 1 .8-.8h1.4a.8.8 0 0 1 .8.8v1.5"/><path d="M4.2 4.5l.6 8a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8"/><path d="M6.7 7v4M9.3 7v4"/>',
+        // Device forms, matched to the Infrastructure page's machine icons (vpn-peers-helpers.js) so a machine
+        // wears the same shape in the tree as on its card — just smaller. Keyed by device category, lowercased.
+        server:  '<rect x="2.5" y="2.5" width="11" height="4" rx=".8"/><rect x="2.5" y="9" width="11" height="4" rx=".8"/><circle cx="4.6" cy="4.5" r=".55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r=".55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/>',
+        nas:     '<rect x="4" y="1.5" width="8" height="13" rx="1"/><line x1="6.2" y1="3.5" x2="6.2" y2="10.5"/><line x1="8" y1="3.5" x2="8" y2="10.5"/><line x1="9.8" y1="3.5" x2="9.8" y2="10.5"/><circle cx="8" cy="12.5" r=".55" fill="currentColor" stroke="none"/>',
+        printer: '<polyline points="4.5 5.5 4.5 2.5 11.5 2.5 11.5 5.5"/><rect x="2.5" y="5.5" width="11" height="5" rx=".8"/><rect x="4.5" y="9.5" width="7" height="4"/><circle cx="11.5" cy="7.5" r=".5" fill="currentColor" stroke="none"/>',
+        router:  '<rect x="2.5" y="8.5" width="11" height="5" rx=".8"/><circle cx="5" cy="11" r=".5" fill="currentColor" stroke="none"/><line x1="11" y1="11" x2="12" y2="11"/><line x1="5.5" y1="8.5" x2="4" y2="3.5"/><line x1="10.5" y1="8.5" x2="12" y2="3.5"/>',
+        gateway: '<rect x="3" y="3" width="10" height="10" rx="1"/><polyline points="6 7.5 6 5 7.8 6.5"/><polyline points="10 8.5 10 11 8.2 9.5"/>',
+        laptop:  '<rect x="2" y="3" width="12" height="8" rx="1"/><line x1="1" y1="13.5" x2="15" y2="13.5"/>',
+        desktop: '<rect x="2" y="2" width="12" height="8.5" rx="1"/><line x1="6" y1="13.5" x2="10" y2="13.5"/><line x1="8" y1="10.5" x2="8" y2="13.5"/>',
+        phone:   '<rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/>',
+        iot:     '<rect x="4.5" y="4.5" width="7" height="7" rx=".8"/><line x1="6.5" y1="4.5" x2="6.5" y2="2.5"/><line x1="9.5" y1="4.5" x2="9.5" y2="2.5"/><line x1="6.5" y1="13.5" x2="6.5" y2="11.5"/><line x1="9.5" y1="13.5" x2="9.5" y2="11.5"/><line x1="4.5" y1="6.5" x2="2.5" y2="6.5"/><line x1="4.5" y1="9.5" x2="2.5" y2="9.5"/><line x1="13.5" y1="6.5" x2="11.5" y2="6.5"/><line x1="13.5" y1="9.5" x2="11.5" y2="9.5"/>',
+        camera:  '<rect x="2" y="4" width="12" height="9" rx="1.5"/><circle cx="8" cy="8.5" r="2.5"/><line x1="11" y1="6" x2="12" y2="6"/>',
+        media:   '<rect x="2" y="2.5" width="12" height="8.5" rx="1"/><line x1="5" y1="13.5" x2="11" y2="13.5"/>',
+        generic: '<rect x="2.5" y="3" width="11" height="8" rx="1"/><line x1="5.5" y1="13.5" x2="10.5" y2="13.5"/><line x1="8" y1="11" x2="8" y2="13.5"/>',
     };
 
     // Trusted constant markup — never interpolate anything but a key of ICON into this.
@@ -397,9 +412,21 @@
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
                        shell: 'shell', containers: 'box', container: 'box', services: 'route',
                        service: 'route', disk: 'disk' };
-    const iconFor = (kind, name) => (kind === 'bridge'
-        ? (BRIDGES.find((b) => b.name === name) || {}).icon
-        : ICON_FOR[kind]) || 'file';
+
+    // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
+    // read off its device category. A category with no icon (or a machine not yet loaded) falls back to the
+    // generic machine glyph, never to a blank.
+    function machineIcon(name) {
+        const m = S.machines.find((x) => x.name === name);
+        const cat = m && m.deviceCategory ? String(m.deviceCategory).toLowerCase() : '';
+        return ICON[cat] ? cat : 'machine';
+    }
+
+    const iconFor = (kind, name) => {
+        if (kind === 'bridge') return (BRIDGES.find((b) => b.name === name) || {}).icon || 'file';
+        if (kind === 'machine') return machineIcon(name);
+        return ICON_FOR[kind] || 'file';
+    };
 
     // Mono for anything with a coordinate, sans for anything human. A machine name, a path, a container name
     // and a DNS name are addresses; "Backups" is a word.
@@ -679,7 +706,7 @@
         } else {
             S.machines.forEach((m) => {
                 const address = tunnelAddress(m);
-                grid.appendChild(card('machine', m.name, true,
+                grid.appendChild(card(machineIcon(m.name), m.name, true,
                     MACHINE_TYPE[m.type] + (address ? ' · ' + address : ''),
                     () => { S.open.add(key(['fleet', m.name])); go(['fleet', m.name]); }, m.name));
             });
@@ -1331,6 +1358,17 @@
         dl.setAttribute('aria-label', dl.title + ' ' + entry.name);
         dl.onclick = () => download(machine, entry);
         box.appendChild(dl);
+
+        // Delete is present-only and destructive, so it never appears while time-travelling (you cannot edit
+        // the past) and it goes through a typed-name gate before anything is removed.
+        if (!S.at) {
+            const rm = el('button', 'ex-iconbtn is-danger');
+            rm.innerHTML = svg('trash', 'ex-ico');
+            rm.title = 'Delete';
+            rm.setAttribute('aria-label', 'Delete ' + entry.name);
+            rm.onclick = () => deleteEntry(machine, entry);
+            box.appendChild(rm);
+        }
         return box;
     }
 
@@ -1373,6 +1411,34 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
+        // Zipping a folder streams the whole tree over SFTP first, so the browser's Save dialog can lag well
+        // behind the click. Say so, rather than leave the operator wondering whether anything happened.
+        if (entry.directory) toast('Preparing ' + entry.name + '.zip — the download will begin shortly.');
+    }
+
+    // Delete, behind a gate you have to mean. A destructive act with no undo and no trash folder gets the same
+    // treatment #321 asks for: name what is affected, and make the operator type the machine's name before the
+    // button will fire. A folder says that everything inside goes with it. On success the listing is re-read,
+    // so the thing that is gone stops being shown.
+    async function deleteEntry(machine, entry) {
+        const what = entry.directory ? 'folder' : 'file';
+        const body = entry.path + ' on ' + machine
+            + (entry.directory ? '\n\nEverything inside this folder is deleted too.' : '')
+            + '\n\nThis cannot be undone. Type the machine name to confirm.';
+        const ok = await confirmTyped('Delete this ' + what + '?', body, machine, 'Delete');
+        if (!ok) return;
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine)
+                + '/files?path=' + encodeURIComponent(entry.path), { method: 'DELETE' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => null);
+                return toast((err && err.message) || ('Could not delete ' + entry.name + '.'));
+            }
+            toast('Deleted ' + entry.name + '.');
+            refreshDir(machine, remotePath(S.path));   // the listing no longer holds it
+        } catch (e) {
+            toast('Could not reach Vaier to delete ' + entry.name + '.');
+        }
     }
 
     // "Paste here" belongs to a directory in the present, and only there — the invariant is that you can only
@@ -1501,6 +1567,12 @@
         coord.textContent = shortName(tr.sourcePath) + ' → ' + tr.destMachine;
         coord.title = tr.sourceMachine + ':' + tr.sourcePath + '  →  ' + tr.destMachine + ':' + tr.destPath;
         line.appendChild(coord);
+        const x = el('button', 'ex-iconbtn ex-xfer-x');
+        x.innerHTML = svg('cross', 'ex-ico');
+        x.title = 'Dismiss';
+        x.setAttribute('aria-label', 'Dismiss this transfer');
+        x.onclick = () => { S.transfers.delete(tr.id); renderClip(); };
+        line.appendChild(x);
         row.appendChild(line);
 
         if (tr.state === 'FAILED') {
@@ -1520,6 +1592,15 @@
                 : VaierListing.formatSize({ size: tr.bytesCopied })
                   + (tr.totalBytes ? ' of ' + VaierListing.formatSize({ size: tr.totalBytes }) : '');
             row.appendChild(meta);
+        }
+
+        // A finished copy clears itself after a moment, on a pure-CSS lifetime (no JS clock, same discipline as
+        // the toast); a failure stays until dismissed so its reason is never lost. The X removes either at once.
+        if (tr.state === 'DONE') {
+            row.classList.add('is-expiring');
+            row.addEventListener('animationend', (e) => {
+                if (e.animationName === 'ex-xfer-expire') { S.transfers.delete(tr.id); renderClip(); }
+            });
         }
         return row;
     }
@@ -1607,6 +1688,45 @@
             ok.onclick = () => close(true);
             document.addEventListener('keydown', onKey);
             ok.focus();
+        });
+    }
+
+    // The destructive gate: a confirm whose button stays disabled until the operator types {@code required}
+    // (the machine's name) exactly. Typing the name is the deliberate act — you cannot fat-finger a delete.
+    function confirmTyped(title, bodyText, required, confirmLabel) {
+        return new Promise((resolve) => {
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title');
+            h.textContent = title;
+            const b = el('div', 'ex-dialog-body');
+            b.textContent = bodyText;
+            const input = el('input', 'ex-dialog-input');
+            input.type = 'text';
+            input.placeholder = required;
+            input.autocomplete = 'off';
+            input.spellcheck = false;
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn');
+            cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-danger');
+            ok.textContent = confirmLabel || 'Confirm';
+            ok.disabled = true;
+            actions.append(cancel, ok);
+            dialog.append(h, b, input, actions);
+            scrim.appendChild(dialog);
+            document.body.appendChild(scrim);
+
+            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
+            const armed = () => input.value === required;
+            const onKey = (e) => { if (e.key === 'Escape') close(false); };
+            input.oninput = () => { ok.disabled = !armed(); };
+            input.onkeydown = (e) => { if (e.key === 'Enter' && armed()) close(true); };
+            scrim.onclick = (e) => { if (e.target === scrim) close(false); };
+            cancel.onclick = () => close(false);
+            ok.onclick = () => { if (armed()) close(true); };
+            document.addEventListener('keydown', onKey);
+            input.focus();
         });
     }
 

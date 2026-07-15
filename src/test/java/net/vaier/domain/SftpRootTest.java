@@ -129,6 +129,46 @@ class SftpRootTest {
         assertThat(none.toJailPath("/etc/hosts")).isEqualTo("/etc/hosts");
     }
 
+    // --- refusing to delete the root itself (slice 5) --------------------------------------------------
+
+    @Test
+    void toDeletableJailPath_isTheJailPath_forAnyPathBelowTheRoot() {
+        // A delete maps down into the jail exactly as a browse does — it is the same mapping, one refusal added.
+        SftpRoot nas = SftpRoot.resolve("/volume1/homes/geir", "/homes/geir").orElseThrow();
+
+        assertThat(nas.toDeletableJailPath("/volume1/homes/geir/old"))
+            .isEqualTo("/homes/geir/old");
+    }
+
+    @Test
+    void toDeletableJailPath_refusesTheSftpRootItself_becauseDeletingTheWholeTreeIsNeverAPasteShapedMistake() {
+        // /volume1 is the machine's SFTP root — the whole browsable tree. It maps onto the jail root "/", and
+        // that is the one path a delete must never touch, however the frontend gates it.
+        SftpRoot nas = SftpRoot.resolve("/volume1/homes/geir", "/homes/geir").orElseThrow();
+
+        assertThatThrownBy(() -> nas.toDeletableJailPath("/volume1"))
+            .isInstanceOf(CannotDeleteSftpRootException.class)
+            .isInstanceOf(IllegalArgumentException.class)   // an argument this machine must refuse — a 400
+            .hasMessageContaining("/volume1");
+    }
+
+    @Test
+    void toDeletableJailPath_onAnUnjailedMachine_refusesTheFilesystemRoot() {
+        // With no jail the root is "/", and deleting "/" is deleting the whole browsable tree just the same.
+        assertThatThrownBy(() -> SftpRoot.NONE.toDeletableJailPath("/"))
+            .isInstanceOf(CannotDeleteSftpRootException.class)
+            .hasMessageContaining("/");
+    }
+
+    @Test
+    void toDeletableJailPath_stillRefusesAPathAboveTheRoot_withTheJailReason() {
+        // The jail discipline is unchanged: /volume2 is unreachable over SFTP, not deletable — and it says so.
+        SftpRoot nas = SftpRoot.resolve("/volume1/homes/geir", "/homes/geir").orElseThrow();
+
+        assertThatThrownBy(() -> nas.toDeletableJailPath("/volume2"))
+            .isInstanceOf(PathOutsideSftpRootException.class);
+    }
+
     // --- anchoring the entries --------------------------------------------------------------------------
 
     @Test

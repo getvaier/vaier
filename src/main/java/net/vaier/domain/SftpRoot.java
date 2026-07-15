@@ -127,6 +127,21 @@ public record SftpRoot(String prefix) {
         throw new PathOutsideSftpRootException(path, path());
     }
 
+    /**
+     * The jail path to delete {@code truePath} at — the very {@link #toJailPath} down-mapping the rest of the
+     * Explorer uses, with one refusal added: the SFTP root itself, which maps onto the jail root {@code "/"},
+     * is never deletable. Deleting a machine's whole browsable tree is not a paste-shaped mistake to make
+     * easy, so it is refused here, in the domain, before any SFTP call is made — and a path above the root is
+     * still {@linkplain PathOutsideSftpRootException refused} by the mapping it delegates to.
+     */
+    public String toDeletableJailPath(String truePath) {
+        String jailPath = toJailPath(truePath);
+        if ("/".equals(jailPath)) {
+            throw new CannotDeleteSftpRootException(path());
+        }
+        return jailPath;
+    }
+
     /** A path the SFTP channel answered with, as the machine's true coordinate — what everything else calls it. */
     public String toTruePath(String jailPath) {
         String path = FileEntry.normalisePath(jailPath);

@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.domain.AuthMethod;
+import net.vaier.domain.CannotDeleteSftpRootException;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.NoHostCredentialException;
@@ -544,6 +545,68 @@ class ExplorerServiceTest {
             }
         }
         return entries;
+    }
+
+    // --- slice 5: deleting a file or directory (present-only, destructive) -----------------------------
+
+    @Test
+    void delete_resolvesTheMachine_andDeletesTheRequestedPath() {
+        machineResolves("apalveien5", "SHA256:pinned");
+
+        service.delete("apalveien5", "/home/geir/old");
+
+        verify(forBrowsingRemoteFiles).delete(any(), eq("/home/geir/old"));
+    }
+
+    @Test
+    void delete_onAJailedMachine_deletesTheJailPath_ofTheTruePathTheBrowserSent() {
+        machineIsJailedIn("NAS", "/volume1");
+
+        service.delete("NAS", "/volume1/homes/geir/old");
+
+        // The browser's path is a TRUE coordinate; SFTP, inside the jail, must be asked for the jail path —
+        // the same down-mapping every other Explorer operation shares.
+        verify(forBrowsingRemoteFiles).delete(any(), eq("/homes/geir/old"));
+    }
+
+    @Test
+    void delete_refusesToDeleteTheMachinesSftpRootItself_beforeAnyConnection() {
+        machineIsJailedIn("NAS", "/volume1");
+
+        assertThatThrownBy(() -> service.delete("NAS", "/volume1"))
+            .isInstanceOf(CannotDeleteSftpRootException.class)
+            .hasMessageContaining("/volume1");
+
+        // Deleting the whole browsable tree is a domain refusal — the machine is never even asked.
+        verify(forBrowsingRemoteFiles, never()).delete(any(), any());
+    }
+
+    @Test
+    void delete_refusesToDeleteTheFilesystemRoot_onAnUnjailedMachine() {
+        machineResolves("apalveien5", "SHA256:pinned");
+
+        assertThatThrownBy(() -> service.delete("apalveien5", "/"))
+            .isInstanceOf(CannotDeleteSftpRootException.class);
+
+        verify(forBrowsingRemoteFiles, never()).delete(any(), any());
+    }
+
+    @Test
+    void delete_aPathClimbingAboveTheRoot_isRefusedBeforeAnyConnection() {
+        assertThatThrownBy(() -> service.delete("apalveien5", "/../../etc/passwd"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        // The trust boundary stands in front of a delete exactly as it does a browse: no machine is resolved.
+        verify(forResolvingSshTargets, never()).resolve(any());
+        verify(forBrowsingRemoteFiles, never()).delete(any(), any());
+    }
+
+    @Test
+    void delete_aRelativePath_isRefusedBeforeAnyConnection() {
+        assertThatThrownBy(() -> service.delete("apalveien5", "etc/passwd"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(forBrowsingRemoteFiles, never()).delete(any(), any());
     }
 
     @Test

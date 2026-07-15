@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.DeleteFileUseCase;
 import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ListMachineArchivesUseCase;
@@ -12,6 +13,7 @@ import net.vaier.domain.FileEntry;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -43,6 +45,7 @@ public class ExplorerRestController {
     private final BrowseFilesUseCase browseFilesUseCase;
     private final ListMachineArchivesUseCase listMachineArchivesUseCase;
     private final DownloadFileUseCase downloadFileUseCase;
+    private final DeleteFileUseCase deleteFileUseCase;
 
     /**
      * Browse one directory on one machine. With {@code at} naming an archive, the same directory is read
@@ -92,6 +95,23 @@ public class ExplorerRestController {
      */
     private static String sanitiseFilename(String filename) {
         return filename.replaceAll("[\"\\\\\r\n]", "_");
+    }
+
+    /**
+     * Delete a file or directory on a machine — the Explorer's present-only, destructive mutate (#321, slice
+     * 5). A directory is deleted recursively. There is <b>no</b> {@code at}: you cannot delete the past — an
+     * archive is read-only by construction — so a delete only ever touches the live filesystem. The frontend
+     * gates this behind a typed machine-name confirmation; the backend deletes safely and reports clearly.
+     *
+     * <p>On success the response is {@code 204 No Content}. A path that is not there is a {@code 404}, a
+     * permission-denied is a {@code 403}, and the SFTP-root guard — you cannot delete a machine's whole
+     * browsable tree — is a {@code 400} carrying its own sentence (all via {@link GlobalExceptionHandler}).
+     */
+    @DeleteMapping("/machines/{machine}/files")
+    public ResponseEntity<Void> delete(@PathVariable String machine, @RequestParam String path) {
+        log.info("Deleting {} on machine {}", LogSafe.forLog(path), LogSafe.forLog(machine));
+        deleteFileUseCase.delete(machine, path);
+        return ResponseEntity.noContent().build();
     }
 
     /**

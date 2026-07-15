@@ -49,7 +49,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     border: 1px solid var(--border);
     border-radius: var(--radius-1);
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 13px;
     overflow-x: auto;
     scrollbar-width: none;
     transition: border-color .5s ease, background .5s ease;
@@ -83,7 +83,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     border-radius: var(--radius-1);
     color: var(--text-dim);
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
 }
 .ex-kbd:hover { color: var(--text-muted); border-color: var(--border-hi); }
@@ -177,8 +177,8 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     white-space: nowrap;
 }
 /* An identifier is an address, not a word. */
-.ex-lbl.is-id { font-family: var(--mono); font-size: 12px; }
-.ex-lbl.is-word { font-size: 12.5px; }
+.ex-lbl.is-id { font-family: var(--mono); font-size: 13px; }
+.ex-lbl.is-word { font-size: 13.5px; }
 
 /* The domain's four-state MachineStatus, in four colours — the same four the fleet page uses. UNKNOWN is
    grey on purpose: it means no probe has run, and a green dot there would be a claim Vaier cannot make. */
@@ -228,12 +228,12 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 .ex-pane-title {
     display: flex; align-items: center; gap: 8px;
     font-family: var(--display);
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
     letter-spacing: -.01em;
 }
-.ex-pane-title .is-id { font-family: var(--mono); font-weight: 500; font-size: 14px; }
-.ex-pane-sub { color: var(--text-dim); font-size: 12px; }
+.ex-pane-title .is-id { font-family: var(--mono); font-weight: 500; font-size: 15px; }
+.ex-pane-sub { color: var(--text-dim); font-size: 13px; }
 .ex-pane-actions { margin-left: auto; display: flex; gap: 6px; }
 .ex-pane-body { padding: 16px 18px 40px; }
 
@@ -245,7 +245,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     background: var(--bg-card);
     color: var(--text-muted);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
     transition: background .12s, color .12s, border-color .12s;
 }
@@ -295,6 +295,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 }
 .ex-iconbtn:hover { color: var(--accent); background: var(--bg-hover); }
 .ex-iconbtn.is-on { color: var(--accent); }
+.ex-iconbtn.is-danger:hover { color: var(--red); background: rgba(244, 135, 113, .1); }
 .ex-iconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 @media (hover: none) { .ex-lactions { opacity: 1; position: static; padding-left: 0; background: none; } }
 
@@ -316,6 +317,8 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 .ex-btn.is-accent { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .ex-btn.is-accent:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--bg); }
 .ex-btn .ex-ico { width: 14px; height: 14px; }
+.ex-btn:disabled { opacity: .4; cursor: not-allowed; }
+.ex-btn:disabled:hover { color: var(--text); border-color: var(--border-hi); background: var(--bg-card); }
 
 /* The paste bar sits between the rail and the listing — present only, and only with a full Clipboard. */
 .ex-pastebar {
@@ -326,7 +329,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     border: 1px dashed var(--border-hi);
     border-radius: var(--radius-2);
 }
-.ex-pastebar-txt { font-size: 12px; color: var(--text-muted); }
+.ex-pastebar-txt { font-size: 13px; color: var(--text-muted); }
 .ex-lname {
     display: flex; align-items: center; gap: 8px;
     min-width: 0;
@@ -334,7 +337,7 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     background: none;
     border: 0;
     text-align: left;
-    font-family: var(--mono); font-size: 12.5px;
+    font-family: var(--mono); font-size: 13.5px;
     color: var(--text);
 }
 .ex-lname .ex-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -342,7 +345,7 @@ button.ex-lname { cursor: pointer; }
 button.ex-lname:hover .ex-nm { color: var(--accent); text-decoration: underline; }
 button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ex-lmeta {
-    font-family: var(--mono); font-size: 11.5px;
+    font-family: var(--mono); font-size: 12.5px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
 }
@@ -442,7 +445,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     flex: none;
     max-width: 38%;
     text-align: right;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
     line-height: 1.35;
 }
@@ -470,11 +473,11 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-card-name {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 12.5px;
+    font-family: var(--mono); font-size: 13.5px;
     color: var(--text);
 }
 .ex-card-name.is-word { font-family: inherit; }
-.ex-card-note { font-size: 11.5px; color: var(--text-dim); }
+.ex-card-note { font-size: 12.5px; color: var(--text-dim); }
 
 .ex-kv {
     display: grid;
@@ -483,8 +486,8 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     margin-bottom: 18px;
     max-width: 620px;
 }
-.ex-kv dt { color: var(--text-dim); font-size: 12px; }
-.ex-kv dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.ex-kv dt { color: var(--text-dim); font-size: 13px; }
+.ex-kv dd { margin: 0; font-family: var(--mono); font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
 
 .ex-sect {
     margin: 22px 0 10px;
@@ -503,7 +506,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     transition: border-color .5s ease;
 }
 .ex-note.is-error { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .06); }
-.ex-note code { font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+.ex-note code { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
 
 /* --- containers and services (#323 slice C) --------------------------------------------------------- */
 
@@ -545,11 +548,11 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 
 .ex-fs-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 9px; }
 /* Mount point and device are coordinates, so they are mono — the shell's one type rule. */
-.ex-fs-mount { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
-.ex-fs-dev { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+.ex-fs-mount { font-family: var(--mono); font-size: 13.5px; color: var(--text); }
+.ex-fs-dev { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
 .ex-fs-size {
     margin-left: auto;
-    font-size: 11.5px;
+    font-size: 12.5px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -558,7 +561,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-fs-ctl {
     display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px;
     margin-top: 10px;
-    font-size: 12px; color: var(--text-muted);
+    font-size: 13px; color: var(--text-muted);
 }
 .ex-fs-ctl label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .ex-fs-ctl input[type='checkbox'] { accent-color: var(--accent); cursor: pointer; }
@@ -569,7 +572,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     border: 1px solid var(--border);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-family: var(--mono); font-size: 12px;
+    font-family: var(--mono); font-size: 13px;
     font-variant-numeric: tabular-nums;
 }
 .ex-thresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -625,7 +628,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     position: relative;
     margin-left: auto;
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: 12.5px;
     font-variant-numeric: tabular-nums;
     color: var(--text-muted);
 }
@@ -682,7 +685,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     background: transparent;
     color: var(--text);
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: 15px;
     outline: none;
 }
 .ex-pal input::placeholder { color: var(--text-dim); }
@@ -703,11 +706,11 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-pal-item .ex-pth {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 12.5px;
+    font-family: var(--mono); font-size: 13.5px;
 }
 .ex-pal-item .ex-pth mark { background: none; color: var(--accent); }
 .ex-pal-item .ex-kind {
-    font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase;
     color: var(--text-dim);
 }
 .ex-pal-empty { padding: 22px 16px; color: var(--text-dim); text-align: center; }
@@ -738,7 +741,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 }
 .ex-clip-clear {
     padding: 2px 6px; background: none; border: 0; border-radius: var(--radius-1);
-    color: var(--text-dim); font-size: 11px; cursor: pointer;
+    color: var(--text-dim); font-size: 12px; cursor: pointer;
 }
 .ex-clip-clear:hover { color: var(--accent); }
 .ex-clip-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -747,7 +750,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-clip-coord {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 11.5px; color: var(--text-muted);
+    font-family: var(--mono); font-size: 12.5px; color: var(--text-muted);
 }
 .ex-clip-item .ex-iconbtn { flex: none; width: 22px; height: 20px; }
 
@@ -755,30 +758,34 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-xfer { margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-1); }
 .ex-xfer + .ex-xfer { margin-top: 6px; }
 .ex-xfer-line { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
-.ex-xfer-line .ex-ico { flex: none; width: 14px; height: 14px; color: var(--text-dim); }
-.ex-xfer.is-done .ex-xfer-line .ex-ico { color: var(--green); }
-.ex-xfer.is-failed .ex-xfer-line .ex-ico { color: var(--red); }
+.ex-xfer-line .ex-ico { flex: none; width: 15px; height: 15px; color: var(--text-dim); }
+.ex-xfer.is-done .ex-xfer-line > .ex-ico { color: var(--green); }
+.ex-xfer.is-failed .ex-xfer-line > .ex-ico { color: var(--red); }
 .ex-xfer-coord {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--mono); font-size: 11.5px; color: var(--text);
+    font-family: var(--mono); font-size: 13px; color: var(--text);
 }
+.ex-xfer-x { flex: none; width: 20px; height: 20px; }
+.ex-xfer.is-expiring { animation: ex-xfer-expire 5.2s ease forwards; }
+@keyframes ex-xfer-expire { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .ex-xfer-bar { height: 4px; border-radius: 9999px; background: var(--bg-hover); overflow: hidden; }
 .ex-xfer-fill { height: 100%; background: var(--accent); border-radius: 9999px; transition: width .3s ease; }
 .ex-xfer.is-done .ex-xfer-fill { background: var(--green); }
 .ex-xfer-fill.is-indeterminate { animation: ex-slide 1.1s ease-in-out infinite; }
 @keyframes ex-slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .ex-xfer-meta {
-    margin-top: 5px; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim);
+    margin-top: 5px; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
     font-variant-numeric: tabular-nums;
 }
-.ex-xfer .ex-note { margin-top: 5px; padding: 6px 8px; font-size: 11px; }
+.ex-xfer .ex-note { margin-top: 5px; padding: 6px 8px; font-size: 12px; }
 
-/* Toasts stack above the tray. Brief, self-dismissing, never modal. */
+/* Toasts sit bottom-left, clear of the tray (bottom-right), so one never covers the other. Brief,
+   self-dismissing, never modal. */
 .ex-toast {
     position: fixed;
-    right: 16px; bottom: 16px;
+    left: 16px; bottom: 16px;
     z-index: 70;
-    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
     pointer-events: none;
 }
 .ex-toast-item {
@@ -789,7 +796,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     border: 1px solid var(--border-hi);
     border-radius: var(--radius-1);
     color: var(--text);
-    font-size: 12px;
+    font-size: 13px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
     pointer-events: auto;   /* the container is click-through; a toast itself is not, so its X can be clicked */
     /* A whole lifetime in CSS: rise, hold, fade — then animationend removes it. No JS timer keeps the clock. */
@@ -830,8 +837,20 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     border-radius: var(--radius-2);
     box-shadow: 0 20px 50px rgba(0, 0, 0, .55);
 }
-.ex-dialog-title { font-family: var(--display); font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 10px; }
-.ex-dialog-body { font-size: 12.5px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap; margin-bottom: 18px; }
+.ex-dialog-title { font-family: var(--display); font-size: 1.06rem; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+.ex-dialog-body { font-size: 13px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap; margin-bottom: 14px; }
+.ex-dialog-body b, .ex-dialog-coord { font-family: var(--mono); color: var(--text); }
+.ex-dialog-input {
+    width: 100%;
+    margin-bottom: 18px;
+    padding: 8px 11px;
+    background: var(--bg);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-1);
+    color: var(--text);
+    font-family: var(--mono); font-size: 13px;
+}
+.ex-dialog-input:focus { outline: none; border-color: var(--red); }
 .ex-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 @media (prefers-reduced-motion: reduce) {

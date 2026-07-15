@@ -82,6 +82,15 @@ public interface ForBrowsingRemoteFiles {
                   java.util.function.LongConsumer onBytes);
 
     /**
+     * Delete the file or directory at {@code path} on {@code target}. A file is removed outright; a directory
+     * is emptied depth-first (its files removed, its subdirectories recursed into and removed bottom-up) and
+     * then removed itself — the whole recursive walk over a <b>single</b> SFTP connection, so a deep tree
+     * behind a VPN never reconnects per entry. There is no time coordinate: only the live filesystem is ever
+     * deleted (an archive is read-only). Fails with the same domain SSH exceptions as {@link #list}.
+     */
+    void delete(SshTarget target, String path);
+
+    /**
      * What one directory holds, plus the host-key fingerprint the machine presented while reading it.
      * The entries are as the remote reported them — unordered; listing order is a domain decision
      * ({@link FileEntry#listing}).

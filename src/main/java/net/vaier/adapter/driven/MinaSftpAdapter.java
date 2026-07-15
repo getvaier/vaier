@@ -159,6 +159,49 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
         }
     }
 
+    @Override
+    public void delete(SshTarget target, String path) {
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            // One stat for the given path; every child carries its own kind in the readdir answer, so the walk
+            // costs no extra stat per entry — and the whole recursion runs over this one open session.
+            removeTree(sftp, path, sftp.stat(path).isDirectory());
+            log.debug("Deleted {} on {}", path, target.host());
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, path);
+        }
+    }
+
+    /**
+     * Remove {@code path} over an already-open SFTP session: a file outright, a directory by emptying it
+     * depth-first — its files removed, its subdirectories recursed into and removed bottom-up — and then
+     * removing the now-empty directory itself, because SFTP can only {@code rmdir} an empty directory. The
+     * protocol's own {@code .} and {@code ..} are skipped: they are artifacts, not entries to delete. The
+     * recursion never opens a second connection, so a deep tree behind a VPN is one connection, not one per
+     * entry.
+     */
+    private static void removeTree(SftpClient sftp, String path, boolean directory) throws IOException {
+        if (directory) {
+            for (SftpClient.DirEntry entry : sftp.readDir(path)) {
+                String name = entry.getFilename();
+                if (SELF.equals(name) || PARENT.equals(name)) {
+                    continue;
+                }
+                removeTree(sftp, childPath(path, name), entry.getAttributes().isDirectory());
+            }
+            sftp.rmdir(path);
+        } else {
+            sftp.remove(path);
+        }
+    }
+
+    /** The path of {@code name} inside the directory {@code parent} — the same join the domain's FileEntry makes. */
+    private static String childPath(String parent, String name) {
+        return "/".equals(parent) ? "/" + name : parent + "/" + name;
+    }
+
     /**
      * The flat-memory relay. Both ends' sessions are held open at once — a source read stream and a dest
      * write stream — and piped with one fixed buffer, so memory stays flat however large the file is. Every

@@ -344,4 +344,81 @@ class MinaSftpAdapterTest {
         // Both the source read-stream and the destination write-stream, and both their sessions, are closed.
         assertThat(server.getActiveSessions()).isEmpty();
     }
+
+    // --- slice 5: deleting a file or a directory tree --------------------------------------------------
+
+    @Test
+    void delete_removesAFile() throws Exception {
+        int port = startServer();
+        Files.writeString(remoteRoot.resolve("notes.txt"), "bye");
+
+        adapter.delete(target(port), remote("notes.txt"));
+
+        assertThat(Files.exists(remoteRoot.resolve("notes.txt"))).isFalse();
+    }
+
+    @Test
+    void delete_removesADirectoryTree_recursively_emptyingItDepthFirstThenRemovingIt() throws Exception {
+        // The mechanic being proven: a directory cannot be rmdir'd until it is empty, so the walk must go to
+        // the bottom of every branch, remove the files, remove the now-empty subdirectories, and only then
+        // remove the directory itself. Files and nested directories alike must be gone.
+        int port = startServer();
+        Files.createDirectories(remoteRoot.resolve("proj/src/main"));
+        Files.writeString(remoteRoot.resolve("proj/README.md"), "r");
+        Files.writeString(remoteRoot.resolve("proj/src/main/App.java"), "class App {}");
+        Files.writeString(remoteRoot.resolve("proj/src/notes.txt"), "n");
+
+        adapter.delete(target(port), remote("proj"));
+
+        assertThat(Files.exists(remoteRoot.resolve("proj"))).isFalse();
+    }
+
+    @Test
+    void delete_ofAnEmptyDirectory_removesIt() throws Exception {
+        int port = startServer();
+        Files.createDirectory(remoteRoot.resolve("empty"));
+
+        adapter.delete(target(port), remote("empty"));
+
+        assertThat(Files.exists(remoteRoot.resolve("empty"))).isFalse();
+    }
+
+    @Test
+    void delete_ofAPathThatIsNotThere_throwsNotFound_carryingThePath() throws Exception {
+        int port = startServer();
+
+        assertThatThrownBy(() -> adapter.delete(target(port), remote("ghost")))
+            .isInstanceOf(NotFoundException.class)
+            .hasMessageContaining("ghost");
+    }
+
+    @Test
+    void delete_ofAPathTheSshUserCannotTouch_throwsPermissionDenied() throws Exception {
+        Path locked = Files.createDirectory(remoteRoot.resolve("locked"));
+        Files.writeString(locked.resolve("secret"), "s");
+        Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+        assumeTrue(!Files.isReadable(locked), "running as root — cannot make a directory unreadable");
+        int port = startServer();
+
+        try {
+            assertThatThrownBy(() -> adapter.delete(target(port), remote("locked")))
+                .isInstanceOf(PermissionDeniedException.class);
+        } finally {
+            Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void delete_ofATree_runsOverOneConnection_andLeavesNoSessionBehind() throws Exception {
+        // The whole recursive delete must hold a single SFTP connection — a deep tree behind a VPN that
+        // reconnected per entry would be pathological. When it returns, that one session is closed too.
+        int port = startServer();
+        Files.createDirectories(remoteRoot.resolve("a/b/c"));
+        Files.writeString(remoteRoot.resolve("a/b/c/x.txt"), "x");
+        Files.writeString(remoteRoot.resolve("a/y.txt"), "y");
+
+        adapter.delete(target(port), remote("a"));
+
+        assertThat(server.getActiveSessions()).isEmpty();
+    }
 }

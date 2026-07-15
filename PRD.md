@@ -1019,7 +1019,10 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
   from slice 2.)*
 - [ ] **4 — Coverage.** Coverage dots, draft-then-save to the backup job, "Uncovered only" filter,
   one-job-per-machine enforcement. Enterprise.
-- [ ] **5 — Mutate.** Delete, rename/move, new folder, behind a typed-confirmation gate. Community.
+- [ ] **5 — Mutate 🟡 (delete backend delivered).** Delete, rename/move, new folder, behind a typed-confirmation
+  gate. Community. *(The **delete** backend landed — recursive delete over SFTP, an SFTP-root guard, and
+  `DELETE /machines/{name}/files`; see **Delivered in slice 5** below. **Rename/move** and **new folder** remain,
+  and the typed-confirmation gate is the frontend half.)*
 
 **Delivered in slice 1 (backend):**
 - **A shared SSH target resolver.** Resolving a machine name to *where to connect, with which credential,
@@ -1141,6 +1144,33 @@ job**'s source paths against the tree and would have reported a backed-up direct
   open in the stream, and probing every file first to avoid it would cost a second round trip per file, for
   every file, to protect against the rare one that fails. All admin-authed, never anonymous. The **Clipboard**
   UI and the source-size **size warning** are the frontend half.
+
+**Delivered in slice 5 (backend — delete):**
+- **Delete is present-only and destructive.** A file or directory is removed from a machine's live
+  filesystem; a directory is removed recursively (emptied, then removed). There is deliberately **no** `at`
+  coordinate — you cannot delete the past, because a machine's past (an **archive**) is read-only by
+  construction — so a delete only ever touches the present. The frontend gates it behind a typed
+  machine-name confirmation; the backend's job is to delete safely and report clearly.
+- **`ForBrowsingRemoteFiles` gains `delete`** (translation-only on `MinaSftpAdapter`, same error mapping as
+  `list` — `NotFoundException` / `PermissionDeniedException` / `SshConnectException`). **The recursive walk
+  lives in the adapter**, not the service: a directory is walked depth-first over a **single** open SFTP
+  session (`readDir` → recurse into subdirectories and `remove` files, then `rmdir` each directory
+  bottom-up, skipping `.`/`..`), because holding one connection for the whole tree is the whole point — a
+  deep tree behind a VPN that reconnected per entry would be pathological. (Contrast the zip **download**
+  walk, which lives in the service because it streams a read and tolerates a connection per directory; a
+  delete does not.)
+- **Two guards, both domain decisions.** The **SFTP root itself is never deletable** — deleting a machine's
+  whole browsable tree is not a paste-shaped mistake to make easy — expressed as
+  `SftpRoot.toDeletableJailPath`, which reuses the shared `toJailPath` down-mapping and refuses the one true
+  path that maps onto the jail root `/` (`CannotDeleteSftpRootException`, a `400`). The path is normalised by
+  the same `FileEntry.normalisePath` discipline browsing uses, so a non-absolute path or one climbing above
+  the root is refused before any connection, and a path above the SFTP root stays a
+  `PathOutsideSftpRootException`.
+- **`DeleteFileUseCase` on `ExplorerService`** (a new narrow use case on the existing Explorer domain
+  service — no new service), and **`DELETE /machines/{machine}/files?path=…`** on `ExplorerRestController`
+  (no `at`). On success **`204 No Content`**; a missing path is the `404`, a permission-denied the `403`, the
+  root guard a `400` carrying its sentence. Admin-authed like the rest of the Explorer. **Rename/move** and
+  **new folder** remain.
 
 ---
 

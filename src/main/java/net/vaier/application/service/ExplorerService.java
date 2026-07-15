@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.BrowseFilesUseCase;
+import net.vaier.application.DeleteFileUseCase;
 import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.ResolveFileCoordinateUseCase;
 import net.vaier.domain.FileEntry;
@@ -39,7 +40,8 @@ import java.util.zip.ZipOutputStream;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class ExplorerService implements BrowseFilesUseCase, ResolveFileCoordinateUseCase, DownloadFileUseCase {
+public class ExplorerService
+    implements BrowseFilesUseCase, ResolveFileCoordinateUseCase, DownloadFileUseCase, DeleteFileUseCase {
 
     private final ForResolvingSshTargets forResolvingSshTargets;
     private final ForBrowsingRemoteFiles forBrowsingRemoteFiles;
@@ -128,6 +130,24 @@ public class ExplorerService implements BrowseFilesUseCase, ResolveFileCoordinat
         }
         MountedArchive mounted = forMountingArchives.mount(machineName, at);
         return root.toJailPath(mounted.machinePath(requested));
+    }
+
+    /**
+     * Delete a file or directory in the present — the Explorer's one destructive mutate (slice 5). The trust
+     * boundary stands in front exactly as it does for a browse: the browser's path becomes a real path here —
+     * non-absolute, or climbing above the root, is refused before a machine is resolved or any connection is
+     * opened. Then the same jail down-mapping every other operation shares is applied, with one added refusal
+     * the domain owns — the machine's SFTP root itself is never deletable ({@link SftpRoot#toDeletableJailPath}).
+     * There is no {@code at}: only the live filesystem is ever deleted, because the past is read-only.
+     */
+    @Override
+    public void delete(String machineName, String path) {
+        String requested = FileEntry.normalisePath(path);
+        SshTarget target = forResolvingSshTargets.resolve(machineName);
+        SftpRoot root = forResolvingSftpRoots.rootFor(machineName, target);
+
+        forBrowsingRemoteFiles.delete(target, root.toDeletableJailPath(requested));
+        log.info("Deleted {} on {}", requested, machineName);
     }
 
     private static final String OCTET_STREAM = "application/octet-stream";

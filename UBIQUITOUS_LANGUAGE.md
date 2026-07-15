@@ -378,6 +378,7 @@ is delegated to an external **identity provider**; Vaier owns **authorization** 
 | **Clipboard** | The Explorer's holding area for one file's **coordinate** (its machine, **path**, and point-in-time), carried until it is pasted. Where the coordinate is pasted names the operation: a different machine is a **Transfer**, the browser is a **download**. |
 | **Download** | Sending a file or directory from a machine straight to the operator's browser — the **Clipboard** coordinate pasted to the browser rather than to another machine. A read, so it is allowed from the past (an **archive**) as well as the present. A file streams as-is; a directory streams as a zip of its whole tree. |
 | **Restore** | Putting an archived file back onto its own live **path** — a **Transfer** whose source is a machine's past (a **mounted archive**) and whose destination is that same machine's present. Not an operation of its own, but the past-to-present case of a Transfer. |
+| **Delete** | Removing a file or directory from a machine's live filesystem in the **Explorer**; a directory is removed with everything inside it. Present-only and destructive: there is no point-in-time to delete, because a machine's past (an **archive**) is read-only by construction. A machine's **SFTP root** — its whole browsable tree — is never deletable. |
 
 ---
 
