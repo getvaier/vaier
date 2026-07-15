@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.AuthorizeBackupClientUseCase;
+import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.CheckBackupPrerequisitesUseCase;
 import net.vaier.application.GenerateBackupServerSetupScriptUseCase;
 import net.vaier.application.GetBackupJobsUseCase;

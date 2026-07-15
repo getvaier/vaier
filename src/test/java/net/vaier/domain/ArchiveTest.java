@@ -45,4 +45,31 @@ class ArchiveTest {
         assertThat(Archive.parseList("")).isEmpty();
         assertThat(Archive.parseList("   ")).isEmpty();
     }
+
+    @Test
+    void newestFirst_ordersByTimeDescending() {
+        // The time rail scrubs newest-to-oldest, so the most recent archive leads.
+        Archive older = new Archive("colina-2024-06-01T12:00:00", "a", Instant.parse("2024-06-01T12:00:00Z"));
+        Archive newer = new Archive("colina-2024-06-03T12:00:00", "c", Instant.parse("2024-06-03T12:00:00Z"));
+        Archive middle = new Archive("colina-2024-06-02T12:00:00", "b", Instant.parse("2024-06-02T12:00:00Z"));
+
+        assertThat(Archive.newestFirst(List.of(older, newer, middle)))
+            .extracting(Archive::id).containsExactly("c", "b", "a");
+    }
+
+    @Test
+    void newestFirst_sortsArchivesWithNoReadableTimeLast() {
+        // borg carries an unreadable time as null; such an archive sinks to the bottom rather than jumping
+        // the rail or throwing.
+        Archive timed = new Archive("colina-2024-06-01T12:00:00", "a", Instant.parse("2024-06-01T12:00:00Z"));
+        Archive untimed = new Archive("colina-unknown", "b", null);
+
+        assertThat(Archive.newestFirst(List.of(untimed, timed)))
+            .extracting(Archive::id).containsExactly("a", "b");
+    }
+
+    @Test
+    void newestFirst_ofNothingIsNothing() {
+        assertThat(Archive.newestFirst(List.of())).isEmpty();
+    }
 }

@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.application.AuthorizeBackupClientUseCase.AuthorizeResult;
+import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.BorgAvailability;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.RepoReachability;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.ServerBorgAuth;

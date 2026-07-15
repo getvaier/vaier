@@ -77,9 +77,54 @@ public final class BorgClientSetupScript {
         sb.append("echo \"==> Verifying borg...\"\n");
         sb.append("borg --version\n\n");
 
+        sb.append(fuseBindingInstall());
+
         sb.append(sudoersDropIn());
 
         sb.append("echo \"==> Vaier Backup client setup complete.\"\n");
+        return sb.toString();
+    }
+
+    /**
+     * Install the FUSE binding that {@code borg mount} needs — the mechanism behind browsing the past
+     * (Explorer slice D). Debian's borg (and every distro's system-python borg) runs under a {@code python3}
+     * that ships <em>neither</em> {@code pyfuse3} nor {@code llfuse}, so {@code borg mount} fails everywhere
+     * with "no FUSE support"; installing {@code python3-pyfuse3} fixes it.
+     *
+     * <p><b>Two traps this block is written to avoid.</b>
+     * <ul>
+     *   <li><b>It must sit OUTSIDE the borg-install branch.</b> That branch is skipped the moment borg is
+     *       found — which is <em>every</em> host in the fleet — so a FUSE install nested inside it would never
+     *       run on a single real machine. It is emitted after the borg install/verify, unconditionally, for
+     *       exactly the same reason the sudoers grant is (see {@link #generate} and {@link #sudoersDropIn}).</li>
+     *   <li><b>A missing binding must NOT fail the script.</b> Backups must keep working on a host that cannot
+     *       mount — only "browse the past" degrades there — so every install is guarded with {@code || echo
+     *       WARNING} and nothing here ever {@code exit}s. The package name differs by distro: most ship
+     *       {@code python3-pyfuse3}, Alpine ships {@code py3-pyfuse3}, Arch ships {@code python-pyfuse3}.</li>
+     * </ul>
+     */
+    private static String fuseBindingInstall() {
+        String warn = "|| echo \"WARNING: could not install the FUSE binding; "
+            + "'borg mount' (browse the past) will be unavailable on this host\" >&2";
+        StringBuilder sb = new StringBuilder();
+        sb.append("echo \"==> Installing FUSE support for borg mount (python3-pyfuse3)...\"\n");
+        sb.append("if command -v apt-get >/dev/null 2>&1; then\n");
+        sb.append("    apt-get install -y python3-pyfuse3 ").append(warn).append("\n");
+        sb.append("elif command -v dnf >/dev/null 2>&1; then\n");
+        sb.append("    dnf install -y python3-pyfuse3 ").append(warn).append("\n");
+        sb.append("elif command -v yum >/dev/null 2>&1; then\n");
+        sb.append("    yum install -y python3-pyfuse3 ").append(warn).append("\n");
+        sb.append("elif command -v apk >/dev/null 2>&1; then\n");
+        sb.append("    apk add --no-cache py3-pyfuse3 ").append(warn).append("\n");
+        // Arch ships it as python-pyfuse3 (python- prefix), NOT python3-pyfuse3.
+        sb.append("elif command -v pacman >/dev/null 2>&1; then\n");
+        sb.append("    pacman -Sy --noconfirm python-pyfuse3 ").append(warn).append("\n");
+        sb.append("elif command -v zypper >/dev/null 2>&1; then\n");
+        sb.append("    zypper install -y python3-pyfuse3 ").append(warn).append("\n");
+        sb.append("else\n");
+        sb.append("    echo \"WARNING: no supported package manager for the FUSE binding; ")
+            .append("'borg mount' will be unavailable\" >&2\n");
+        sb.append("fi\n\n");
         return sb.toString();
     }
 

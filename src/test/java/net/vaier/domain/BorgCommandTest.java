@@ -929,4 +929,62 @@ class BorgCommandTest {
         assertThat(BorgCommand.isRepositoryAlreadyExists("")).isFalse();
         assertThat(BorgCommand.isRepositoryAlreadyExists(null)).isFalse();
     }
+
+    // --- borg mount: browsing the past (Explorer slice D) -----------------------------------------------
+
+    private static final String MOUNTPOINT = "/home/ubuntu/.vaier-backup/mounts/ab12";
+
+    @Test
+    void mount_exportsThePasscommand_andMountsTheArchiveByNameIntoTheMountpoint() {
+        String exec = BorgCommand.mount(server(), repo(), "colina-2026-07-14T02:00:00", MOUNTPOINT, WORK_DIR)
+            .exec();
+
+        // The passphrase reaches borg only via the pass file (never argv/env), exactly like list/create.
+        assertThat(exec).contains("BORG_PASSCOMMAND");
+        assertThat(exec).doesNotContain("s3cr3t");
+        // REPO::ARCHIVE addressed as two adjacent quoted tokens, mounted at the mountpoint.
+        assertThat(exec).contains("borg mount");
+        assertThat(exec).contains("'ssh://borg@192.168.3.3:8022/./colina'::'colina-2026-07-14T02:00:00'");
+        assertThat(exec).contains("'" + MOUNTPOINT + "'");
+    }
+
+    @Test
+    void mount_isIdempotent_reusingAnAlreadyMountedArchiveRatherThanRemounting() {
+        String exec = BorgCommand.mount(server(), repo(), "colina-2026-07-14T02:00:00", MOUNTPOINT, WORK_DIR)
+            .exec();
+
+        // A second browse must not fail on "already mounted": the command makes the dir and only mounts when
+        // the mountpoint is not already a mount. The kernel enforces the ro/user_id design; we do not re-do it.
+        assertThat(exec).contains("mkdir -p '" + MOUNTPOINT + "'");
+        assertThat(exec).contains("mountpoint -q '" + MOUNTPOINT + "'");
+    }
+
+    @Test
+    void mount_hasNoSecretToRedact_soTheRedactedTwinEqualsExec() {
+        BuiltCommand mount = BorgCommand.mount(server(), repo(), "colina-2026-07-14T02:00:00", MOUNTPOINT,
+            WORK_DIR);
+        assertThat(mount.redacted()).isEqualTo(mount.exec());
+    }
+
+    @Test
+    void umount_releasesTheArchiveMount_andRemovesTheMountpointDir() {
+        String umount = BorgCommand.umount(MOUNTPOINT);
+
+        assertThat(umount).contains("borg umount '" + MOUNTPOINT + "'");
+        assertThat(umount).contains("rmdir '" + MOUNTPOINT + "'");
+    }
+
+    @Test
+    void isMounted_probesWhetherTheMountpointIsAlreadyAMount() {
+        assertThat(BorgCommand.isMounted(MOUNTPOINT)).contains("mountpoint -q '" + MOUNTPOINT + "'");
+    }
+
+    @Test
+    void parseMounted_readsTheProbe() {
+        // Distinct tokens so IS_MOUNTED is never a substring of NOT_MOUNTED.
+        assertThat(BorgCommand.parseMounted("IS_MOUNTED")).isTrue();
+        assertThat(BorgCommand.parseMounted("NOT_MOUNTED")).isFalse();
+        assertThat(BorgCommand.parseMounted("")).isFalse();
+        assertThat(BorgCommand.parseMounted(null)).isFalse();
+    }
 }

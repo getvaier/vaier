@@ -1,6 +1,5 @@
-package net.vaier.rest;
+package net.vaier.application;
 
-import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.domain.CommandResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

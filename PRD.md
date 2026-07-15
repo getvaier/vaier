@@ -1010,7 +1010,8 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
 - [ ] **2 — Move.** Clipboard, cross-machine Transfer (streaming, tracked, SSE-settled), download to
   browser, size warning. Community.
 - [ ] **3 — Time.** `borg mount` lifecycle, the time rail, archive overlay on the tree, restore as
-  paste-from-the-past. Enterprise.
+  paste-from-the-past. Enterprise. *(The `borg mount` lifecycle backend landed via §6.21 slice D — mount-on-demand,
+  idempotent, idle-swept; the time-rail UI is what remains.)*
 - [ ] **4 — Coverage.** Coverage dots, draft-then-save to the backup job, "Uncovered only" filter,
   one-job-per-machine enforcement. Enterprise.
 - [ ] **5 — Mutate.** Delete, rename/move, new folder, behind a typed-confirmation gate. Community.
@@ -1085,9 +1086,11 @@ job**'s source paths against the tree and would have reported a backed-up direct
   sentence — **never an empty directory**, and never the jail's contents under another path's name.
 
 **Notes / open risks:**
-- **`borg mount` is still unverified on the fleet** — slice 3's archive browsing rests on it (`/dev/fuse`,
-  `fusermount`, borg built with FUSE). Must be confirmed on Apalveien 5 and Colina 27 before slice 3 is
-  designed; a host that can't mount falls back to `borg list`.
+- **`borg mount` is verified ✅** — confirmed end-to-end on the Vaier server (mount + list + read over SFTP with
+  Vaier's own credential). The catch the fleet actually hit: Debian's borg runs under a system `python3` shipping
+  neither `pyfuse3` nor `llfuse`, so `borg mount` failed everywhere with "no FUSE support". `python3-pyfuse3` fixes
+  it, and §6.21 slice D's `BorgClientSetupScript` now installs it (via **Prepare client**), non-fatally so a host
+  that can't mount keeps backing up. Apalveien 5 and Colina 27 still need the binding installed.
 - **Browsing is not confined to a subtree by Vaier** — but the *machine* may confine it. There is no chroot
   of Vaier's making: an operator can browse anywhere the machine's SSH user can read, by design (the fleet's
   Docker volumes live outside any one home directory), and the SSH user's own permissions are the boundary.
@@ -1206,9 +1209,57 @@ Three things this buys that a set of pages structurally cannot:
   Refactor along the way: trust-on-first-use had been copied into `TerminalService` and `ExplorerService`; the
   third copy (the disk read) is what made it worth having exactly one, so the rule now lives on
   `SshTarget.pinOnFirstUse` and every SSH path (shell, exec, SFTP, disk) pins from it.
-- [ ] **D — Time.** The archive rail (§6.20 slice 3). Scrubbing back re-lights the Inspector in the past's
-  palette (`data-past`, defined in slice A and unused until now); the past has no liveness to report, so the
-  status dots go out. Restore is not a feature — it is a paste into the present.
+- [ ] **D — Time (backend ✅, the rail UI next).** The archive rail (§6.20 slice 3). Scrubbing back re-lights the
+  Inspector in the past's palette (`data-past`, defined in slice A and unused until now); the past has no liveness
+  to report, so the status dots go out. Restore is not a feature — it is a paste into the present.
+  **Delivered in slice D (backend) — the past is a coordinate:**
+  - **`borg mount` is the mechanism, and there is only one browse.** A file's third coordinate is *time*, and the
+    trick is not to write a second directory lister for the past: mount a backup **archive** as a read-only FUSE
+    filesystem on its own machine, and walk it with the exact same SFTP code that walks the live tree. borg strips
+    the leading `/`, so a file at `/home/geir/x` in the archive is really at `<mountpoint>/home/geir/x` — a trivial
+    prefix. The mount is `ro, user_id=1000` (`borgfs`), so **the kernel enforces "you can only paste into the
+    present"** and Vaier never re-implements that invariant.
+  - **`domain.MountedArchive`** — the decision, not the plumbing. The mountpoint is keyed by the archive **id**
+    (opaque hex, filesystem-safe) because a borg archive *name* carries a `:` and cannot be a directory. The path
+    mapping (`machinePath` down under the mount, `toArchivePath`/`anchor` back up) **reuses `FileEntry.normalisePath`**,
+    so a path that climbs above the archive root is refused in the past *exactly* as it is in the present, and can
+    never escape the mount onto the live filesystem. It is the inverse of **`SftpRoot`**: a jail hides a prefix the
+    machine really has; a mount adds a prefix the archive's paths do not carry — and `ExplorerService` composes the
+    two, so a jailed machine's past maps correctly too.
+  - **`ForMountingArchives` + `BorgArchiveMountAdapter`** — the driven port that keeps `ExplorerService` free of
+    borg: it asks for a mountpoint and never learns what borg is. The adapter resolves the machine's backup job →
+    **repository** → **server**, provisions the pass file, reads the archive's *name* from the repository's
+    `borg list` (the id keys the mountpoint; borg mounts by name), and mounts on demand — over the same
+    `ForRunningSshCommands` exec path everything else uses. **Idempotent and lazy:** a cheap `mountpoint -q` probe
+    short-circuits a warm re-browse to a single round trip, so the `borg list` + `borg mount` run only on a cold mount.
+  - **`BorgCommand.mount`/`umount`/`isMounted`** — every mount command string lives in the one place that knows the
+    borg command line, so no borg (or FUSE) flag leaks into a service or adapter. The passphrase reaches borg only
+    through the `BORG_PASSCOMMAND` pass file, never argv or env, exactly like `create`/`list`. Unlike a `borg create`,
+    `borg mount` daemonises and returns at once, so it needs none of the detached/nohup/poll machinery a run needs.
+  - **The Explorer gains the time coordinate.** `GET /machines/{machine}/files?path=…&at=<archiveId>` — absent `at`
+    is the present, unchanged (#326's "omitting `path` is a question, not a default" is **not** regressed); present
+    `at` mounts the archive and lists the same directory inside it, and the response carries `at` so the browser knows
+    it is looking at the past. `GET /machines/{machine}/archives` gives a machine's archives **newest first**
+    (`Archive.newestFirst`, `ListMachineArchivesUseCase` on `BackupRunner` mapping machine → job → repository) — the
+    data the time rail will scrub over.
+  - **Idle mounts are swept off the fleet.** A mount holds a FUSE mount and a borg process on a machine, so
+    `ArchiveMountWatcher` (`@Scheduled`, the fleet-backup watcher convention) periodically calls
+    `ForMountingArchives.unmountIdle`, releasing every mount untouched beyond the idle window — a mount lives only as
+    long as it is being browsed. *(In-memory registry: a Vaier restart orphans a live mount until the same archive is
+    re-browsed, which re-adopts it; a future startup sweep could close that gap.)*
+  - **`BorgClientSetupScript` installs the FUSE binding.** Debian's borg runs under a system `python3` that ships
+    neither `pyfuse3` nor `llfuse`, so `borg mount` failed on **every** fleet host with "no FUSE support";
+    `python3-pyfuse3` (`py3-` on Alpine, `python-` on Arch) fixes it. The install sits **outside** the
+    borg-already-present branch — the same trap the sudoers grant hit, since every fleet host already has borg, so a
+    nested install would never run on one real machine — and a missing binding is **reported, not fatal**: a host that
+    cannot mount keeps backing up, only "browse the past" degrades there.
+  - **Seam moved: `BackupWorkDirResolver` rest/ → application/.** It resolves the on-host work dir / SSH `$HOME` over
+    SSH and is orchestration, not a controller — it sat in `rest/` only beside `BackupRunner`. The mount adapter needs
+    it, and an adapter reaching into `rest/` is a layer inversion, so it moved to `application/` where it belongs. The
+    resolved value it returns is a plain collaborator, not a `*UseCase` business call.
+  - **FUSE verified end-to-end on the Vaier server** (`borg mount ssh://borg@nas::<archive>` then listing/reading over
+    SFTP with Vaier's own credential). Apalveien 5 and Colina 27 still need `python3-pyfuse3` — now installed by
+    **Prepare client**.
 - [ ] **E — The rest.** DNS, access, settings. `admin.html` and the iframes are deleted, and the bridge with
   them.
 

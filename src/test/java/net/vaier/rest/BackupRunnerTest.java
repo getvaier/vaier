@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetBackupServersUseCase;
@@ -385,6 +386,32 @@ class BackupRunnerTest {
         assertThat(archives).hasSize(1);
         assertThat(archives.get(0).name()).isEqualTo("colina-x");
         assertThat(archives.get(0).id()).isEqualTo("abc");
+    }
+
+    @Test
+    void listMachineArchives_resolvesTheMachinesRepository_andReturnsItsArchivesNewestFirst() {
+        // The time rail asks by MACHINE; the runner maps machine -> its backup job -> repository -> archives.
+        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(jobs.getBackupJobs()).thenReturn(List.of(job())); // job() backs up "Colina 27" into "nas-borg"
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        hasCredential("Colina 27");
+        String json = "{ \"archives\": [ "
+            + "{ \"archive\": \"colina-old\", \"id\": \"a\", \"time\": \"2024-06-01T02:00:00.000000\" }, "
+            + "{ \"archive\": \"colina-new\", \"id\": \"b\", \"time\": \"2024-06-03T02:00:00.000000\" } ] }";
+        when(runner.run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("borg list --json")))
+            .thenReturn(new CommandResult(0, json, "", false, "SHA256:x"));
+
+        List<Archive> archives = backupRunner.listMachineArchives("Colina 27");
+
+        assertThat(archives).extracting(Archive::id).containsExactly("b", "a");
+    }
+
+    @Test
+    void listMachineArchives_ofAMachineWithNoBackupJob_isEmpty() {
+        when(jobs.getBackupJobs()).thenReturn(List.of(job())); // backs up "Colina 27", not "Roon"
+
+        assertThat(backupRunner.listMachineArchives("Roon")).isEmpty();
+        verify(runner, never()).run(any(), any());
     }
 
     @Test

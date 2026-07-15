@@ -267,6 +267,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected BrowseFilesUseCase browseFilesUseCase;
 
+    @MockBean
+    protected ListMachineArchivesUseCase listMachineArchivesUseCase;
+
     // --- Server location use case ---
     @MockBean
     protected GetServerLocationUseCase getServerLocationUseCase;

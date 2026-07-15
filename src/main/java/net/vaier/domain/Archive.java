@@ -51,6 +51,18 @@ public record Archive(String name, String id, Instant time) {
         }
     }
 
+    /**
+     * {@code archives} ordered newest first — what the Explorer's time rail scrubs over. An archive whose
+     * time borg reported as unreadable ({@code null}) sinks to the bottom rather than jumping the order or
+     * throwing. Ordering the rail is a decision about archives, so it lives here on the entity.
+     */
+    public static List<Archive> newestFirst(List<Archive> archives) {
+        return archives.stream()
+            .sorted(java.util.Comparator.comparing(Archive::time,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+            .toList();
+    }
+
     private static String text(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asText();

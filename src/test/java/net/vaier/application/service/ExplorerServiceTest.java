@@ -9,8 +9,10 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
+import net.vaier.domain.MountedArchive;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
+import net.vaier.domain.port.ForMountingArchives;
 import net.vaier.domain.port.ForResolvingSftpRoots;
 import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForTrackingHostKeys;
@@ -45,6 +47,7 @@ class ExplorerServiceTest {
     @Mock ForBrowsingRemoteFiles forBrowsingRemoteFiles;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
     @Mock ForResolvingSftpRoots forResolvingSftpRoots;
+    @Mock ForMountingArchives forMountingArchives;
 
     @InjectMocks ExplorerService service;
 
@@ -259,5 +262,75 @@ class ExplorerServiceTest {
         // two probes that learn the root.
         verify(forResolvingSftpRoots, never()).rootFor(any(), any());
         verify(forResolvingSshTargets, never()).resolve(any());
+    }
+
+    // --- slice D: the past is a coordinate --------------------------------------------------------------
+    //
+    // With `at` naming an archive, the SAME browse mounts that archive on the machine and lists the same path
+    // INSIDE it. The service asks the mount port for a mountpoint — it never learns what borg is — then maps
+    // the archive path under the mountpoint and back, exactly as it maps a jail down and back for the present.
+
+    private static final String MOUNTPOINT = "/home/ubuntu/.vaier-backup/mounts/ab12";
+
+    private void archiveMountsAt(String machine, String archiveId, String mountpoint) {
+        when(forMountingArchives.mount(machine, archiveId)).thenReturn(new MountedArchive(mountpoint));
+    }
+
+    @Test
+    void listDirectory_withAnArchive_listsThePathInsideTheMountedArchive() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+        remoteAnswers(new DirectoryListing(List.of(
+            FileEntry.in(MOUNTPOINT + "/home/geir", "notes.txt", false, 120, WHEN)), "SHA256:pinned"));
+
+        MachineDirectory directory = service.listDirectory("apalveien5", "/home/geir", "ab12");
+
+        // The path the browser sent is an ARCHIVE coordinate; the SFTP read happens under the mountpoint.
+        verify(forBrowsingRemoteFiles).list(any(), eq(MOUNTPOINT + "/home/geir"));
+        // ...and the entries come back on their archive coordinates — the file's own path, not the mountpoint.
+        assertThat(directory.entries()).extracting(FileEntry::path).containsExactly("/home/geir/notes.txt");
+        assertThat(directory.path()).isEqualTo("/home/geir");
+        // The listing carries the archive coordinate so the browser knows it is looking at the past.
+        assertThat(directory.at()).isEqualTo("ab12");
+    }
+
+    @Test
+    void listDirectory_withAnArchive_andNoPath_beginsAtTheArchiveRoot() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+        remoteAnswers(new DirectoryListing(List.of(
+            FileEntry.in(MOUNTPOINT, "home", true, 4096, WHEN)), "SHA256:pinned"));
+
+        MachineDirectory directory = service.listDirectory("apalveien5", null, "ab12");
+
+        // The archive captured absolute machine paths, so its tree begins at "/", read at the mountpoint.
+        verify(forBrowsingRemoteFiles).list(any(), eq(MOUNTPOINT));
+        assertThat(directory.path()).isEqualTo("/");
+        assertThat(directory.entries()).extracting(FileEntry::path).containsExactly("/home");
+    }
+
+    @Test
+    void listDirectory_withAnArchive_stillRefusesAPathThatClimbsAboveTheRoot_beforeMounting() {
+        // The trust boundary is unchanged in the past: a climb is refused before a machine is resolved or an
+        // archive is mounted.
+        assertThatThrownBy(() -> service.listDirectory("apalveien5", "/../../etc/passwd", "ab12"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(forMountingArchives, never()).mount(any(), any());
+        verify(forResolvingSshTargets, never()).resolve(any());
+        verify(forBrowsingRemoteFiles, never()).list(any(), any());
+    }
+
+    @Test
+    void listDirectory_withNoArchive_neverMountsAnything_andReportsNoArchiveCoordinate() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        remoteAnswers(new DirectoryListing(List.of(), "SHA256:pinned"));
+
+        MachineDirectory directory = service.listDirectory("apalveien5", "/home", null);
+
+        // Omitting `at` is the present, unchanged (#326 is not regressed): no mount, no archive coordinate.
+        verify(forMountingArchives, never()).mount(any(), any());
+        assertThat(directory.at()).isNull();
+        assertThat(directory.path()).isEqualTo("/home");
     }
 }

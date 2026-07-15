@@ -2,6 +2,8 @@ package net.vaier.rest;
 
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.ListMachineArchivesUseCase;
+import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
@@ -32,6 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ExplorerRestControllerTest {
 
     @Mock BrowseFilesUseCase browseFilesUseCase;
+    @Mock ListMachineArchivesUseCase listMachineArchivesUseCase;
 
     @InjectMocks ExplorerRestController controller;
 
@@ -43,11 +46,11 @@ class ExplorerRestControllerTest {
 
     @Test
     void get_listsTheRequestedDirectory_onTheRequestedMachine() {
-        when(browseFilesUseCase.listDirectory("apalveien5", "/home/geir")).thenReturn(at("/home/geir",
+        when(browseFilesUseCase.listDirectory("apalveien5", "/home/geir", null)).thenReturn(at("/home/geir",
             FileEntry.in("/home/geir", "docs", true, 4096, WHEN),
             FileEntry.in("/home/geir", "notes.txt", false, 120, WHEN)));
 
-        ResponseEntity<DirectoryResponse> response = controller.list("apalveien5", "/home/geir");
+        ResponseEntity<DirectoryResponse> response = controller.list("apalveien5", "/home/geir", null);
 
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         List<FileEntryResponse> body = response.getBody().entries();
@@ -61,7 +64,7 @@ class ExplorerRestControllerTest {
     @Test
     void get_withNoPath_letsTheMachineSayWhereItsTreeBegins() throws Exception {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
-        when(browseFilesUseCase.listDirectory("NAS", null))
+        when(browseFilesUseCase.listDirectory("NAS", null, null))
             .thenReturn(new MachineDirectory(new SftpRoot("/volume1"), "/volume1",
                 List.of(FileEntry.in("/volume1", "homes", true, 4096, WHEN))));
 
@@ -73,13 +76,13 @@ class ExplorerRestControllerTest {
             .andExpect(jsonPath("$.path").value("/volume1"))
             .andExpect(jsonPath("$.entries[0].path").value("/volume1/homes"));
 
-        verify(browseFilesUseCase).listDirectory("NAS", null);
+        verify(browseFilesUseCase).listDirectory("NAS", null, null);
     }
 
     @Test
     void get_carriesTheRootAlongsideTheEntries_soTheBrowserKnowsWhereTheTreeBegins() throws Exception {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
-        when(browseFilesUseCase.listDirectory(any(), any())).thenReturn(at("/",
+        when(browseFilesUseCase.listDirectory(any(), any(), any())).thenReturn(at("/",
             FileEntry.in("/", "etc", true, 4096, WHEN)));
 
         // The listing is no longer a bare array: an array cannot carry the root, and a machine's file tree
@@ -99,20 +102,20 @@ class ExplorerRestControllerTest {
     @Test
     void get_passesTheRequestedPathThrough_asTheQueryParameter() throws Exception {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
-        when(browseFilesUseCase.listDirectory(any(), any())).thenReturn(at("/var/lib"));
+        when(browseFilesUseCase.listDirectory(any(), any(), any())).thenReturn(at("/var/lib"));
 
         mockMvc.perform(get("/machines/apalveien5/files").param("path", "/var/lib"))
             .andExpect(status().isOk());
 
         // The path is handed to the domain verbatim — the controller does not sanitise it, the domain does.
-        verify(browseFilesUseCase).listDirectory("apalveien5", "/var/lib");
+        verify(browseFilesUseCase).listDirectory("apalveien5", "/var/lib", null);
     }
 
     @Test
     void get_aHostilePath_isRejected_asABadRequest() throws Exception {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new GlobalExceptionHandler()).build();
-        when(browseFilesUseCase.listDirectory(any(), any()))
+        when(browseFilesUseCase.listDirectory(any(), any(), any()))
             .thenThrow(new IllegalArgumentException("A path must not climb above the root: /../etc"));
 
         mockMvc.perform(get("/machines/apalveien5/files").param("path", "/../etc"))
@@ -123,7 +126,7 @@ class ExplorerRestControllerTest {
     void get_aPathOutsideTheMachinesSftpRoot_failsWithTheRealSentence_notAnEmptyDirectory() throws Exception {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new GlobalExceptionHandler()).build();
-        when(browseFilesUseCase.listDirectory(any(), any()))
+        when(browseFilesUseCase.listDirectory(any(), any(), any()))
             .thenThrow(new PathOutsideSftpRootException("/volume2", "/volume1"));
 
         // /volume2 exists on the NAS — df and the web terminal both see it — but SFTP is chrooted into
@@ -134,5 +137,39 @@ class ExplorerRestControllerTest {
             .andExpect(jsonPath("$.code").value("PATH_OUTSIDE_SFTP_ROOT"))
             .andExpect(jsonPath("$.message").value(
                 "/volume2 is not reachable over SFTP; this machine's SFTP service is rooted at /volume1."));
+    }
+
+    // --- slice D: the time coordinate -------------------------------------------------------------------
+
+    @Test
+    void get_withAnArchiveCoordinate_browsesThePast_andCarriesItBack() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        when(browseFilesUseCase.listDirectory("apalveien5", "/home/geir", "ab12"))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/home/geir",
+                List.of(FileEntry.in("/home/geir", "notes.txt", false, 120, WHEN)), "ab12"));
+
+        mockMvc.perform(get("/machines/apalveien5/files").param("path", "/home/geir").param("at", "ab12"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.path").value("/home/geir"))
+            // The listing carries the archive coordinate, so the browser knows it is looking at the past.
+            .andExpect(jsonPath("$.at").value("ab12"))
+            .andExpect(jsonPath("$.entries[0].path").value("/home/geir/notes.txt"));
+
+        verify(browseFilesUseCase).listDirectory("apalveien5", "/home/geir", "ab12");
+    }
+
+    @Test
+    void archives_listsTheMachinesArchives_newestFirst_withIdNameAndTime() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        when(listMachineArchivesUseCase.listMachineArchives("apalveien5")).thenReturn(List.of(
+            new Archive("apalveien5-2026-07-14T02:00:00", "b", Instant.parse("2026-07-14T02:00:00Z")),
+            new Archive("apalveien5-2026-07-13T02:00:00", "a", Instant.parse("2026-07-13T02:00:00Z"))));
+
+        mockMvc.perform(get("/machines/apalveien5/archives"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value("b"))
+            .andExpect(jsonPath("$[0].name").value("apalveien5-2026-07-14T02:00:00"))
+            .andExpect(jsonPath("$[0].createdAt").value("2026-07-14T02:00:00Z"))
+            .andExpect(jsonPath("$[1].id").value("a"));
     }
 }

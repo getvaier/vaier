@@ -1,7 +1,6 @@
-package net.vaier.rest;
+package net.vaier.application;
 
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.SshHome;
 import org.springframework.stereotype.Component;
@@ -97,9 +96,23 @@ public class BackupWorkDirResolver {
             }
         } catch (Exception e) {
             log.debug("Could not resolve $HOME on {} for backup work dir: {}",
-                LogSafe.forLog(machineName), e.getMessage());
+                forLog(machineName), e.getMessage());
         }
         // Deliberately NOT cached: a transient probe failure must never poison the cache.
         return java.util.Optional.empty();
+    }
+
+    /**
+     * Render a machine name safe for a single log line: collapse CR/LF and other ISO control characters to
+     * spaces so a hand-edited name can never forge a multiline log entry. Mirrors the {@code rest/}-layer
+     * {@code LogSafe}, kept local so this application component carries no dependency into the web layer.
+     */
+    private static String forLog(String name) {
+        if (name == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder(name.length());
+        name.codePoints().forEach(c -> sb.appendCodePoint(Character.isISOControl(c) ? ' ' : c));
+        return sb.toString();
     }
 }

@@ -190,6 +190,60 @@ class BorgClientSetupScriptTest {
         assertThat(s).contains("borg --version");
     }
 
+    // --- The FUSE binding that makes `borg mount` work (Explorer slice D) ---
+
+    /**
+     * Debian's borg runs under the system python3, which ships NEITHER pyfuse3 NOR llfuse, so {@code borg
+     * mount} fails on every fleet host with "no FUSE support". Installing python3-pyfuse3 fixes it. The
+     * script installs the binding per package manager, exactly as it installs borg.
+     */
+    @Test
+    void generate_installsAFuseBindingForBorgMount_onEachPackageManager() {
+        String s = BorgClientSetupScript.generate();
+
+        // Debian/Ubuntu, Fedora/RHEL, openSUSE ship it as python3-pyfuse3.
+        assertThat(s).contains("apt-get install -y python3-pyfuse3");
+        assertThat(s).contains("dnf install -y python3-pyfuse3");
+        assertThat(s).contains("yum install -y python3-pyfuse3");
+        assertThat(s).contains("zypper install -y python3-pyfuse3");
+        // Alpine's py3- prefix, Arch's python- prefix.
+        assertThat(s).contains("apk add --no-cache py3-pyfuse3");
+        assertThat(s).contains("pacman -Sy --noconfirm python-pyfuse3");
+    }
+
+    /**
+     * The trap this whole slice hinges on: every fleet host ALREADY has borg, so the borg-install branch is
+     * skipped on all of them. If the FUSE install sat inside that branch it would never run on a single real
+     * machine. It must sit OUTSIDE — after the borg-install if/else closes (past "Verifying borg").
+     */
+    @Test
+    void generate_installsTheFuseBinding_outsideTheBorgAlreadyInstalledEarlyExit() {
+        String s = BorgClientSetupScript.generate();
+
+        int borgVerified = s.indexOf("==> Verifying borg");
+        int fuseInstall = s.indexOf("pyfuse3");
+        assertThat(borgVerified).isGreaterThan(-1);
+        // The FUSE install is past the borg install branch, so it runs even when borg was already present.
+        assertThat(fuseInstall).isGreaterThan(borgVerified);
+    }
+
+    /**
+     * A host that cannot install the FUSE binding must keep BACKING UP — only its "browse the past" degrades.
+     * So the FUSE install never aborts the script: it is reported, not fatal (no {@code exit} on its failure).
+     */
+    @Test
+    void generate_aMissingFuseBindingIsReported_notFatal() {
+        String s = BorgClientSetupScript.generate();
+
+        int fuseStart = s.indexOf("FUSE support for borg mount");
+        assertThat(fuseStart).isGreaterThan(-1);
+        int sudoersGrant = s.indexOf("Granting borg-as-root");
+        // Between announcing the FUSE install and the next step, nothing exits the script on failure.
+        String fuseSection = s.substring(fuseStart, sudoersGrant > fuseStart ? sudoersGrant : s.length());
+        assertThat(fuseSection).contains("WARNING");
+        assertThat(fuseSection).doesNotContain("exit ");
+    }
+
     @Test
     void generate_isValidBash() throws Exception {
         String s = BorgClientSetupScript.generate();

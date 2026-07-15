@@ -1,12 +1,14 @@
 package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.ListArchivesUseCase;
+import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.application.NotifyAdminsOfBackupFailureUseCase;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.RunRemoteCommandUseCase;
@@ -63,7 +65,7 @@ import java.util.Optional;
  */
 @Component
 @Slf4j
-public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
+public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase, ListMachineArchivesUseCase {
 
     /** How often the scheduler sweeps in-flight RUNNING runs for a result. */
     static final long POLL_INTERVAL_MS = 60_000;
@@ -320,6 +322,23 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase {
                 LogSafe.forLog(repositoryName), e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * List the archives the machine named {@code machineName} can be browsed at — the Explorer time rail's
+     * data. Maps the machine to its first backup job, then lists that job's repository's archives newest
+     * first (via the same {@link #listArchives} path). Empty — never throwing — when the machine has no
+     * backup job (nothing to browse), or when the underlying repository list is empty for any reason.
+     */
+    @Override
+    public List<Archive> listMachineArchives(String machineName) {
+        Optional<BackupJob> job = jobs.getBackupJobs().stream()
+            .filter(j -> j.machineName().equals(machineName)).findFirst();
+        if (job.isEmpty()) {
+            log.debug("No archives for machine {}: it has no backup job", LogSafe.forLog(machineName));
+            return List.of();
+        }
+        return Archive.newestFirst(listArchives(job.get().repositoryName()));
     }
 
     /** A machine to list from: a first enabled job targeting the repo, else any job that targets it. */

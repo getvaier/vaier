@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
+import net.vaier.application.ListMachineArchivesUseCase;
+import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,13 +36,32 @@ import java.util.List;
 public class ExplorerRestController {
 
     private final BrowseFilesUseCase browseFilesUseCase;
+    private final ListMachineArchivesUseCase listMachineArchivesUseCase;
 
+    /**
+     * Browse one directory on one machine. With {@code at} naming an archive, the same directory is read
+     * <em>inside that archive</em> — the machine's past. Absent {@code at}, the live filesystem, unchanged
+     * (#326: omitting {@code path} is still a question, not a default).
+     */
     @GetMapping("/machines/{machine}/files")
     public ResponseEntity<DirectoryResponse> list(@PathVariable String machine,
-                                                  @RequestParam(required = false) String path) {
-        log.debug("Browsing {} on machine {}", LogSafe.forLog(path), LogSafe.forLog(machine));
-        MachineDirectory directory = browseFilesUseCase.listDirectory(machine, path);
+                                                  @RequestParam(required = false) String path,
+                                                  @RequestParam(required = false) String at) {
+        log.debug("Browsing {} on machine {} at archive {}",
+            LogSafe.forLog(path), LogSafe.forLog(machine), LogSafe.forLog(at));
+        MachineDirectory directory = browseFilesUseCase.listDirectory(machine, path, at);
         return ResponseEntity.ok(DirectoryResponse.from(directory));
+    }
+
+    /**
+     * The archives this machine can be browsed at, newest first — the time rail's data. Each carries the
+     * {@code id} the browser hands back as the {@code at} coordinate, plus a display name and creation time.
+     */
+    @GetMapping("/machines/{machine}/archives")
+    public ResponseEntity<List<ArchiveResponse>> archives(@PathVariable String machine) {
+        log.debug("Listing archives for machine {}", LogSafe.forLog(machine));
+        return ResponseEntity.ok(listMachineArchivesUseCase.listMachineArchives(machine).stream()
+            .map(ArchiveResponse::from).toList());
     }
 
     /**
@@ -51,10 +72,22 @@ public class ExplorerRestController {
      * bare array — what this endpoint answered with before #326 — had nowhere to carry it, and a browser that
      * assumed {@code /} opened the NAS on the one path the NAS cannot answer.
      */
-    record DirectoryResponse(String root, String path, List<FileEntryResponse> entries) {
+    record DirectoryResponse(String root, String path, String at, List<FileEntryResponse> entries) {
         static DirectoryResponse from(MachineDirectory directory) {
-            return new DirectoryResponse(directory.root().path(), directory.path(),
+            return new DirectoryResponse(directory.root().path(), directory.path(), directory.at(),
                 directory.entries().stream().map(FileEntryResponse::from).toList());
+        }
+    }
+
+    /**
+     * One archive on the machine's time rail: the borg {@code id} the browser sends back as the {@code at}
+     * coordinate to browse the past, a display {@code name}, and the {@code createdAt} time (ISO-8601, or
+     * {@code null} when borg reported no readable time) that places it on the rail.
+     */
+    record ArchiveResponse(String name, String id, String createdAt) {
+        static ArchiveResponse from(Archive archive) {
+            return new ArchiveResponse(archive.name(), archive.id(),
+                archive.time() == null ? null : archive.time().toString());
         }
     }
 

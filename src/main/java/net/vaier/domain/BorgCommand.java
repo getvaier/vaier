@@ -219,6 +219,62 @@ public final class BorgCommand {
     }
 
     /**
+     * Mount the archive named {@code archiveName} in {@code repo} as a read-only FUSE filesystem at
+     * {@code mountpoint} — the mechanism behind browsing the past (Explorer slice D). Once mounted, the
+     * archive is walked with the exact same SFTP code that walks the live tree; borg's {@code borgfs} mount
+     * is {@code ro, user_id=1000}, so the kernel itself enforces "you can only paste into the present" and
+     * Vaier never has to re-implement that invariant.
+     *
+     * <p><b>Idempotent.</b> A directory browse re-issues this on every archive it opens, so the command makes
+     * the mountpoint dir and mounts only when it is not <em>already</em> a mount ({@code mountpoint -q}) —
+     * an already-mounted archive is reused, never re-mounted into a "directory not empty"/"already mounted"
+     * error. Unlike a {@code borg create}, {@code borg mount} daemonises and returns at once, so it fits the
+     * 20 s SSH exec cap with none of {@link #detachedRun}'s nohup/poll machinery.
+     *
+     * <p>The passphrase reaches borg only through the {@code BORG_PASSCOMMAND} pass file — never argv or env —
+     * exactly like {@link #listArchives}, wrapped in {@code sh -c "…"} so the export reaches borg. There is no
+     * secret on the command line, so the redacted twin equals exec.
+     */
+    public static BuiltCommand mount(BackupServer server, BackupRepository repo, String archiveName,
+                                     String mountpoint, String workDir) {
+        String qMount = singleQuote(mountpoint);
+        // REPO::ARCHIVE as two adjacent single-quoted tokens (the shell concatenates them into one argument
+        // borg parses as REPO::ARCHIVE), so neither the URL nor the archive name can break out of its quoting.
+        String source = singleQuote(repo.borgRepoUrl(server)) + "::" + singleQuote(archiveName);
+        String body = "mkdir -p " + qMount + "; "
+            + "mountpoint -q " + qMount + " && echo ALREADY_MOUNTED || "
+            + "{ borg mount " + source + " " + qMount + " && echo MOUNTED; }";
+        String cmd = "sh -c \"" + dqEmbed(exportPasscommand(repo, workDir)) + dqEmbed(body) + "\"";
+        return new BuiltCommand(cmd, cmd);
+    }
+
+    /**
+     * Release the archive mount at {@code mountpoint} and remove the now-empty mountpoint dir: {@code borg
+     * umount} (its own wrapper over {@code fusermount -u}), then {@code rmdir}. Both are best-effort
+     * ({@code 2>/dev/null}) so an already-unmounted or missing mountpoint is not an error — the idle sweep
+     * must be able to run this without a stray failure when a mount vanished on its own.
+     */
+    public static String umount(String mountpoint) {
+        String qMount = singleQuote(mountpoint);
+        return "borg umount " + qMount + " 2>/dev/null; "
+            + "rmdir " + qMount + " 2>/dev/null; echo UNMOUNTED";
+    }
+
+    /**
+     * A cheap probe of whether {@code mountpoint} is already an archive mount — used to short-circuit a
+     * re-browse of the same archive to a single round trip, without a {@code borg list} to resolve the name.
+     * Echoes {@code IS_MOUNTED}/{@code NOT_MOUNTED} (distinct tokens so one is never a substring of the other).
+     */
+    public static String isMounted(String mountpoint) {
+        return "mountpoint -q " + singleQuote(mountpoint) + " && echo IS_MOUNTED || echo NOT_MOUNTED";
+    }
+
+    /** Read an {@link #isMounted} probe: {@code IS_MOUNTED} means the archive is already mounted. */
+    public static boolean parseMounted(String stdout) {
+        return stdout != null && stdout.contains("IS_MOUNTED");
+    }
+
+    /**
      * The three outcomes of the {@link #serverAuthProbe} run: {@code AUTH_OK} (the client authenticated and
      * borg serve ran — the repository exists <em>or</em> is merely not initialised yet), {@code AUTH_DENIED}
      * (the client's key is not trusted on the server), or {@code UNREACHABLE} (a connection error, timeout,
