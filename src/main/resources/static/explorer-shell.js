@@ -248,7 +248,13 @@
             const kids = [];
             if (m.sshAccess) kids.push({ name: 'files', kind: 'files' }, { name: 'shell', kind: 'shell' });
             if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
-            if (servicesOn(m.name).length || candidatesOn(m.name).length) kids.push({ name: 'services', kind: 'services' });
+            // A machine grows a `services` entry when it publishes something, has a container port that could be
+            // published, or is a server (so a non-container service on it — a printer's page, a LAN app — can
+            // still be published by hand). Clients, which host nothing, stay quiet.
+            if (servicesOn(m.name).length || candidatesOn(m.name).length
+                || SERVER_TYPES.has(m.type) || m.name === VAIER_SERVER) {
+                kids.push({ name: 'services', kind: 'services' });
+            }
             if (m.sshAccess) kids.push({ name: 'disk', kind: 'disk' });
             // A machine grows a `backup` entry when it plays any part in fleet backup: it is the one backup
             // server (name-equality — the backend refuses a second), or a job backs it up. The entry reads both
@@ -852,11 +858,6 @@
             return;
         }
         if (_map) { try { _map.remove(); } catch (e) { /* already gone */ } _map = null; }
-        L.Icon.Default.mergeOptions({
-            iconUrl: 'vendor/leaflet/images/marker-icon.png',
-            iconRetinaUrl: 'vendor/leaflet/images/marker-icon-2x.png',
-            shadowUrl: 'vendor/leaflet/images/marker-shadow.png',
-        });
         const map = L.map(holder, { worldCopyJump: true }).setView([20, 0], 2);
         _map = map;
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -866,7 +867,14 @@
         S.machines.forEach((m) => {
             const p = S.peers.get(m.name);
             if (!p || p.latitude == null || p.longitude == null) return;
-            const marker = L.marker([p.latitude, p.longitude]).addTo(map);
+            // The same device icon the tree draws, in a circle coloured by the same liveness the dots use —
+            // a divIcon, so there are no default marker images to mis-resolve (which is why they were blank).
+            const icon = L.divIcon({
+                html: '<div class="ex-map-marker ' + livenessOf(m.name) + '">'
+                    + svg(machineIcon(m.name), 'ex-map-ico') + '</div>',
+                className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+            });
+            const marker = L.marker([p.latitude, p.longitude], { icon }).addTo(map);
             const pop = el('div');
             const nm = el('b'); nm.textContent = m.name; pop.appendChild(nm);
             const where = [p.city, p.country].filter(Boolean).join(', ');
@@ -1239,9 +1247,12 @@
                 selVerb('check', 'Unignore', 'ex-btn', () => unignoreCandidate(machine, c)),
             ])));
         }
-        if (!found.length && !open.length && !hidden.length) {
-            body.appendChild(note('No container ports here that Vaier could publish.', false));
-        }
+        // A service that isn't a container Vaier discovered — a LAN app, a device's own web page — is published
+        // by hand: name a port on this machine and Vaier makes the route and the DNS record just the same.
+        body.appendChild(section('Publish a service by hand'));
+        const manual = el('div', 'ex-lactions is-static');
+        manual.appendChild(selVerb('route', 'Publish a service', 'ex-btn', () => lanPublish(machine)));
+        body.appendChild(manual);
         pane.appendChild(body);
     }
 
@@ -1341,6 +1352,68 @@
             scrim.onclick = (e) => { if (e.target === scrim) close(null); };
             cancel.onclick = () => close(null);
             ok.onclick = () => { if (subIn.value.trim()) close({ subdomain: subIn.value.trim(), requiresAuth: auth.checked }); };
+            document.addEventListener('keydown', onKey);
+            sync(); subIn.focus();
+        });
+    }
+
+    // Publish a service by hand — a port on the machine that Vaier did not find as a container. The machine is
+    // the context; the operator names the subdomain, the port, whether it speaks http or https, and whether it
+    // needs a login. Vaier makes the DNS record and the route.
+    function lanPublish(machine) {
+        lanPublishForm(machine).then((body) => {
+            if (!body) return;
+            saveJson('/published-services/lan', 'POST', {
+                subdomain: body.subdomain, machineName: machine, port: body.port, protocol: body.protocol,
+                requireAuth: body.requireAuth, directUrlDisabled: false, rootRedirectPath: '', pathPrefix: '',
+            }, 'Publishing ' + body.subdomain + '…', () => reloadServices(machine), 'Could not publish that.');
+        });
+    }
+
+    function lanPublishForm(machine) {
+        return new Promise((resolve) => {
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title'); h.textContent = 'Publish a service on ' + machine;
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'A service Vaier did not discover as a container — a LAN app, a device’s own page. '
+                + 'Name where it listens on ' + machine + ' and Vaier puts it on the internet.';
+            const form = el('div', 'ex-form');
+            const field = (label, hint, control) => {
+                const f = el('div', 'ex-field'); const l = el('label'); l.textContent = label;
+                f.append(l, control);
+                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+                return f;
+            };
+            const text = (ph) => { const i = el('input', 'ex-input'); i.type = 'text'; if (ph) i.placeholder = ph;
+                i.autocomplete = 'off'; i.spellcheck = false; return i; };
+            const subIn = text('e.g. printer');
+            const port = el('input', 'ex-input'); port.type = 'number'; port.min = '1'; port.max = '65535'; port.placeholder = 'e.g. 8080';
+            const protocol = el('select', 'ex-input');
+            [['http', 'http'], ['https', 'https']].forEach(([v, t]) => { const o = el('option'); o.value = v; o.textContent = t; protocol.appendChild(o); });
+            const authRow = el('label', 'ex-check-row');
+            const auth = el('input'); auth.type = 'checkbox'; auth.checked = true;
+            const atxt = el('span'); atxt.textContent = 'Require a login to reach it';
+            authRow.append(auth, atxt);
+            form.append(field('Subdomain', null, subIn), field('Port on ' + machine, null, port),
+                field('Speaks', 'How the backend serves — http or https.', protocol), authRow);
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Publish';
+            actions.append(cancel, ok);
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog); document.body.appendChild(scrim);
+
+            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const armed = () => subIn.value.trim() !== '' && parseInt(port.value, 10) > 0;
+            const sync = () => { ok.disabled = !armed(); };
+            subIn.oninput = sync; port.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => { if (armed()) close({ subdomain: subIn.value.trim(), port: parseInt(port.value, 10),
+                protocol: protocol.value, requireAuth: auth.checked }); };
             document.addEventListener('keydown', onKey);
             sync(); subIn.focus();
         });
