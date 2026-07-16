@@ -139,7 +139,7 @@ class ExplorerShellTest {
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
                                        "/docker-services", "/published-services", "/access/services",
                                        "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
-                                       "/settings", "/license");
+                                       "/settings", "/license", "/lan-scan");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;

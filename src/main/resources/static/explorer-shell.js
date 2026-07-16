@@ -107,6 +107,7 @@
         peerNames: new Map(),            // peer id -> machine name (the SSE keys stats by id, not by name)
         lan: new Map(),                  // machine name -> its LAN server (the domain's MachineStatus)
         serverLocation: null,            // GET /vpn/peers/server-location — the Vaier server's geo (Frankfurt), for the map
+        lanScan: null,                   // GET /lan-scan — the discovered-machines snapshot { status, machines, lastScanCompleted }, or { gated } on Community
         dirs: new Map(),                 // dirKey -> one directory's read: its state, its children, its reader
         services: [],                    // GET /published-services/discover — the whole fleet's routes
         publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
@@ -825,6 +826,42 @@
                     () => { S.open.add(key(['fleet', m.name])); go(['fleet', m.name]); }, m.name));
             });
             body.appendChild(grid);
+        }
+
+        // Discover machines on the relay LANs that aren't in the fleet yet, and register them. Read on view; a
+        // finished scan pushes lan-scan-updated (watchFleet) so this refreshes without polling. Community is
+        // gated out (402) and the section simply does not appear.
+        if (S.lanScan === null) loadLanScan();
+        if (S.lanScan && !S.lanScan.gated) {
+            body.appendChild(section('Discovered on the LAN'));
+            const scanning = S.lanScan.status === 'SCANNING';
+            const found = S.lanScan.machines || [];
+            const bar = el('div', 'ex-lactions is-static');
+            const scanBtn = selVerb('refresh', scanning ? 'Scanning…' : (found.length ? 'Scan again' : 'Scan the LAN'),
+                'ex-btn', () => scanLan());
+            if (scanning) scanBtn.disabled = true;
+            bar.appendChild(scanBtn);
+            body.appendChild(bar);
+            if (found.length) {
+                const list = el('div', 'ex-brepos');
+                found.forEach((d) => {
+                    const row = el('div', 'ex-brepo');
+                    const info = el('div', 'ex-brepo-info');
+                    const nm = el('span', 'ex-brepo-name'); nm.textContent = d.hostname || d.ipAddress;
+                    const meta = el('span', 'ex-brepo-path');
+                    meta.textContent = d.ipAddress
+                        + (d.openPorts && d.openPorts.length ? ' · :' + d.openPorts.join(' :') : '')
+                        + (d.relayAnchor ? ' · behind ' + d.relayAnchor : '');
+                    info.append(nm, meta);
+                    const acts = el('div', 'ex-lactions is-static');
+                    acts.appendChild(selVerb('server', 'Register', 'ex-btn is-accent', () => registerDiscovered(d)));
+                    row.append(info, acts);
+                    list.appendChild(row);
+                });
+                body.appendChild(list);
+            } else if (!scanning) {
+                body.appendChild(note('No unregistered machines found. Scan to look again.', false));
+            }
         }
 
         body.appendChild(section('Not in the tree yet'));
@@ -3761,6 +3798,46 @@
         } catch (e) { /* a fleet with no LAN servers is a fleet, not a failure */ }
     }
 
+    // The discovered-machines snapshot — read when the fleet is looked at, and again whenever a scan settles
+    // (the backend pushes lan-scan-updated on the vpn-peers stream, so this never polls). A Community instance
+    // is refused with 402; the section then simply does not show. Guarded so a re-render can't re-fetch it.
+    let _lanScanLoading = false;
+    async function loadLanScan() {
+        if (_lanScanLoading) return;
+        _lanScanLoading = true;
+        try {
+            const res = await fetch('/lan-scan', { cache: 'no-store' });
+            S.lanScan = res.status === 402 ? { gated: true }
+                : (res.ok ? await res.json() : { status: 'IDLE', machines: [] });
+        } catch (e) { S.lanScan = { status: 'IDLE', machines: [] }; }
+        _lanScanLoading = false;
+        render();
+    }
+
+    // Kick off a scan. It runs on the backend and settles onto lan-scan-updated (no polling); here we only mark
+    // it running so the button says so, and wait to be told it finished.
+    async function scanLan() {
+        try {
+            const res = await fetch('/lan-scan', { method: 'POST' });
+            if (res.status === 402) { toast('The LAN scan is an Enterprise feature.'); return; }
+            if (!res.ok && res.status !== 202) { toast('Vaier could not start the scan.'); return; }
+            toast('Scanning the LAN…');
+            if (S.lanScan && !S.lanScan.gated) { S.lanScan.status = 'SCANNING'; render(); }
+        } catch (e) { toast('Vaier could not start the scan.'); }
+    }
+
+    // Register a discovered machine as a LAN server — named by its hostname, at its IP, carrying the detected
+    // device category; an open Docker port is noted. Vaier infers which relay it sits behind from the address.
+    function registerDiscovered(d) {
+        const dockerPort = (d.openPorts || []).find((p) => p === 2375 || p === 2376) || null;
+        saveJson('/lan-servers', 'POST', {
+            name: d.hostname || d.ipAddress, lanAddress: d.ipAddress,
+            runsDocker: dockerPort != null, dockerPort: dockerPort,
+            description: '', deviceCategory: d.deviceCategory,
+        }, 'Registering ' + (d.hostname || d.ipAddress) + '…',
+           async () => { await loadFleet(); await loadLanScan(); }, 'Could not register that machine.');
+    }
+
     function watchFleet() {
         const events = new EventSource('/vpn/peers/events');
         // A peer was added, renamed or removed — the tree's own shape changed.
@@ -3787,6 +3864,8 @@
         // open — so LAN liveness costs no second connection, no new endpoint and no timer. Re-read the
         // statuses and repaint the dots where they stand, without re-rendering the pane under the operator.
         events.addEventListener('lan-servers-updated', () => loadLanServers().then(paintDots));
+        // A LAN scan finished on the backend — re-read the discovered snapshot (it renders when it lands).
+        events.addEventListener('lan-scan-updated', () => loadLanScan());
     }
 
     // The fleet's second stream, and the last one. `published-services` is a different topic on a different
