@@ -112,6 +112,8 @@
         clipboard: [],                   // held file coordinates {machine, path, at, name, directory, size} — the Clipboard
         transfers: new Map(),            // id -> a live/settled Transfer, streamed in over the transfers SSE topic
         sel: new Set(),                  // paths ticked in the current directory listing (multi-select)
+        backupServer: null,              // GET /backup-servers — the fleet's one backup server, or null when none is designated
+        backupRepos: [],                 // GET /backup-repositories — the repositories that live on it, shown read-only
         palSel: 0,
     };
 
@@ -137,6 +139,7 @@
             return BRIDGES.some((b) => b.name === path[1]) ? 'bridge' : 'machine';
         }
         if (path[2] === 'shell') return 'shell';
+        if (path[2] === 'backup') return 'backup';
         if (path[2] === 'disk') return 'disk';
         if (path[2] === 'containers') return path.length === 3 ? 'containers' : 'container';
         if (path[2] === 'services') return path.length === 3 ? 'services' : 'service';
@@ -205,6 +208,12 @@
             if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
             if (servicesOn(m.name).length) kids.push({ name: 'services', kind: 'services' });
             if (m.sshAccess) kids.push({ name: 'disk', kind: 'disk' });
+            // The one machine the fleet backs up to grows a `backup` entry — the backup server's own coordinate.
+            // Exactly one machine ever holds the role (the backend refuses a second), so it is found by
+            // name-equality, not a flag on the machine.
+            if (S.backupServer && S.backupServer.machineName === m.name) {
+                kids.push({ name: 'backup', kind: 'backup' });
+            }
             return kids;
         }
         if (kind === 'containers') {
@@ -401,6 +410,27 @@
         render();
     }
 
+    // The fleet's one backup server, and the repositories that live on it. Loaded before the first paint, like
+    // the services are, because the tree cannot be honest without it: a machine grows a `backup` entry only if
+    // it is the designated backup server, and a tree that grew one a moment later would have been lying for that
+    // moment. Never polled — a server is designated by an operator, not by a schedule, so a reload is the right
+    // time to learn a new one. The fleet has at most one, so the list is read as its single head.
+    async function loadBackup() {
+        try {
+            const res = await fetch('/backup-servers', { cache: 'no-store' });
+            const list = res.ok ? await res.json() : [];
+            S.backupServer = list.length ? list[0] : null;
+        } catch (e) {
+            S.backupServer = null;
+        }
+        try {
+            const res = await fetch('/backup-repositories', { cache: 'no-store' });
+            S.backupRepos = res.ok ? await res.json() : [];
+        } catch (e) {
+            S.backupRepos = [];
+        }
+    }
+
     // A machine that left the fleet takes its cached directories with it. Machines that are still here keep
     // theirs — that is the point of the cache: collapsing and re-expanding must not re-hit SFTP.
     function pruneDirs() {
@@ -412,7 +442,7 @@
 
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
                        shell: 'shell', containers: 'box', container: 'box', services: 'route',
-                       service: 'route', disk: 'disk' };
+                       service: 'route', disk: 'disk', backup: 'archive' };
 
     // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
     // read off its device category. A category with no icon (or a machine not yet loaded) falls back to the
@@ -432,7 +462,7 @@
     // Mono for anything with a coordinate, sans for anything human. A machine name, a path, a container name
     // and a DNS name are addresses; "Backups" is a word.
     const MONO_KINDS = new Set(['machine', 'files', 'dir', 'file', 'containers', 'container', 'services',
-                                'service', 'disk']);
+                                'service', 'disk', 'backup']);
 
     // --- liveness --------------------------------------------------------------------------------------
     //
@@ -685,6 +715,7 @@
         if (kind === 'container') return renderContainer(pane);
         if (kind === 'services') return renderServices(pane);
         if (kind === 'service') return renderService(pane);
+        if (kind === 'backup') return renderBackup(pane);
         if (kind === 'disk') return renderDisk(pane);
         return renderDirectory(pane);
     }
@@ -771,12 +802,27 @@
                 containers: containersOn(m.name).length + ' seen by Vaier',
                 services:   servicesOn(m.name).length + ' published from here',
                 disk:       'Its filesystems, and how full they are',
+                backup:     'The fleet backs up here',
             };
             inside.forEach((kid) => {
                 grid.appendChild(card(iconFor(kid.kind, kid.name), kid.name, kid.kind !== 'shell',
                     NOTE[kid.name], () => go(['fleet', m.name, kid.name])));
             });
             body.appendChild(grid);
+        }
+
+        // Designation lives on the machine now, not on a page apart. Any machine can become the fleet's one
+        // backup server — but only while none is yet: the machine that already is it wears a `backup` entry
+        // above, and every other machine stays quiet, because there is exactly one and moving it means removing
+        // it first. So this offer shows on every machine only in the bootstrapping moment before a server exists.
+        if (!S.backupServer) {
+            body.appendChild(section('Fleet backup'));
+            body.appendChild(note('No machine is the fleet’s backup server yet. Make this one the place the '
+                + 'fleet backs its archives up to.', false));
+            const act = el('div', 'ex-lactions is-static');
+            act.appendChild(selVerb('archive', 'Make this the fleet’s backup server', 'ex-btn',
+                () => designateBackupServer(m)));
+            body.appendChild(act);
         }
         pane.appendChild(body);
     }
@@ -1153,6 +1199,255 @@
         const key = state === 'OK' ? 'is-up' : (state === 'UNKNOWN' ? 'is-idle' : 'is-down');
         el.className = 'ex-dot ' + key;
         return el;
+    }
+
+    // --- the backup server: the fleet's one archive destination, given a coordinate --------------------
+    //
+    // Identity lives here — which machine plays the role, and how Vaier reaches its `borg serve` — with the
+    // repositories that live on it shown read-only. The operations that stand a server up or trust a client
+    // (provision, authorize) poll for their outcome, and the shell never polls, so those stay on the Backups
+    // page; this entry links there. Editing the coordinates and removing the designation are single calls, and
+    // they live here, because designating the backup server is now a thing you do to a machine in the tree.
+
+    // Where a borg server is reached on the machine's own network — its LAN address, the CIDR's host part, or,
+    // failing both, its tunnel address. A guess to prefill the field, never the last word: the operator edits it.
+    function machineHostGuess(m) {
+        if (m.lanAddress) return m.lanAddress;
+        if (m.lanCidr) return String(m.lanCidr).split('/')[0];
+        return tunnelAddress(m) || '';
+    }
+
+    // The store keys a server by name, and a name is a shell/path token — so a machine name is slugged into one
+    // the same way BackupServer.sanitizedName does on the server. Mirrored here, not shared: it is the client
+    // side of the same rule, and the server validates again.
+    function serverNameFor(machineName) {
+        return String(machineName).trim()
+            .replace(/[^A-Za-z0-9_-]/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+    }
+
+    function renderBackup(pane) {
+        const machine = S.path[1];
+        const s = S.backupServer;
+        if (!s || s.machineName !== machine) {
+            return pane.appendChild(note('This machine is not the fleet’s backup server.', true));
+        }
+        pane.appendChild(paneHead(machine + ' / backup', true, 'The fleet’s backup server'));
+
+        const body = el('div', 'ex-pane-body');
+        body.appendChild(kv([
+            ['Server name', s.name],
+            ['Reached at', s.host + ':' + s.sshPort],
+            ['Borg user', s.borgUser],
+            ['Base repo path', '/' + s.baseRepoPath],
+            ['Server data path', s.serverDataPath],
+            ['Stood up by Vaier', s.managed ? 'Yes' : 'No — adopted'],
+        ]));
+
+        // The repositories that live here, read-only. They are created and managed on the Backups page — the
+        // tree names them and where they sit, it does not write them.
+        body.appendChild(section('Repositories'));
+        const repos = S.backupRepos.filter((r) => r.serverName === s.name);
+        if (!repos.length) {
+            body.appendChild(note('No repositories on this server yet. Add one on the Backups page.', false));
+        } else {
+            const list = el('div', 'ex-brepos');
+            repos.forEach((r) => {
+                const row = el('div', 'ex-brepo');
+                const nm = el('span', 'ex-brepo-name');
+                nm.textContent = r.name;
+                const path = el('span', 'ex-brepo-path');
+                path.textContent = r.repoPath || '';
+                row.append(nm, path);
+                list.appendChild(row);
+            });
+            body.appendChild(list);
+        }
+
+        // Actions: identity only. The operations that poll for an outcome live on the Backups bridge.
+        body.appendChild(section('Designation'));
+        const acts = el('div', 'ex-lactions is-static');
+        acts.appendChild(selVerb('gear', 'Edit coordinates', 'ex-btn', () => editBackupServer(s)));
+        acts.appendChild(selVerb('trash', 'Remove designation', 'ex-btn is-danger', () => removeBackupServer(s)));
+        body.appendChild(acts);
+
+        const bridge = el('div', 'ex-note');
+        bridge.appendChild(document.createTextNode('Provision the server, authorize clients and manage '
+            + 'repositories on the '));
+        const link = el('a', 'ex-link');
+        link.href = '/backups.html';
+        link.textContent = 'Backups page';
+        bridge.appendChild(link);
+        bridge.appendChild(document.createTextNode('.'));
+        body.appendChild(bridge);
+
+        pane.appendChild(body);
+    }
+
+    // Make a machine the fleet's one backup server. The machine is already the context, so the form asks only
+    // what the machine cannot tell us — the borg coordinates — with the machine's own address prefilled.
+    function designateBackupServer(m) {
+        backupServerForm({
+            title: 'Make ' + m.name + ' the backup server',
+            intro: 'The fleet backs its archives up here. Vaier reaches the server’s borg over SSH — the '
+                + 'coordinates below say how.',
+            existing: { host: machineHostGuess(m), sshPort: 8022, borgUser: 'borg',
+                        baseRepoPath: 'home/borg/backups', serverDataPath: '', managed: false },
+            confirmLabel: 'Designate',
+        }).then((body) => {
+            if (body) putBackupServer(serverNameFor(m.name), m.name, body, 'designated');
+        });
+    }
+
+    // Edit the coordinates of the server that already is. The name and the machine are fixed — moving the role
+    // to another machine is a remove-then-designate, not an edit — so only the reach-it fields are offered.
+    function editBackupServer(s) {
+        backupServerForm({
+            title: 'Edit ' + s.name,
+            intro: 'How Vaier reaches this server’s borg over SSH.',
+            existing: s,
+            confirmLabel: 'Save',
+        }).then((body) => {
+            if (body) putBackupServer(s.name, s.machineName, body, 'saved');
+        });
+    }
+
+    async function putBackupServer(name, machineName, body, verbedPast) {
+        try {
+            const res = await fetch('/backup-servers/' + encodeURIComponent(name), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machineName: machineName, host: body.host, sshPort: body.sshPort,
+                    borgUser: body.borgUser, baseRepoPath: body.baseRepoPath,
+                    serverDataPath: body.serverDataPath, managed: body.managed }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not save the backup server.');
+                return;
+            }
+            await loadBackup();
+            toast('Backup server ' + verbedPast + '.');
+            go(['fleet', machineName, 'backup']);   // the role now has a coordinate — stand on it
+        } catch (e) {
+            toast('Vaier could not save the backup server.');
+        }
+    }
+
+    // Removing the designation is destructive in the way delete is — the fleet is left with nowhere to back up
+    // to until another machine is designated — so it takes the same typed-name gate. It does not touch the
+    // borg server itself or its repositories; it forgets which machine plays the role.
+    async function removeBackupServer(s) {
+        const ok = await confirmTyped('Remove the backup server?',
+            'The fleet will have nowhere to back up to until you designate another. This does not delete the '
+            + 'borg server on ' + s.machineName + ' or its repositories — it forgets that this machine is the '
+            + 'backup server. Type the server name to confirm.', s.name, 'Remove designation');
+        if (!ok) return;
+        try {
+            const res = await fetch('/backup-servers/' + encodeURIComponent(s.name), { method: 'DELETE' });
+            if (!res.ok && res.status !== 404) {
+                toast('Vaier could not remove the backup server.');
+                return;
+            }
+        } catch (e) {
+            toast('Vaier could not remove the backup server.');
+            return;
+        }
+        const machine = s.machineName;
+        await loadBackup();
+        toast('Backup server removed.');
+        go(['fleet', machine]);   // the `backup` entry is gone; fall back to the machine
+    }
+
+    // The coordinates form, built on demand over the shell's overlay layer. Resolves the entered body on confirm
+    // and null on cancel or Escape — the same shape as confirmModal, one field richer. Host is the only required
+    // field (the rest carry borg's conventional defaults); the Designate/Save button stays disabled until it has
+    // a value.
+    function backupServerForm({ title, intro, existing, confirmLabel }) {
+        return new Promise((resolve) => {
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title');
+            h.textContent = title;
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = intro;
+            const form = el('div', 'ex-form');
+
+            const field = (label, hint, control) => {
+                const f = el('div', 'ex-field');
+                const l = el('label');
+                l.textContent = label;
+                f.append(l, control);
+                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+                return f;
+            };
+            const input = (value, ph, type) => {
+                const i = el('input', 'ex-input');
+                i.type = type || 'text';
+                i.value = value == null ? '' : String(value);
+                if (ph) i.placeholder = ph;
+                i.autocomplete = 'off';
+                i.spellcheck = false;
+                return i;
+            };
+
+            const host = input(existing.host, 'e.g. 192.168.3.3');
+            const sshPort = input(existing.sshPort || 8022, '8022', 'number');
+            const borgUser = input(existing.borgUser || 'borg', 'borg');
+            const baseRepoPath = input(existing.baseRepoPath || 'home/borg/backups', 'home/borg/backups');
+            const serverDataPath = input(existing.serverDataPath, 'e.g. /volume1/docker/borg');
+            const managed = el('input');
+            managed.type = 'checkbox';
+            managed.checked = !!existing.managed;
+
+            const managedRow = el('label', 'ex-check-row');
+            managedRow.append(managed);
+            const mtxt = el('span');
+            mtxt.textContent = 'Vaier stood this server up (rather than adopting an existing one)';
+            managedRow.append(mtxt);
+
+            form.append(
+                field('Reached at', 'The host the borg server’s SSH listens on.', host),
+                field('SSH port', null, sshPort),
+                field('Borg user', null, borgUser),
+                field('Base repo path', 'No leading slash — repositories derive under this.', baseRepoPath),
+                field('Server data path', 'The borg container’s host data directory. Optional; found at provision.', serverDataPath),
+                managedRow,
+            );
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn');
+            cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent');
+            ok.textContent = confirmLabel || 'Save';
+            actions.append(cancel, ok);
+
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog);
+            document.body.appendChild(scrim);
+
+            const close = (result) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(result); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const armed = () => host.value.trim() !== '';
+            const sync = () => { ok.disabled = !armed(); };
+            host.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => {
+                if (!armed()) return;
+                const port = parseInt(sshPort.value, 10);
+                close({
+                    host: host.value.trim(),
+                    sshPort: Number.isFinite(port) ? port : 8022,
+                    borgUser: borgUser.value.trim() || 'borg',
+                    baseRepoPath: baseRepoPath.value.trim() || 'home/borg/backups',
+                    serverDataPath: serverDataPath.value.trim(),
+                    managed: managed.checked,
+                });
+            };
+            document.addEventListener('keydown', onKey);
+            sync();
+            host.focus();
+        });
     }
 
     // The terminal itself is in the dock, not in the pane: the tree, the address bar and the shell are all on
@@ -2176,7 +2471,7 @@
         // The services are awaited because the tree cannot be honest without them: a `services` entry exists
         // only on a machine that actually publishes something, and a tree that grew one a moment later would
         // have been lying for that moment.
-        await Promise.all([loadFleet(), loadServices()]);
+        await Promise.all([loadFleet(), loadServices(), loadBackup()]);
         render();
 
         // The containers are not awaited. The fleet-wide Docker scrape can take seconds against a sleeping

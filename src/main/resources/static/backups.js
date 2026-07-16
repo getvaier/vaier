@@ -16,7 +16,6 @@
     const pendingRunJobs = new Set();  // job names awaiting a `run-settled` SSE event (never polled)
     let pendingProvision = null; // { serverName } while awaiting a `provision-settled` SSE event
     let pendingPrepare = null;   // { job, machineName } while awaiting a prepare-client SSE settle event
-    let editingServerName = null;
     let editingRepoName = null;  // null while creating
     let editingJobName = null;
     let authorizeServerName = null;
@@ -263,12 +262,20 @@
         }
     }
 
+    // The link to where the backup server's identity now lives — you designate it in the Explorer, not here.
+    const DESIGNATE_LINK =
+        '<a class="bk-designate-link" href="/explorer.html">Designate the backup server in the Explorer</a>';
+
+    // The fleet has exactly one backup server, and its identity is designated in the Explorer. This section
+    // renders that server read-only — its coordinates plus the operational actions that stay here (provision,
+    // authorize a client, download the setup script) — and points at the Explorer to change the record.
     function renderServers() {
         const list = document.getElementById('serverList');
         if (servers.length === 0) {
-            list.innerHTML = `<div class="bk-empty"><b>Start here.</b>
-                Point Vaier at the machine that will hold the fleet's archives. If Vaier can reach it over
-                SSH it will install and start borg there itself.</div>`;
+            list.innerHTML = `<div class="bk-empty"><b>No backup server yet.</b>
+                You designate the backup server in the Explorer — pick the machine that will hold the fleet's
+                archives there, then provision and use it from here.
+                <div class="bk-designate-note">${DESIGNATE_LINK}</div></div>`;
             return;
         }
         list.innerHTML = '';
@@ -293,8 +300,11 @@
                         <span><span class="bk-meta-k">Machine</span><span class="bk-meta-v">${escapeHtml(server.machineName)}</span></span>
                         <span><span class="bk-meta-k">Address</span><span class="bk-meta-v">${escapeHtml(server.host)}:${escapeHtml(String(server.sshPort))}</span></span>
                         <span><span class="bk-meta-k">User</span><span class="bk-meta-v">${escapeHtml(server.borgUser)}</span></span>
+                        <span><span class="bk-meta-k">Base repo path</span><span class="bk-meta-v">${escapeHtml(server.baseRepoPath)}</span></span>
+                        <span><span class="bk-meta-k">Data path</span><span class="bk-meta-v">${escapeHtml(server.serverDataPath)}</span></span>
                     </div>
                     <div class="bk-tags">${managed}</div>
+                    <div class="bk-designate-note">${DESIGNATE_LINK}</div>
                 </div>
                 <div class="bk-item-actions">
                     <button class="btn btn-small ${primary.cls} js-primary">${escapeHtml(primary.label)}</button>
@@ -302,9 +312,7 @@
             el.querySelector('.js-primary').addEventListener('click', primary.onClick);
             el.querySelector('.bk-item-actions').appendChild(actionMenu([
                 secondary,
-                { label: 'Setup script', onClick: () => openSetupModal(server) },
-                { label: 'Edit', onClick: () => openServerModal(server) },
-                { label: 'Delete', cls: 'btn-danger', onClick: () => confirmDeleteServer(server) }
+                { label: 'Setup script', onClick: () => openSetupModal(server) }
             ]));
             list.appendChild(el);
         });
@@ -318,74 +326,6 @@
             opts.push(`<option value="${escapeHtml(v)}" ${v === selected ? 'selected' : ''}>${escapeHtml(v)}</option>`);
         });
         sel.innerHTML = opts.join('');
-    }
-
-    function openServerModal(server) {
-        editingServerName = server ? server.name : null;
-        clearModalError('serverModalError');
-        document.getElementById('serverModalTitle').textContent = server ? 'Edit backup server' : 'New backup server';
-        const nameEl = document.getElementById('serverName');
-        nameEl.value = server ? server.name : '';
-        nameEl.disabled = !!server;
-        document.getElementById('serverNameNote').style.display = server ? 'none' : '';
-        fillSelect('serverMachine', machines, server ? server.machineName : null,
-            machines.length ? 'Select a machine' : 'No machines yet — add one under Infrastructure');
-        document.getElementById('serverHost').value = server ? server.host : '';
-        document.getElementById('serverSshPort').value = server ? server.sshPort : '8022';
-        document.getElementById('serverBorgUser').value = server ? server.borgUser : 'borg';
-        document.getElementById('serverBaseRepoPath').value = server ? server.baseRepoPath : 'home/borg/backups';
-        document.getElementById('serverDataPath').value = server ? server.serverDataPath : '';
-        document.getElementById('serverManaged').checked = server ? server.managed : true;
-        openModal('serverModal');
-        if (!server) nameEl.focus();
-    }
-
-    async function saveServer() {
-        clearModalError('serverModalError');
-        const name = document.getElementById('serverName').value.trim();
-        const machineName = document.getElementById('serverMachine').value;
-        const host = document.getElementById('serverHost').value.trim();
-        const dataPath = document.getElementById('serverDataPath').value.trim();
-        if (!name) { showModalError('serverModalError', 'A server name is required.'); return; }
-        if (!machineName) { showModalError('serverModalError', 'Choose the machine that hosts the server.'); return; }
-        if (!host) { showModalError('serverModalError', 'A host is required.'); return; }
-        if (!dataPath) { showModalError('serverModalError', 'A server data path is required.'); return; }
-        const sshPortRaw = document.getElementById('serverSshPort').value.trim();
-        const body = {
-            machineName,
-            host,
-            sshPort: sshPortRaw === '' ? null : parseInt(sshPortRaw, 10),
-            borgUser: document.getElementById('serverBorgUser').value.trim() || 'borg',
-            baseRepoPath: document.getElementById('serverBaseRepoPath').value.trim() || 'home/borg/backups',
-            serverDataPath: dataPath,
-            managed: document.getElementById('serverManaged').checked
-        };
-        const btn = document.getElementById('serverSaveBtn');
-        btn.disabled = true;
-        try {
-            await jsonOrThrow(await fetch('/backup-servers/' + encodeURIComponent(name), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            }));
-            closeModal('serverModal');
-            msg('Server "' + name + '" saved.', 'success');
-            await loadServers();
-        } catch (e) {
-            showModalError('serverModalError', e.message);
-        } finally {
-            btn.disabled = false;
-        }
-    }
-
-    function confirmDeleteServer(server) {
-        openConfirm('Delete backup server',
-            'Delete server "' + server.name + '"? Repositories on it will lose their destination.',
-            async () => {
-                await jsonOrThrow(await fetch('/backup-servers/' + encodeURIComponent(server.name), { method: 'DELETE' }));
-                msg('Server "' + server.name + '" deleted.', 'success');
-                await loadServers();
-            });
     }
 
     // --- Setup script ---
@@ -1285,11 +1225,6 @@
 
     // --- Wiring ---
     function wire() {
-        document.getElementById('newServerBtn').addEventListener('click', () => openServerModal(null));
-        document.getElementById('serverCancelBtn').addEventListener('click', () => closeModal('serverModal'));
-        document.getElementById('serverSaveBtn').addEventListener('click', saveServer);
-        document.getElementById('serverName').addEventListener('input', liveSlugName);
-
         document.getElementById('setupCloseBtn').addEventListener('click', () => closeModal('setupModal'));
 
         document.getElementById('serverProvisionCloseBtn').addEventListener('click', () => {

@@ -146,6 +146,28 @@ class BackupServiceTest {
     }
 
     @Test
+    void theFleetHasAtMostOneBackupServer() {
+        // (c) first server on an empty store is allowed.
+        service.saveBackupServer(server());
+        assertThat(service.getBackupServers()).containsExactly(server());
+
+        // (b) re-saving the SAME-named server (an edit) still replaces in place.
+        BackupServer moved = new BackupServer("nas-borg", "NAS", "192.168.3.9", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", true);
+        service.saveBackupServer(moved);
+        assertThat(service.getBackupServers()).containsExactly(moved);
+
+        // (a) a second, differently-named server is rejected and not stored.
+        BackupServer another = new BackupServer("other-borg", "Other", "192.168.3.4", 8022,
+            "borg", "home/borg/backups", "/volume1/docker/borg", true);
+        assertThatThrownBy(() -> service.saveBackupServer(another))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("nas-borg");
+
+        assertThat(service.getBackupServers()).containsExactly(moved);
+    }
+
+    @Test
     void savingAJobForAnUnknownRepositoryIsRejected() {
         // No repository saved yet -> the job references a repository that does not exist.
         assertThatThrownBy(() -> service.saveBackupJob(job()))

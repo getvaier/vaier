@@ -362,6 +362,16 @@
 }
 .bk-stage.is-blocked .bk-empty b { color: var(--text-muted); }
 
+/* --- Designate link: the backup server's identity now lives in the Explorer, so both the read-only
+       card and the empty state point there instead of offering create/edit here. --- */
+.bk-designate-note { margin-top: 0.55rem; }
+.bk-designate-link {
+    font-size: 0.78rem;
+    color: var(--accent);
+    text-decoration: none;
+}
+.bk-designate-link:hover { text-decoration: underline; }
+
 /* --- Enterprise gate --- */
 .bk-gate {
     max-width: 34rem;

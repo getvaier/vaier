@@ -890,6 +890,52 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-dialog-input:focus { outline: none; border-color: var(--red); }
 .ex-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
+/* --- the backup server: identity given a coordinate ----------------------------------------------- */
+
+/* Standalone action rows (the backup entry, the designation offer) borrow .ex-lactions' button grouping but
+   not its ride-over-the-listing behaviour: they sit in the pane flow, always at full strength. */
+.ex-lactions.is-static {
+    position: static; opacity: 1;
+    padding-left: 0; gap: 8px; flex-wrap: wrap;
+    background: none;
+    margin-top: 4px;
+}
+
+/* Repositories that live on the server — read-only, one per line: its name, then where it sits. */
+.ex-brepos { display: flex; flex-direction: column; }
+.ex-brepo {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+    padding: 7px 0; border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: 14px;
+}
+.ex-brepo:last-child { border-bottom: none; }
+.ex-brepo-name { color: var(--text); white-space: nowrap; }
+.ex-brepo-path { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ex-note .ex-link { color: var(--accent); text-decoration: none; }
+.ex-note .ex-link:hover { text-decoration: underline; }
+
+/* The coordinates form, in the same dialog shell as the confirms — labelled fields stacked, left-aligned. */
+.ex-form { display: flex; flex-direction: column; gap: 13px; margin-bottom: 16px; text-align: left; }
+.ex-field { display: flex; flex-direction: column; gap: 5px; }
+.ex-field > label { font-size: 13px; color: var(--text-muted); }
+.ex-hint { font-size: 12px; color: var(--text-dim); }
+.ex-input {
+    width: 100%;
+    padding: 8px 11px;
+    background: var(--bg);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-1);
+    color: var(--text);
+    font-family: var(--mono); font-size: 14px;
+}
+.ex-input:focus { outline: none; border-color: var(--accent); }
+.ex-check-row {
+    display: flex; align-items: flex-start; gap: 9px;
+    font-size: 13px; color: var(--text-muted); line-height: 1.45; cursor: pointer;
+}
+.ex-check-row input { margin-top: 2px; accent-color: var(--accent); }
+
 @media (prefers-reduced-motion: reduce) {
     .ex-app *, .ex-app { transition: none !important; animation: none !important; }
     .ex-xfer-fill.is-indeterminate { animation: none; margin-left: 0; width: 40% !important; }

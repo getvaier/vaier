@@ -35,9 +35,9 @@
                                 <h2 class="bk-stage-title">Stand up a backup server</h2>
                                 <p class="bk-stage-desc">The machine that stores the fleet's archives — often a
                                    NAS. Vaier reaches it over SSH to install borg and to trust the machines
-                                   that back up to it.</p>
+                                   that back up to it. You designate the backup server in the Explorer;
+                                   provision it and use it from here.</p>
                             </div>
-                            <button class="btn btn-primary" id="newServerBtn">+ New server</button>
                         </div>
                         <div class="bk-list" id="serverList"><div class="loading">Loading servers…</div></div>
                     </div>
@@ -110,60 +110,6 @@
                     </div>
                 </li>
             </ol>
-        </div>
-    </div>
-
-    <!-- Backup server create/edit modal -->
-    <div id="serverModal" class="modal">
-        <div class="modal-content" style="max-width:600px;width:95%">
-            <div class="modal-header" id="serverModalTitle">New backup server</div>
-            <div id="serverModalError" style="display:none"></div>
-            <div class="form-group">
-                <label class="form-label" for="serverName">Name</label>
-                <input type="text" id="serverName" class="form-input" placeholder="e.g. nas-borg" autocomplete="off">
-                <div class="bk-field-note" id="serverNameNote">A short identifier, unique across servers.</div>
-            </div>
-            <div class="form-group">
-                <label class="form-label" for="serverMachine">Machine</label>
-                <select id="serverMachine" class="form-input"></select>
-                <div class="bk-field-note">The machine that hosts the borg server — often a LAN server such as NAS.
-                    Vaier reaches it over SSH to provision and to trust client keys.</div>
-            </div>
-            <div class="bk-form-row">
-                <div class="form-group" style="flex:2;margin-bottom:1rem">
-                    <label class="form-label" for="serverHost">Host</label>
-                    <input type="text" id="serverHost" class="form-input" placeholder="e.g. nas.apalveien5" autocomplete="off">
-                </div>
-                <div class="form-group" style="flex:1;margin-bottom:1rem">
-                    <label class="form-label" for="serverSshPort">SSH port</label>
-                    <input type="number" id="serverSshPort" class="form-input" min="1" max="65535" placeholder="8022">
-                </div>
-            </div>
-            <div class="bk-form-row">
-                <div class="form-group" style="flex:1;margin-bottom:1rem">
-                    <label class="form-label" for="serverBorgUser">Borg user</label>
-                    <input type="text" id="serverBorgUser" class="form-input" placeholder="borg" autocomplete="off">
-                </div>
-                <div class="form-group" style="flex:2;margin-bottom:1rem">
-                    <label class="form-label" for="serverBaseRepoPath">Base repository path</label>
-                    <input type="text" id="serverBaseRepoPath" class="form-input" placeholder="home/borg/backups" autocomplete="off">
-                    <div class="bk-field-note">Repositories derive their path as <code>base/&lt;name&gt;</code>. No leading slash.</div>
-                </div>
-            </div>
-            <div class="form-group">
-                <label class="form-label" for="serverDataPath">Server data path <span style="color:var(--text-dim)">(on the host)</span></label>
-                <input type="text" id="serverDataPath" class="form-input" placeholder="e.g. /volume1/docker/borg" autocomplete="off">
-                <div class="bk-field-note">Where the borg server's volumes live on its machine — used to provision it
-                    and to write trusted client keys.</div>
-            </div>
-            <div class="form-checkbox" style="margin-top:0.2rem">
-                <input type="checkbox" id="serverManaged" checked>
-                <label for="serverManaged">Vaier manages this server (provision and re-provision it from here)</label>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="serverCancelBtn">Cancel</button>
-                <button class="btn btn-primary" id="serverSaveBtn">Save server</button>
-            </div>
         </div>
     </div>
 

@@ -131,12 +131,14 @@ class ExplorerShellTest {
         // The shell is a new front for the API Vaier already has. Slice A opened nothing; slice C opened
         // exactly one endpoint (GET /machines/{machine}/disk); slice 2 (Move) opens the transfers side —
         // GET/POST /transfers — because a cross-machine copy is a genuinely new operation Vaier could not do
-        // before. Everything else here was already reachable, and a fetch to anything outside this list would
-        // mean an endpoint was invented to make the tree look finished. (The download is an <a href>, not a
-        // fetch, so it does not appear here.)
+        // before. The backup-server designation moving into the tree adds the two backup endpoints it needs —
+        // /backup-servers (list, PUT to designate/edit, DELETE to remove) and /backup-repositories (read-only,
+        // to show what lives on the server) — both already there for the Backups page. Everything else here was
+        // already reachable, and a fetch to anything outside this list would mean an endpoint was invented to
+        // make the tree look finished. (The download is an <a href>, not a fetch, so it does not appear here.)
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
                                        "/docker-services", "/published-services", "/access/services",
-                                       "/transfers");
+                                       "/transfers", "/backup-servers", "/backup-repositories");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
@@ -425,10 +427,13 @@ class ExplorerShellTest {
 
     @Test
     void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
-        // Three mutating verbs ship now, each backed by a real endpoint: DELETE (two of them — unpublish a
-        // service, slice C, and delete a file/folder, slice 5), PUT /machines/{machine}/disk/watch (#325), and
-        // POST /transfers (a cross-machine copy, slice 2). Publishing (POST /publish) still needs a form and
-        // stays on the Infrastructure bridge. The distinct verb set is pinned here; an invented one shows up.
+        // Three mutating verbs ship now, each backed by a real endpoint. DELETE unpublishes a service (slice C),
+        // deletes a file/folder (slice 5), and removes the backup-server designation. PUT sets a disk watch
+        // (#325) and designates/edits the backup server. POST copies across the fleet (/transfers, slice 2).
+        // Designating the backup server moved into the tree, but it invents no verb — it reuses PUT and DELETE
+        // against /backup-servers, endpoints the Backups page already drove. Publishing (POST /publish) still
+        // needs a form and stays on the Infrastructure bridge. The distinct verb set is pinned here; an invented
+        // one shows up.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);

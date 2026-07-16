@@ -70,6 +70,13 @@ public class BackupService implements
 
     @Override
     public void saveBackupServer(BackupServer server) {
+        servers.getAll().stream()
+            .filter(existing -> !existing.name().equals(server.name()))
+            .findFirst()
+            .ifPresent(existing -> {
+                throw new IllegalArgumentException("The fleet already has a backup server: "
+                    + existing.name() + ". Remove it before designating another.");
+            });
         servers.save(server);
     }
 
