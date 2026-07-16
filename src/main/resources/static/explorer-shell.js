@@ -826,10 +826,6 @@
             body.appendChild(grid);
         }
 
-        const addAct = el('div', 'ex-lactions is-static');
-        addAct.appendChild(selVerb('server', 'Add machine', 'ex-btn', () => addMachine()));
-        body.appendChild(addAct);
-
         body.appendChild(section('Not in the tree yet'));
         const rest = document.createElement('div');
         rest.className = 'ex-grid';
@@ -3675,6 +3671,7 @@
     // --- wiring -----------------------------------------------------------------------------------------
 
     $('exPalBtn').onclick = openPalette;
+    $('exAddBtn').onclick = () => addMachine();
     $('exScrim').onclick = (e) => { if (e.target === $('exScrim')) closePalette(); };
     $('exPalInput').oninput = () => { S.palSel = 0; paintPalette($('exPalInput').value); };
     $('exPalInput').onkeydown = (e) => {
