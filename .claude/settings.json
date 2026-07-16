@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "git diff --cached --name-only 2>/dev/null | grep -qE \"^src/main/java/.*\\.java$\" && printf \"%s\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PreToolUse\\\",\\\"permissionDecision\\\":\\\"ask\\\",\\\"permissionDecisionReason\\\":\\\"Backend Java is staged. Enforced hex rules: run the hex-architecture-checker agent on this diff and confirm it is clean (decisions in the domain — not service/controller/frontend; the domain owns port calls; services never call use cases; a side-effect is NOT a use case, trigger it via a driven port; thin controllers) before committing. See the hexagonal-architecture skill.\\\"}}\" || true"
+          }
+        ]
+      }
+    ]
+  }
+}
