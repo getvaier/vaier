@@ -106,6 +106,7 @@
         peers: new Map(),                // machine name -> its live WireGuard peer (tunnel address, liveness)
         peerNames: new Map(),            // peer id -> machine name (the SSE keys stats by id, not by name)
         lan: new Map(),                  // machine name -> its LAN server (the domain's MachineStatus)
+        serverLocation: null,            // GET /vpn/peers/server-location — the Vaier server's geo (Frankfurt), for the map
         dirs: new Map(),                 // dirKey -> one directory's read: its state, its children, its reader
         services: [],                    // GET /published-services/discover — the whole fleet's routes
         publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
@@ -841,48 +842,110 @@
     // peer (latitude/longitude/city). Leaflet, loaded from explorer.html; if it did not load, the entry says so
     // rather than breaking. The map is torn down and rebuilt on each render (rare — peer stats only repaint the
     // dots, so the map is not thrashed), and requestAnimationFrame — never a timer — settles its size.
+    // The fleet on a map — a faithful port of the Infrastructure page's map (vpn-peers-map.js). Clustered so
+    // co-located machines gather and spiderfy on click; a client shows twice — a weak marker where it connects
+    // from and a firm one where its traffic surfaces (the Vaier server); LAN servers sit at their relay; the
+    // Vaier server itself is the big marker in Frankfurt. Leaflet + markercluster load from explorer.html.
     let _map = null;
+    const MAP_STATUS = { OK: 'up', DEGRADED: 'degraded', DOWN: 'down', UNKNOWN: 'unknown' };
+    const iconByCategory = (cat) => { const k = cat ? String(cat).toLowerCase() : ''; return ICON[k] ? k : 'generic'; };
+
+    function mapMarker(latlng, iconKind, statusKey, opts) {
+        const cls = ['map-marker', statusKey];
+        if (opts && opts.big) cls.push('large');
+        if (opts && opts.weak) cls.push('weak');
+        const sz = opts && opts.big ? 36 : 28;
+        return L.marker(latlng, {
+            icon: L.divIcon({ html: '<div class="' + cls.join(' ') + '">' + svg(iconKind, 'ex-ico') + '</div>',
+                className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2] }),
+            riseOnHover: true,
+        });
+    }
+    // A popup, built from DOM elements (no interpolation) — a bold title then muted/mono lines.
+    function mapPopup(title, lines) {
+        const box = el('div');
+        const t = el('strong'); t.textContent = title; box.appendChild(t);
+        lines.forEach((ln) => {
+            if (!ln || !ln.text) return;
+            box.appendChild(el('br'));
+            const s = el('span');
+            if (ln.mono) s.style.fontFamily = 'monospace';
+            if (ln.muted) { s.style.color = '#888'; s.style.fontSize = '0.85em'; }
+            s.textContent = ln.text; box.appendChild(s);
+        });
+        return box;
+    }
+
     function renderMap(pane) {
         pane.appendChild(paneHead('Map', false, 'Where the fleet is'));
         const body = el('div', 'ex-pane-body ex-map-body');
         const holder = el('div', 'ex-map');
         body.appendChild(holder);
         pane.appendChild(body);
+        if (typeof L === 'undefined') { body.appendChild(note('The map could not load its library.', true)); return; }
+        if (_map) { try { _map.remove(); } catch (e) { /* gone */ } _map = null; }
 
-        if (typeof L === 'undefined') {
-            body.appendChild(note('The map could not load its library.', true));
-            return;
-        }
-        if (_map) { try { _map.remove(); } catch (e) { /* already gone */ } _map = null; }
-        const map = L.map(holder, { worldCopyJump: true }).setView([20, 0], 2);
+        const map = L.map(holder, { worldCopyJump: true }).setView([20, 0], 1);
         _map = map;
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
             { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+        const cluster = L.markerClusterGroup({ showCoverageOnHover: false, spiderfyOnMaxZoom: true, maxClusterRadius: 30 });
+        map.addLayer(cluster);
 
+        const loc = S.serverLocation;
+        const hasLoc = loc && loc.latitude != null && loc.longitude != null;
         const coords = [];
-        S.machines.forEach((m) => {
-            const p = S.peers.get(m.name);
-            if (!p || p.latitude == null || p.longitude == null) return;
-            // The same device icon the tree draws, in a circle coloured by the same liveness the dots use —
-            // a divIcon, so there are no default marker images to mis-resolve (which is why they were blank).
-            const icon = L.divIcon({
-                html: '<div class="ex-map-marker ' + livenessOf(m.name) + '">'
-                    + svg(machineIcon(m.name), 'ex-map-ico') + '</div>',
-                className: '', iconSize: [30, 30], iconAnchor: [15, 15],
-            });
-            const marker = L.marker([p.latitude, p.longitude], { icon }).addTo(map);
-            const pop = el('div');
-            const nm = el('b'); nm.textContent = m.name; pop.appendChild(nm);
-            const where = [p.city, p.country].filter(Boolean).join(', ');
-            if (where) { pop.appendChild(el('br')); const w = el('span'); w.textContent = where; pop.appendChild(w); }
-            pop.appendChild(el('br'));
-            const st = el('span'); st.textContent = p.connected ? 'online' : 'offline'; pop.appendChild(st);
-            marker.bindPopup(pop);
-            coords.push([p.latitude, p.longitude]);
+        const add = (marker, ll) => { cluster.addLayer(marker); coords.push(ll); };
+
+        Array.from(S.peers.values()).forEach((p) => {
+            if (p.latitude == null || p.longitude == null) return;
+            const statusKey = p.connected ? 'up' : 'down';
+            const iconKind = iconByCategory(p.deviceCategory);
+            const place = [p.city, p.country].filter(Boolean).join(', ');
+            if (p.isClient) {
+                const weak = mapMarker([p.latitude, p.longitude], iconKind, statusKey, { weak: true });
+                weak.bindPopup(mapPopup(p.name, [{ text: 'connecting from', muted: true },
+                    { text: p.endpointIp, mono: true }, { text: place }, { text: 'approx. ISP location', muted: true }]));
+                add(weak, [p.latitude, p.longitude]);
+                if (hasLoc) {
+                    const firm = mapMarker([loc.latitude, loc.longitude], iconKind, statusKey);
+                    firm.bindPopup(mapPopup(p.name, [{ text: 'internet via Vaier', muted: true },
+                        { text: [loc.city, loc.country].filter(Boolean).join(', ') }]));
+                    add(firm, [loc.latitude, loc.longitude]);
+                }
+            } else {
+                const firm = mapMarker([p.latitude, p.longitude], iconKind, statusKey);
+                firm.bindPopup(mapPopup(p.name, [{ text: p.endpointIp, mono: true }, { text: place }]));
+                add(firm, [p.latitude, p.longitude]);
+            }
         });
-        if (coords.length) map.fitBounds(coords, { padding: [40, 40], maxZoom: 9 });
+
+        Array.from(S.lan.values()).forEach((s) => {
+            if (!s.relayPeerName) return;
+            let lat, lon;
+            if (s.relayPeerName === VAIER_SERVER) {
+                if (!hasLoc) return; lat = loc.latitude; lon = loc.longitude;
+            } else {
+                const relay = S.peers.get(s.relayPeerName);
+                if (!relay || relay.latitude == null || relay.longitude == null) return;
+                lat = relay.latitude; lon = relay.longitude;
+            }
+            const firm = mapMarker([lat, lon], iconByCategory(s.deviceCategory), MAP_STATUS[s.status] || 'unknown');
+            firm.bindPopup(mapPopup(s.name, [{ text: 'Behind ' + s.relayPeerName, muted: true },
+                { text: s.lanAddress, mono: true },
+                { text: s.runsDocker ? 'Docker on :' + s.dockerPort : '', muted: true }]));
+            add(firm, [lat, lon]);
+        });
+
+        if (hasLoc) {
+            const m = mapMarker([loc.latitude, loc.longitude], 'server', 'up', { big: true });
+            m.bindPopup(mapPopup('Vaier server', [{ text: loc.publicHost, mono: true },
+                { text: [loc.city, loc.country].filter(Boolean).join(', ') }]));
+            add(m, [loc.latitude, loc.longitude]);
+        }
+
+        if (coords.length) map.fitBounds(L.latLngBounds(coords).pad(0.3), { maxZoom: 5 });
         else body.appendChild(note('No machine has a known location yet.', false));
-        // Leaflet mis-measures a container that only just entered the layout; a frame later it is correct.
         requestAnimationFrame(() => { try { map.invalidateSize(); } catch (e) { /* torn down */ } });
     }
 
@@ -3547,6 +3610,11 @@
         } catch (e) { /* a fleet with no peers is a fleet, not a failure */ }
 
         await loadLanServers();
+
+        try {
+            const res = await fetch('/vpn/peers/server-location');
+            S.serverLocation = res.ok ? await res.json() : null;
+        } catch (e) { S.serverLocation = null; }
 
         // The fleet just changed shape. A machine that left must not leave its directories behind in the
         // cache, and a read still in flight for it must not be able to put them back (readDir checks that

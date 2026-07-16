@@ -940,17 +940,20 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
 .ex-map-body { padding: 0; }
 .ex-map { width: 100%; height: 72vh; min-height: 360px; border-radius: var(--radius-1); overflow: hidden; }
 .ex-map .leaflet-popup-content { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
-/* A map marker: the device icon in a circle, ringed by its liveness colour. */
-.ex-map-marker {
-    display: flex; align-items: center; justify-content: center;
-    width: 30px; height: 30px; border-radius: 50%;
-    background: var(--bg-panel); border: 2px solid var(--text-dim);
-    color: var(--text); box-shadow: 0 1px 5px rgba(0, 0, 0, .5);
+/* Map markers — copied from the Infrastructure page so the two maps read identically: the device icon in a
+   circle filled by its status, a dashed weak marker for a client's carrier IP, a larger one for the server. */
+.map-marker {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 2px solid #1e1e1e; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center; color: #fff;
 }
-.ex-map-marker.is-up { border-color: var(--green); }
-.ex-map-marker.is-down { border-color: var(--red); }
-.ex-map-marker.is-degraded { border-color: var(--yellow); }
-.ex-map-marker .ex-map-ico { width: 16px; height: 16px; }
+.map-marker svg { width: 60%; height: 60%; }
+.map-marker.up { background: var(--green); }
+.map-marker.down { background: var(--red); }
+.map-marker.degraded { background: var(--yellow); }
+.map-marker.unknown { background: var(--text-dim); }
+.map-marker.weak { opacity: 0.55; border-style: dashed; }
+.map-marker.large { width: 36px; height: 36px; border-width: 3px; }
 
 .ex-note .ex-link { color: var(--accent); text-decoration: none; }
 .ex-note .ex-link:hover { text-decoration: underline; }
