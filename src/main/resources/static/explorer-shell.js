@@ -1018,6 +1018,16 @@
             body.appendChild(act);
         }
 
+        // The SSH login Vaier holds for this machine — what opens its files, shell, disk and backups. Offered on
+        // any machine Vaier would SSH (a server or a LAN server), never on a phone or laptop client.
+        if (m.type !== 'MOBILE_CLIENT' && m.type !== 'WINDOWS_CLIENT') {
+            body.appendChild(section('SSH credential'));
+            const cred = el('div', 'ex-lactions is-static');
+            cred.appendChild(selVerb('gear', m.sshAccess ? 'Edit SSH credential' : 'Set SSH credential', 'ex-btn',
+                () => credentialDialog(m.name)));
+            body.appendChild(cred);
+        }
+
         // Removing a machine is destructive — its WireGuard peer (or LAN-server registration) is deleted and it
         // can no longer reach the VPN — so it takes the typed-name gate. The Vaier server is this machine; it is
         // never offered for removal.
@@ -1192,6 +1202,99 @@
         const onKey = (e) => { if (e.key === 'Escape') close(); };
         done.onclick = close;
         document.addEventListener('keydown', onKey);
+    }
+
+    // The SSH credential Vaier holds for a machine, ported from the Infrastructure page's modal. Loads the
+    // stored username/method on open (the secret is never returned), saves a new one, or forgets it. This is
+    // what turns a machine's files/shell/disk/backups on — without it they are dark.
+    function credentialDialog(machine) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog');
+        const h = el('div', 'ex-dialog-title'); h.textContent = 'SSH credential — ' + machine;
+        const status = el('div', 'ex-dialog-body'); status.textContent = 'Checking…';
+        const form = el('div', 'ex-form');
+        const field = (label, hint, control) => {
+            const f = el('div', 'ex-field'); const l = el('label'); l.textContent = label; f.append(l, control);
+            if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+            return f;
+        };
+        const username = el('input', 'ex-input'); username.type = 'text'; username.autocomplete = 'off'; username.spellcheck = false;
+        const method = el('select', 'ex-input');
+        [['PASSWORD', 'Password'], ['PRIVATE_KEY', 'Private key']].forEach(([v, t]) => {
+            const o = el('option'); o.value = v; o.textContent = t; method.appendChild(o);
+        });
+        const password = el('input', 'ex-input'); password.type = 'password'; password.autocomplete = 'new-password';
+        const keyArea = el('textarea', 'ex-input ex-cred-key'); keyArea.rows = 4;
+        keyArea.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----'; keyArea.spellcheck = false;
+        const passphrase = el('input', 'ex-input'); passphrase.type = 'password'; passphrase.autocomplete = 'new-password';
+        const passF = field('Key passphrase', 'Optional.', passphrase);
+        const pwF = field('Password', null, password);
+        const keyF = field('Private key (PEM)', null, keyArea);
+        form.append(field('Username', null, username), field('Auth method', null, method), pwF, keyF, passF);
+        const syncMethod = () => {
+            const isKey = method.value === 'PRIVATE_KEY';
+            pwF.style.display = isKey ? 'none' : '';
+            keyF.style.display = isKey ? '' : 'none';
+            passF.style.display = isKey ? '' : 'none';
+        };
+        method.onchange = syncMethod; syncMethod();
+
+        const actions = el('div', 'ex-dialog-actions');
+        const del = el('button', 'ex-btn is-danger'); del.textContent = 'Delete';
+        del.style.display = 'none'; del.style.marginRight = 'auto';
+        const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+        const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Save';
+        actions.append(del, cancel, ok);
+        dialog.append(h, status, form, actions);
+        scrim.appendChild(dialog); document.body.appendChild(scrim);
+
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        cancel.onclick = close;
+        scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
+        username.focus();
+
+        fetch('/machines/' + encodeURIComponent(machine) + '/ssh-credential').then(async (r) => {
+            if (r.status === 404) { status.textContent = 'No credential stored yet.'; return; }
+            if (!r.ok) { status.textContent = 'Could not read the credential status.'; return; }
+            const v = await r.json();
+            username.value = v.username || '';
+            method.value = v.authMethod || 'PASSWORD'; syncMethod();
+            del.style.display = v.hasSecret ? '' : 'none';
+            status.textContent = 'Stored for ' + (v.username || '') + ' · '
+                + (v.authMethod || '').toLowerCase().replace('_', ' ') + '. Enter the secret again to replace it.';
+        }).catch(() => { status.textContent = 'Could not reach Vaier.'; });
+
+        ok.onclick = async () => {
+            const secret = method.value === 'PRIVATE_KEY' ? keyArea.value : password.value;
+            if (!username.value.trim()) { toast('Enter a username.'); return; }
+            if (!secret.trim()) { toast('Enter the ' + (method.value === 'PRIVATE_KEY' ? 'private key' : 'password') + '.'); return; }
+            ok.disabled = true;
+            try {
+                const r = await fetch('/machines/' + encodeURIComponent(machine) + '/ssh-credential', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username.value.trim(), authMethod: method.value,
+                        secret: secret, passphrase: passphrase.value || null }),
+                });
+                if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.message || 'Could not save the credential.'); ok.disabled = false; return; }
+                toast('SSH credential saved for ' + machine + '.');
+                close(); await loadFleet(); render();
+            } catch (e) { toast('Could not save the credential.'); ok.disabled = false; }
+        };
+
+        del.onclick = async () => {
+            const sure = await confirmModal('Delete the SSH credential for ' + machine + '?',
+                'Vaier forgets the login it holds for ' + machine + '. Its files, shell, disk and backups go dark '
+                + 'until you set one again.', 'Delete');
+            if (!sure) return;
+            try {
+                const r = await fetch('/machines/' + encodeURIComponent(machine) + '/ssh-credential', { method: 'DELETE' });
+                if (!r.ok && r.status !== 204) { toast('Could not delete the credential.'); return; }
+                toast('SSH credential deleted.');
+                close(); await loadFleet(); render();
+            } catch (e) { toast('Could not delete the credential.'); }
+        };
     }
 
     // --- containers: what Vaier can see, and nothing it cannot do ---------------------------------------
