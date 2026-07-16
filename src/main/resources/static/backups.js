@@ -16,7 +16,6 @@
     const pendingRunJobs = new Set();  // job names awaiting a `run-settled` SSE event (never polled)
     let pendingProvision = null; // { serverName } while awaiting a `provision-settled` SSE event
     let pendingPrepare = null;   // { job, machineName } while awaiting a prepare-client SSE settle event
-    let editingRepoName = null;  // null while creating
     let editingJobName = null;
     let authorizeServerName = null;
     let confirmCallback = null;
@@ -65,20 +64,6 @@
         const d = new Date(iso);
         if (isNaN(d.getTime())) return '';
         return d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-    }
-
-    // Crypto-strong, alphanumeric passphrase — no quotes or shell metacharacters, so it is safe to
-    // hand to borg over SSH. Rejection sampling keeps the character distribution uniform (no modulo bias).
-    function generatePassphrase(length) {
-        const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        const threshold = 256 - (256 % alphabet.length);
-        const out = [];
-        const byte = new Uint8Array(1);
-        while (out.length < (length || 32)) {
-            crypto.getRandomValues(byte);
-            if (byte[0] < threshold) out.push(alphabet[byte[0] % alphabet.length]);
-        }
-        return out.join('');
     }
 
     async function copyToClipboard(text, btn) {
@@ -200,7 +185,6 @@
         setNode('repoNode', '2', repos.length > 0);
         setNode('jobNode', '3', jobs.length > 0);
 
-        blockButton('newRepoBtn', servers.length === 0, 'Add a backup server first');
         blockButton('newJobBtn', repos.length === 0, 'Add a backup repository first');
         updateScheduleSummary();
     }
@@ -508,15 +492,19 @@
         }
     }
 
+    // Repositories are created, edited, deleted and browsed in the Explorer now, on the backup server's
+    // `backup` entry. This link points there from both the empty state and the read-only list.
+    const MANAGE_REPOS_LINK =
+        '<a class="bk-designate-link" href="/explorer.html">Manage repositories in the Explorer</a>';
+
+    // Read-only: each repository's name, its effective path, and its badges. There are no actions here —
+    // adding, editing, deleting and browsing archives all live in the Explorer.
     function renderRepos() {
         const list = document.getElementById('repoList');
         if (repos.length === 0) {
-            list.innerHTML = servers.length === 0
-                ? `<div class="bk-empty"><b>Waiting on step 1.</b>
-                    A repository lives inside a backup server, so there's nowhere to put one yet.</div>`
-                : `<div class="bk-empty"><b>Name a repository.</b>
-                    Vaier derives its path on ${escapeHtml(servers[0].name)} and generates a passphrase for
-                    it. Give each machine its own.</div>`;
+            list.innerHTML = `<div class="bk-empty"><b>No repositories yet.</b>
+                You add repositories in the Explorer, on the backup server's backup entry.
+                <div class="bk-designate-note">${MANAGE_REPOS_LINK}</div></div>`;
             return;
         }
         list.innerHTML = '';
@@ -536,178 +524,13 @@
                         <span><span class="bk-meta-k">Path</span><span class="bk-meta-v">${escapeHtml(repo.repoPath)}</span></span>
                     </div>
                     <div class="bk-tags">${tags.join('')}</div>
-                </div>
-                <div class="bk-item-actions">
-                    <button class="btn btn-small btn-secondary js-archives">Browse archives</button>
                 </div>`;
-            el.querySelector('.js-archives').addEventListener('click', () => browseArchives(repo));
-            // No Initialise action: a run creates the repository if it is absent. The endpoint that does it
-            // borrows a host from a job targeting the repository, so a button here could only ever fail on a
-            // repository no job references yet — the moment its name most invites pressing it.
-            el.querySelector('.bk-item-actions').appendChild(actionMenu([
-                { label: 'Edit', onClick: () => openRepoModal(repo) },
-                { label: 'Delete', cls: 'btn-danger', onClick: () => confirmDeleteRepo(repo) }
-            ]));
             list.appendChild(el);
         });
-    }
-
-    // A repository/server name is a shell/path token server-side, so it is confined to [A-Za-z0-9_-]
-    // (BackupRepository.name / BackupServer.name). Slug the field as the operator types — spaces and other
-    // characters become hyphens — so "NUC 02" is accepted as "NUC-02" and a name that would be rejected
-    // (400) can never be submitted. The replacement is 1:1, so the caret position is preserved.
-    function slugName(raw) {
-        return raw.replace(/[^A-Za-z0-9_-]/g, '-');
-    }
-
-    function liveSlugName(ev) {
-        const el = ev.target;
-        const caret = el.selectionStart;
-        const slugged = slugName(el.value);
-        if (slugged !== el.value) {
-            el.value = slugged;
-            el.setSelectionRange(caret, caret);
-        }
-    }
-
-    // Live preview of where a new/edited repository will point, mirroring the server's derivation
-    // (base/<name>) unless a custom path overrides it.
-    function updateDerivedPath() {
-        const el = document.getElementById('repoDerived');
-        const serverName = document.getElementById('repoServer').value;
-        const name = document.getElementById('repoName').value.trim();
-        const custom = document.getElementById('repoPath').value.trim();
-        const server = servers.find(s => s.name === serverName);
-        let path;
-        if (custom) {
-            path = custom;
-        } else if (server && name) {
-            path = server.baseRepoPath + '/' + name;
-        } else {
-            el.innerHTML = '';
-            return;
-        }
-        el.innerHTML = `<span class="bk-meta-k">Points at</span><code>${escapeHtml(path)}</code>`;
-    }
-
-    function openRepoModal(repo) {
-        editingRepoName = repo ? repo.name : null;
-        clearModalError('repoModalError');
-        document.getElementById('repoModalTitle').textContent = repo ? 'Edit backup repository' : 'New backup repository';
-        const nameEl = document.getElementById('repoName');
-        nameEl.value = repo ? repo.name : '';
-        nameEl.disabled = !!repo;
-        document.getElementById('repoNameNote').style.display = repo ? 'none' : '';
-        fillSelect('repoServer', servers.map(s => s.name), repo ? repo.serverName : null,
-            servers.length ? 'Select a server' : 'No servers yet — add one above');
-
-        // Custom path (advanced): only pre-open/pre-fill when editing a repo that carries an explicit override.
-        // The response repoPath is the effective path, so a value equal to the derived base/<name> is treated
-        // as "derived" and left collapsed.
-        const server = repo ? servers.find(s => s.name === repo.serverName) : null;
-        const derived = server ? server.baseRepoPath + '/' + repo.name : null;
-        const hasCustom = !!repo && repo.repoPath && repo.repoPath !== derived;
-        document.getElementById('repoPath').value = hasCustom ? repo.repoPath : '';
-        setDisclosure(hasCustom);
-
-        const passGroup = document.getElementById('repoPassphraseGroup');
-        const passEl = document.getElementById('repoPassphrase');
-        const warn = document.getElementById('repoPassphraseWarn');
-        if (repo) {
-            // Editing: never auto-generate. Blank keeps the stored secret.
-            passEl.value = '';
-            passEl.placeholder = 'Leave blank to keep the stored passphrase';
-            warn.textContent = repo.hasPassphrase
-                ? 'A passphrase is stored. Leave blank to keep it, or type a new one to replace it.'
-                : 'No passphrase stored yet. Type one, or generate a strong one.';
-            warn.classList.remove('bk-passphrase-strong');
-        } else {
-            // Creating: pre-fill a strong passphrase, shown once.
-            passEl.value = generatePassphrase(32);
-            passEl.placeholder = '';
-            warn.textContent = 'Auto-generated. Vaier stores this encrypted — copy it somewhere safe now, it can\'t be shown again.';
-            warn.classList.add('bk-passphrase-strong');
-        }
-        passGroup.style.display = '';
-        document.getElementById('repoAppendOnly').checked = repo ? repo.appendOnly : false;
-        updateDerivedPath();
-        openModal('repoModal');
-        if (!repo) nameEl.focus();
-    }
-
-    function setDisclosure(open) {
-        const toggle = document.getElementById('repoPathToggle');
-        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-        toggle.classList.toggle('open', open);
-        document.getElementById('repoPathAdvanced').style.display = open ? '' : 'none';
-    }
-
-    async function saveRepo() {
-        clearModalError('repoModalError');
-        const name = document.getElementById('repoName').value.trim();
-        const serverName = document.getElementById('repoServer').value;
-        const repoPath = document.getElementById('repoPath').value.trim();
-        const passphrase = document.getElementById('repoPassphrase').value;
-        if (!name) { showModalError('repoModalError', 'A repository name is required.'); return; }
-        if (!serverName) { showModalError('repoModalError', 'Choose a backup server.'); return; }
-        if (!editingRepoName && !passphrase.trim()) {
-            showModalError('repoModalError', 'A passphrase is required when creating a repository.');
-            return;
-        }
-        const body = {
-            serverName,
-            repoPath: repoPath === '' ? null : repoPath,   // blank derives base/<name> server-side
-            passphrase,                                     // blank on edit keeps the stored secret
-            appendOnly: document.getElementById('repoAppendOnly').checked
-        };
-        const btn = document.getElementById('repoSaveBtn');
-        btn.disabled = true;
-        try {
-            const saved = await jsonOrThrow(await fetch('/backup-repositories/' + encodeURIComponent(name), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            }));
-            closeModal('repoModal');
-            msg('Repository "' + name + '" saved — points at ' + (saved ? saved.repoPath : '') + '.', 'success');
-            await loadRepositories();
-        } catch (e) {
-            showModalError('repoModalError', e.message);
-        } finally {
-            btn.disabled = false;
-        }
-    }
-
-    function confirmDeleteRepo(repo) {
-        openConfirm('Delete backup repository',
-            'Delete repository "' + repo.name + '"? Jobs targeting it will no longer have a destination.',
-            async () => {
-                await jsonOrThrow(await fetch('/backup-repositories/' + encodeURIComponent(repo.name), { method: 'DELETE' }));
-                msg('Repository "' + repo.name + '" deleted.', 'success');
-                await loadRepositories();
-            });
-    }
-
-    async function browseArchives(repo) {
-        document.getElementById('archivesModalTitle').textContent = 'Archives · ' + repo.name;
-        const body = document.getElementById('archivesBody');
-        body.innerHTML = '<div class="loading">Loading archives…</div>';
-        openModal('archivesModal');
-        try {
-            const archives = await jsonOrThrow(await fetch('/backup-repositories/' + encodeURIComponent(repo.name) + '/archives', { cache: 'no-store' }));
-            if (!archives.length) {
-                body.innerHTML = `<div class="bk-empty">No archives found.<br>Archives appear here once a job has run against this repository from a reachable machine.</div>`;
-                return;
-            }
-            const rows = archives.map(a => `
-                <div class="bk-archive-row">
-                    <span class="bk-archive-name">${escapeHtml(a.name)}</span>
-                    <span class="bk-archive-time">${escapeHtml(formatTime(a.time))}</span>
-                </div>`).join('');
-            body.innerHTML = `<div class="bk-archive-list">${rows}</div>`;
-        } catch (e) {
-            body.innerHTML = `<div class="error">Couldn't list archives: ${escapeHtml(e.message)}</div>`;
-        }
+        const note = document.createElement('div');
+        note.className = 'bk-designate-note';
+        note.innerHTML = MANAGE_REPOS_LINK;
+        list.appendChild(note);
     }
 
     // --- Jobs ---
@@ -1235,26 +1058,10 @@
         document.getElementById('authorizeCloseBtn').addEventListener('click', () => closeModal('authorizeModal'));
         document.getElementById('authorizeOkBtn').addEventListener('click', authorizeHost);
 
-        document.getElementById('newRepoBtn').addEventListener('click', () => openRepoModal(null));
-        document.getElementById('repoCancelBtn').addEventListener('click', () => closeModal('repoModal'));
-        document.getElementById('repoSaveBtn').addEventListener('click', saveRepo);
-        document.getElementById('repoServer').addEventListener('change', updateDerivedPath);
-        document.getElementById('repoName').addEventListener('input', liveSlugName);
-        document.getElementById('repoName').addEventListener('input', updateDerivedPath);
-        document.getElementById('repoPath').addEventListener('input', updateDerivedPath);
-        document.getElementById('repoPathToggle').addEventListener('click', () =>
-            setDisclosure(document.getElementById('repoPathToggle').getAttribute('aria-expanded') !== 'true'));
-        document.getElementById('repoPassRegenBtn').addEventListener('click', () => {
-            document.getElementById('repoPassphrase').value = generatePassphrase(32);
-        });
-        document.getElementById('repoPassCopyBtn').addEventListener('click', ev =>
-            copyToClipboard(document.getElementById('repoPassphrase').value, ev.currentTarget));
-
         document.getElementById('newJobBtn').addEventListener('click', () => openJobModal(null));
         document.getElementById('jobCancelBtn').addEventListener('click', () => closeModal('jobModal'));
         document.getElementById('jobSaveBtn').addEventListener('click', saveJob);
 
-        document.getElementById('archivesCloseBtn').addEventListener('click', () => closeModal('archivesModal'));
         document.getElementById('provisionCloseBtn').addEventListener('click', () => closeModal('provisionModal'));
 
         document.getElementById('confirmCancelBtn').addEventListener('click', () => { closeModal('confirmModal'); confirmCallback = null; });

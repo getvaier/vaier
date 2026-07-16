@@ -113,7 +113,8 @@
         transfers: new Map(),            // id -> a live/settled Transfer, streamed in over the transfers SSE topic
         sel: new Set(),                  // paths ticked in the current directory listing (multi-select)
         backupServer: null,              // GET /backup-servers — the fleet's one backup server, or null when none is designated
-        backupRepos: [],                 // GET /backup-repositories — the repositories that live on it, shown read-only
+        backupRepos: [],                 // GET /backup-repositories — the repositories that live on it
+        repoArchives: new Map(),         // repo name -> { state, list, error }: the archives in a repository, read when looked at
         palSel: 0,
     };
 
@@ -139,7 +140,7 @@
             return BRIDGES.some((b) => b.name === path[1]) ? 'bridge' : 'machine';
         }
         if (path[2] === 'shell') return 'shell';
-        if (path[2] === 'backup') return 'backup';
+        if (path[2] === 'backup') return path.length === 3 ? 'backup' : 'repo';
         if (path[2] === 'disk') return 'disk';
         if (path[2] === 'containers') return path.length === 3 ? 'containers' : 'container';
         if (path[2] === 'services') return path.length === 3 ? 'services' : 'service';
@@ -189,6 +190,9 @@
 
     const servicesOn = (machine) => S.services.filter((s) => machineOfService(s) === machine);
     const containersOn = (machine) => S.containers.get(machine) || [];
+    // The repositories that live on a backup server, filtered by the server they name. One server, so this is
+    // every repository Vaier knows — but the filter keeps it honest if a stale repo names a server that is gone.
+    const reposOn = (server) => (server ? S.backupRepos.filter((r) => r.serverName === server.name) : []);
 
     function childrenOf(path) {
         const kind = kindOf(path);
@@ -215,6 +219,10 @@
                 kids.push({ name: 'backup', kind: 'backup' });
             }
             return kids;
+        }
+        if (kind === 'backup') {
+            // The backup server's children are its repositories — the coordinate they hang under is the server's.
+            return reposOn(S.backupServer).map((r) => ({ name: r.name, kind: 'repo' }));
         }
         if (kind === 'containers') {
             return containersOn(path[1]).map((c) => ({ name: c.containerName, kind: 'container' }));
@@ -442,7 +450,7 @@
 
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
                        shell: 'shell', containers: 'box', container: 'box', services: 'route',
-                       service: 'route', disk: 'disk', backup: 'archive' };
+                       service: 'route', disk: 'disk', backup: 'archive', repo: 'box' };
 
     // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
     // read off its device category. A category with no icon (or a machine not yet loaded) falls back to the
@@ -462,7 +470,7 @@
     // Mono for anything with a coordinate, sans for anything human. A machine name, a path, a container name
     // and a DNS name are addresses; "Backups" is a word.
     const MONO_KINDS = new Set(['machine', 'files', 'dir', 'file', 'containers', 'container', 'services',
-                                'service', 'disk', 'backup']);
+                                'service', 'disk', 'backup', 'repo']);
 
     // --- liveness --------------------------------------------------------------------------------------
     //
@@ -716,6 +724,7 @@
         if (kind === 'services') return renderServices(pane);
         if (kind === 'service') return renderService(pane);
         if (kind === 'backup') return renderBackup(pane);
+        if (kind === 'repo') return renderRepo(pane);
         if (kind === 'disk') return renderDisk(pane);
         return renderDirectory(pane);
     }
@@ -1243,18 +1252,19 @@
             ['Stood up by Vaier', s.managed ? 'Yes' : 'No — adopted'],
         ]));
 
-        // The repositories that live here, read-only. They are created and managed on the Backups page — the
-        // tree names them and where they sit, it does not write them.
+        // The repositories that live here — each an entry of its own (open it for its path, archives and the
+        // Edit/Delete of it). This is where a repository is made now, not on the Backups page.
         body.appendChild(section('Repositories'));
-        const repos = S.backupRepos.filter((r) => r.serverName === s.name);
+        const repos = reposOn(s);
         if (!repos.length) {
-            body.appendChild(note('No repositories on this server yet. Add one on the Backups page.', false));
+            body.appendChild(note('No repositories on this server yet. Add the first one below.', false));
         } else {
             const list = el('div', 'ex-brepos');
             repos.forEach((r) => {
                 const row = el('div', 'ex-brepo');
-                const nm = el('span', 'ex-brepo-name');
+                const nm = el('button', 'ex-brepo-name is-link');
                 nm.textContent = r.name;
+                nm.onclick = () => go(['fleet', machine, 'backup', r.name]);
                 const path = el('span', 'ex-brepo-path');
                 path.textContent = r.repoPath || '';
                 row.append(nm, path);
@@ -1262,6 +1272,9 @@
             });
             body.appendChild(list);
         }
+        const repoActs = el('div', 'ex-lactions is-static');
+        repoActs.appendChild(selVerb('box', 'New repository', 'ex-btn', () => newRepository(s)));
+        body.appendChild(repoActs);
 
         // Actions: identity only. The operations that poll for an outcome live on the Backups bridge.
         body.appendChild(section('Designation'));
@@ -1271,8 +1284,7 @@
         body.appendChild(acts);
 
         const bridge = el('div', 'ex-note');
-        bridge.appendChild(document.createTextNode('Provision the server, authorize clients and manage '
-            + 'repositories on the '));
+        bridge.appendChild(document.createTextNode('Provision the server and authorize clients on the '));
         const link = el('a', 'ex-link');
         link.href = '/backups.html';
         link.textContent = 'Backups page';
@@ -1448,6 +1460,264 @@
             sync();
             host.focus();
         });
+    }
+
+    // --- a backup repository: a named store on the server, with the archives inside it -----------------
+    //
+    // A repository is a child of the server it lives on, so it hangs under the `backup` entry as its own
+    // coordinate. Its Inspector shows where it sits and what is in it, and lets you edit or forget it — all
+    // single calls, none of which poll, so the whole of repository management lives here rather than on the
+    // Backups page. The archives are read when the repository is looked at (borg list runs on a job's host),
+    // never polled — a nightly archive lands on a reload, not under the cursor.
+
+    function renderRepo(pane) {
+        const machine = S.path[1];
+        const name = S.path[3];
+        const s = S.backupServer;
+        const r = reposOn(s).find((x) => x.name === name);
+        if (!r) return pane.appendChild(note('That repository is no longer on this server.', true));
+
+        pane.appendChild(paneHead(name, true, 'Backup repository on ' + (s ? s.name : '')));
+        const body = el('div', 'ex-pane-body');
+        body.appendChild(kv([
+            ['Repository path', r.repoPath],
+            ['Append-only', r.appendOnly ? 'Yes' : 'No'],
+            ['Passphrase', r.hasPassphrase ? 'Stored in the vault' : 'None'],
+        ]));
+
+        body.appendChild(section('Repository'));
+        const acts = el('div', 'ex-lactions is-static');
+        acts.appendChild(selVerb('gear', 'Edit', 'ex-btn', () => editRepository(r)));
+        acts.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => deleteRepository(r)));
+        body.appendChild(acts);
+
+        // The archives inside, read on view. A repository nothing targets has no host to read it from, so the
+        // answer is an empty list, not an error — the note says which case it is.
+        body.appendChild(section('Archives'));
+        const held = S.repoArchives.get(name);
+        if (!held || held.state === 'loading') {
+            body.appendChild(note('Reading the archives in this repository…', false));
+            loadRepoArchives(name);
+        } else if (held.state === 'error') {
+            body.appendChild(note(held.error, true));
+        } else if (!held.list.length) {
+            body.appendChild(note('No archives to show. Nothing has been backed up into this repository yet, or '
+                + 'no job targets it — borg list runs on a job’s host, so without one Vaier has nowhere to read '
+                + 'it from.', false));
+        } else {
+            const list = el('div', 'ex-brepos');
+            held.list.forEach((a) => {
+                const row = el('div', 'ex-brepo');
+                const nm = el('span', 'ex-brepo-name');
+                nm.textContent = a.name;
+                const when = el('span', 'ex-brepo-path');
+                when.textContent = timeAgo(a.time);
+                row.append(nm, when);
+                list.appendChild(row);
+            });
+            body.appendChild(list);
+        }
+        pane.appendChild(body);
+    }
+
+    async function loadRepoArchives(name) {
+        const held = S.repoArchives.get(name);
+        if (held && (held.state === 'loading' || held.state === 'ready')) return;   // once per look
+        S.repoArchives.set(name, { state: 'loading', list: [], error: null });
+        try {
+            const res = await fetch('/backup-repositories/' + encodeURIComponent(name) + '/archives',
+                { cache: 'no-store' });
+            if (res.ok) {
+                S.repoArchives.set(name, { state: 'ready', list: await res.json(), error: null });
+            } else {
+                const b = await res.json().catch(() => ({}));
+                S.repoArchives.set(name, { state: 'error', list: [],
+                    error: b.message || 'Vaier could not read this repository’s archives.' });
+            }
+        } catch (e) {
+            S.repoArchives.set(name, { state: 'error', list: [],
+                error: 'Vaier could not read this repository’s archives.' });
+        }
+        render();
+    }
+
+    // Make a repository on the server. The server is the context, so the form asks only the repository's own
+    // name, an optional path override (it derives under the server's base path when blank), append-only, and a
+    // passphrase — pre-filled with a strong generated one, shown once, because a repository that cannot be
+    // unlocked is a repository that cannot be restored. Vaier stores it encrypted in the vault regardless.
+    function newRepository(s) {
+        repoForm({
+            title: 'New repository on ' + s.name,
+            intro: 'A named borg store on ' + s.name + '. Its path derives under the server’s base path unless '
+                + 'you override it.',
+            existing: null,
+            confirmLabel: 'Create',
+        }).then((body) => {
+            if (body) putRepository(body.name, s.name, body, 'created');
+        });
+    }
+
+    function editRepository(r) {
+        repoForm({
+            title: 'Edit ' + r.name,
+            intro: 'The path override and append-only setting of this repository. Leave the passphrase blank to '
+                + 'keep the stored one.',
+            existing: r,
+            confirmLabel: 'Save',
+        }).then((body) => {
+            if (body) putRepository(r.name, r.serverName, body, 'saved');
+        });
+    }
+
+    async function putRepository(name, serverName, body, verbedPast) {
+        try {
+            const res = await fetch('/backup-repositories/' + encodeURIComponent(name), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serverName: serverName, repoPath: body.repoPath,
+                    passphrase: body.passphrase, appendOnly: body.appendOnly }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not save the repository.');
+                return;
+            }
+            await loadBackup();
+            S.repoArchives.delete(name);   // a re-saved repo re-reads its archives fresh
+            toast('Repository ' + verbedPast + '.');
+            go(['fleet', S.path[1], 'backup', name]);
+        } catch (e) {
+            toast('Vaier could not save the repository.');
+        }
+    }
+
+    // Deleting a repository forgets it in Vaier — it does not erase the borg store on the server. That is the
+    // safe default (the archives on disk are the whole point of a backup), so it takes a plain confirm rather
+    // than the typed-name gate a file delete does.
+    async function deleteRepository(r) {
+        const ok = await confirmModal('Delete repository ' + r.name + '?',
+            'Vaier forgets this repository — it does not erase the borg store on ' + r.serverName + ' or the '
+            + 'archives in it. Any backup job pointing at it will have nowhere to write until you re-add it.',
+            'Delete');
+        if (!ok) return;
+        try {
+            const res = await fetch('/backup-repositories/' + encodeURIComponent(r.name), { method: 'DELETE' });
+            if (!res.ok && res.status !== 404) {
+                toast('Vaier could not delete the repository.');
+                return;
+            }
+        } catch (e) {
+            toast('Vaier could not delete the repository.');
+            return;
+        }
+        const machine = S.path[1];
+        S.repoArchives.delete(r.name);
+        await loadBackup();
+        toast('Repository deleted.');
+        go(['fleet', machine, 'backup']);   // back up to the server
+    }
+
+    // The repository form, in the same dialog shell as the others. On create, the name is asked and a strong
+    // passphrase is pre-filled (shown once); on edit, the name is fixed and the passphrase field is blank
+    // (blank keeps the stored one). Name (create) is the only required field.
+    function repoForm({ title, intro, existing, confirmLabel }) {
+        return new Promise((resolve) => {
+            const creating = !existing;
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title');
+            h.textContent = title;
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = intro;
+            const form = el('div', 'ex-form');
+
+            const field = (label, hint, control) => {
+                const f = el('div', 'ex-field');
+                const l = el('label');
+                l.textContent = label;
+                f.append(l, control);
+                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+                return f;
+            };
+            const input = (value, ph) => {
+                const i = el('input', 'ex-input');
+                i.type = 'text';
+                i.value = value == null ? '' : String(value);
+                if (ph) i.placeholder = ph;
+                i.autocomplete = 'off';
+                i.spellcheck = false;
+                return i;
+            };
+
+            const name = input(existing ? existing.name : '', 'e.g. colina27');
+            if (!creating) { name.disabled = true; }
+            const repoPath = input(existing ? existing.repoPath : '', 'Optional — derives under the base path');
+            const passphrase = input(creating ? generatePassphrase(32) : '',
+                creating ? '' : 'Leave blank to keep the stored passphrase');
+            const appendOnly = el('input');
+            appendOnly.type = 'checkbox';
+            appendOnly.checked = !!(existing && existing.appendOnly);
+            const appendRow = el('label', 'ex-check-row');
+            const atxt = el('span');
+            atxt.textContent = 'Append-only — the client key cannot prune or delete archives';
+            appendRow.append(appendOnly, atxt);
+
+            form.append(
+                field('Name', creating ? 'Letters, digits, dot, dash, underscore.' : null, name),
+                field('Path override', 'No leading slash. Blank derives ' + (existing ? existing.serverName
+                    : (S.backupServer ? S.backupServer.name : 'the server')) + '’s base path + the name.', repoPath),
+                field('Passphrase', creating ? 'Save this — it unlocks the repository. Vaier also keeps it '
+                    + 'encrypted in the vault.' : 'Blank keeps the stored one; type a new one to replace it.',
+                    passphrase),
+                appendRow,
+            );
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn');
+            cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent');
+            ok.textContent = confirmLabel || 'Save';
+            actions.append(cancel, ok);
+
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog);
+            document.body.appendChild(scrim);
+
+            const close = (result) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(result); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const armed = () => !creating || name.value.trim() !== '';
+            const sync = () => { ok.disabled = !armed(); };
+            name.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => {
+                if (!armed()) return;
+                close({
+                    name: name.value.trim(),
+                    repoPath: repoPath.value.trim(),
+                    passphrase: passphrase.value,   // not trimmed — a passphrase may legitimately carry spaces
+                    appendOnly: appendOnly.checked,
+                });
+            };
+            document.addEventListener('keydown', onKey);
+            sync();
+            (creating ? name : repoPath).focus();
+        });
+    }
+
+    // A crypto-strong, alphanumeric passphrase — no quotes or shell metacharacters, so it is safe to hand borg
+    // over SSH. Rejection sampling keeps the distribution uniform (no modulo bias). The same generator the
+    // Backups page used before repository creation moved here.
+    function generatePassphrase(length) {
+        const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        const threshold = 256 - (256 % alphabet.length);
+        const out = [];
+        const byte = new Uint8Array(1);
+        while (out.length < (length || 32)) {
+            crypto.getRandomValues(byte);
+            if (byte[0] < threshold) out.push(alphabet[byte[0] % alphabet.length]);
+        }
+        return out.join('');
     }
 
     // The terminal itself is in the dock, not in the pane: the tree, the address bar and the shell are all on

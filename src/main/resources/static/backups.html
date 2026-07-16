@@ -49,11 +49,10 @@
                         <div class="bk-stage-head">
                             <div>
                                 <h2 class="bk-stage-title">Name a repository on it</h2>
-                                <p class="bk-stage-desc">A repository is where one machine's archives land. Name
-                                   it and Vaier derives its path on the server, generates a passphrase, and
-                                   creates it on the first run.</p>
+                                <p class="bk-stage-desc">A repository is where one machine's archives land. You
+                                   add and manage repositories in the Explorer, on the backup server's backup
+                                   entry; this list shows what's defined so a job can target one.</p>
                             </div>
-                            <button class="btn btn-primary" id="newRepoBtn">+ New repository</button>
                         </div>
                         <div class="bk-list" id="repoList"><div class="loading">Loading repositories…</div></div>
                     </div>
@@ -158,53 +157,6 @@
         </div>
     </div>
 
-    <!-- Repository create/edit modal -->
-    <div id="repoModal" class="modal">
-        <div class="modal-content" style="max-width:560px;width:95%">
-            <div class="modal-header" id="repoModalTitle">New backup repository</div>
-            <div id="repoModalError" style="display:none"></div>
-            <div class="form-group">
-                <label class="form-label" for="repoName">Name</label>
-                <input type="text" id="repoName" class="form-input" placeholder="e.g. apalveien5" autocomplete="off">
-                <div class="bk-field-note" id="repoNameNote">A short identifier, unique across repositories.</div>
-            </div>
-            <div class="form-group">
-                <label class="form-label" for="repoServer">Server</label>
-                <select id="repoServer" class="form-input"></select>
-                <div class="bk-field-note">The backup server this repository lives on.</div>
-            </div>
-            <div class="bk-derived" id="repoDerived"></div>
-            <div class="form-group" style="margin-bottom:0.6rem">
-                <button type="button" class="bk-disclosure" id="repoPathToggle" aria-expanded="false">
-                    <span class="bk-disclosure-caret">›</span> Custom repository path
-                </button>
-                <div id="repoPathAdvanced" style="display:none;margin-top:0.5rem">
-                    <input type="text" id="repoPath" class="form-input" placeholder="Leave blank to derive from the server" autocomplete="off">
-                    <div class="bk-field-note">Only needed to point at an existing, oddly-named repository. Blank derives
-                        <code>base/&lt;name&gt;</code>.</div>
-                </div>
-            </div>
-            <div class="form-group" id="repoPassphraseGroup">
-                <label class="form-label" for="repoPassphrase">Passphrase</label>
-                <div class="bk-passphrase-row">
-                    <input type="text" id="repoPassphrase" class="form-input" autocomplete="off" spellcheck="false">
-                    <button type="button" class="btn btn-small btn-secondary" id="repoPassRegenBtn" title="Generate a new passphrase">Regenerate</button>
-                    <button type="button" class="btn btn-small btn-secondary" id="repoPassCopyBtn">Copy</button>
-                </div>
-                <div class="bk-field-note bk-passphrase-warn" id="repoPassphraseWarn">
-                    Auto-generated. Vaier stores this encrypted — copy it somewhere safe now, it can't be shown again.</div>
-            </div>
-            <div class="form-checkbox" style="margin-top:0.2rem">
-                <input type="checkbox" id="repoAppendOnly">
-                <label for="repoAppendOnly">Append-only (clients can add archives but not prune or delete)</label>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="repoCancelBtn">Cancel</button>
-                <button class="btn btn-primary" id="repoSaveBtn">Save repository</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Job create/edit modal -->
     <div id="jobModal" class="modal">
         <div class="modal-content" style="max-width:620px;width:95%">
@@ -274,17 +226,6 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="jobCancelBtn">Cancel</button>
                 <button class="btn btn-primary" id="jobSaveBtn">Save job</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Archive browser modal -->
-    <div id="archivesModal" class="modal">
-        <div class="modal-content" style="max-width:640px;width:95%">
-            <div class="modal-header" id="archivesModalTitle">Archives</div>
-            <div id="archivesBody"><div class="loading">Loading archives…</div></div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="archivesCloseBtn">Close</button>
             </div>
         </div>
     </div>

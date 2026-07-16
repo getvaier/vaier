@@ -911,6 +911,12 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-brepo:last-child { border-bottom: none; }
 .ex-brepo-name { color: var(--text); white-space: nowrap; }
 .ex-brepo-path { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.ex-brepo-name {
+    background: none; border: 0; padding: 0;
+    font: inherit; color: var(--text); text-align: left; cursor: pointer;
+}
+button.ex-brepo-name.is-link:hover { color: var(--accent); text-decoration: underline; }
+button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .ex-note .ex-link { color: var(--accent); text-decoration: none; }
 .ex-note .ex-link:hover { text-decoration: underline; }
