@@ -38,6 +38,7 @@
         trash:   '<path d="M3 4.5h10M6.5 4.5V3a.8.8 0 0 1 .8-.8h1.4a.8.8 0 0 1 .8.8v1.5"/><path d="M4.2 4.5l.6 8a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8"/><path d="M6.7 7v4M9.3 7v4"/>',
         shield:  '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M5.7 8l1.6 1.7L10.4 6"/>',
         shieldhalf: '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M3 8.3h10"/>',
+        map:     '<path d="M8 1.7c-2.5 0-4.4 1.9-4.4 4.3 0 3.1 4.4 8.3 4.4 8.3s4.4-5.2 4.4-8.3c0-2.4-1.9-4.3-4.4-4.3z"/><circle cx="8" cy="6" r="1.6"/>',
         // Device forms, matched to the Infrastructure page's machine icons (vpn-peers-helpers.js) so a machine
         // wears the same shape in the tree as on its card — just smaller. Keyed by device category, lowercased.
         server:  '<rect x="2.5" y="2.5" width="11" height="4" rx=".8"/><rect x="2.5" y="9" width="11" height="4" rx=".8"/><circle cx="4.6" cy="4.5" r=".55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r=".55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/>',
@@ -152,6 +153,7 @@
             return 'fleet';
         }
         if (path.length === 2) {
+            if (path[1] === 'map') return 'map';
             return BRIDGES.some((b) => b.name === path[1]) ? 'bridge' : 'machine';
         }
         if (path[2] === 'shell') return 'shell';
@@ -232,7 +234,8 @@
     function childrenOf(path) {
         const kind = kindOf(path);
         if (kind === 'fleet') {
-            return sortedMachines().map((m) => ({ name: m.name, kind: 'machine' }))
+            return [{ name: 'map', kind: 'map', label: 'Map' }]
+                .concat(sortedMachines().map((m) => ({ name: m.name, kind: 'machine' })))
                 .concat(BRIDGES.map((b) => ({ name: b.name, kind: 'bridge', label: b.label })));
         }
         if (kind === 'machine') {
@@ -499,7 +502,7 @@
 
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
                        shell: 'shell', containers: 'box', container: 'box', services: 'route',
-                       service: 'route', disk: 'disk', backup: 'archive', repo: 'box' };
+                       service: 'route', disk: 'disk', backup: 'archive', repo: 'box', map: 'map' };
 
     // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
     // read off its device category. A category with no icon (or a machine not yet loaded) falls back to the
@@ -776,6 +779,7 @@
 
         const kind = kindOf(S.path);
         if (kind === 'fleet') return renderFleet(pane);
+        if (kind === 'map') return renderMap(pane);
         if (kind === 'settings') return renderSettings(pane);
         if (kind === 'gbridge') return renderGlobalBridge(pane);
         if (kind === 'machine') return renderMachine(pane);
@@ -816,6 +820,10 @@
             body.appendChild(grid);
         }
 
+        const addAct = el('div', 'ex-lactions is-static');
+        addAct.appendChild(selVerb('server', 'Add machine', 'ex-btn', () => addMachine()));
+        body.appendChild(addAct);
+
         body.appendChild(section('Not in the tree yet'));
         const rest = document.createElement('div');
         rest.className = 'ex-grid';
@@ -825,6 +833,53 @@
         body.appendChild(rest);
 
         pane.appendChild(body);
+    }
+
+    // The fleet on a map — where the machines physically are, from the geo Vaier already resolves onto each
+    // peer (latitude/longitude/city). Leaflet, loaded from explorer.html; if it did not load, the entry says so
+    // rather than breaking. The map is torn down and rebuilt on each render (rare — peer stats only repaint the
+    // dots, so the map is not thrashed), and requestAnimationFrame — never a timer — settles its size.
+    let _map = null;
+    function renderMap(pane) {
+        pane.appendChild(paneHead('Map', false, 'Where the fleet is'));
+        const body = el('div', 'ex-pane-body ex-map-body');
+        const holder = el('div', 'ex-map');
+        body.appendChild(holder);
+        pane.appendChild(body);
+
+        if (typeof L === 'undefined') {
+            body.appendChild(note('The map could not load its library.', true));
+            return;
+        }
+        if (_map) { try { _map.remove(); } catch (e) { /* already gone */ } _map = null; }
+        L.Icon.Default.mergeOptions({
+            iconUrl: 'vendor/leaflet/images/marker-icon.png',
+            iconRetinaUrl: 'vendor/leaflet/images/marker-icon-2x.png',
+            shadowUrl: 'vendor/leaflet/images/marker-shadow.png',
+        });
+        const map = L.map(holder, { worldCopyJump: true }).setView([20, 0], 2);
+        _map = map;
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+
+        const coords = [];
+        S.machines.forEach((m) => {
+            const p = S.peers.get(m.name);
+            if (!p || p.latitude == null || p.longitude == null) return;
+            const marker = L.marker([p.latitude, p.longitude]).addTo(map);
+            const pop = el('div');
+            const nm = el('b'); nm.textContent = m.name; pop.appendChild(nm);
+            const where = [p.city, p.country].filter(Boolean).join(', ');
+            if (where) { pop.appendChild(el('br')); const w = el('span'); w.textContent = where; pop.appendChild(w); }
+            pop.appendChild(el('br'));
+            const st = el('span'); st.textContent = p.connected ? 'online' : 'offline'; pop.appendChild(st);
+            marker.bindPopup(pop);
+            coords.push([p.latitude, p.longitude]);
+        });
+        if (coords.length) map.fitBounds(coords, { padding: [40, 40], maxZoom: 9 });
+        else body.appendChild(note('No machine has a known location yet.', false));
+        // Leaflet mis-measures a container that only just entered the layout; a frame later it is correct.
+        requestAnimationFrame(() => { try { map.invalidateSize(); } catch (e) { /* torn down */ } });
     }
 
     // A peer answers at its tunnel address, a LAN server on its LAN — the same rule the SSH connection
@@ -895,7 +950,181 @@
                 () => designateBackupServer(m)));
             body.appendChild(act);
         }
+
+        // Removing a machine is destructive — its WireGuard peer (or LAN-server registration) is deleted and it
+        // can no longer reach the VPN — so it takes the typed-name gate. The Vaier server is this machine; it is
+        // never offered for removal.
+        if (m.name !== VAIER_SERVER) {
+            body.appendChild(section('This machine'));
+            const rm = el('div', 'ex-lactions is-static');
+            rm.appendChild(selVerb('trash', 'Remove machine', 'ex-btn is-danger', () => removeMachine(m)));
+            body.appendChild(rm);
+        }
         pane.appendChild(body);
+    }
+
+    // --- adding and removing a machine -----------------------------------------------------------------
+    //
+    // A machine is a WireGuard peer. Adding one asks a name and a type (and, for a server, the LAN behind it);
+    // Vaier assigns the keys and the tunnel address, and hands back the config to install — shown once, because
+    // the download endpoints are one-shot. Removing deletes the peer (or a LAN-server registration) behind the
+    // typed-name gate. LAN servers are usually found by the scan, so the add form offers the peer kinds.
+
+    function addMachine() {
+        machineForm().then((body) => { if (body) createPeer(body); });
+    }
+
+    async function createPeer(body) {
+        try {
+            const res = await fetch('/vpn/peers', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not add that machine.');
+                return;
+            }
+            const created = await res.json();
+            await loadFleet();
+            toast(created.name + ' added.');
+            createResult(created);   // its config, shown once — download it now
+        } catch (e) {
+            toast('Vaier could not add that machine.');
+        }
+    }
+
+    async function removeMachine(m) {
+        const isPeer = S.peers.has(m.name);
+        const ok = await confirmTyped('Remove ' + m.name + '?',
+            'This deletes ' + m.name + ' from the fleet — its ' + (isPeer ? 'WireGuard peer' : 'registration')
+            + ' is removed and it can no longer reach the VPN. This cannot be undone. Type the machine name to '
+            + 'confirm.', m.name, 'Remove');
+        if (!ok) return;
+        const url = isPeer ? '/vpn/peers/' + encodeURIComponent(S.peers.get(m.name).id)
+                           : '/lan-servers/' + encodeURIComponent(m.name);
+        try {
+            const res = await fetch(url, { method: 'DELETE' });
+            if (!res.ok && res.status !== 204) { toast('Vaier could not remove ' + m.name + '.'); return; }
+        } catch (e) { toast('Vaier could not remove ' + m.name + '.'); return; }
+        await loadFleet();
+        toast(m.name + ' removed.');
+        go(['fleet']);
+    }
+
+    // A tiny client-side download — turns text Vaier already sent (a config, a compose file) into a file the
+    // browser saves, so nothing has to be re-fetched through the peer's one-shot download gate.
+    function downloadText(filename, text) {
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // The add-machine form: name, type, and — only for a server — the LAN behind it. Resolves the POST body or
+    // null. The tunnel address and the keys are Vaier's to assign, so they are never asked.
+    function machineForm() {
+        return new Promise((resolve) => {
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title'); h.textContent = 'Add a machine';
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'A new WireGuard peer. Vaier assigns its address and keys and hands you the config '
+                + 'to install.';
+            const form = el('div', 'ex-form');
+
+            const field = (label, hint, control) => {
+                const f = el('div', 'ex-field');
+                const l = el('label'); l.textContent = label; f.append(l, control);
+                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+                return f;
+            };
+            const name = el('input', 'ex-input'); name.type = 'text'; name.placeholder = 'e.g. Roon server';
+            name.autocomplete = 'off'; name.spellcheck = false;
+            const type = el('select', 'ex-input');
+            [['MOBILE_CLIENT', 'Phone / mobile'], ['WINDOWS_CLIENT', 'Windows client'],
+             ['UBUNTU_SERVER', 'Ubuntu server'], ['WINDOWS_SERVER', 'Windows server']].forEach(([v, t]) => {
+                const o = el('option'); o.value = v; o.textContent = t; type.appendChild(o);
+            });
+            const lanCidr = el('input', 'ex-input'); lanCidr.type = 'text';
+            lanCidr.placeholder = 'e.g. 192.168.1.0/24'; lanCidr.autocomplete = 'off'; lanCidr.spellcheck = false;
+            const lanField = field('LAN behind it', 'The subnet this server routes to, so the fleet can reach it.', lanCidr);
+            const desc = el('input', 'ex-input'); desc.type = 'text'; desc.autocomplete = 'off';
+
+            const isServer = () => SERVER_TYPES.has(type.value);
+            const syncLan = () => { lanField.style.display = isServer() ? '' : 'none'; };
+            type.onchange = syncLan;
+
+            form.append(field('Name', null, name), field('Type', null, type), lanField,
+                field('Description', 'Optional.', desc));
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Add machine';
+            actions.append(cancel, ok);
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog); document.body.appendChild(scrim);
+
+            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const sync = () => { ok.disabled = name.value.trim() === ''; };
+            name.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => {
+                if (!name.value.trim()) return;
+                close({ name: name.value.trim(), peerType: type.value,
+                    lanCidr: isServer() ? lanCidr.value.trim() : '', lanAddress: '',
+                    description: desc.value.trim() });
+            };
+            document.addEventListener('keydown', onKey);
+            syncLan(); sync(); name.focus();
+        });
+    }
+
+    // The config a new peer needs, shown once. The config text (with a download), the QR for a phone, and the
+    // docker-compose for a server — all from the inline create response, so the one-shot download gate is never
+    // touched. This is the only chance to save it, and the dialog says so.
+    function createResult(p) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog is-wide');
+        const h = el('div', 'ex-dialog-title'); h.textContent = p.name + ' — its config';
+        const sub = el('div', 'ex-dialog-body');
+        sub.textContent = 'Save this now: for security the config is shown once. Install it on ' + p.name
+            + ' to bring it onto the VPN.';
+        dialog.append(h, sub);
+
+        if (p.configFile) {
+            const pre = el('pre', 'ex-config'); pre.textContent = p.configFile;
+            dialog.appendChild(pre);
+            const row = el('div', 'ex-set-actions');
+            const dl = el('button', 'ex-btn is-accent'); dl.textContent = 'Download .conf';
+            dl.onclick = () => downloadText(p.name + '.conf', p.configFile);
+            row.appendChild(dl);
+            if (p.dockerCompose) {
+                const dc = el('button', 'ex-btn'); dc.textContent = 'Download docker-compose.yml';
+                dc.onclick = () => downloadText('docker-compose.yml', p.dockerCompose);
+                row.appendChild(dc);
+            }
+            dialog.appendChild(row);
+        }
+        if (p.qrCodePngBase64) {
+            const img = el('img', 'ex-qr');
+            img.src = 'data:image/png;base64,' + p.qrCodePngBase64;
+            img.alt = 'WireGuard config QR code';
+            dialog.appendChild(img);
+        }
+
+        const actions = el('div', 'ex-dialog-actions');
+        const done = el('button', 'ex-btn'); done.textContent = 'Done';
+        actions.appendChild(done);
+        dialog.appendChild(actions);
+        scrim.appendChild(dialog); document.body.appendChild(scrim);
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        done.onclick = close;
+        document.addEventListener('keydown', onKey);
     }
 
     // --- containers: what Vaier can see, and nothing it cannot do ---------------------------------------
