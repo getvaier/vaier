@@ -165,6 +165,14 @@
     const machineOf = (path) => S.machines.find((m) => m.name === path[1]) || null;
     const bridgeOf = (path) => BRIDGES.find((b) => b.name === path[1]) || null;
 
+    // Machines are ordered the way the Infrastructure page orders them, so the two never disagree: the Vaier
+    // server first, then the servers, then the clients, each group alphabetical. Server-ness is the machine's
+    // type (the domain's isServerType — Ubuntu/Windows/LAN server), the same split vpn-peers.js draws.
+    const SERVER_TYPES = new Set(['UBUNTU_SERVER', 'WINDOWS_SERVER', 'LAN_SERVER']);
+    const machineRank = (m) => (m.name === VAIER_SERVER ? 0 : (SERVER_TYPES.has(m.type) ? 1 : 2));
+    const sortedMachines = () => S.machines.slice()
+        .sort((a, b) => machineRank(a) - machineRank(b) || a.name.localeCompare(b.name));
+
     // A tree path under `files` and a path on the machine are the same path, written twice — but a machine's
     // tree does not begin at "/". It begins at its SFTP root (#326): the NAS jails its SFTP subsystem into
     // /volume1, so its `files` entry IS /volume1, and everything below hangs off that. Until the machine has
@@ -218,7 +226,7 @@
     function childrenOf(path) {
         const kind = kindOf(path);
         if (kind === 'fleet') {
-            return S.machines.map((m) => ({ name: m.name, kind: 'machine' }))
+            return sortedMachines().map((m) => ({ name: m.name, kind: 'machine' }))
                 .concat(BRIDGES.map((b) => ({ name: b.name, kind: 'bridge', label: b.label })));
         }
         if (kind === 'machine') {
@@ -787,7 +795,7 @@
             body.appendChild(note('No machines yet. Add one on Infrastructure and it will appear here.',
                 false));
         } else {
-            S.machines.forEach((m) => {
+            sortedMachines().forEach((m) => {
                 const address = tunnelAddress(m);
                 grid.appendChild(card(machineIcon(m.name), m.name, true,
                     MACHINE_TYPE[m.type] + (address ? ' · ' + address : ''),
