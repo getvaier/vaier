@@ -107,6 +107,7 @@
         lan: new Map(),                  // machine name -> its LAN server (the domain's MachineStatus)
         dirs: new Map(),                 // dirKey -> one directory's read: its state, its children, its reader
         services: [],                    // GET /published-services/discover — the whole fleet's routes
+        publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
         access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
         containers: new Map(),           // machine name -> its containers, as Vaier last scraped them
         containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
@@ -212,6 +213,11 @@
 
     const servicesOn = (machine) => S.services.filter((s) => machineOfService(s) === machine);
     const containersOn = (machine) => S.containers.get(machine) || [];
+    // A publishable candidate names the machine it runs on by peer id (like the container scrape), so it maps
+    // back to the machine's canonical name through the same id→name map. Falls through for LAN/Vaier servers,
+    // whose peerName already is the name.
+    const candidateMachine = (c) => S.peerNames.get(c.peerName) || c.peerName;
+    const candidatesOn = (machine) => S.publishable.filter((c) => candidateMachine(c) === machine);
     // The repositories that live on a backup server, filtered by the server they name. One server, so this is
     // every repository Vaier knows — but the filter keeps it honest if a stale repo names a server that is gone.
     const reposOn = (server) => (server ? S.backupRepos.filter((r) => r.serverName === server.name) : []);
@@ -239,7 +245,7 @@
             const kids = [];
             if (m.sshAccess) kids.push({ name: 'files', kind: 'files' }, { name: 'shell', kind: 'shell' });
             if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
-            if (servicesOn(m.name).length) kids.push({ name: 'services', kind: 'services' });
+            if (servicesOn(m.name).length || candidatesOn(m.name).length) kids.push({ name: 'services', kind: 'services' });
             if (m.sshAccess) kids.push({ name: 'disk', kind: 'disk' });
             // A machine grows a `backup` entry when it plays any part in fleet backup: it is the one backup
             // server (name-equality — the backend refuses a second), or a job backs it up. The entry reads both
@@ -403,6 +409,12 @@
             S.access = res.ok ? await res.json() : {};
         } catch (e) {
             S.access = {};
+        }
+        try {
+            const res = await fetch('/published-services/publishable', { cache: 'no-store' });
+            S.publishable = res.ok ? await res.json() : [];
+        } catch (e) {
+            S.publishable = [];
         }
     }
 
@@ -964,26 +976,145 @@
     function renderServices(pane) {
         const machine = S.path[1];
         const found = servicesOn(machine);
+        const open = candidatesOn(machine).filter((c) => !c.ignored);
+        const hidden = candidatesOn(machine).filter((c) => c.ignored);
         pane.appendChild(paneHead(machine + ' / services', true,
             found.length + (found.length === 1 ? ' published service' : ' published services')));
 
-        const body = document.createElement('div');
-        body.className = 'ex-pane-body';
-        const rows = document.createElement('div');
-        rows.className = 'ex-listing is-wide';
-        rows.appendChild(listHead(['Published at', 'Backend', 'State']));
-        found.forEach((s) => {
-            rows.appendChild(listRow('route', s.dnsAddress || serviceName(s),
-                () => go(['fleet', machine, 'services', serviceName(s)]),
-                [(s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : ''), s.state || 'UNKNOWN'],
-                s.state));
-        });
-        body.appendChild(rows);
+        const body = el('div', 'ex-pane-body');
 
-        body.appendChild(note('Publishing a new service needs a subdomain, an auth mode and a backend to '
-            + 'point at — that form still lives on Infrastructure, so publishing is done there. What can '
-            + 'be done from here is unpublishing, on each service.', false));
+        // What is published — the live routes, each openable, each unpublishable.
+        body.appendChild(section('Published'));
+        if (!found.length) {
+            body.appendChild(note('Nothing is published from this machine yet.', false));
+        } else {
+            const rows = el('div', 'ex-listing is-wide');
+            rows.appendChild(listHead(['Published at', 'Backend', 'State']));
+            found.forEach((s) => rows.appendChild(listRow('route', s.dnsAddress || serviceName(s),
+                () => go(['fleet', machine, 'services', serviceName(s)]),
+                [(s.hostAddress || '') + (s.hostPort ? ':' + s.hostPort : ''), s.state || 'UNKNOWN'], s.state)));
+            body.appendChild(rows);
+        }
+
+        // Container ports Vaier could put on the internet — publish one, or ignore it so it stops being offered.
+        if (open.length) {
+            body.appendChild(section('Ready to publish'));
+            open.forEach((c) => body.appendChild(candidateRow(machine, c, [
+                selVerb('route', 'Publish', 'ex-btn is-accent', () => publishCandidate(machine, c)),
+                selVerb('cross', 'Ignore', 'ex-btn', () => ignoreCandidate(machine, c)),
+            ])));
+        }
+        if (hidden.length) {
+            body.appendChild(section('Ignored'));
+            hidden.forEach((c) => body.appendChild(candidateRow(machine, c, [
+                selVerb('check', 'Unignore', 'ex-btn', () => unignoreCandidate(machine, c)),
+            ])));
+        }
+        if (!found.length && !open.length && !hidden.length) {
+            body.appendChild(note('No container ports here that Vaier could publish.', false));
+        }
         pane.appendChild(body);
+    }
+
+    // A publishable container port: its container name and where it listens, then the actions for it.
+    function candidateRow(machine, c, buttons) {
+        const row = el('div', 'ex-brepo');
+        const info = el('div', 'ex-brepo-info');
+        const nm = el('span', 'ex-brepo-name'); nm.textContent = c.containerName;
+        const meta = el('span', 'ex-brepo-path'); meta.textContent = ':' + c.port + ' · ' + c.address;
+        info.append(nm, meta);
+        const acts = el('div', 'ex-lactions is-static');
+        buttons.forEach((btn) => acts.appendChild(btn));
+        row.append(info, acts);
+        return row;
+    }
+
+    async function reloadServices(machine) {
+        await loadServices();
+        go(['fleet', machine, 'services']);   // stay on the entry; it repaints from the fresh data
+    }
+
+    // Publish a container port: the only choices that are the operator's are the subdomain (defaulted from the
+    // container name by the domain) and whether it sits behind login. Everything else — the DNS record, the
+    // Traefik route — Vaier does. So the form is two fields.
+    function publishCandidate(machine, c) {
+        publishForm(c).then((body) => {
+            if (!body) return;
+            saveJson('/published-services/publish', 'POST', {
+                address: c.address, port: c.port, subdomain: body.subdomain, requiresAuth: body.requiresAuth,
+                rootRedirectPath: c.rootRedirectPath || '', directUrlDisabled: false, pathPrefix: '',
+            }, 'Publishing ' + body.subdomain + '…', () => reloadServices(machine),
+               'Could not publish that.');
+        });
+    }
+
+    function ignoreCandidate(machine, c) {
+        saveJson('/published-services/publishable/ignore', 'POST', { key: c.ignoreKey },
+            'Ignored ' + c.containerName + '.', () => reloadServices(machine), 'Could not ignore that.');
+    }
+
+    function unignoreCandidate(machine, c) {
+        saveJson('/published-services/publishable/unignore', 'POST', { key: c.ignoreKey },
+            c.containerName + ' can be published again.', () => reloadServices(machine), 'Could not unignore that.');
+    }
+
+    // A small POST/PUT helper for the fire-and-refresh actions: send, toast a first message, and on success run
+    // an after() (usually a reload) — on failure, toast the server's own reason.
+    async function saveJson(url, method, body, workingMsg, after, failMsg) {
+        try {
+            const res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body) });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || failMsg);
+                return;
+            }
+            toast(workingMsg);
+            if (after) await after();
+        } catch (e) {
+            toast(failMsg);
+        }
+    }
+
+    // The publish form — subdomain (defaulted) and an auth toggle, over the shell's overlay. Resolves the body
+    // on confirm and null otherwise; the button stays disabled until the subdomain is non-empty.
+    function publishForm(c) {
+        return new Promise((resolve) => {
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title'); h.textContent = 'Publish ' + c.containerName;
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'Put ' + c.address + ':' + c.port + ' on the internet. Vaier makes the DNS record '
+                + 'and the route; you choose the name and whether it needs a login.';
+            const form = el('div', 'ex-form');
+            const subF = el('div', 'ex-field');
+            const subL = el('label'); subL.textContent = 'Subdomain';
+            const subIn = el('input', 'ex-input'); subIn.type = 'text'; subIn.value = c.suggestedSubdomain || '';
+            subIn.autocomplete = 'off'; subIn.spellcheck = false;
+            subF.append(subL, subIn);
+            const authRow = el('label', 'ex-check-row');
+            const auth = el('input'); auth.type = 'checkbox'; auth.checked = true;
+            const atxt = el('span'); atxt.textContent = 'Require a login to reach it';
+            authRow.append(auth, atxt);
+            form.append(subF, authRow);
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Publish';
+            actions.append(cancel, ok);
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog); document.body.appendChild(scrim);
+
+            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const sync = () => { ok.disabled = subIn.value.trim() === ''; };
+            subIn.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => { if (subIn.value.trim()) close({ subdomain: subIn.value.trim(), requiresAuth: auth.checked }); };
+            document.addEventListener('keydown', onKey);
+            sync(); subIn.focus();
+        });
     }
 
     function renderService(pane) {
