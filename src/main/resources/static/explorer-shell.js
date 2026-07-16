@@ -73,12 +73,15 @@
           note: 'Machines, services, the map' },
         { name: 'backups',        label: 'Backups',        icon: 'archive', page: 'backups.html',
           note: 'Jobs, runs and archives' },
-        { name: 'users',          label: 'Users',          icon: 'users',   page: 'users.html',
-          note: 'Who may reach what' },
-        { name: 'settings',       label: 'Settings',       icon: 'gear',    page: 'settings.html',
-          note: 'AWS, mail, disk alerts' },
-        { name: 'concepts',       label: 'Concepts',       icon: 'book',    page: 'concepts.html',
-          note: 'How Vaier is put together' },
+    ];
+
+    // Vaier-wide entries that are NOT of the fleet — they belong to Vaier, not to any machine — so they sit at
+    // the top level of the tree, outside `fleet`. Settings is native now; Users and Concepts still bridge their
+    // pages until they are ported (a later slice). This is why the tree is a forest, not one root.
+    const GLOBALS = [
+        { name: 'settings', label: 'Settings', icon: 'gear',  native: true },
+        { name: 'users',    label: 'Users',    icon: 'users', page: 'users.html' },
+        { name: 'concepts', label: 'Concepts', icon: 'book',  page: 'concepts.html' },
     ];
 
     const MACHINE_TYPE = {
@@ -120,6 +123,7 @@
         backupJobs: [],                  // GET /backup-jobs — the jobs, each backing one machine up to a repository
         jobRuns: new Map(),              // job name -> { state, run }: its last run, read on view and on the run-settled push
         preparing: new Set(),            // machine names Vaier is readying to back up (first back-up), cleared on prepare-client-settled
+        settings: { state: 'idle', config: null, version: '', edition: '' },   // the native Settings entry, read on view
         palSel: 0,
     };
 
@@ -140,7 +144,12 @@
     // where you are, and they would drift the first time a machine was renamed under one of them.
 
     function kindOf(path) {
-        if (path.length === 1) return 'fleet';
+        if (path.length === 1) {
+            if (path[0] === 'fleet') return 'fleet';
+            const g = GLOBALS.find((x) => x.name === path[0]);
+            if (g) return g.native ? 'settings' : 'gbridge';
+            return 'fleet';
+        }
         if (path.length === 2) {
             return BRIDGES.some((b) => b.name === path[1]) ? 'bridge' : 'machine';
         }
@@ -483,6 +492,7 @@
 
     const iconFor = (kind, name) => {
         if (kind === 'bridge') return (BRIDGES.find((b) => b.name === name) || {}).icon || 'file';
+        if (kind === 'settings' || kind === 'gbridge') return (GLOBALS.find((g) => g.name === name) || {}).icon || 'file';
         if (kind === 'machine') return machineIcon(name);
         return ICON_FOR[kind] || 'file';
     };
@@ -555,8 +565,15 @@
         label.className = 'ex-col-label';
         label.textContent = 'Fleet';
         tree.appendChild(label);
-
         tree.appendChild(branch(['fleet'], 'fleet', 'fleet', 0));
+
+        // The Vaier-wide entries, at the top level, outside the fleet.
+        const vlabel = document.createElement('div');
+        vlabel.className = 'ex-col-label';
+        vlabel.textContent = 'Vaier';
+        tree.appendChild(vlabel);
+        GLOBALS.forEach((g) => tree.appendChild(
+            branch([g.name], g.native ? 'settings' : 'gbridge', g.label, 0)));
     }
 
     function branch(path, kind, label, depth) {
@@ -640,15 +657,18 @@
                 sep.textContent = '/';
                 bar.appendChild(sep);
             }
+            // A top-level global reads by its label ("Settings"), not its lowercase address.
+            const text = (i === 0 && seg !== 'fleet')
+                ? ((GLOBALS.find((g) => g.name === seg) || {}).label || seg) : seg;
             if (i === S.path.length - 1) {
                 const here = document.createElement('span');
                 here.className = 'ex-crumb-here';
-                here.textContent = seg;
+                here.textContent = text;
                 bar.appendChild(here);
             } else {
                 const crumb = document.createElement('button');
                 crumb.className = 'ex-crumb';
-                crumb.textContent = seg;
+                crumb.textContent = text;
                 crumb.onclick = () => go(S.path.slice(0, i + 1));
                 bar.appendChild(crumb);
             }
@@ -736,6 +756,8 @@
 
         const kind = kindOf(S.path);
         if (kind === 'fleet') return renderFleet(pane);
+        if (kind === 'settings') return renderSettings(pane);
+        if (kind === 'gbridge') return renderGlobalBridge(pane);
         if (kind === 'machine') return renderMachine(pane);
         if (kind === 'bridge') return renderBridge(pane);
         if (kind === 'shell') return renderShell(pane);
@@ -1980,6 +2002,185 @@
         frame.src = bridge.page;
         frame.title = bridge.label;
         pane.appendChild(frame);
+    }
+
+    // A top-level global that is still bridged (Users, Concepts) — its page, framed whole, until it is ported.
+    function renderGlobalBridge(pane) {
+        const g = GLOBALS.find((x) => x.name === S.path[0]);
+        pane.className = 'ex-pane is-bridged';
+        const frame = document.createElement('iframe');
+        frame.className = 'ex-bridge';
+        frame.src = g.page;
+        frame.title = g.label;
+        pane.appendChild(frame);
+    }
+
+    // --- Settings: Vaier-wide, native, outside the fleet ------------------------------------------------
+    //
+    // The one native global. It reads its config on view (like disk/archives — never polled) and saves each
+    // section on its own against the `/settings/*` endpoints Vaier already had. The nightly-backup schedule
+    // lives here now, not on the Backups page: it is the fleet-wide "when", the one backup knob that is the
+    // operator's to set — everything else about a backup is Vaier's.
+
+    async function loadSettings() {
+        if (S.settings.state === 'loading') return;
+        S.settings = { ...S.settings, state: 'loading' };
+        try {
+            const [cfg, ver, lic] = await Promise.all([
+                fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
+                fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+                fetch('/license').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+            ]);
+            S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
+                version: (ver || {}).version || '', edition: (lic || {}).edition || '' };
+        } catch (e) {
+            S.settings = { state: 'error', config: null, version: '', edition: '' };
+        }
+        render();
+    }
+
+    // Save one section: PUT/POST the body, then write the outcome into that section's own note. It never
+    // re-reads the whole config — a saved section already shows its new value.
+    async function saveSetting(url, method, body, noteEl, okText) {
+        noteEl.className = 'ex-set-note';
+        noteEl.textContent = 'Saving…';
+        try {
+            const res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body) });
+            if (res.ok) {
+                noteEl.className = 'ex-set-note is-ok';
+                noteEl.textContent = okText || 'Saved.';
+            } else {
+                const err = await res.json().catch(() => ({}));
+                noteEl.className = 'ex-set-note is-err';
+                noteEl.textContent = err.message || 'Could not save.';
+            }
+        } catch (e) {
+            noteEl.className = 'ex-set-note is-err';
+            noteEl.textContent = 'Could not save.';
+        }
+    }
+
+    function renderSettings(pane) {
+        pane.appendChild(paneHead('Settings', false, 'Vaier-wide configuration'));
+        const body = el('div', 'ex-pane-body');
+
+        if (S.settings.state === 'idle' || S.settings.state === 'loading') {
+            if (S.settings.state === 'idle') loadSettings();
+            body.appendChild(note('Reading settings…', false));
+            return pane.appendChild(body);
+        }
+        if (S.settings.state === 'error' || !S.settings.config) {
+            body.appendChild(note('Vaier could not read its settings.', true));
+            return pane.appendChild(body);
+        }
+        const c = S.settings.config;
+
+        const field = (label, hint, control) => {
+            const f = el('div', 'ex-field');
+            const l = el('label'); l.textContent = label;
+            f.append(l, control);
+            if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+            return f;
+        };
+        const input = (value, ph, type) => {
+            const i = el('input', 'ex-input');
+            i.type = type || 'text'; i.value = value == null ? '' : String(value);
+            if (ph) i.placeholder = ph; i.autocomplete = 'off'; i.spellcheck = false;
+            return i;
+        };
+        // A form section: a titled block of fields with its own Save button and inline note.
+        const sectionForm = (title) => {
+            body.appendChild(section(title));
+            const form = el('div', 'ex-form'); body.appendChild(form);
+            return form;
+        };
+        const saveRow = (form, label, onSave) => {
+            const row = el('div', 'ex-set-actions');
+            const btn = el('button', 'ex-btn is-accent'); btn.textContent = label;
+            const noteEl = el('span', 'ex-set-note');
+            btn.onclick = () => onSave(noteEl);
+            row.append(btn, noteEl); form.appendChild(row);
+            return noteEl;
+        };
+
+        // --- Nightly backups: the fleet-wide "when" (the one backup knob the operator owns) ---
+        const sched = sectionForm('Nightly backups');
+        const hour = el('select', 'ex-input');
+        for (let h = 0; h < 24; h++) {
+            const o = el('option'); o.value = String(h);
+            o.textContent = String(h).padStart(2, '0') + ':00'; hour.appendChild(o);
+        }
+        hour.value = String(c.backupScheduleHour);
+        sched.appendChild(field('Runs each night at',
+            'In ' + (c.backupScheduleZone || 'the server’s zone') + '. A failed run emails the admins.', hour));
+        saveRow(sched, 'Save schedule', (n) => saveSetting('/settings/backup-schedule', 'PUT',
+            { backupScheduleHour: parseInt(hour.value, 10) }, n, 'Schedule saved.'));
+
+        // --- AWS credentials: only meaningful in Route53 DNS mode ---
+        if (c.dnsProvider === 'ROUTE53') {
+            const aws = sectionForm('AWS credentials');
+            const cur = input(c.awsKeyHint, 'Not configured'); cur.disabled = true;
+            const newKey = input('', 'AKIA…'); const newSecret = input('', 'Secret', 'password');
+            aws.append(field('Current key', null, cur), field('New key', null, newKey),
+                field('New secret', 'Both are needed to change the credentials.', newSecret));
+            saveRow(aws, 'Save credentials', (n) => {
+                if (!newKey.value.trim() || !newSecret.value.trim()) {
+                    n.className = 'ex-set-note is-err'; n.textContent = 'Both key and secret are required.'; return;
+                }
+                saveSetting('/settings/aws', 'PUT', { awsKey: newKey.value.trim(), awsSecret: newSecret.value.trim() },
+                    n, 'Credentials saved.').then(() => { newKey.value = ''; newSecret.value = ''; });
+            });
+        }
+
+        // --- Email (SMTP): the channel every alert goes out on ---
+        const smtp = sectionForm('Email (SMTP)');
+        const host = input(c.smtpHost, 'smtp.example.com');
+        const port = input(c.smtpPort || 587, '587', 'number');
+        const user = input(c.smtpUsername, 'user@example.com');
+        const pass = input('', 'Leave blank to keep the stored password', 'password');
+        const sender = input(c.smtpSender, 'noreply@example.com');
+        const test = input('', 'you@example.com');
+        smtp.append(field('Host', null, host), field('Port', null, port), field('Username', null, user),
+            field('Password', null, pass), field('Sender', null, sender),
+            field('Send a test to', 'Optional — checks the settings above send mail.', test));
+        const smtpBody = () => ({ smtpHost: host.value.trim(), smtpPort: parseInt(port.value, 10) || 587,
+            smtpUsername: user.value.trim(), smtpPassword: pass.value, smtpSender: sender.value.trim() });
+        const smtpNote = saveRow(smtp, 'Save email', (n) => {
+            if (!host.value.trim() || !user.value.trim() || !sender.value.trim()) {
+                n.className = 'ex-set-note is-err'; n.textContent = 'Host, username and sender are required.'; return;
+            }
+            saveSetting('/settings/smtp', 'PUT', smtpBody(), n, 'Email settings saved.').then(() => { pass.value = ''; });
+        });
+        const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Send test email';
+        testBtn.onclick = () => {
+            if (!test.value.trim()) { smtpNote.className = 'ex-set-note is-err'; smtpNote.textContent = 'Enter a recipient for the test.'; return; }
+            saveSetting('/settings/smtp/test', 'POST', { ...smtpBody(), recipient: test.value.trim() },
+                smtpNote, 'Test email sent to ' + test.value.trim() + '.');
+        };
+        smtp.querySelector('.ex-set-actions').insertBefore(testBtn, smtp.querySelector('.ex-set-note'));
+
+        // --- Disk monitoring ---
+        const disk = sectionForm('Disk monitoring');
+        const thresh = input(c.diskMonitorThresholdPercent || 85, '85', 'number');
+        disk.appendChild(field('Alert above', 'Percent full. Vaier emails the admins when a filesystem crosses this.', thresh));
+        saveRow(disk, 'Save threshold', (n) => {
+            const t = parseInt(thresh.value, 10);
+            if (!t || t < 1 || t > 99) { n.className = 'ex-set-note is-err'; n.textContent = 'Enter 1–99.'; return; }
+            saveSetting('/settings/disk-monitor', 'PUT', { diskMonitorThresholdPercent: t }, n, 'Threshold saved.');
+        });
+
+        // --- About: read-only facts ---
+        body.appendChild(section('About'));
+        body.appendChild(kv([
+            ['Version', S.settings.version],
+            ['Edition', S.settings.edition],
+            ['Domain', c.domain],
+            ['Let’s Encrypt email', c.acmeEmail],
+            ['DNS', c.dnsProvider],
+        ]));
+
+        pane.appendChild(body);
     }
 
     // --- files, and the time rail through them ----------------------------------------------------------

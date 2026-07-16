@@ -138,7 +138,8 @@ class ExplorerShellTest {
         // make the tree look finished. (The download is an <a href>, not a fetch, so it does not appear here.)
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
                                        "/docker-services", "/published-services", "/access/services",
-                                       "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs");
+                                       "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
+                                       "/settings", "/license");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
@@ -192,10 +193,13 @@ class ExplorerShellTest {
     @Test
     void theSectionsNotYetPorted_areBridgedIntoTheTreeAndMarkedTransitional() throws IOException {
         String js = read("explorer-shell.js");
-        for (String page : List.of("vpn-peers.html", "backups.html", "users.html", "settings.html",
-                                   "concepts.html")) {
+        // Settings is native now (a top-level global, no longer an iframe), so settings.html is gone from the
+        // shell. Infrastructure and Backups stay transitional bridges; Users and Concepts are top-level globals
+        // that still bridge their pages until they are ported.
+        for (String page : List.of("vpn-peers.html", "backups.html", "users.html", "concepts.html")) {
             assertThat(js).as("bridge to %s", page).contains(page);
         }
+        assertThat(js).doesNotContain("settings.html");   // ported to a native entry, not framed
         // A bridge nobody labelled is a bridge nobody deletes.
         assertThat(js).containsIgnoringCase("transitional");
     }

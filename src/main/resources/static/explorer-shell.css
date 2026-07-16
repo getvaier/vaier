@@ -943,6 +943,12 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
     font-size: 13px; color: var(--text-muted); line-height: 1.45; cursor: pointer;
 }
 .ex-check-row input { margin-top: 2px; accent-color: var(--accent); }
+select.ex-input { cursor: pointer; }
+/* A settings section's Save row: the button(s), then an inline note that turns green on save, red on error. */
+.ex-set-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+.ex-set-note { font-size: 13px; color: var(--text-dim); }
+.ex-set-note.is-ok { color: var(--green); }
+.ex-set-note.is-err { color: var(--red); }
 /* A machine's job subheading, and its last-run status line — a dot and a phrase, the fleet's own four colours. */
 .ex-sub { font-family: var(--mono); font-size: 14px; color: var(--text); margin: 16px 0 6px; }
 .ex-runline { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-muted); }
