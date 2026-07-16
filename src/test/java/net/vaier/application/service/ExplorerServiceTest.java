@@ -14,7 +14,9 @@ import net.vaier.domain.SftpRoot;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
+import net.vaier.domain.SourcePaths;
 import net.vaier.domain.port.ForMountingArchives;
+import net.vaier.domain.port.ForReadingProtectedPaths;
 import net.vaier.domain.port.ForResolvingSftpRoots;
 import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForTrackingHostKeys;
@@ -59,6 +61,7 @@ class ExplorerServiceTest {
     @Mock ForTrackingHostKeys forTrackingHostKeys;
     @Mock ForResolvingSftpRoots forResolvingSftpRoots;
     @Mock ForMountingArchives forMountingArchives;
+    @Mock ForReadingProtectedPaths forReadingProtectedPaths;
 
     @InjectMocks ExplorerService service;
 
@@ -99,6 +102,36 @@ class ExplorerServiceTest {
         ArgumentCaptor<SshTarget> resolved = ArgumentCaptor.forClass(SshTarget.class);
         verify(forBrowsingRemoteFiles).list(resolved.capture(), eq("/home/geir"));
         assertThat(resolved.getValue().host()).isEqualTo("10.13.13.6");
+    }
+
+    @Test
+    void listDirectory_carriesTheMachinesProtectedPaths_soEntriesCanBeMarkedBackedUp() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forReadingProtectedPaths.protectedPathsFor("apalveien5"))
+            .thenReturn(SourcePaths.of(List.of("/home/geir")));
+        remoteAnswers(new DirectoryListing(List.of(
+            FileEntry.in("/home/geir", "docs", true, 4096, WHEN)), "SHA256:pinned"));
+
+        MachineDirectory directory = service.listDirectory("apalveien5", "/home/geir");
+
+        // The service asks the driven port (never a backup use case) and threads the domain value object back;
+        // the coverage decision itself stays in the domain.
+        assertThat(directory.protectedPaths().covers("/home/geir/docs")).isTrue();
+        verify(forReadingProtectedPaths).protectedPathsFor("apalveien5");
+    }
+
+    @Test
+    void listDirectory_inThePast_doesNotConsultProtectedPaths_andMarksNothing() {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+        remoteAnswers(new DirectoryListing(List.of(
+            FileEntry.in(MOUNTPOINT + "/home/geir", "docs", true, 4096, WHEN)), "SHA256:pinned"));
+
+        MachineDirectory directory = service.listDirectory("apalveien5", "/home/geir", "ab12");
+
+        // The past's backup shape is not today's — the protected set is empty and the port is never asked.
+        assertThat(directory.protectedPaths().isEmpty()).isTrue();
+        verify(forReadingProtectedPaths, never()).protectedPathsFor(any());
     }
 
     @Test

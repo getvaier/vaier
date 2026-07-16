@@ -1017,8 +1017,11 @@ Browse, cross-machine copy and download are **Community**; the time rail, covera
   §6.21 slice D — mount-on-demand, idempotent, idle-swept, with the rail scrubbing a machine's archives newest-first
   and the shell relighting into the past palette; restore-as-paste is what remains, and it rides on Clipboard/paste
   from slice 2.)*
-- [ ] **4 — Coverage.** Coverage dots, draft-then-save to the backup job, "Uncovered only" filter,
-  one-job-per-machine enforcement. Enterprise.
+- [ ] **4 — Coverage 🟡 (backend delivered).** Coverage dots, draft-then-save to the backup job, "Uncovered only" filter,
+  one-job-per-machine enforcement. Enterprise. *(The **select-and-back-up** backend landed — per-entry
+  **backed-up** / **contains-backed-up** flags on the file listing, and one endpoint per direction that
+  get-or-creates the machine's repository and job and folds a path selection into the job's **protected
+  paths**; see **Delivered in slice 4** below.)*
 - [ ] **5 — Mutate 🟡 (delete backend delivered).** Delete, rename/move, new folder, behind a typed-confirmation
   gate. Community. *(The **delete** backend landed — recursive delete over SFTP, an SFTP-root guard, and
   `DELETE /machines/{name}/files`; see **Delivered in slice 5** below. **Rename/move** and **new folder** remain,
@@ -1186,6 +1189,42 @@ job**'s source paths against the tree and would have reported a backed-up direct
   root guard a `400` carrying its sentence. Admin-authed like the rest of the Explorer. **Rename/move** and
   **new folder** remain.
 
+**Delivered in slice 4 (backend — select and back up):**
+- **The operator makes the decision; the backend absorbs the machinery.** The whole flow an operator sees is
+  *select files, click Back up*. Everything under it — the machine's **backup repository**, its **backup job**,
+  the encrypting passphrase, path normalization, coverage — is the backend's problem, hidden behind one call
+  per direction. This is the design direction for Vaier generally: shrink what the operator has to hold in
+  their head, not the code.
+- **`domain.SourcePaths`** — a new value object: the normalized **protected paths** of a job, and the home of
+  the containment decisions. Normalization is a *minimal cover* — no path is a descendant of another (an
+  ancestor covers its children), exact duplicates collapse, paths are trimmed, blanks ignored, a non-absolute
+  path refused (a source path goes verbatim into borg's `create`), a trailing slash stripped. `protecting(paths)`
+  / `without(paths)` return new normalized sets (removing a path also drops any descendant of it). `covers(path)`
+  is true when the path equals or sits under a source path ("this path is **backed up**") — the same containment
+  the minimal cover uses to drop redundant descendants; `enclosesUnder(path)` is true when a source path is a
+  *strict* descendant of the given path ("this folder is not itself backed up but **contains backed up**"). Both
+  are the domain's, unit-tested, and computed once server-side — never re-implemented in the browser.
+- **The file listing gained two booleans.** `GET /machines/{machine}/files` entries now carry `backedUp`
+  (`protectedPaths.covers(entry.path)`) and `containsBackedUp` (`!backedUp && protectedPaths.enclosesUnder(entry.path)`,
+  so the two are mutually exclusive — full shield vs half shield). They are **present-only**: a past (archived)
+  listing marks nothing, because an old archive's shape is not today's protection. The read side gets the set
+  through a new driven port **`ForReadingProtectedPaths`** (`protectedPathsFor(machineName)`, implemented by
+  `BackupJobProtectedPathsAdapter` over the backup-job store), so `ExplorerService` depends on it and **not** on
+  any backup use case — the hex boundary holds, and a machine with no job simply protects the empty set.
+- **`ProtectMachinePathsUseCase` on `BackupService`** (a new narrow use case on the existing backup domain
+  service — no new service). `protect(machine, paths)` get-or-creates the machine's repository (name =
+  `BackupRepository.sanitizedName(machine)`, on the fleet's single **backup server**, `appendOnly` false,
+  passphrase minted by the new `Passphrases.strong()` — 32 alphanumeric chars from `SecureRandom`, **never taken
+  from the client**) and its job (retention 7/4/6, `zstd,6`, enabled), then folds the posted paths into the job's
+  protected set; `unprotect(machine, paths)` removes them and any descendants, deleting the job (repository kept)
+  when its last path goes. `BackupJob.withSourcePaths` carries every other field through unchanged.
+- **Endpoints.** `POST /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job; `404`
+  when the machine is unknown; `409` (`ConflictException` → `ApiError`, *"Designate a backup server before backing
+  up machines."*) when no backup server is designated yet, since a repository has nowhere to live without one.
+  `DELETE /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job, `204` when that removal
+  emptied the job (deleted), and a no-op success when the machine has no job; `404` when the machine is unknown.
+  Both Enterprise-gated with the rest of `BackupRestController`.
+
 ---
 
 ### 6.21 Explorer becomes Vaier's only UI 🟡 (in progress — epic [#323](https://github.com/getvaier/vaier/issues/323))
@@ -1205,7 +1244,9 @@ Three things this buys that a set of pages structurally cannot:
 - **Coverage becomes a property of a path.** A **backup job**'s source paths and a machine's file tree are the
   same namespace, so Vaier can flag an uncovered directory *while the operator is standing in it* — the
   production gap today (jobs cover `/home/geir` only; Home Assistant's database and every Docker volume are
-  unprotected) is invisible to a separate Backups page.
+  unprotected) is invisible to a separate Backups page. *(The backend for this landed in §6.20 slice 4:
+  each browsed entry now carries a **backed up** / **contains backed up** flag, and a select-and-back-up
+  call get-or-creates the machine's repository and job from a path selection.)*
 - **One search.** One address space means one ⌘K over the whole fleet.
 
 **Slices:**

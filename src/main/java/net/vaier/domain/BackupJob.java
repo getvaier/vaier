@@ -77,6 +77,18 @@ public record BackupJob(
     }
 
     /**
+     * A copy of this job protecting {@code newSourcePaths} instead of its current ones. The paths are the
+     * job's only mutable-by-selection field in the just-select-and-back-up flow; every other field
+     * (repository, retention, compression, flags) is carried through unchanged. The caller supplies an
+     * already-normalized, non-empty set (see {@link SourcePaths}) — an empty job means "stop backing up",
+     * which deletes the job rather than saving an empty one.
+     */
+    public BackupJob withSourcePaths(List<String> newSourcePaths) {
+        return new BackupJob(name, machineName, repositoryName, newSourcePaths, excludes,
+            keepDaily, keepWeekly, keepMonthly, compression, enabled, backupAsRoot);
+    }
+
+    /**
      * The borg archive-name placeholder expression this job creates archives under: the machine's own
      * hostname plus an ISO-8601 timestamp, both expanded by borg at create time. Every host's archives
      * are therefore self-identifying within a shared repository.

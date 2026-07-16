@@ -30,6 +30,7 @@ import net.vaier.domain.BorgVersion;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.Edition;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.port.ForPersistingBackupJobs;
@@ -148,7 +149,7 @@ class BackupRestControllerTest {
         controller = new BackupRestController(service, service, service, service, service, service,
             generateSetupScript, provisionBackupServer, service, service, service, service, runBackupJob,
             listArchives, checkPrerequisites, initBackupRepository, getMachines, authorizeBackupClient,
-            prepareBackupClient, forSubscribingToEvents);
+            prepareBackupClient, service, forSubscribingToEvents);
     }
 
     private Machine machine(String name) {
@@ -226,6 +227,13 @@ class BackupRestControllerTest {
             .andExpect(status().isPaymentRequired());
         // The backup SSE stream is gated too.
         mvc.perform(get("/backup-jobs/events")).andExpect(status().isPaymentRequired());
+
+        // Just-select-and-back-up: the protected-paths routes are gated too.
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .post("/machines/colina/backup/paths")
+            .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isPaymentRequired());
+        mvc.perform(delete("/machines/colina/backup/paths")
+            .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isPaymentRequired());
     }
 
     @Test
@@ -914,5 +922,124 @@ class BackupRestControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         verify(authorizeBackupClient, never()).authorizeClient(any(), any());
+    }
+
+    // --- Just select and back up: protected paths ---
+
+    @Test
+    void protectPathsCreatesTheRepositoryAndJobThenReturnsTheJob() {
+        backupServers.save(server());
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.protectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir", "/etc/nginx")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().machineName()).isEqualTo("Colina 27");
+        assertThat(response.getBody().sourcePaths()).containsExactlyInAnyOrder("/home/geir", "/etc/nginx");
+
+        // A repository was created for the machine — by its sanitized name — with a strong, backend-owned
+        // passphrase (never taken from the client).
+        BackupRepository createdRepo = repositories.getByName("Colina-27").orElseThrow();
+        assertThat(createdRepo.serverName()).isEqualTo("nas-borg");
+        assertThat(createdRepo.passphrase()).matches("[A-Za-z0-9]{32}");
+        // The job references that repository.
+        assertThat(jobs.getByName("Colina-27").orElseThrow().repositoryName()).isEqualTo("Colina-27");
+    }
+
+    @Test
+    void protectPathsAddsToAnExistingJobAndNormalizesDescendants() {
+        backupServers.save(server());
+        repositories.save(repo());
+        jobs.save(job()); // machineName "Colina 27", sourcePaths ["/home/geir"]
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        // A descendant of an already-protected path is a no-op; a genuinely new path is added.
+        ResponseEntity<BackupRestController.JobResponse> response = controller.protectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir/docs", "/var/lib/docker")));
+
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().sourcePaths())
+            .containsExactlyInAnyOrder("/home/geir", "/var/lib/docker");
+        // No second repository was created — the existing one is reused.
+        assertThat(repositories.getAll()).hasSize(1);
+    }
+
+    @Test
+    void protectPathsUnknownMachineReturns404() {
+        backupServers.save(server());
+        when(getMachines.getAllMachines()).thenReturn(List.of());
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.protectPaths("ghost",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(jobs.getAll()).isEmpty();
+    }
+
+    @Test
+    void protectPathsWithNoBackupServerConflicts() {
+        // No server designated yet -> the operation cannot create a repository. Surfaces as a 409 via
+        // ConflictException.
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.protectPaths("Colina 27",
+                new BackupRestController.ProtectPathsRequest(List.of("/home/geir"))))
+            .isInstanceOf(ConflictException.class)
+            .hasMessageContaining("Designate a backup server");
+        assertThat(jobs.getAll()).isEmpty();
+    }
+
+    @Test
+    void unprotectPathsRemovesSomeAndReturnsTheUpdatedJob() {
+        backupServers.save(server());
+        repositories.save(repo());
+        jobs.save(new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home/geir", "/etc/nginx"), List.of(), 7, 4, 6, "zstd,6", true, false));
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/etc/nginx")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().sourcePaths()).containsExactly("/home/geir");
+    }
+
+    @Test
+    void unprotectPathsRemovingTheLastPathDeletesTheJobAndReturns204() {
+        backupServers.save(server());
+        repositories.save(repo());
+        jobs.save(job()); // only "/home/geir"
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(jobs.getByName("colina-home")).isEmpty();
+        // The repository is left intact.
+        assertThat(repositories.getByName("nas-borg")).isPresent();
+    }
+
+    @Test
+    void unprotectPathsWhenMachineHasNoJobIsANoOpSuccess() {
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    void unprotectPathsUnknownMachineReturns404() {
+        when(getMachines.getAllMachines()).thenReturn(List.of());
+
+        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("ghost",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 }

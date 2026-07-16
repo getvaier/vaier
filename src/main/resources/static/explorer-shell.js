@@ -36,6 +36,8 @@
         cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
         refresh: '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.4v3.1h-3.1"/>',
         trash:   '<path d="M3 4.5h10M6.5 4.5V3a.8.8 0 0 1 .8-.8h1.4a.8.8 0 0 1 .8.8v1.5"/><path d="M4.2 4.5l.6 8a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8"/><path d="M6.7 7v4M9.3 7v4"/>',
+        shield:  '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M5.7 8l1.6 1.7L10.4 6"/>',
+        shieldhalf: '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M3 8.3h10"/>',
         // Device forms, matched to the Infrastructure page's machine icons (vpn-peers-helpers.js) so a machine
         // wears the same shape in the tree as on its card — just smaller. Keyed by device category, lowercased.
         server:  '<rect x="2.5" y="2.5" width="11" height="4" rx=".8"/><rect x="2.5" y="9" width="11" height="4" rx=".8"/><circle cx="4.6" cy="4.5" r=".55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r=".55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/>',
@@ -198,6 +200,10 @@
     // The backup jobs that back a machine up. A job names the machine it protects, so this is how a machine
     // learns it is backed up — and grows a `backup` entry even when it is not the server.
     const jobsOn = (machine) => S.backupJobs.filter((j) => j.machineName === machine);
+
+    // Whether an entry is inside its machine's backup is NOT decided here — the containment rule (a source path
+    // covers itself and its descendants) lives in the domain, and the backend stamps each listed entry with
+    // `backedUp`. The shell only reads that flag; it never re-derives the rule in JS.
 
     function childrenOf(path) {
         const kind = kindOf(path);
@@ -2275,6 +2281,16 @@
             nm.className = 'ex-nm';
             nm.textContent = entry.name;
             name.appendChild(nm);
+            // A backed-up path wears a shield, right in the browser — you see what's protected, top-down, with
+            // nothing to cross-reference. A folder that isn't itself backed up but holds something that is wears
+            // a half-shield, so the trail down to protected content is visible as you drill in. Both facts are
+            // the backend's (the domain owns the rule); the past carries neither, so an archive shows no shields.
+            if (!S.at && (entry.backedUp || entry.containsBackedUp)) {
+                const shield = el('span', 'ex-shield' + (entry.backedUp ? '' : ' is-partial'));
+                shield.innerHTML = svg(entry.backedUp ? 'shield' : 'shieldhalf', 'ex-ico');
+                shield.title = entry.backedUp ? 'Backed up' : 'Something inside is backed up';
+                name.appendChild(shield);
+            }
             if (entry.directory) name.onclick = () => go(S.path.concat([entry.name]));
 
             const size = document.createElement('span');
@@ -2425,6 +2441,15 @@
         const actions = el('div', 'ex-selbar-actions');
         actions.appendChild(selVerb('copy', 'Copy', 'ex-btn', () => selCopy(machine, chosen)));
         actions.appendChild(selVerb('download', 'Download', 'ex-btn', () => selDownload(machine, chosen)));
+        // Back up is the whole idea: pick what matters and protect it. Present-only (you protect the live tree,
+        // not an archived shape of it) and never on the backup server itself (it stores the archives, it is not
+        // a thing that is backed up). Vaier makes the repository, the job and the schedule behind the one click.
+        if (!S.at && (!S.backupServer || machine !== S.backupServer.machineName)) {
+            actions.appendChild(selVerb('shield', 'Back up', 'ex-btn is-accent', () => selBackup(machine, chosen)));
+            if (chosen.some((e) => e.backedUp)) {
+                actions.appendChild(selVerb('cross', 'Stop backing up', 'ex-btn', () => selUnbackup(machine, chosen)));
+            }
+        }
         if (!S.at) actions.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => selDelete(machine, chosen)));
         const clear = el('button', 'ex-iconbtn');
         clear.innerHTML = svg('cross', 'ex-ico');
@@ -2463,6 +2488,58 @@
         chosen.forEach((entry) => download(machine, entry));   // each in the same click gesture
         S.sel = new Set();
         render();
+    }
+
+    // Back the selection up — the one gesture that is the whole feature. The browser sends only the paths; the
+    // backend makes the repository if there is none, makes the job if there is none, and folds the paths in
+    // (a child of something already protected just disappears into it). Then the jobs reload and the shields
+    // appear where the selection was. Vaier holds the complexity; the operator held down a checkbox.
+    async function selBackup(machine, chosen) {
+        const paths = chosen.map((e) => e.path);
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/backup/paths', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: paths }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not back that up.');
+                return;
+            }
+            await loadBackup();   // the job changed — reload so the backup entry is current
+            toast(paths.length + (paths.length === 1 ? ' item is' : ' items are') + ' backed up on ' + machine
+                + ' now, and nightly.');
+            S.sel = new Set();
+            // The shields are stamped on the listing by the backend, so re-read this directory to show them.
+            refreshDir(machine, remotePath(S.path));
+        } catch (e) {
+            toast('Vaier could not back that up.');
+        }
+    }
+
+    // Stop backing the selection up. Removing a folder clears anything under it too; if nothing is left backed
+    // up on the machine, the backend forgets the job entirely (the archives already made are untouched).
+    async function selUnbackup(machine, chosen) {
+        const paths = chosen.map((e) => e.path);
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/backup/paths', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: paths }),
+            });
+            if (!res.ok && res.status !== 204) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not stop backing that up.');
+                return;
+            }
+            await loadBackup();
+            toast('Stopped backing up ' + paths.length + (paths.length === 1 ? ' item.' : ' items.'));
+            S.sel = new Set();
+            refreshDir(machine, remotePath(S.path));   // re-read so the shields clear
+        } catch (e) {
+            toast('Vaier could not stop backing that up.');
+        }
     }
 
     // One gate for the whole batch: name the count, and delete each in turn once the machine name is typed.

@@ -417,7 +417,10 @@ class ExplorerShellTest {
         // a container, and cannot fetch its logs. So the Inspector shows what Vaier knows and offers nothing
         // it cannot do. (Adding those endpoints is its own change, with its own security thinking.)
         String js = read("explorer-shell.js");
-        for (String verb : List.of("Restart", "Stop", "Start container", "Logs", "/restart", "/stop",
+        // "Stop container" not bare "Stop": backups legitimately ship "Stop backing up" (a real DELETE endpoint
+        // backs it), and the container guard is about container control that has NO endpoint. The endpoint
+        // checks below (/stop, a /docker-services POST, /containers/) are the real teeth regardless.
+        for (String verb : List.of("Restart", "Stop container", "Start container", "Logs", "/restart", "/stop",
                                    "/start")) {
             assertThat(js).as("a container verb (%s) with no endpoint behind it", verb).doesNotContain(verb);
         }

@@ -949,6 +949,11 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
 /* A machine's job subheading, and its last-run status line — a dot and a phrase, the fleet's own four colours. */
 .ex-sub { font-family: var(--mono); font-size: 14px; color: var(--text); margin: 16px 0 6px; }
 .ex-runline { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-muted); }
+/* The backed-up mark in the file browser: a small shield in the accent, riding just after the name. The
+   half-shield (a folder that only contains backed-up things) is the same glyph, muted — present, but lesser. */
+.ex-shield { display: inline-flex; align-items: center; margin-left: 5px; color: var(--accent); flex: none; }
+.ex-shield .ex-ico { width: 12px; height: 12px; }
+.ex-shield.is-partial { color: var(--text-dim); }
 
 @media (prefers-reduced-motion: reduce) {
     .ex-app *, .ex-app { transition: none !important; animation: none !important; }

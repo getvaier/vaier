@@ -13,6 +13,7 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SftpRoot;
+import net.vaier.domain.SourcePaths;
 import net.vaier.rest.ExplorerRestController.DirectoryResponse;
 import net.vaier.rest.ExplorerRestController.FileEntryResponse;
 import org.junit.jupiter.api.Test;
@@ -150,6 +151,51 @@ class ExplorerRestControllerTest {
             .andExpect(jsonPath("$.code").value("PATH_OUTSIDE_SFTP_ROOT"))
             .andExpect(jsonPath("$.message").value(
                 "/volume2 is not reachable over SFTP; this machine's SFTP service is rooted at /volume1."));
+    }
+
+    @Test
+    void get_marksTheThreeShieldStates_backedUp_containsBackedUp_orNeither() {
+        // The machine protects exactly /home/geir. An entry AT that path is backedUp; an ancestor /home merely
+        // CONTAINS it (half shield); an unrelated /var is neither. All three verdicts are the domain's
+        // (SourcePaths.covers / enclosesUnder), rendered per entry — never re-derived in the browser.
+        when(browseFilesUseCase.listDirectory("apalveien5", "/", null))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/", List.of(
+                FileEntry.in("/", "home", true, 4096, WHEN),
+                FileEntry.in("/", "var", true, 4096, WHEN)),
+                SourcePaths.of(List.of("/home/geir"))));
+        when(browseFilesUseCase.listDirectory("apalveien5", "/home", null))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/home", List.of(
+                FileEntry.in("/home", "geir", true, 4096, WHEN)),
+                SourcePaths.of(List.of("/home/geir"))));
+
+        List<FileEntryResponse> root = controller.list("apalveien5", "/", null).getBody().entries();
+        FileEntryResponse home = root.stream().filter(e -> e.name().equals("home")).findFirst().orElseThrow();
+        FileEntryResponse var = root.stream().filter(e -> e.name().equals("var")).findFirst().orElseThrow();
+        // /home contains a source path deeper down but is not itself backed up -> half shield.
+        assertThat(home.backedUp()).isFalse();
+        assertThat(home.containsBackedUp()).isTrue();
+        // /var has nothing protected -> neither.
+        assertThat(var.backedUp()).isFalse();
+        assertThat(var.containsBackedUp()).isFalse();
+
+        // The entry that IS the source path -> fully backed up, and never also "contains" (mutually exclusive).
+        FileEntryResponse geir = controller.list("apalveien5", "/home", null).getBody().entries().getFirst();
+        assertThat(geir.backedUp()).isTrue();
+        assertThat(geir.containsBackedUp()).isFalse();
+    }
+
+    @Test
+    void get_inThePast_marksNothingBackedUp() {
+        // An archived listing carries an empty protected set — the past's backup shape is not today's, so no
+        // entry is marked, whatever its path.
+        when(browseFilesUseCase.listDirectory("apalveien5", "/home/geir", "ab12"))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/home/geir",
+                List.of(FileEntry.in("/home/geir", "docs", true, 4096, WHEN)), "ab12"));
+
+        FileEntryResponse entry = controller.list("apalveien5", "/home/geir", "ab12").getBody().entries().getFirst();
+
+        assertThat(entry.backedUp()).isFalse();
+        assertThat(entry.containsBackedUp()).isFalse();
     }
 
     // --- slice D: the time coordinate -------------------------------------------------------------------

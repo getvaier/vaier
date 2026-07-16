@@ -2,6 +2,7 @@ package net.vaier.application;
 
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.SftpRoot;
+import net.vaier.domain.SourcePaths;
 
 import java.util.List;
 
@@ -52,12 +53,29 @@ public interface BrowseFilesUseCase {
      * that is unreachable over SFTP. A caller that assumed {@code /} would open the NAS on the one path the
      * NAS cannot answer. The {@code at} coordinate travels too, so the browser can tell a listing of the past
      * from one of the present.
+     *
+     * <p>{@code protectedPaths} carries the machine's backed-up {@link SourcePaths} so each entry can be marked
+     * as protected — the "is this path backed up?" decision the domain owns ({@link SourcePaths#covers}). It is
+     * only populated for a present listing; the past is left empty, because an old archive's backup shape is
+     * not today's protection.
      */
-    record MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at) {
+    record MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at,
+                            SourcePaths protectedPaths) {
 
-        /** A present-tense listing (no archive coordinate). */
+        /** A present-tense listing (no archive coordinate, nothing marked protected). */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries) {
-            this(root, path, entries, null);
+            this(root, path, entries, null, SourcePaths.of(List.of()));
+        }
+
+        /** A listing at an archive coordinate — the past, where nothing is marked protected. */
+        public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at) {
+            this(root, path, entries, at, SourcePaths.of(List.of()));
+        }
+
+        /** A present-tense listing carrying the machine's protected paths, so entries can be marked. */
+        public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries,
+                                SourcePaths protectedPaths) {
+            this(root, path, entries, null, protectedPaths);
         }
     }
 }

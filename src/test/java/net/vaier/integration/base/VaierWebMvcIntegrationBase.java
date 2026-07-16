@@ -373,6 +373,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected InitBackupRepositoryUseCase initBackupRepositoryUseCase;
 
+    @MockBean
+    protected net.vaier.application.ProtectMachinePathsUseCase protectMachinePathsUseCase;
+
     // --- Offline page ---
     @MockBean
     protected GetOfflinePageUseCase getOfflinePageUseCase;

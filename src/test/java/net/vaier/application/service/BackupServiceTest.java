@@ -176,4 +176,65 @@ class BackupServiceTest {
 
         assertThat(service.getBackupJobs()).isEmpty();
     }
+
+    // --- Just select and back up: get-or-create semantics ---
+
+    @Test
+    void protectGetsOrCreatesRepositoryAndJobWithABackendPassphrase() {
+        service.saveBackupServer(server());
+
+        BackupJob created = service.protect("Colina 27", List.of("/home/geir"));
+
+        // The repository is created by the machine's sanitized name, on the single server, with a strong
+        // backend-generated passphrase (never taken from a client).
+        BackupRepository repo = repositories.getByName("Colina-27").orElseThrow();
+        assertThat(repo.serverName()).isEqualTo("nas-borg");
+        assertThat(repo.passphrase()).matches("[A-Za-z0-9]{32}");
+        // The job is created for the machine, referencing that repository, with the retention defaults.
+        assertThat(created.machineName()).isEqualTo("Colina 27");
+        assertThat(created.repositoryName()).isEqualTo("Colina-27");
+        assertThat(created.sourcePaths()).containsExactly("/home/geir");
+        assertThat(created.keepDaily()).isEqualTo(7);
+        assertThat(created.enabled()).isTrue();
+    }
+
+    @Test
+    void protectReusesTheExistingRepositoryAndJobForTheMachine() {
+        service.saveBackupServer(server());
+        service.protect("Colina 27", List.of("/home/geir"));
+
+        service.protect("Colina 27", List.of("/etc/nginx"));
+
+        // Still exactly one repository and one job — the second call folds into the same job.
+        assertThat(repositories.getAll()).hasSize(1);
+        assertThat(jobs.getAll()).hasSize(1);
+        assertThat(jobs.getAll().get(0).sourcePaths())
+            .containsExactlyInAnyOrder("/home/geir", "/etc/nginx");
+    }
+
+    @Test
+    void protectWithoutABackupServerConflicts() {
+        assertThatThrownBy(() -> service.protect("Colina 27", List.of("/home/geir")))
+            .isInstanceOf(net.vaier.domain.ConflictException.class)
+            .hasMessageContaining("Designate a backup server");
+        assertThat(jobs.getAll()).isEmpty();
+        assertThat(repositories.getAll()).isEmpty();
+    }
+
+    @Test
+    void unprotectEmptyingTheJobDeletesItButKeepsTheRepository() {
+        service.saveBackupServer(server());
+        service.protect("Colina 27", List.of("/home/geir"));
+
+        Optional<BackupJob> result = service.unprotect("Colina 27", List.of("/home/geir"));
+
+        assertThat(result).isEmpty();
+        assertThat(jobs.getAll()).isEmpty();
+        assertThat(repositories.getByName("Colina-27")).isPresent();
+    }
+
+    @Test
+    void unprotectForAMachineWithNoJobIsANoOp() {
+        assertThat(service.unprotect("Colina 27", List.of("/home/geir"))).isEmpty();
+    }
 }

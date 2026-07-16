@@ -22,6 +22,7 @@ import net.vaier.application.ListArchivesUseCase;
 import net.vaier.application.PrepareBackupClientUseCase;
 import net.vaier.application.PrepareBackupClientUseCase.PrepareResult;
 import net.vaier.application.PrepareBackupClientUseCase.PrepareStatus;
+import net.vaier.application.ProtectMachinePathsUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionResult;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionStatus;
@@ -96,6 +97,7 @@ public class BackupRestController {
     private final GetMachinesUseCase getMachines;
     private final AuthorizeBackupClientUseCase authorizeBackupClient;
     private final PrepareBackupClientUseCase prepareBackupClient;
+    private final ProtectMachinePathsUseCase protectMachinePaths;
     private final ForSubscribingToEvents forSubscribingToEvents;
 
     public BackupRestController(SaveBackupRepositoryUseCase saveBackupRepository,
@@ -117,6 +119,7 @@ public class BackupRestController {
                                GetMachinesUseCase getMachines,
                                AuthorizeBackupClientUseCase authorizeBackupClient,
                                PrepareBackupClientUseCase prepareBackupClient,
+                               ProtectMachinePathsUseCase protectMachinePaths,
                                ForSubscribingToEvents forSubscribingToEvents) {
         this.saveBackupRepository = saveBackupRepository;
         this.getBackupRepositories = getBackupRepositories;
@@ -137,6 +140,7 @@ public class BackupRestController {
         this.getMachines = getMachines;
         this.authorizeBackupClient = authorizeBackupClient;
         this.prepareBackupClient = prepareBackupClient;
+        this.protectMachinePaths = protectMachinePaths;
         this.forSubscribingToEvents = forSubscribingToEvents;
     }
 
@@ -340,6 +344,47 @@ public class BackupRestController {
         log.info("Deleting backup job {}", LogSafe.forLog(name));
         deleteBackupJob.deleteBackupJob(name);
         return ResponseEntity.noContent().build();
+    }
+
+    // --- Just select and back up (protected paths) ---
+
+    /**
+     * Back up a selection of paths on a machine — the Explorer's "select files, click Back up" flow. All the
+     * machinery hides behind this one call: get-or-create the machine's repository (with a backend-generated
+     * passphrase) and its job, then add the posted paths to the job's protected set, normalized so no path is
+     * a descendant of another. {@code 404} when the machine is unknown; {@code 409} (via
+     * {@link net.vaier.domain.ConflictException}) when no backup server has been designated yet. Otherwise
+     * {@code 200} with the updated job — the same shape {@code GET /backup-jobs} returns.
+     */
+    @PostMapping("/machines/{machine}/backup/paths")
+    public ResponseEntity<JobResponse> protectPaths(@PathVariable String machine,
+                                                    @RequestBody ProtectPathsRequest request) {
+        if (!machineExists(machine)) {
+            return ResponseEntity.notFound().build();
+        }
+        log.info("Backing up {} paths on machine {}",
+            request.paths() == null ? 0 : request.paths().size(), LogSafe.forLog(machine));
+        BackupJob job = protectMachinePaths.protect(machine, request.paths());
+        return ResponseEntity.ok(JobResponse.from(job));
+    }
+
+    /**
+     * Stop backing up a selection of paths on a machine. Removing a path also removes any protected path that
+     * is a descendant of it. {@code 404} when the machine is unknown; a machine with no job is a no-op success.
+     * When the last protected path is removed the job is deleted (leaving the repository intact) and the
+     * response is {@code 204 No Content}; otherwise {@code 200} with the updated job.
+     */
+    @DeleteMapping("/machines/{machine}/backup/paths")
+    public ResponseEntity<JobResponse> unprotectPaths(@PathVariable String machine,
+                                                      @RequestBody ProtectPathsRequest request) {
+        if (!machineExists(machine)) {
+            return ResponseEntity.<JobResponse>notFound().build();
+        }
+        log.info("Stopping backup of {} paths on machine {}",
+            request.paths() == null ? 0 : request.paths().size(), LogSafe.forLog(machine));
+        return protectMachinePaths.unprotect(machine, request.paths())
+            .map(job -> ResponseEntity.ok(JobResponse.from(job)))
+            .orElseGet(() -> ResponseEntity.<JobResponse>noContent().build());
     }
 
     // --- Backup runs ---
@@ -586,6 +631,9 @@ public class BackupRestController {
      */
     record RepositoryResponse(String name, String serverName, String repoPath,
                               boolean appendOnly, boolean hasPassphrase) {}
+
+    /** The paths an operator selected to start or stop backing up, from the Explorer's "Back up" action. */
+    record ProtectPathsRequest(List<String> paths) {}
 
     /** Create/update a backup job. */
     record JobRequest(String machineName, String repositoryName, List<String> sourcePaths,
