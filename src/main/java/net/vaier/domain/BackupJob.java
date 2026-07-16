@@ -1,5 +1,7 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForReadyingBackupClients;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -150,5 +152,27 @@ public record BackupJob(
 
     private static LocalDate localDateOf(Instant instant, ZoneId zone) {
         return instant.atZone(zone).toLocalDate();
+    }
+
+    /**
+     * Ready this job's client host for backups on the machine's FIRST back-up — the decision that a
+     * newly-created job means "the operator said this data matters, so ready the host" rather than making them
+     * run the provisioning wizard. This is the job's own decision, so it lives here on the entity rather than
+     * in the service: given whether the job was {@code firstBackup} (newly created for the machine, not an edit
+     * that folds paths into an existing job), it either asks the driven {@link ForReadyingBackupClients} port
+     * to ready the host — returning its outcome — or, when the machine already had a job, does nothing and
+     * returns empty (a provisioned host is never re-readied on every selection).
+     *
+     * <p>The port never throws (a readying failure comes back as a reasoned outcome), so this can never fail
+     * the back-up. The install it launches is detached; the caller does not block on it.
+     */
+    public Optional<ForReadyingBackupClients.ReadyingOutcome> readyClientHostForFirstBackup(
+            boolean firstBackup, ForReadyingBackupClients readier) {
+        if (!firstBackup) {
+            return Optional.empty();
+        }
+        // The port guarantees a non-null outcome; ofNullable degrades a (contract-breaking) null to "no
+        // outcome" rather than a surprise NPE that would fail the back-up.
+        return Optional.ofNullable(readier.readyForBackup(machineName));
     }
 }

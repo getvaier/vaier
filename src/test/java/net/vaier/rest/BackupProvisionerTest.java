@@ -5,9 +5,9 @@ import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.BorgAvailability;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.RepoReachability;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.ServerBorgAuth;
-import net.vaier.application.GetBackupJobsUseCase;
-import net.vaier.application.GetBackupRepositoriesUseCase;
-import net.vaier.application.GetBackupServersUseCase;
+import net.vaier.domain.port.ForPersistingBackupJobs;
+import net.vaier.domain.port.ForPersistingBackupRepositories;
+import net.vaier.domain.port.ForPersistingBackupServers;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase.RepoInitResult;
@@ -47,9 +47,9 @@ class BackupProvisionerTest {
     GetMachinesUseCase machines;
     GetHostCredentialUseCase credentials;
     RunRemoteCommandUseCase runner;
-    GetBackupRepositoriesUseCase repositories;
-    GetBackupServersUseCase servers;
-    GetBackupJobsUseCase jobs;
+    ForPersistingBackupRepositories repositories;
+    ForPersistingBackupServers servers;
+    ForPersistingBackupJobs jobs;
     BackupWorkDirResolver workDirResolver;
     net.vaier.domain.port.ForPublishingEvents events;
     BackupProvisioner provisioner;
@@ -88,17 +88,17 @@ class BackupProvisionerTest {
         machines = mock(GetMachinesUseCase.class);
         credentials = mock(GetHostCredentialUseCase.class);
         runner = mock(RunRemoteCommandUseCase.class);
-        repositories = mock(GetBackupRepositoriesUseCase.class);
-        servers = mock(GetBackupServersUseCase.class);
-        jobs = mock(GetBackupJobsUseCase.class);
+        repositories = mock(ForPersistingBackupRepositories.class);
+        servers = mock(ForPersistingBackupServers.class);
+        jobs = mock(ForPersistingBackupJobs.class);
         workDirResolver = mock(BackupWorkDirResolver.class);
         events = mock(net.vaier.domain.port.ForPublishingEvents.class);
         // Default: resolve to the SSH user's home so existing assertions stay green.
         when(workDirResolver.workDirFor(any())).thenReturn("/home/geir/.vaier-backup");
         // Default: the repository's backup server is configured, so probes/init reach the borg URL step.
-        when(servers.getBackupServers()).thenReturn(List.of(server()));
+        when(servers.getAll()).thenReturn(List.of(server()));
         // Default: no jobs, so authorize falls back to the base path unless a test configures jobs.
-        when(jobs.getBackupJobs()).thenReturn(List.of());
+        when(jobs.getAll()).thenReturn(List.of());
         provisioner = new BackupProvisioner(machines, credentials, runner, repositories, servers,
             jobs, workDirResolver, events);
     }
@@ -193,7 +193,7 @@ class BackupProvisionerTest {
 
     @Test
     void checkNasReachableAndUnreachable() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
 
@@ -210,7 +210,7 @@ class BackupProvisionerTest {
 
     @Test
     void checkNasUnreachableWhenRepositoryUnknown() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of());
+        when(repositories.getAll()).thenReturn(List.of());
 
         RepoReachability r = provisioner.checkNas("does-not-exist", "Colina 27");
 
@@ -222,8 +222,8 @@ class BackupProvisionerTest {
     void checkNasUnreachableWhenBackupServerUnknown() {
         // The repository exists but its Backup server is not configured -> no host:port to probe -> not
         // reachable, and nothing is ever run.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
-        when(servers.getBackupServers()).thenReturn(List.of());
+        when(repositories.getAll()).thenReturn(List.of(repo()));
+        when(servers.getAll()).thenReturn(List.of());
 
         RepoReachability r = provisioner.checkNas("nas-borg", "Colina 27");
 
@@ -235,8 +235,8 @@ class BackupProvisionerTest {
     void initRepoFailsWhenBackupServerUnknown() {
         // Without a configured Backup server there is no borg URL to init -> a negative result with a
         // reason, never an exception, and nothing is run.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
-        when(servers.getBackupServers()).thenReturn(List.of());
+        when(repositories.getAll()).thenReturn(List.of(repo()));
+        when(servers.getAll()).thenReturn(List.of());
 
         RepoInitResult result = provisioner.initRepo("nas-borg", "Colina 27");
 
@@ -247,7 +247,7 @@ class BackupProvisionerTest {
 
     @Test
     void initRepoWritesPassFileThenInitsAndSucceeds() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), any()))
@@ -266,7 +266,7 @@ class BackupProvisionerTest {
     void initRepoUsesResolvedWorkDirForPassFileAndInit() {
         // The bug fix: provisioning writes the pass file and inits under the SSH user's writable
         // ~/.vaier-backup, resolved over SSH — not the root-owned /var/lib the non-root user cannot mkdir.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(workDirResolver.workDirFor("Colina 27")).thenReturn("/home/geir/.vaier-backup");
@@ -285,7 +285,7 @@ class BackupProvisionerTest {
 
     @Test
     void initRepoIdempotentOnAlreadyExists() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         // Pass-file write succeeds; borg init fails non-zero, but only because the repo already exists.
@@ -304,7 +304,7 @@ class BackupProvisionerTest {
 
     @Test
     void initRepoFailsOnRealError() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         hasCredential("Colina 27");
         when(runner.run(eq("Colina 27"), contains("nas-borg.pass")))
@@ -320,7 +320,7 @@ class BackupProvisionerTest {
 
     @Test
     void initRepoGuardFailsWhenNoCredential() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         when(credentials.getHostCredential("Colina 27")).thenReturn(Optional.empty());
 
@@ -587,7 +587,7 @@ class BackupProvisionerTest {
 
     @Test
     void authorizeUnknownServerReturnsNegativeAndMakesNoSshCall() {
-        when(servers.getBackupServers()).thenReturn(List.of());
+        when(servers.getAll()).thenReturn(List.of());
 
         AuthorizeResult result = provisioner.authorizeClient("nope", "Colina 27");
 
@@ -614,7 +614,7 @@ class BackupProvisionerTest {
         // report a reasoned negative BEFORE any SSH call (never keygen into thin air).
         BackupServer noPath = new BackupServer("nas-borg", "NAS", "192.168.3.3", 8022,
             "borg", "home/borg/backups", null, false);
-        when(servers.getBackupServers()).thenReturn(List.of(noPath));
+        when(servers.getAll()).thenReturn(List.of(noPath));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
         hasCredential("Colina 27");
         hasCredential("NAS");
@@ -687,8 +687,8 @@ class BackupProvisionerTest {
         // serve, reads EOF and yields no version, which the old parser mis-read as UNREACHABLE
         // (borgAuthOk=false) on a perfectly HEALTHY setup. The new probe runs `borg info` for THIS repo:
         // reaching borg at all proves the forced-command key authenticated.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
-        when(servers.getBackupServers()).thenReturn(List.of(managedServer()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
+        when(servers.getAll()).thenReturn(List.of(managedServer()));
         clientBorgInfoReturns(0, "Repository ID: 3ac1f9e0\nLocation: ssh://borg@192.168.3.3:8022/./colina\n"
             + "Encrypted: Yes (repokey BLAKE2b)\n", "");
 
@@ -704,8 +704,8 @@ class BackupProvisionerTest {
     void checkServerAuthBorgAuthOkWhenTheRepositoryDoesNotExistYet_theBootstrapCase() {
         // Fresh network: the repo has not been `borg init`-ed yet, so `borg info` returns "does not exist" —
         // but reaching that error PROVES ssh auth succeeded and borg serve ran, so borgAuthOk MUST be true.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
-        when(servers.getBackupServers()).thenReturn(List.of(managedServer()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
+        when(servers.getAll()).thenReturn(List.of(managedServer()));
         clientBorgInfoReturns(2, "", "Repository /home/borg/backups/colina does not exist.");
 
         ServerBorgAuth auth = provisioner.checkServerAuth("nas-borg", "Colina 27", CLIENT_128);
@@ -719,7 +719,7 @@ class BackupProvisionerTest {
     @Test
     void checkServerAuthReportsBorgAuthFalseOnPermissionDenied() {
         // The client key is not trusted: the borg run dies with Permission denied. Not ready.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo())); // adopted server() (managed=false)
+        when(repositories.getAll()).thenReturn(List.of(repo())); // adopted server() (managed=false)
         clientBorgInfoReturns(255, "", "Permission denied (publickey,keyboard-interactive).");
 
         ServerBorgAuth auth = provisioner.checkServerAuth("nas-borg", "Colina 27", CLIENT_128);
@@ -732,8 +732,8 @@ class BackupProvisionerTest {
     void checkServerAuthManagedServerReportsDerivedVersionAndCompatibility() {
         // A Vaier-managed server: we know exactly what it runs (the pin), so serverBorgVersion is present and
         // a 1.2.8 client is compatible with the 1.4.3 it ships.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
-        when(servers.getBackupServers()).thenReturn(List.of(managedServer()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
+        when(servers.getAll()).thenReturn(List.of(managedServer()));
         clientBorgInfoReturns(0, "Repository ID: abc\nEncrypted: Yes\n", "");
 
         ServerBorgAuth auth = provisioner.checkServerAuth("nas-borg", "Colina 27", CLIENT_128);
@@ -748,7 +748,7 @@ class BackupProvisionerTest {
         // An adopted/registered server (managed=false): with a forced borg-serve command we CANNOT ask its
         // version, so it is unknown — and versionsCompatible fails closed (false), never optimistically green,
         // even though auth succeeds.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         clientBorgInfoReturns(0, "Repository ID: abc\nEncrypted: Yes\n", "");
 
         ServerBorgAuth auth = provisioner.checkServerAuth("nas-borg", "Colina 27", CLIENT_128);
@@ -760,8 +760,8 @@ class BackupProvisionerTest {
 
     @Test
     void checkServerAuthMakesNoSshCallWhenBackupServerUnknown() {
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
-        when(servers.getBackupServers()).thenReturn(List.of());
+        when(repositories.getAll()).thenReturn(List.of(repo()));
+        when(servers.getAll()).thenReturn(List.of());
 
         ServerBorgAuth auth = provisioner.checkServerAuth("nas-borg", "Colina 27", CLIENT_128);
 
@@ -773,7 +773,7 @@ class BackupProvisionerTest {
     @Test
     void checkServerAuthMakesNoSshCallWhenClientGuardsUnmet() {
         // No credential for the client machine -> never contacts anything, reports a negative.
-        when(repositories.getBackupRepositories()).thenReturn(List.of(repo()));
+        when(repositories.getAll()).thenReturn(List.of(repo()));
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
         when(credentials.getHostCredential("Colina 27")).thenReturn(Optional.empty());
 
@@ -823,9 +823,9 @@ class BackupProvisionerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
         hasCredential("Colina 27");
         hasCredential("NAS");
-        when(repositories.getBackupRepositories()).thenReturn(List.of(
+        when(repositories.getAll()).thenReturn(List.of(
             derivedRepo("beta", "nas-borg"), derivedRepo("alpha", "nas-borg")));
-        when(jobs.getBackupJobs()).thenReturn(List.of(
+        when(jobs.getAll()).thenReturn(List.of(
             jobFor("j1", "Colina 27", "alpha"),
             jobFor("j2", "Colina 27", "alpha"),   // same repo -> deduped to one path
             jobFor("j3", "Colina 27", "beta")));
@@ -847,11 +847,11 @@ class BackupProvisionerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
         hasCredential("Colina 27");
         hasCredential("NAS");
-        when(repositories.getBackupRepositories()).thenReturn(List.of(
+        when(repositories.getAll()).thenReturn(List.of(
             derivedRepo("alpha", "nas-borg"),        // Colina's repo on this server -> included
             derivedRepo("beta", "nas-borg"),         // referenced only by another machine -> excluded
             derivedRepo("gamma", "other-server")));  // Colina's repo but on another server -> excluded
-        when(jobs.getBackupJobs()).thenReturn(List.of(
+        when(jobs.getAll()).thenReturn(List.of(
             jobFor("j1", "Colina 27", "alpha"),
             jobFor("j2", "Some Other Machine", "beta"),
             jobFor("j3", "Colina 27", "gamma")));
@@ -870,8 +870,8 @@ class BackupProvisionerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
         hasCredential("Colina 27");
         hasCredential("NAS");
-        when(repositories.getBackupRepositories()).thenReturn(List.of(derivedRepo("alpha", "nas-borg")));
-        when(jobs.getBackupJobs()).thenReturn(List.of());   // no jobs on this machine
+        when(repositories.getAll()).thenReturn(List.of(derivedRepo("alpha", "nas-borg")));
+        when(jobs.getAll()).thenReturn(List.of());   // no jobs on this machine
         when(runner.run(eq("Colina 27"), contains("id_ed25519")))
             .thenReturn(new CommandResult(0, VALID_PUBKEY + "\n", "", false, "SHA256:x"));
         when(runner.run(eq("NAS"), contains("authorized_keys")))
@@ -897,8 +897,8 @@ class BackupProvisionerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
         hasCredential("Colina 27");
         hasCredential("NAS");
-        when(repositories.getBackupRepositories()).thenReturn(List.of(derivedRepo("alpha", "nas-borg")));
-        when(jobs.getBackupJobs()).thenReturn(List.of(jobFor("j1", "Colina 27", "alpha")));
+        when(repositories.getAll()).thenReturn(List.of(derivedRepo("alpha", "nas-borg")));
+        when(jobs.getAll()).thenReturn(List.of(jobFor("j1", "Colina 27", "alpha")));
         when(runner.run(eq("Colina 27"), contains("id_ed25519")))
             .thenReturn(new CommandResult(0, VALID_PUBKEY + "\n", "", false, "SHA256:x"));
         when(runner.run(eq("NAS"), contains("authorized_keys")))
@@ -1249,11 +1249,58 @@ class BackupProvisionerTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
         hasCredential("NAS");
         when(credentials.getHostCredential("Colina 27")).thenReturn(Optional.empty());
-        when(jobs.getBackupJobs()).thenReturn(List.of(jobFor("j1", "Colina 27", "alpha")));
+        when(jobs.getAll()).thenReturn(List.of(jobFor("j1", "Colina 27", "alpha")));
 
         AuthorizeResult result = provisioner.authorizeClient("nas-borg", "Colina 27");
 
         assertThat(result.authorized()).isFalse();
         verify(runner, never()).run(any(), any());
+    }
+
+    // --- Readying a client on its first back-up (the ForReadyingBackupClients driven port) ---
+
+    @Test
+    void readyForBackupAuthorizesTheKeyThenLaunchesTheClientInstall() {
+        // The domain calls this on Colina 27's first back-up: its job/repo/server are known, so readying
+        // authorizes the key on the server and launches the detached borg-client install — reusing the
+        // existing authorize + prepare mechanics.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27"), sshMachine("NAS")));
+        hasCredential("Colina 27");
+        hasCredential("NAS");
+        when(repositories.getAll()).thenReturn(List.of(derivedRepo("Colina-27", "nas-borg")));
+        when(jobs.getAll()).thenReturn(List.of(jobFor("Colina-27", "Colina 27", "Colina-27")));
+        // authorize: keygen on the client, append on the server's machine
+        when(runner.run(eq("Colina 27"), contains("id_ed25519")))
+            .thenReturn(new CommandResult(0,
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyDataHere geir@colina\n", "", false, "SHA256:x"));
+        when(runner.run(eq("NAS"), contains("authorized_keys")))
+            .thenReturn(new CommandResult(0, "ADDED\n", "", false, "SHA256:x"));
+        // prepare: passwordless sudo present, detached install launches
+        when(runner.run(eq("Colina 27"), contains("sudo -n true")))
+            .thenReturn(new CommandResult(0, "SUDO_OK\n", "", false, "SHA256:x"));
+        when(runner.run(eq("Colina 27"), contains("nohup")))
+            .thenReturn(new CommandResult(0, "STARTED 7788\n", "", false, "SHA256:x"));
+
+        var outcome = provisioner.readyForBackup("Colina 27");
+
+        assertThat(outcome.started()).isTrue();
+        assertThat(outcome.scriptOnly()).isFalse();
+        // The key was trusted on the server AND the install was launched on the client.
+        verify(runner).run(eq("NAS"), contains("authorized_keys"));
+        verify(runner).run(eq("Colina 27"), contains("nohup"));
+    }
+
+    @Test
+    void readyForBackupNeverThrowsAndReportsAReasonedOutcomeWhenTheHostCannotBeReached() {
+        // No credential for the client: the guarded-out prepare degrades to scriptOnly and readying never
+        // throws — a readying failure must never fail the back-up.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("Colina 27")));
+        when(credentials.getHostCredential("Colina 27")).thenReturn(Optional.empty());
+
+        var outcome = provisioner.readyForBackup("Colina 27");
+
+        assertThat(outcome.started()).isFalse();
+        assertThat(outcome.scriptOnly()).isTrue();
+        assertThat(outcome.message()).isNotBlank();
     }
 }

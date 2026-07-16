@@ -21,6 +21,8 @@ import net.vaier.domain.SourcePaths;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
 import net.vaier.domain.port.ForPersistingBackupServers;
+import net.vaier.domain.port.ForReadyingBackupClients;
+import net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import org.springframework.stereotype.Service;
 
@@ -49,13 +51,16 @@ public class BackupService implements
     private final ForPersistingBackupServers servers;
     private final ForPersistingBackupJobs jobs;
     private final ForRecordingBackupRuns runs;
+    private final ForReadyingBackupClients readier;
 
     public BackupService(ForPersistingBackupRepositories repositories, ForPersistingBackupServers servers,
-                         ForPersistingBackupJobs jobs, ForRecordingBackupRuns runs) {
+                         ForPersistingBackupJobs jobs, ForRecordingBackupRuns runs,
+                         ForReadyingBackupClients readier) {
         this.repositories = repositories;
         this.servers = servers;
         this.jobs = jobs;
         this.runs = runs;
+        this.readier = readier;
     }
 
     @Override
@@ -124,12 +129,19 @@ public class BackupService implements
      * the machine has no job yet, and always with a backend-generated passphrase — Vaier never takes a
      * repository secret from a client. Rejects with a {@link ConflictException} (mapped to {@code 409}) when
      * no backup server has been designated, since a repository has nowhere to live without one.
+     *
+     * <p>On the machine's FIRST back-up (no prior job) the freshly-created job decides its host must be
+     * readied and calls the driven {@link ForReadyingBackupClients} port — the operator never runs the
+     * provisioning wizard by hand. The service only supplies the port and orchestrates; the decision (first
+     * back-up ⇒ ready the host) is the job's, on {@link BackupJob#readyClientHostForFirstBackup}. Readying is
+     * detached and never throws, so it can never fail this call; its outcome rides back on the result.
      */
     @Override
-    public BackupJob protect(String machineName, List<String> paths) {
+    public ProtectionOutcome protect(String machineName, List<String> paths) {
         BackupServer server = theBackupServer();
         String slug = BackupRepository.sanitizedName(machineName);
         Optional<BackupJob> existing = jobs.getByMachine(machineName).stream().findFirst();
+        boolean firstBackup = existing.isEmpty();
         BackupRepository repository = existing
             .flatMap(job -> repositories.getByName(job.repositoryName()))
             .orElseGet(() -> createRepository(slug, server));
@@ -142,7 +154,8 @@ public class BackupService implements
             .orElseGet(() -> new BackupJob(slug, machineName, repository.name(), newSourcePaths, List.of(),
                 7, 4, 6, BackupJob.DEFAULT_COMPRESSION, true, false));
         jobs.save(job);
-        return job;
+        ReadyingOutcome readying = job.readyClientHostForFirstBackup(firstBackup, readier).orElse(null);
+        return new ProtectionOutcome(job, readying);
     }
 
     /**

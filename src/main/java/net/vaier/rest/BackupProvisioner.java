@@ -5,9 +5,6 @@ import net.vaier.application.AuthorizeBackupClientUseCase;
 import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.CheckBackupPrerequisitesUseCase;
 import net.vaier.application.GenerateBackupServerSetupScriptUseCase;
-import net.vaier.application.GetBackupJobsUseCase;
-import net.vaier.application.GetBackupRepositoriesUseCase;
-import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.InitBackupRepositoryUseCase;
@@ -25,7 +22,11 @@ import net.vaier.domain.BorgVersion;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
+import net.vaier.domain.port.ForPersistingBackupJobs;
+import net.vaier.domain.port.ForPersistingBackupRepositories;
+import net.vaier.domain.port.ForPersistingBackupServers;
 import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForReadyingBackupClients;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -51,14 +52,14 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitBackupRepositoryUseCase,
     ProvisionBackupServerUseCase, GenerateBackupServerSetupScriptUseCase, AuthorizeBackupClientUseCase,
-    PrepareBackupClientUseCase {
+    PrepareBackupClientUseCase, ForReadyingBackupClients {
 
     private final GetMachinesUseCase machines;
     private final GetHostCredentialUseCase credentials;
     private final RunRemoteCommandUseCase remoteCommand;
-    private final GetBackupRepositoriesUseCase repositories;
-    private final GetBackupServersUseCase servers;
-    private final GetBackupJobsUseCase jobs;
+    private final ForPersistingBackupRepositories repositories;
+    private final ForPersistingBackupServers servers;
+    private final ForPersistingBackupJobs jobs;
     private final BackupWorkDirResolver workDirResolver;
     private final ForPublishingEvents events;
 
@@ -86,9 +87,9 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
     public BackupProvisioner(GetMachinesUseCase machines,
                              GetHostCredentialUseCase credentials,
                              RunRemoteCommandUseCase remoteCommand,
-                             GetBackupRepositoriesUseCase repositories,
-                             GetBackupServersUseCase servers,
-                             GetBackupJobsUseCase jobs,
+                             ForPersistingBackupRepositories repositories,
+                             ForPersistingBackupServers servers,
+                             ForPersistingBackupJobs jobs,
                              BackupWorkDirResolver workDirResolver,
                              ForPublishingEvents events) {
         this.machines = machines;
@@ -504,6 +505,43 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
     }
 
     /**
+     * The driven-port entry point the domain calls on a machine's first back-up: authorize the machine's key
+     * on its backup server (idempotent), then launch the detached borg-client install (idempotent). It reuses
+     * the existing {@link #authorizeClient} and {@link #prepareClient} mechanics rather than duplicating them,
+     * and never throws — any failure comes back as a reasoned {@link ReadyingOutcome} so a readying failure can
+     * never fail the back-up itself. The install is detached; this does not block on it (progress rides the
+     * {@code prepare-client-settled} SSE event).
+     */
+    @Override
+    public ReadyingOutcome readyForBackup(String machineName) {
+        try {
+            // Trust the key on the machine's backup server first, so the install has somewhere to authenticate.
+            // The server is resolved via the machine's freshly-created job -> repository -> server; when it
+            // cannot be resolved yet (no repo on a server) the authorize is skipped rather than guessed.
+            serverForMachine(machineName)
+                .ifPresent(serverName -> authorizeClient(serverName, machineName));
+            PrepareResult prepare = prepareClient(machineName);
+            return new ReadyingOutcome(prepare.started(), prepare.scriptOnly(),
+                prepare.stagedScriptPath(), prepare.message());
+        } catch (Exception e) {
+            log.debug("Readying {} for its first back-up failed transiently: {}",
+                LogSafe.forLog(machineName), e.getMessage());
+            return new ReadyingOutcome(false, false, null,
+                "Automatic provisioning could not run: " + e.getMessage());
+        }
+    }
+
+    /** The backup server a machine backs up to, via its job's repository — empty when none is resolvable yet. */
+    private Optional<String> serverForMachine(String machineName) {
+        return jobs.getAll().stream()
+            .filter(j -> j.machineName().equals(machineName))
+            .map(BackupJob::repositoryName)
+            .flatMap(repoName -> findRepository(repoName).stream())
+            .map(BackupRepository::serverName)
+            .findFirst();
+    }
+
+    /**
      * The backend sweep that settles launched client-prepares: for each in-flight install it reads the host's
      * {@code .rc} file over SSH (backend polling is fine — the <em>frontend</em> never polls) and, when the
      * install has finished, publishes a {@link #PREPARE_SETTLED_EVENT} on the {@link #BACKUPS_TOPIC} SSE topic
@@ -725,11 +763,11 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
      * targeted by a job on this machine (the orchestrator then falls back to the repository root).
      */
     private List<String> restrictPathsFor(String machineName, BackupServer server) {
-        List<String> targetedRepoNames = jobs.getBackupJobs().stream()
+        List<String> targetedRepoNames = jobs.getAll().stream()
             .filter(j -> j.machineName().equals(machineName))
             .map(BackupJob::repositoryName)
             .toList();
-        return repositories.getBackupRepositories().stream()
+        return repositories.getAll().stream()
             .filter(r -> targetedRepoNames.contains(r.name()))
             .filter(r -> r.serverName().equals(server.name()))
             .map(r -> "/" + r.repoPathOn(server))
@@ -752,13 +790,13 @@ public class BackupProvisioner implements CheckBackupPrerequisitesUseCase, InitB
     }
 
     private Optional<BackupRepository> findRepository(String repositoryName) {
-        return repositories.getBackupRepositories().stream()
+        return repositories.getAll().stream()
             .filter(r -> r.name().equals(repositoryName)).findFirst();
     }
 
     /** The Backup server a repository lives on, resolved by name — empty when it is not configured. */
     private Optional<BackupServer> findServer(String serverName) {
-        return servers.getBackupServers().stream()
+        return servers.getAll().stream()
             .filter(s -> s.name().equals(serverName)).findFirst();
     }
 

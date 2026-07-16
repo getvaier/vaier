@@ -7,6 +7,8 @@ import net.vaier.domain.BackupServer;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
 import net.vaier.domain.port.ForPersistingBackupServers;
+import net.vaier.domain.port.ForReadyingBackupClients;
+import net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,10 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class BackupServiceTest {
 
@@ -25,6 +31,7 @@ class BackupServiceTest {
     InMemoryServers servers;
     InMemoryJobs jobs;
     InMemoryRunRecorder runs;
+    ForReadyingBackupClients readier;
     BackupService service;
 
     static final class InMemoryServers implements ForPersistingBackupServers {
@@ -79,7 +86,8 @@ class BackupServiceTest {
         servers = new InMemoryServers();
         jobs = new InMemoryJobs();
         runs = new InMemoryRunRecorder();
-        service = new BackupService(repositories, servers, jobs, runs);
+        readier = mock(ForReadyingBackupClients.class);
+        service = new BackupService(repositories, servers, jobs, runs, readier);
     }
 
     private BackupServer server() {
@@ -183,7 +191,7 @@ class BackupServiceTest {
     void protectGetsOrCreatesRepositoryAndJobWithABackendPassphrase() {
         service.saveBackupServer(server());
 
-        BackupJob created = service.protect("Colina 27", List.of("/home/geir"));
+        BackupJob created = service.protect("Colina 27", List.of("/home/geir")).job();
 
         // The repository is created by the machine's sanitized name, on the single server, with a strong
         // backend-generated passphrase (never taken from a client).
@@ -210,6 +218,37 @@ class BackupServiceTest {
         assertThat(jobs.getAll()).hasSize(1);
         assertThat(jobs.getAll().get(0).sourcePaths())
             .containsExactlyInAnyOrder("/home/geir", "/etc/nginx");
+    }
+
+    @Test
+    void protectOnAMachinesFirstBackupReadiesTheHostThroughThePortAndCarriesTheOutcome() {
+        // The first back-up creates the job, and the newly-created job decides its host must be readied: the
+        // service passes the driven port in, the domain calls it, and the outcome rides back on the result.
+        service.saveBackupServer(server());
+        when(readier.readyForBackup("Colina 27"))
+            .thenReturn(new ReadyingOutcome(true, false, null, "Preparing client on Colina 27"));
+
+        var outcome = service.protect("Colina 27", List.of("/home/geir"));
+
+        assertThat(outcome.readying()).isNotNull();
+        assertThat(outcome.readying().started()).isTrue();
+        verify(readier).readyForBackup("Colina 27");
+    }
+
+    @Test
+    void protectAddingPathsToAnExistingJobDoesNotReadyTheHostAgain() {
+        // Adding paths to an existing job must never re-ready a provisioned host: the port is not called and
+        // the result carries no readying outcome.
+        service.saveBackupServer(server());
+        when(readier.readyForBackup("Colina 27"))
+            .thenReturn(new ReadyingOutcome(true, false, null, "Preparing client on Colina 27"));
+        service.protect("Colina 27", List.of("/home/geir"));   // first back-up (readies)
+
+        var second = service.protect("Colina 27", List.of("/etc/nginx"));   // adding paths (must not re-ready)
+
+        assertThat(second.readying()).isNull();
+        // Exactly one readying across both calls — the second never re-readies.
+        verify(readier, org.mockito.Mockito.times(1)).readyForBackup(any());
     }
 
     @Test

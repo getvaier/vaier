@@ -119,6 +119,7 @@
         repoArchives: new Map(),         // repo name -> { state, list, error }: the archives in a repository, read when looked at
         backupJobs: [],                  // GET /backup-jobs — the jobs, each backing one machine up to a repository
         jobRuns: new Map(),              // job name -> { state, run }: its last run, read on view and on the run-settled push
+        preparing: new Set(),            // machine names Vaier is readying to back up (first back-up), cleared on prepare-client-settled
         palSel: 0,
     };
 
@@ -1777,6 +1778,11 @@
     // whether to read as root are Vaier's to decide, not knobs to turn. So the whole entry is a readout with a
     // single intent — run it now — and one way out — stop backing this machine up.
     function renderJobsBackup(body, machine, jobs) {
+        if (S.preparing.has(machine)) {
+            const prep = el('div', 'ex-runline');
+            prep.textContent = 'Getting this machine ready to back up — installing borg and trusting its key…';
+            body.appendChild(prep);
+        }
         jobs.forEach((job) => renderOneJob(body, machine, job, jobs.length > 1));
     }
 
@@ -1839,8 +1845,14 @@
             runLine.append(d, txt);
         }
         body.appendChild(runLine);
-        if (held && held.state === 'ready' && held.run.status === 'FAILED' && held.run.diagnostics) {
-            body.appendChild(note(held.run.diagnostics, true));
+        // A failed OR a warning run says why, right here: the skipped-file and error lines the backend pulled
+        // out of borg's own output (a domain decision — BackupRun.diagnostics). A warning reads amber and a
+        // failure red, the same two colours the run's dot uses, so "what went wrong" is never a mystery.
+        if (held && held.state === 'ready' && held.run.diagnostics
+            && (held.run.status === 'FAILED' || held.run.status === 'WARNING')) {
+            const n = note(held.run.diagnostics, held.run.status === 'FAILED');
+            if (held.run.status === 'WARNING') n.classList.add('is-warn');
+            body.appendChild(n);
         }
 
         const running = held && held.state === 'ready' && held.run.status === 'RUNNING';
@@ -1931,6 +1943,19 @@
         events.addEventListener('run-settled', (e) => {
             const d = JSON.parse(e.data);
             if (S.backupJobs.some((j) => j.name === d.jobName)) loadJobRun(d.jobName);
+        });
+        // The other half of the readying we started under a first back-up: the detached borg install has
+        // finished on the host. Clear the "getting ready" state and say how it went — no polling, we were told.
+        events.addEventListener('prepare-client-settled', (e) => {
+            const d = JSON.parse(e.data);   // { machineName, state }
+            if (!S.preparing.has(d.machineName)) return;
+            S.preparing.delete(d.machineName);
+            toast(d.state === 'SUCCESS'
+                ? d.machineName + ' is ready — its backup will run tonight, or now if you like.'
+                : 'Vaier could not finish getting ' + d.machineName + ' ready. Check its readiness on the '
+                  + 'Backups page.');
+            loadBackup();
+            render();
         });
     }
 
@@ -2346,14 +2371,36 @@
                 toast(err.message || 'Vaier could not back that up.');
                 return;
             }
+            const body = await res.json().catch(() => ({}));
             await loadBackup();   // the job changed — reload so the backup entry is current
             toast(paths.length + (paths.length === 1 ? ' item is' : ' items are') + ' backed up on ' + machine
                 + ' now, and nightly.');
+            // First back-up on a machine: the backend rings the host to be readied (borg installed, key trusted)
+            // and tells us here. The install runs detached; we watch prepare-client-settled to know it landed.
+            if (body && body.provisioning) startReadying(machine, body.provisioning);
             S.sel = new Set();
             // The shields are stamped on the listing by the backend, so re-read this directory to show them.
             refreshDir(machine, remotePath(S.path));
         } catch (e) {
             toast('Vaier could not back that up.');
+        }
+    }
+
+    // What Vaier does behind the first back-up: ready the host (install borg, trust its key). It's silent by
+    // design — a quiet "Getting X ready…" and nothing more — unless it hits the one wall it can't pass on its
+    // own, a host where it lacks the root to install borg, in which case it names the single command to run.
+    function startReadying(machine, p) {
+        if (p.scriptOnly && p.stagedScriptPath) {
+            toast('Almost there — to finish setting ' + machine + ' up, run this on it once: sudo bash '
+                + p.stagedScriptPath);
+            return;
+        }
+        if (p.started) {
+            S.preparing.add(machine);
+            toast('Getting ' + machine + ' ready to back up…');
+            render();
+        } else if (p.message) {
+            toast(p.message);
         }
     }
 

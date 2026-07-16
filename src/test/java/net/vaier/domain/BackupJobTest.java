@@ -114,4 +114,35 @@ class BackupJobTest {
         // But a failure on a previous day does not block today's scheduled attempt.
         assertThat(enabledJob().isDue(TODAY, ZONE, Optional.of(failedOn(TODAY.minusDays(1))))).isTrue();
     }
+
+    // --- The first-back-up readying DECISION lives here on the entity, not in the service ---
+
+    @Test
+    void readyClientHostForFirstBackup_readiesThroughThePortAndReturnsTheOutcome_whenFirst() {
+        // A newly-created job (first back-up for the machine) decides its host must be readied: it calls the
+        // driven port with its own machine and returns the outcome.
+        var readier = org.mockito.Mockito.mock(net.vaier.domain.port.ForReadyingBackupClients.class);
+        var expected = new net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome(
+            true, false, null, "Preparing client on Colina 27");
+        org.mockito.Mockito.when(readier.readyForBackup("Colina 27")).thenReturn(expected);
+
+        Optional<net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome> result =
+            job("colina-home").readyClientHostForFirstBackup(true, readier);
+
+        assertThat(result).contains(expected);
+        org.mockito.Mockito.verify(readier).readyForBackup("Colina 27");
+    }
+
+    @Test
+    void readyClientHostForFirstBackup_doesNothing_whenNotFirst() {
+        // Adding paths to an existing job is not a first back-up: the host is already ready, so the port is
+        // never touched and there is no outcome.
+        var readier = org.mockito.Mockito.mock(net.vaier.domain.port.ForReadyingBackupClients.class);
+
+        Optional<net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome> result =
+            job("colina-home").readyClientHostForFirstBackup(false, readier);
+
+        assertThat(result).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(readier);
+    }
 }

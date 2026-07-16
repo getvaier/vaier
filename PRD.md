@@ -1218,12 +1218,25 @@ job**'s source paths against the tree and would have reported a backed-up direct
   from the client**) and its job (retention 7/4/6, `zstd,6`, enabled), then folds the posted paths into the job's
   protected set; `unprotect(machine, paths)` removes them and any descendants, deleting the job (repository kept)
   when its last path goes. `BackupJob.withSourcePaths` carries every other field through unchanged.
-- **Endpoints.** `POST /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job; `404`
+- **Endpoints.** `POST /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job (and, on a
+  machine's **first** back-up only, a nullable `provisioning` object — see below); `404`
   when the machine is unknown; `409` (`ConflictException` → `ApiError`, *"Designate a backup server before backing
   up machines."*) when no backup server is designated yet, since a repository has nowhere to live without one.
   `DELETE /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job, `204` when that removal
   emptied the job (deleted), and a no-op success when the machine has no job; `404` when the machine is unknown.
   Both Enterprise-gated with the rest of `BackupRestController`.
+- **First back-up readies the host ✅** — a machine's **first** back-up now provisions its **backup client**
+  automatically, so the operator never runs the guided provisioning wizard by hand. When
+  `POST /machines/{machine}/backup/paths` creates a **new** job for a machine that had none, Vaier (1) trusts the
+  machine's SSH key on the **backup server** (the same idempotent **Authorize host** work) and (2) launches the
+  idempotent **Prepare client** borg-client install **detached**, its progress riding the existing
+  `prepare-client-settled` SSE event on the `backups` topic. It runs **only** on first back-up — adding paths to a
+  machine that already has a job never re-readies an already-provisioned host. A readying failure **never fails the
+  back-up**: the paths are still saved and the reason is carried back to the caller. The decision is a **domain**
+  rule (`BackupJob.readyClientHostForFirstBackup`), reached through a new driven port **`ForReadyingBackupClients`**
+  (implemented by the rest layer's `BackupProvisioner`), so `BackupService` stays clear of the provisioning
+  machinery and the hex boundary holds. The POST response gains a **nullable `provisioning`** object
+  (`{started, scriptOnly, stagedScriptPath, message}`), populated only on that first back-up.
 
 ---
 

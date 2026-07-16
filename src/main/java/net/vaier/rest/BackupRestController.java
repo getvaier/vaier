@@ -26,6 +26,7 @@ import net.vaier.application.ProtectMachinePathsUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionResult;
 import net.vaier.application.ProvisionBackupServerUseCase.ProvisionStatus;
+import net.vaier.application.ProtectMachinePathsUseCase.ProtectionOutcome;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.SaveBackupJobUseCase;
 import net.vaier.application.SaveBackupRepositoryUseCase;
@@ -37,6 +38,7 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.BorgVersion;
+import net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -354,18 +356,25 @@ public class BackupRestController {
      * passphrase) and its job, then add the posted paths to the job's protected set, normalized so no path is
      * a descendant of another. {@code 404} when the machine is unknown; {@code 409} (via
      * {@link net.vaier.domain.ConflictException}) when no backup server has been designated yet. Otherwise
-     * {@code 200} with the updated job — the same shape {@code GET /backup-jobs} returns.
+     * {@code 200} with the updated job plus, on a machine's <em>first</em> back-up, a {@code provisioning}
+     * object carrying the outcome of the automatic host readying the domain triggered.
+     *
+     * <p>The controller stays thin: it does not decide when to provision. The {@code protect} use case (its
+     * domain) decides that a newly-created job means "ready this host" and returns that outcome — this handler
+     * only maps it onto the response.
      */
     @PostMapping("/machines/{machine}/backup/paths")
-    public ResponseEntity<JobResponse> protectPaths(@PathVariable String machine,
+    public ResponseEntity<ProtectPathsResponse> protectPaths(@PathVariable String machine,
                                                     @RequestBody ProtectPathsRequest request) {
         if (!machineExists(machine)) {
             return ResponseEntity.notFound().build();
         }
         log.info("Backing up {} paths on machine {}",
             request.paths() == null ? 0 : request.paths().size(), LogSafe.forLog(machine));
-        BackupJob job = protectMachinePaths.protect(machine, request.paths());
-        return ResponseEntity.ok(JobResponse.from(job));
+        ProtectionOutcome outcome = protectMachinePaths.protect(machine, request.paths());
+        ProvisioningResponse provisioning = outcome.readying() == null
+            ? null : ProvisioningResponse.from(outcome.readying());
+        return ResponseEntity.ok(ProtectPathsResponse.from(outcome.job(), provisioning));
     }
 
     /**
@@ -634,6 +643,36 @@ public class BackupRestController {
 
     /** The paths an operator selected to start or stop backing up, from the Explorer's "Back up" action. */
     record ProtectPathsRequest(List<String> paths) {}
+
+    /**
+     * The {@code POST /machines/{machine}/backup/paths} response: the updated job (the same fields
+     * {@link JobResponse} carries) plus a nullable {@code provisioning} object. The provisioning object is
+     * populated only on a machine's FIRST back-up — when the job was newly created and Vaier readied the host
+     * automatically — and is {@code null} when the job already existed (adding paths never re-provisions).
+     */
+    record ProtectPathsResponse(String name, String machineName, String repositoryName, List<String> sourcePaths,
+                                List<String> excludes, int keepDaily, int keepWeekly, int keepMonthly,
+                                String compression, boolean enabled, boolean backupAsRoot,
+                                ProvisioningResponse provisioning) {
+        static ProtectPathsResponse from(BackupJob j, ProvisioningResponse provisioning) {
+            return new ProtectPathsResponse(j.name(), j.machineName(), j.repositoryName(), j.sourcePaths(),
+                j.excludes(), j.keepDaily(), j.keepWeekly(), j.keepMonthly(), j.compression(), j.enabled(),
+                j.backupAsRoot(), provisioning);
+        }
+    }
+
+    /**
+     * The outcome of first-back-up auto-provisioning, surfaced on the POST response (never a secret):
+     * {@code started} when the borg-client install launched (detached — the frontend watches the
+     * {@code prepare-client-settled} SSE event); {@code scriptOnly} when Vaier could not run it itself and the
+     * operator must run the staged script; {@code stagedScriptPath} the absolute on-host path for that case
+     * (else {@code null}); {@code message} a human-readable reason for any path.
+     */
+    record ProvisioningResponse(boolean started, boolean scriptOnly, String stagedScriptPath, String message) {
+        static ProvisioningResponse from(ReadyingOutcome r) {
+            return new ProvisioningResponse(r.started(), r.scriptOnly(), r.stagedScriptPath(), r.message());
+        }
+    }
 
     /** Create/update a backup job. */
     record JobRequest(String machineName, String repositoryName, List<String> sourcePaths,

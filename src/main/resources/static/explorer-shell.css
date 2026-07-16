@@ -543,6 +543,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     transition: border-color .5s ease;
 }
 .ex-note.is-error { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .06); }
+.ex-note.is-warn { border-color: rgba(220, 220, 170, .4); background: rgba(220, 220, 170, .06); }
 .ex-note code { font-family: var(--mono); font-size: 13px; color: var(--accent); }
 
 /* --- containers and services (#323 slice C) --------------------------------------------------------- */

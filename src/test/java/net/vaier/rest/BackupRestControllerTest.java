@@ -36,6 +36,8 @@ import net.vaier.domain.BackupServer;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
 import net.vaier.domain.port.ForPersistingBackupServers;
+import net.vaier.domain.port.ForReadyingBackupClients;
+import net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome;
 import net.vaier.domain.port.ForRecordingBackupRuns;
 import net.vaier.rest.BackupRestController.ArchiveResponse;
 import net.vaier.rest.BackupRestController.RepositoryRequest;
@@ -82,6 +84,7 @@ class BackupRestControllerTest {
     GetMachinesUseCase getMachines;
     AuthorizeBackupClientUseCase authorizeBackupClient;
     PrepareBackupClientUseCase prepareBackupClient;
+    ForReadyingBackupClients readier;
     net.vaier.domain.port.ForSubscribingToEvents forSubscribingToEvents;
     BackupService service;
     BackupRestController controller;
@@ -144,8 +147,9 @@ class BackupRestControllerTest {
         getMachines = mock(GetMachinesUseCase.class);
         authorizeBackupClient = mock(AuthorizeBackupClientUseCase.class);
         prepareBackupClient = mock(PrepareBackupClientUseCase.class);
+        readier = mock(ForReadyingBackupClients.class);
         forSubscribingToEvents = mock(net.vaier.domain.port.ForSubscribingToEvents.class);
-        service = new BackupService(repositories, backupServers, jobs, runs);
+        service = new BackupService(repositories, backupServers, jobs, runs, readier);
         controller = new BackupRestController(service, service, service, service, service, service,
             generateSetupScript, provisionBackupServer, service, service, service, service, runBackupJob,
             listArchives, checkPrerequisites, initBackupRepository, getMachines, authorizeBackupClient,
@@ -930,8 +934,10 @@ class BackupRestControllerTest {
     void protectPathsCreatesTheRepositoryAndJobThenReturnsTheJob() {
         backupServers.save(server());
         when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+        when(readier.readyForBackup("Colina 27"))
+            .thenReturn(new ReadyingOutcome(true, false, null, "Preparing client on Colina 27"));
 
-        ResponseEntity<BackupRestController.JobResponse> response = controller.protectPaths("Colina 27",
+        ResponseEntity<BackupRestController.ProtectPathsResponse> response = controller.protectPaths("Colina 27",
             new BackupRestController.ProtectPathsRequest(List.of("/home/geir", "/etc/nginx")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -956,7 +962,7 @@ class BackupRestControllerTest {
         when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
 
         // A descendant of an already-protected path is a no-op; a genuinely new path is added.
-        ResponseEntity<BackupRestController.JobResponse> response = controller.protectPaths("Colina 27",
+        ResponseEntity<BackupRestController.ProtectPathsResponse> response = controller.protectPaths("Colina 27",
             new BackupRestController.ProtectPathsRequest(List.of("/home/geir/docs", "/var/lib/docker")));
 
         assertThat(response.getBody()).isNotNull();
@@ -966,12 +972,78 @@ class BackupRestControllerTest {
         assertThat(repositories.getAll()).hasSize(1);
     }
 
+    // --- First back-up auto-readies the host via the driven port (the operator never runs the wizard) ---
+
+    @Test
+    void protectPathsOnAMachineWithNoPriorJobReadiesTheHostAndCarriesTheOutcome() {
+        // A machine's FIRST back-up (no prior job) readies the host automatically through the ForReadyingBackup
+        // Clients driven port — the decision is the domain's, and its outcome rides back on the provisioning
+        // object of the response.
+        backupServers.save(server());
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+        when(readier.readyForBackup("Colina 27"))
+            .thenReturn(new ReadyingOutcome(true, false, null,
+                "Preparing client on Colina 27 — you'll be notified when it finishes."));
+
+        ResponseEntity<BackupRestController.ProtectPathsResponse> response = controller.protectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().provisioning()).isNotNull();
+        assertThat(response.getBody().provisioning().started()).isTrue();
+        assertThat(response.getBody().provisioning().scriptOnly()).isFalse();
+        assertThat(response.getBody().provisioning().stagedScriptPath()).isNull();
+        assertThat(response.getBody().provisioning().message()).contains("Preparing client");
+        verify(readier).readyForBackup("Colina 27");
+    }
+
+    @Test
+    void protectPathsOnAMachineThatAlreadyHasAJobDoesNotReadyAgain() {
+        // Adding paths to an existing job must NEVER re-ready — the host is already provisioned. The response
+        // carries no provisioning object and the port is never called.
+        backupServers.save(server());
+        repositories.save(repo());
+        jobs.save(job()); // machineName "Colina 27" already has a job
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.ProtectPathsResponse> response = controller.protectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/var/lib/docker")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().provisioning()).isNull();
+        verify(readier, never()).readyForBackup(any());
+    }
+
+    @Test
+    void protectPathsReadyingFailureSurfacesInTheOutcomeButKeepsTheSavedPaths() {
+        // The port never throws (a readying failure comes back as a reasoned outcome), so the back-up still
+        // succeeds and the paths are saved; the failure reason rides on the provisioning object.
+        backupServers.save(server());
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+        when(readier.readyForBackup("Colina 27"))
+            .thenReturn(new ReadyingOutcome(false, false, null,
+                "Automatic provisioning could not run: ssh: connection reset"));
+
+        ResponseEntity<BackupRestController.ProtectPathsResponse> response = controller.protectPaths("Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        // The paths were still saved despite readying reporting a failure.
+        assertThat(response.getBody().sourcePaths()).containsExactly("/home/geir");
+        assertThat(response.getBody().provisioning()).isNotNull();
+        assertThat(response.getBody().provisioning().started()).isFalse();
+        assertThat(response.getBody().provisioning().message()).isNotBlank();
+    }
+
     @Test
     void protectPathsUnknownMachineReturns404() {
         backupServers.save(server());
         when(getMachines.getAllMachines()).thenReturn(List.of());
 
-        ResponseEntity<BackupRestController.JobResponse> response = controller.protectPaths("ghost",
+        ResponseEntity<BackupRestController.ProtectPathsResponse> response = controller.protectPaths("ghost",
             new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
