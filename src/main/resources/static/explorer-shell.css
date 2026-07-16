@@ -954,6 +954,16 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
 .map-marker.unknown { background: var(--text-dim); }
 .map-marker.weak { opacity: 0.55; border-style: dashed; }
 .map-marker.large { width: 36px; height: 36px; border-width: 3px; }
+/* Cluster bubbles: markercluster's default light-green is near-invisible on the tiles. Recolour to the shell's
+   dark palette with an accent ring so the count reads at a glance. */
+.ex-map .marker-cluster-small,
+.ex-map .marker-cluster-medium,
+.ex-map .marker-cluster-large { background: transparent; }
+.ex-map .marker-cluster div {
+    background: var(--bg-panel); color: var(--text);
+    border: 2px solid var(--accent); box-shadow: 0 1px 6px rgba(0, 0, 0, .55);
+}
+.ex-map .marker-cluster span { font-family: var(--mono); font-weight: 600; line-height: 30px; }
 
 .ex-note .ex-link { color: var(--accent); text-decoration: none; }
 .ex-note .ex-link:hover { text-decoration: underline; }
