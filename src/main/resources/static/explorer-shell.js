@@ -842,20 +842,37 @@
             if (scanning) scanBtn.disabled = true;
             bar.appendChild(scanBtn);
             body.appendChild(bar);
+            if (scanning) {
+                body.appendChild(note('Looking across the relay LANs — this can take a minute.', false));
+            }
             if (found.length) {
-                const list = el('div', 'ex-brepos');
-                found.forEach((d) => {
-                    const row = el('div', 'ex-brepo');
-                    const info = el('div', 'ex-brepo-info');
-                    const nm = el('span', 'ex-brepo-name'); nm.textContent = d.hostname || d.ipAddress;
-                    const meta = el('span', 'ex-brepo-path');
-                    meta.textContent = d.ipAddress
-                        + (d.openPorts && d.openPorts.length ? ' · :' + d.openPorts.join(' :') : '')
-                        + (d.relayAnchor ? ' · behind ' + d.relayAnchor : '');
-                    info.append(nm, meta);
+                const sorted = found.slice().sort((a, b) =>
+                    discoveredRank(a) - discoveredRank(b) || ipOrder(a.ipAddress).localeCompare(ipOrder(b.ipAddress)));
+                const list = el('div', 'ex-disc');
+                sorted.forEach((d) => {
+                    const row = el('div', 'ex-disc-row');
+                    const ic = el('span', 'ex-disc-icon');
+                    ic.innerHTML = svg(iconByCategory(d.deviceCategory), 'ex-disc-svg');   // trusted: key is an ICON name
+                    const info = el('div', 'ex-disc-info');
+                    const host = realHostname(d);
+                    const line = el('div', 'ex-disc-line');
+                    const nm = el('span', 'ex-disc-name'); nm.textContent = host || discoveredLabel(d);
+                    line.appendChild(nm);
+                    if (host) {                                    // a real name leads; the guess becomes a chip
+                        const chip = el('span', 'ex-disc-kind'); chip.textContent = discoveredLabel(d);
+                        line.appendChild(chip);
+                    }
+                    const meta = el('span', 'ex-disc-meta');
+                    const bits = [d.ipAddress];
+                    const relay = relayName(d.relayAnchor);
+                    if (relay) bits.push('behind ' + relay);
+                    const hint = portHint(d.openPorts);
+                    if (hint) bits.push(hint);
+                    meta.textContent = bits.join(' · ');
+                    info.append(line, meta);
                     const acts = el('div', 'ex-lactions is-static');
                     acts.appendChild(selVerb('server', 'Register', 'ex-btn is-accent', () => registerDiscovered(d)));
-                    row.append(info, acts);
+                    row.append(ic, info, acts);
                     list.appendChild(row);
                 });
                 body.appendChild(list);
@@ -3826,17 +3843,84 @@
         } catch (e) { toast('Vaier could not start the scan.'); }
     }
 
-    // Register a discovered machine as a LAN server — named by its hostname, at its IP, carrying the detected
-    // device category; an open Docker port is noted. Vaier infers which relay it sits behind from the address.
+    // Register a discovered machine as a LAN server — named for what it is (a real hostname if it has one, else
+    // its guessed kind and last address octet), at its IP, carrying the detected device category; an open Docker
+    // port is noted. Vaier infers which relay it sits behind from the address.
     function registerDiscovered(d) {
         const dockerPort = (d.openPorts || []).find((p) => p === 2375 || p === 2376) || null;
         saveJson('/lan-servers', 'POST', {
-            name: d.hostname || d.ipAddress, lanAddress: d.ipAddress,
+            name: registerName(d), lanAddress: d.ipAddress,
             runsDocker: dockerPort != null, dockerPort: dockerPort,
             description: '', deviceCategory: d.deviceCategory,
-        }, 'Registering ' + (d.hostname || d.ipAddress) + '…',
+        }, 'Registering ' + registerName(d) + '…',
            async () => { await loadFleet(); await loadLanScan(); }, 'Could not register that machine.');
     }
+
+    // --- discovered-machine presentation — lead with WHAT it is, not its reverse-DNS name -----------------
+    // The scan runs from the EC2 box, so every RFC1918 IP reverse-resolves to an AWS placeholder
+    // (ip-192-168-3-1.eu-central-1.compute.internal) — noise, never a real name. Suppress those; keep a
+    // genuine hostname (rare on a home LAN) if one shows up.
+    function realHostname(d) {
+        const h = (d.hostname || '').trim();
+        if (!h) return null;
+        if (/\.internal$/i.test(h)) return null;           // *.compute.internal / *.internal — AWS placeholder
+        if (/^ip-[\d-]+\./i.test(h)) return null;          // ip-192-168-3-1.* — the IP restated as a name
+        if (h === d.ipAddress) return null;
+        return h;
+    }
+
+    const CATEGORY_LABEL = {
+        SERVER: 'Server', NAS: 'NAS', PRINTER: 'Printer', ROUTER: 'Router', GATEWAY: 'Gateway',
+        CAMERA: 'Camera', MEDIA: 'Media device', IOT: 'Smart device', PHONE: 'Phone',
+        LAPTOP: 'Laptop', DESKTOP: 'Desktop', GENERIC: 'Unknown device',
+    };
+
+    // The one-line human name for a discovered thing: its guessed function when the ports say something
+    // ("Docker host", "Web service"), otherwise the device category Vaier inferred. Never the raw hostname.
+    function discoveredLabel(d) {
+        switch (d.role) {
+            case 'DOCKER_HOST': return 'Docker host';
+            case 'WEB_UI': return 'Web service';
+            case 'PRINTER': return 'Printer';
+            case 'SSH_HOST': return 'Server';
+            default: return CATEGORY_LABEL[d.deviceCategory] || 'Unknown device';
+        }
+    }
+
+    // The name a registration lands under — a real hostname wins; otherwise the guessed kind, made unique by
+    // the address's last octet so two "Web service" finds don't collide.
+    function registerName(d) {
+        const host = realHostname(d);
+        if (host) return host;
+        const octet = (d.ipAddress || '').split('.').pop();
+        return discoveredLabel(d) + (octet ? ' ' + octet : '');
+    }
+
+    // A plain-language read of what the open ports mean, or null when they say nothing worth a word.
+    function portHint(ports) {
+        if (!ports || !ports.length) return null;
+        const p = new Set(ports);
+        if (p.has(2375) || p.has(2376)) return 'runs Docker';
+        if (p.has(80) || p.has(443) || p.has(8080) || p.has(8443) || p.has(5000)) return 'serves a web page';
+        if (p.has(9100) || p.has(631) || p.has(515)) return 'accepts print jobs';
+        if (p.has(22)) return 'accepts SSH';
+        return null;
+    }
+
+    // Resolve a scan's relay anchor (a WireGuard identity like "apalveien5") back to the machine's display
+    // name ("Apalveien 5") when we know it, so the readout reads the way the tree does.
+    function relayName(anchor) {
+        if (!anchor) return null;
+        const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const m = S.machines.find((x) => norm(x.name) === norm(anchor));
+        return m ? m.name : anchor;
+    }
+
+    // Sort the useful finds to the top: a server/Docker/web host is worth registering; a printer or an unknown
+    // appliance can wait at the bottom. Ties fall back to numeric IP order for stability.
+    const DISCOVERED_RANK = { DOCKER_HOST: 0, WEB_UI: 1, SSH_HOST: 2, PRINTER: 4, UNKNOWN: 5 };
+    const discoveredRank = (d) => (DISCOVERED_RANK[d.role] === undefined ? 3 : DISCOVERED_RANK[d.role]);
+    const ipOrder = (ip) => (ip || '').split('.').map((n) => ('00' + n).slice(-3)).join('');
 
     function watchFleet() {
         const events = new EventSource('/vpn/peers/events');

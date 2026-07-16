@@ -920,6 +920,31 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-brepo:last-child { border-bottom: none; }
 .ex-brepo-name { color: var(--text); white-space: nowrap; }
 .ex-brepo-path { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- discovered on the LAN: an icon and what Vaier thinks each thing is, not its reverse-DNS name ---- */
+.ex-disc { display: flex; flex-direction: column; }
+.ex-disc-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.ex-disc-row:last-child { border-bottom: none; }
+.ex-disc-icon { flex: none; display: flex; color: var(--text-muted); }
+.ex-disc-svg { width: 18px; height: 18px; }
+.ex-disc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ex-disc-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ex-disc-name {
+    color: var(--text); font-size: 14px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ex-disc-kind {
+    flex: none; font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    padding: 1px 6px; border: 1px solid var(--border-hi); border-radius: var(--radius-1);
+}
+.ex-disc-meta {
+    color: var(--text-dim); font-family: var(--mono); font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ex-disc-row .ex-lactions { flex: none; }
 button.ex-brepo-name {
     background: none; border: 0; padding: 0;
     font: inherit; color: var(--text); text-align: left; cursor: pointer;
