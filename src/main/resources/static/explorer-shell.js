@@ -1034,6 +1034,9 @@
         if (m.name !== VAIER_SERVER) {
             body.appendChild(section('This machine'));
             const rm = el('div', 'ex-lactions is-static');
+            if (S.peers.has(m.name)) {
+                rm.appendChild(selVerb('refresh', 'Reissue config', 'ex-btn', () => reissuePeer(m)));
+            }
             rm.appendChild(selVerb('trash', 'Remove machine', 'ex-btn is-danger', () => removeMachine(m)));
             body.appendChild(rm);
         }
@@ -1087,6 +1090,29 @@
         await loadFleet();
         toast(m.name + ' removed.');
         go(['fleet']);
+    }
+
+    // Reissue a peer's WireGuard config — fresh keys and a new config, shown once like a new machine's. The old
+    // config stops working once the new one is installed, so it asks first.
+    async function reissuePeer(m) {
+        const peer = S.peers.get(m.name);
+        if (!peer) return;
+        const ok = await confirmModal('Reissue ' + m.name + '’s config?',
+            'Vaier generates a fresh WireGuard config for ' + m.name + '. The current one stops working the '
+            + 'moment the new one is installed — reissue only when you are ready to replace it.', 'Reissue');
+        if (!ok) return;
+        try {
+            const res = await fetch('/vpn/peers/' + encodeURIComponent(peer.id) + '/reissue', { method: 'POST' });
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}));
+                toast(e.message || 'Vaier could not reissue the config.');
+                return;
+            }
+            toast(m.name + '’s config reissued.');
+            createResult(await res.json());   // same one-shot config view a new machine gets
+        } catch (e) {
+            toast('Vaier could not reissue the config.');
+        }
     }
 
     // A tiny client-side download — turns text Vaier already sent (a config, a compose file) into a file the
