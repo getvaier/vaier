@@ -64,11 +64,11 @@
                         <div class="bk-stage-head">
                             <div>
                                 <h2 class="bk-stage-title">Give a machine a job</h2>
-                                <p class="bk-stage-desc">Which paths to back up, into which repository, and how
-                                   long to keep them. Check readiness to install borg on the machine and trust
-                                   its key, then run it on demand or leave it to the nightly schedule.</p>
+                                <p class="bk-stage-desc">You create a machine's backup jobs in the Explorer, on
+                                   its backup entry — which paths to back up, into which repository, and how long
+                                   to keep them. Check readiness here to install borg on the machine and trust
+                                   its key, so the nightly run can reach the repository.</p>
                             </div>
-                            <button class="btn btn-primary" id="newJobBtn">+ New job</button>
                         </div>
                         <div class="bk-list" id="jobList"><div class="loading">Loading jobs…</div></div>
                     </div>
@@ -157,79 +157,6 @@
         </div>
     </div>
 
-    <!-- Job create/edit modal -->
-    <div id="jobModal" class="modal">
-        <div class="modal-content" style="max-width:620px;width:95%">
-            <div class="modal-header" id="jobModalTitle">New backup job</div>
-            <div id="jobModalError" style="display:none"></div>
-            <div class="form-group">
-                <label class="form-label" for="jobName">Name</label>
-                <input type="text" id="jobName" class="form-input" placeholder="e.g. apalveien5-nightly" autocomplete="off">
-                <div class="bk-field-note" id="jobNameNote">A short identifier, unique across jobs.</div>
-            </div>
-            <div class="bk-form-row">
-                <div class="form-group" style="flex:1;margin-bottom:1rem">
-                    <label class="form-label" for="jobMachine">Machine</label>
-                    <select id="jobMachine" class="form-input"></select>
-                </div>
-                <div class="form-group" style="flex:1;margin-bottom:1rem">
-                    <label class="form-label" for="jobRepository">Backup repository</label>
-                    <select id="jobRepository" class="form-input"></select>
-                </div>
-            </div>
-            <div class="form-group">
-                <label class="form-label" for="jobSourcePaths">Source paths</label>
-                <textarea id="jobSourcePaths" class="form-input bk-paths" placeholder="/etc&#10;/var/lib/docker/volumes&#10;/home"></textarea>
-                <div class="bk-field-note">One path per line — the directories to back up on the machine.</div>
-            </div>
-            <div class="form-group">
-                <label class="form-label" for="jobExcludes">Excludes <span style="color:var(--text-dim)">(optional)</span></label>
-                <textarea id="jobExcludes" class="form-input bk-paths" placeholder="*.tmp&#10;/var/cache"></textarea>
-                <div class="bk-field-note">One pattern per line — paths or globs to skip.</div>
-            </div>
-            <label class="form-label">Retention</label>
-            <div class="bk-form-row" style="margin-top:0.35rem">
-                <div class="form-group">
-                    <label class="form-label" for="jobKeepDaily">Keep daily</label>
-                    <input type="number" id="jobKeepDaily" class="form-input" min="0" value="7">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="jobKeepWeekly">Keep weekly</label>
-                    <input type="number" id="jobKeepWeekly" class="form-input" min="0" value="4">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="jobKeepMonthly">Keep monthly</label>
-                    <input type="number" id="jobKeepMonthly" class="form-input" min="0" value="6">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="jobCompression">Compression</label>
-                    <input type="text" id="jobCompression" class="form-input" value="zstd,6">
-                </div>
-            </div>
-            <div class="form-checkbox" style="margin-top:0.4rem">
-                <input type="checkbox" id="jobEnabled" checked>
-                <label for="jobEnabled">Enabled (included in the nightly run)</label>
-            </div>
-            <div class="form-checkbox" style="margin-top:0.4rem">
-                <input type="checkbox" id="jobBackupAsRoot">
-                <label for="jobBackupAsRoot">Back up as root</label>
-            </div>
-            <div class="bk-field-note bk-checkbox-note">
-                Runs borg under <code>sudo</code> on the machine, so it can read files the SSH user cannot —
-                container volumes and other root-owned data are otherwise skipped without failing the run.
-                Requires passwordless sudo for borg on the machine; <strong>Prepare client</strong> grants it.
-                <br>
-                <strong>This makes Vaier's SSH credential for this machine root-equivalent.</strong> A borg
-                that runs as root can read and write any file on it, so grant this only on machines where
-                that is acceptable.
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="jobCancelBtn">Cancel</button>
-                <button class="btn btn-primary" id="jobSaveBtn">Save job</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Host readiness modal -->
     <div id="provisionModal" class="modal">
         <div class="modal-content" style="max-width:560px;width:95%">
@@ -237,19 +164,6 @@
             <div id="provisionBody"><div class="loading">Checking…</div></div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" id="provisionCloseBtn">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Generic delete confirmation -->
-    <div id="confirmModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header" id="confirmTitle">Delete</div>
-            <p style="font-size:0.85rem;color:var(--text-muted)" id="confirmText"></p>
-            <p style="font-size:0.78rem;color:var(--red);margin-top:0.35rem">This action cannot be undone.</p>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="confirmCancelBtn">Cancel</button>
-                <button class="btn btn-danger" id="confirmOkBtn">Delete</button>
             </div>
         </div>
     </div>

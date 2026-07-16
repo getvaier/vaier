@@ -138,7 +138,7 @@ class ExplorerShellTest {
         // make the tree look finished. (The download is an <a href>, not a fetch, so it does not appear here.)
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
                                        "/docker-services", "/published-services", "/access/services",
-                                       "/transfers", "/backup-servers", "/backup-repositories");
+                                       "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
@@ -428,12 +428,13 @@ class ExplorerShellTest {
     @Test
     void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
         // Three mutating verbs ship now, each backed by a real endpoint. DELETE unpublishes a service (slice C),
-        // deletes a file/folder (slice 5), and removes the backup-server designation. PUT sets a disk watch
-        // (#325) and designates/edits the backup server. POST copies across the fleet (/transfers, slice 2).
-        // Designating the backup server moved into the tree, but it invents no verb — it reuses PUT and DELETE
-        // against /backup-servers, endpoints the Backups page already drove. Publishing (POST /publish) still
-        // needs a form and stays on the Infrastructure bridge. The distinct verb set is pinned here; an invented
-        // one shows up.
+        // deletes a file/folder (slice 5), removes the backup-server designation, and deletes a backup
+        // repository or job. PUT sets a disk watch (#325), designates/edits the backup server, saves a
+        // repository, and saves/enables a job. POST copies across the fleet (/transfers, slice 2) and starts a
+        // backup run (/backup-jobs/{name}/runs). Each move into the tree invents no verb — the backup server,
+        // its repositories and its jobs all reuse PUT/DELETE/POST against endpoints the Backups page already
+        // drove. Publishing (POST /publish) still needs a form and stays on the Infrastructure bridge. The
+        // distinct verb set is pinned here; an invented one shows up.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);
@@ -503,15 +504,16 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theShell_holdsThreeStreams_theFleet_itsServices_andItsTransfers() throws IOException {
-        // Slice A held one; slice C added `published-services` (a real, existing topic); slice 2 (Move) adds
-        // `transfers` — the third and newest, carrying a copy's live progress so the browser watches rather
-        // than polls. Each is a real backend topic listened to, never invented. Three is the ceiling now: a
-        // fourth EventSource would have to be added here consciously. And still no clock of the shell's own —
-        // no setInterval, and no setTimeout (the toast lives out a CSS animation, not a JS timer).
+    void theShell_holdsFourStreams_theFleet_itsServices_itsTransfers_andItsBackups() throws IOException {
+        // Slice A held one; slice C added `published-services` (a real, existing topic); slice 2 (Move) added
+        // `transfers`, a copy's live progress. Moving jobs onto their machines adds the conscious fourth —
+        // `backups`, carrying run-settled so a launched backup's outcome arrives pushed, not polled. Each is a
+        // real backend topic listened to, never invented. Four is the ceiling now. And still no clock of the
+        // shell's own — no setInterval, and no setTimeout (the toast lives out a CSS animation, not a JS timer).
         String js = read("explorer-shell.js");
-        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(3);
+        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(4);
         assertThat(js).contains("new EventSource('/transfers/events')");
+        assertThat(js).contains("new EventSource('/backup-jobs/events')");
         assertThat(js).doesNotContain("setInterval");
         assertThat(js).doesNotContain("setTimeout");
     }

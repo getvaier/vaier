@@ -115,6 +115,8 @@
         backupServer: null,              // GET /backup-servers — the fleet's one backup server, or null when none is designated
         backupRepos: [],                 // GET /backup-repositories — the repositories that live on it
         repoArchives: new Map(),         // repo name -> { state, list, error }: the archives in a repository, read when looked at
+        backupJobs: [],                  // GET /backup-jobs — the jobs, each backing one machine up to a repository
+        jobRuns: new Map(),              // job name -> { state, run }: its last run, read on view and on the run-settled push
         palSel: 0,
     };
 
@@ -193,6 +195,9 @@
     // The repositories that live on a backup server, filtered by the server they name. One server, so this is
     // every repository Vaier knows — but the filter keeps it honest if a stale repo names a server that is gone.
     const reposOn = (server) => (server ? S.backupRepos.filter((r) => r.serverName === server.name) : []);
+    // The backup jobs that back a machine up. A job names the machine it protects, so this is how a machine
+    // learns it is backed up — and grows a `backup` entry even when it is not the server.
+    const jobsOn = (machine) => S.backupJobs.filter((j) => j.machineName === machine);
 
     function childrenOf(path) {
         const kind = kindOf(path);
@@ -212,17 +217,19 @@
             if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
             if (servicesOn(m.name).length) kids.push({ name: 'services', kind: 'services' });
             if (m.sshAccess) kids.push({ name: 'disk', kind: 'disk' });
-            // The one machine the fleet backs up to grows a `backup` entry — the backup server's own coordinate.
-            // Exactly one machine ever holds the role (the backend refuses a second), so it is found by
-            // name-equality, not a flag on the machine.
-            if (S.backupServer && S.backupServer.machineName === m.name) {
+            // A machine grows a `backup` entry when it plays any part in fleet backup: it is the one backup
+            // server (name-equality — the backend refuses a second), or a job backs it up. The entry reads both
+            // ways; here we only decide whether it exists.
+            if ((S.backupServer && S.backupServer.machineName === m.name) || jobsOn(m.name).length) {
                 kids.push({ name: 'backup', kind: 'backup' });
             }
             return kids;
         }
         if (kind === 'backup') {
-            // The backup server's children are its repositories — the coordinate they hang under is the server's.
-            return reposOn(S.backupServer).map((r) => ({ name: r.name, kind: 'repo' }));
+            // Only the server's `backup` entry has children — its repositories. A client machine's `backup`
+            // entry shows its job inline and has none, so it must not inherit the server's repos as its own.
+            const isServer = S.backupServer && S.backupServer.machineName === path[1];
+            return isServer ? reposOn(S.backupServer).map((r) => ({ name: r.name, kind: 'repo' })) : [];
         }
         if (kind === 'containers') {
             return containersOn(path[1]).map((c) => ({ name: c.containerName, kind: 'container' }));
@@ -436,6 +443,12 @@
             S.backupRepos = res.ok ? await res.json() : [];
         } catch (e) {
             S.backupRepos = [];
+        }
+        try {
+            const res = await fetch('/backup-jobs', { cache: 'no-store' });
+            S.backupJobs = res.ok ? await res.json() : [];
+        } catch (e) {
+            S.backupJobs = [];
         }
     }
 
@@ -1234,15 +1247,30 @@
             .replace(/[^A-Za-z0-9_-]/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
     }
 
+    // A machine's `backup` entry is its whole part in fleet backup — read two ways. The one machine that hosts
+    // the borg shows the server and its repositories; every machine a job backs up shows that job, its last run
+    // and how to run it now. A machine that is neither has no `backup` entry at all (childrenOf never grows one).
+    // The rare machine that is both stacks the two sections.
     function renderBackup(pane) {
         const machine = S.path[1];
         const s = S.backupServer;
-        if (!s || s.machineName !== machine) {
-            return pane.appendChild(note('This machine is not the fleet’s backup server.', true));
+        const isServer = s && s.machineName === machine;
+        const jobs = jobsOn(machine);
+        if (!isServer && !jobs.length) {
+            return pane.appendChild(note('This machine has no part in fleet backup — it is not the backup '
+                + 'server, and no job backs it up.', true));
         }
-        pane.appendChild(paneHead(machine + ' / backup', true, 'The fleet’s backup server'));
-
+        pane.appendChild(paneHead(machine + ' / backup', true,
+            isServer ? 'The fleet’s backup server' : 'How this machine is backed up'));
         const body = el('div', 'ex-pane-body');
+        if (isServer) renderServerBackup(body, machine, s);
+        if (jobs.length) renderJobsBackup(body, machine, jobs);
+        pane.appendChild(body);
+    }
+
+    // The machine that hosts the fleet's borg: its coordinates, the repositories on it (each an entry of its
+    // own), and the identity actions. The operations that poll for an outcome stay on the Backups bridge.
+    function renderServerBackup(body, machine, s) {
         body.appendChild(kv([
             ['Server name', s.name],
             ['Reached at', s.host + ':' + s.sshPort],
@@ -1291,8 +1319,6 @@
         bridge.appendChild(link);
         bridge.appendChild(document.createTextNode('.'));
         body.appendChild(bridge);
-
-        pane.appendChild(body);
     }
 
     // Make a machine the fleet's one backup server. The machine is already the context, so the form asks only
@@ -1718,6 +1744,349 @@
             if (byte[0] < threshold) out.push(alphabet[byte[0] % alphabet.length]);
         }
         return out.join('');
+    }
+
+    // --- backup jobs: how a machine is backed up, shown on the machine ---------------------------------
+    //
+    // A job is rendered inline in the `backup` entry of the machine it protects — its target, its schedule,
+    // its last run, and the buttons to run it now, edit it, enable it or forget it. Running is the one long
+    // operation, and it does not poll: POST starts it, the run shows RUNNING, and the backend pushes
+    // `run-settled` on the backups stream when borg finishes (watchBackups). The Backups page keeps the guided
+    // provisioning that first gets a host ready — installing borg, the root grant — a bridge for now.
+
+    const RUN_DOT = { SUCCESS: 'is-up', WARNING: 'is-degraded', FAILED: 'is-down',
+                      RUNNING: 'is-idle', UNKNOWN: 'is-idle' };
+
+    // A run's summary is only shown when it is a short, human line. Borg's own {@code --json} stats can end up
+    // stored here — a multi-line braces-y blob — and that is never dumped into the status line; the status and
+    // the time say enough, and a failure's diagnostics get their own note below.
+    function runSummary(r) {
+        const s = r.summary;
+        if (!s) return '';
+        return (s.length <= 60 && s.indexOf('{') === -1 && s.indexOf('\n') === -1) ? s : '';
+    }
+
+    function renderJobsBackup(body, machine, jobs) {
+        body.appendChild(section(jobs.length === 1 ? 'Backup job' : 'Backup jobs'));
+        jobs.forEach((job) => renderOneJob(body, machine, job, jobs.length > 1));
+        const acts = el('div', 'ex-lactions is-static');
+        acts.appendChild(selVerb('archive', 'New backup job', 'ex-btn', () => newJob(machine)));
+        body.appendChild(acts);
+    }
+
+    function renderOneJob(body, machine, job, named) {
+        if (named) {
+            const h = el('div', 'ex-sub');
+            h.textContent = job.name;
+            body.appendChild(h);
+        }
+        body.appendChild(kv([
+            ['Backs up', (job.sourcePaths || []).join(', ')],
+            ['Excludes', (job.excludes || []).join(', ')],
+            ['To repository', job.repositoryName],
+            ['Keep', job.keepDaily + ' daily · ' + job.keepWeekly + ' weekly · ' + job.keepMonthly + ' monthly'],
+            ['Compression', job.compression],
+            ['As root', job.backupAsRoot ? 'Yes' : 'No'],
+            ['Schedule', job.enabled ? 'Nightly' : 'Off — runs only when you start it'],
+        ]));
+
+        // A jump to the repository this job writes to — it lives on the server's machine, wherever that is.
+        const server = S.backupServer;
+        if (server && reposOn(server).some((r) => r.name === job.repositoryName)) {
+            const open = el('div', 'ex-lactions is-static');
+            open.appendChild(selVerb('box', 'Open repository ' + job.repositoryName, 'ex-btn',
+                () => go(['fleet', server.machineName, 'backup', job.repositoryName])));
+            body.appendChild(open);
+        }
+
+        // The last run, read on view and refreshed when the backend says it settled.
+        const held = S.jobRuns.get(job.name);
+        if (held === undefined) loadJobRun(job.name);
+        body.appendChild(section('Last run'));
+        const runLine = el('div', 'ex-runline');
+        if (held === undefined || held.state === 'loading') {
+            runLine.textContent = 'Reading the last run…';
+        } else if (held.state === 'none') {
+            runLine.textContent = 'Never run yet.';
+        } else if (held.state === 'error') {
+            runLine.textContent = 'Vaier could not read the last run.';
+        } else {
+            const r = held.run;
+            const d = el('span');
+            d.className = 'ex-dot ' + (RUN_DOT[r.status] || 'is-idle');
+            const txt = el('span');
+            if (r.status === 'RUNNING') {
+                txt.textContent = 'Running now — started ' + timeAgo(r.startedAt);
+            } else {
+                const title = r.status.charAt(0) + r.status.slice(1).toLowerCase();
+                const sum = runSummary(r);
+                txt.textContent = title + ' · ' + timeAgo(r.finishedAt || r.startedAt)
+                    + (sum ? ' · ' + sum : '');
+            }
+            runLine.append(d, txt);
+        }
+        body.appendChild(runLine);
+        if (held && held.state === 'ready' && held.run.status === 'FAILED' && held.run.diagnostics) {
+            body.appendChild(note(held.run.diagnostics, true));
+        }
+
+        const running = held && held.state === 'ready' && held.run.status === 'RUNNING';
+        const acts = el('div', 'ex-lactions is-static');
+        const run = selVerb('refresh', running ? 'Backing up…' : 'Back up now', 'ex-btn is-accent',
+            () => runNow(job));
+        if (running) run.disabled = true;
+        acts.append(run);
+        acts.appendChild(selVerb('gear', 'Edit', 'ex-btn', () => editJob(job)));
+        acts.appendChild(selVerb('check', job.enabled ? 'Disable' : 'Enable', 'ex-btn', () => toggleJob(job)));
+        acts.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => deleteJob(job)));
+        body.appendChild(acts);
+    }
+
+    // The last run, read on view (404 means it has never run) and again on the run-settled push. Not skipped on
+    // 'ready' — the push calls this to replace a RUNNING run with its outcome — but skipped while a read is in
+    // flight, and only ever the latest run, so a machine's whole history is not dragged into the browser.
+    async function loadJobRun(name) {
+        const held = S.jobRuns.get(name);
+        if (held && held.state === 'loading') return;
+        S.jobRuns.set(name, { state: 'loading', run: held ? held.run : null });
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(name) + '/runs', { cache: 'no-store' });
+            if (res.status === 404) {
+                S.jobRuns.set(name, { state: 'none', run: null });
+            } else if (res.ok) {
+                S.jobRuns.set(name, { state: 'ready', run: await res.json() });
+            } else {
+                S.jobRuns.set(name, { state: 'error', run: null });
+            }
+        } catch (e) {
+            S.jobRuns.set(name, { state: 'error', run: null });
+        }
+        render();
+    }
+
+    // Start a run now. The POST returns the RUNNING run at once; the outcome arrives on the backups stream
+    // (watchBackups) as run-settled, so this shows RUNNING and never waits or polls for the end.
+    async function runNow(job) {
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(job.name) + '/runs', { method: 'POST' });
+            if (!res.ok) {
+                toast(res.status === 404
+                    ? 'Cannot start the backup — its repository or the server is missing.'
+                    : 'Vaier could not start the backup.');
+                return;
+            }
+            S.jobRuns.set(job.name, { state: 'ready', run: await res.json() });   // RUNNING
+            toast('Backing up ' + job.machineName + '…');
+            render();
+        } catch (e) {
+            toast('Vaier could not start the backup.');
+        }
+    }
+
+    // Enable/disable rides on the whole job spec — the flag has no endpoint of its own, so a toggle re-saves the
+    // job with it flipped. Everything else is carried through unchanged.
+    function toggleJob(job) {
+        putJob(job.name, {
+            machineName: job.machineName, repositoryName: job.repositoryName,
+            sourcePaths: job.sourcePaths, excludes: job.excludes,
+            keepDaily: job.keepDaily, keepWeekly: job.keepWeekly, keepMonthly: job.keepMonthly,
+            compression: job.compression, enabled: !job.enabled, backupAsRoot: job.backupAsRoot,
+        }, job.enabled ? 'disabled' : 'enabled');
+    }
+
+    async function putJob(name, body, verbedPast) {
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(name), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not save the job.');
+                return;
+            }
+            await loadBackup();
+            toast('Backup job ' + verbedPast + '.');
+            go(['fleet', body.machineName, 'backup']);
+        } catch (e) {
+            toast('Vaier could not save the job.');
+        }
+    }
+
+    // Deleting a job stops the schedule and forgets the job — it never touches the archives already written.
+    // Plain confirm, like a repository: the data on the server is the thing you do not want to lose, and this
+    // does not risk it.
+    async function deleteJob(job) {
+        const ok = await confirmModal('Delete backup job ' + job.name + '?',
+            'Vaier stops backing up ' + job.machineName + ' — the nightly schedule is removed. The archives '
+            + 'already in ' + job.repositoryName + ' are untouched; they stay on the server.', 'Delete');
+        if (!ok) return;
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(job.name), { method: 'DELETE' });
+            if (!res.ok && res.status !== 404) { toast('Vaier could not delete the job.'); return; }
+        } catch (e) { toast('Vaier could not delete the job.'); return; }
+        const machine = job.machineName;
+        S.jobRuns.delete(job.name);
+        await loadBackup();
+        toast('Backup job deleted.');
+        go(['fleet', machine]);   // the machine may have no `backup` entry left; the machine always stands
+    }
+
+    function newJob(machine) {
+        if (!reposOn(S.backupServer).length) {
+            toast('Add a repository first — a job needs somewhere to back up to.');
+            return;
+        }
+        jobForm({
+            title: 'New backup job for ' + machine,
+            intro: 'Back ' + machine + ' up nightly to a repository on '
+                + (S.backupServer ? S.backupServer.name : 'the server') + '.',
+            machine: machine, existing: null, confirmLabel: 'Create',
+        }).then((r) => { if (r) putJob(r.name, r.body, 'created'); });
+    }
+
+    function editJob(job) {
+        jobForm({
+            title: 'Edit ' + job.name,
+            intro: 'What ' + job.machineName + ' backs up, where to, and how it is kept.',
+            machine: job.machineName, existing: job, confirmLabel: 'Save',
+        }).then((r) => { if (r) putJob(job.name, r.body, 'saved'); });
+    }
+
+    // The job form — the biggest of the dialogs, because a job carries the most: what to back up, what to skip,
+    // where to, how long to keep it, and how. The machine is fixed (it is the entry you opened), the repository
+    // is chosen from those on the server, and paths are one-per-line. Resolves { name, body } on confirm, null
+    // otherwise; the confirm stays disabled until there is a name (on create) and at least one source path.
+    function jobForm({ title, intro, machine, existing, confirmLabel }) {
+        return new Promise((resolve) => {
+            const creating = !existing;
+            const repos = reposOn(S.backupServer);
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title');
+            h.textContent = title;
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = intro;
+            const form = el('div', 'ex-form');
+
+            const field = (label, hint, control) => {
+                const f = el('div', 'ex-field');
+                const l = el('label');
+                l.textContent = label;
+                f.append(l, control);
+                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+                return f;
+            };
+            const textInput = (value, ph) => {
+                const i = el('input', 'ex-input');
+                i.type = 'text'; i.value = value == null ? '' : String(value);
+                if (ph) i.placeholder = ph; i.autocomplete = 'off'; i.spellcheck = false;
+                return i;
+            };
+            const numInput = (value) => {
+                const i = el('input', 'ex-input');
+                i.type = 'number'; i.min = '0'; i.value = String(value);
+                return i;
+            };
+            const area = (value, ph) => {
+                const t = el('textarea', 'ex-input ex-textarea');
+                t.value = value || ''; t.rows = 3; if (ph) t.placeholder = ph; t.spellcheck = false;
+                return t;
+            };
+            const lines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
+
+            const name = textInput(existing ? existing.name
+                : machine.toLowerCase().replace(/[^a-z0-9]+/g, ''), 'e.g. colina27');
+            if (!creating) name.disabled = true;
+
+            const repository = el('select', 'ex-input ex-select');
+            repos.forEach((r) => {
+                const o = el('option'); o.value = r.name; o.textContent = r.name; repository.appendChild(o);
+            });
+            repository.value = existing ? existing.repositoryName : repos[0].name;
+
+            const sourcePaths = area(existing ? (existing.sourcePaths || []).join('\n') : '', '/home/geir');
+            const excludes = area(existing ? (existing.excludes || []).join('\n') : '', 'home/*/.cache/*');
+            const keepDaily = numInput(existing ? existing.keepDaily : 7);
+            const keepWeekly = numInput(existing ? existing.keepWeekly : 4);
+            const keepMonthly = numInput(existing ? existing.keepMonthly : 6);
+            const compression = textInput(existing ? existing.compression : 'zstd,6', 'zstd,6');
+            const backupAsRoot = el('input'); backupAsRoot.type = 'checkbox';
+            backupAsRoot.checked = !!(existing && existing.backupAsRoot);
+            const enabled = el('input'); enabled.type = 'checkbox';
+            enabled.checked = existing ? existing.enabled : true;
+
+            const keepRow = el('div', 'ex-form-row');
+            keepRow.append(field('Keep daily', null, keepDaily), field('Keep weekly', null, keepWeekly),
+                field('Keep monthly', null, keepMonthly));
+            const rootRow = el('label', 'ex-check-row');
+            const rtxt = el('span'); rtxt.textContent = 'Back up as root — needed to read files the SSH user cannot';
+            rootRow.append(backupAsRoot, rtxt);
+            const enabledRow = el('label', 'ex-check-row');
+            const etxt = el('span'); etxt.textContent = 'Enabled — run nightly on the fleet schedule';
+            enabledRow.append(enabled, etxt);
+
+            form.append(
+                field('Name', creating ? 'Letters, digits, dot, dash, underscore.' : null, name),
+                field('Back up to', 'A repository on ' + (S.backupServer ? S.backupServer.name : 'the server') + '.', repository),
+                field('Source paths', 'One per line. Absolute paths on ' + machine + '.', sourcePaths),
+                field('Excludes', 'One per line. Optional borg patterns.', excludes),
+                keepRow,
+                field('Compression', null, compression),
+                rootRow,
+                enabledRow,
+            );
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent'); ok.textContent = confirmLabel || 'Save';
+            actions.append(cancel, ok);
+
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog);
+            document.body.appendChild(scrim);
+
+            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const armed = () => (!creating || name.value.trim() !== '') && lines(sourcePaths.value).length > 0;
+            const sync = () => { ok.disabled = !armed(); };
+            name.oninput = sync; sourcePaths.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => {
+                if (!armed()) return;
+                close({
+                    name: creating ? name.value.trim() : existing.name,
+                    body: {
+                        machineName: machine,
+                        repositoryName: repository.value,
+                        sourcePaths: lines(sourcePaths.value),
+                        excludes: lines(excludes.value),
+                        keepDaily: parseInt(keepDaily.value, 10) || 0,
+                        keepWeekly: parseInt(keepWeekly.value, 10) || 0,
+                        keepMonthly: parseInt(keepMonthly.value, 10) || 0,
+                        compression: compression.value.trim() || 'zstd,6',
+                        enabled: enabled.checked,
+                        backupAsRoot: backupAsRoot.checked,
+                    },
+                });
+            };
+            document.addEventListener('keydown', onKey);
+            sync();
+            (creating ? name : sourcePaths).focus();
+        });
+    }
+
+    // The backups stream — the fourth and last the shell holds. It carries a run's outcome: when a launched
+    // backup settles, the backend pushes run-settled { jobName, status }, and we re-read exactly that job's last
+    // run. No polling: the browser waits to be told, the same discipline the transfers and services streams keep.
+    function watchBackups() {
+        const events = new EventSource('/backup-jobs/events');
+        events.addEventListener('run-settled', (e) => {
+            const d = JSON.parse(e.data);
+            if (S.backupJobs.some((j) => j.name === d.jobName)) loadJobRun(d.jobName);
+        });
     }
 
     // The terminal itself is in the dock, not in the pane: the tree, the address bar and the shell are all on
@@ -2753,6 +3122,7 @@
         watchFleet();
         watchServices();
         watchTransfers();
+        watchBackups();
         loadTransfers();
         loadUser();
     }

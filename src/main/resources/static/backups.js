@@ -12,13 +12,9 @@
     let repos = [];
     let jobs = [];
     let machines = [];           // machine names from /machines (peers + LAN servers + vaier-server)
-    const latestRuns = {};       // jobName -> RunResponse | null
-    const pendingRunJobs = new Set();  // job names awaiting a `run-settled` SSE event (never polled)
     let pendingProvision = null; // { serverName } while awaiting a `provision-settled` SSE event
     let pendingPrepare = null;   // { job, machineName } while awaiting a prepare-client SSE settle event
-    let editingJobName = null;
     let authorizeServerName = null;
-    let confirmCallback = null;
 
     // --- Small helpers ---
     function escapeHtml(s) {
@@ -57,13 +53,6 @@
             throw new Error(body.message || 'HTTP ' + res.status);
         }
         return res.status === 204 ? null : res.json();
-    }
-
-    function formatTime(iso) {
-        if (!iso) return '';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return '';
-        return d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
     }
 
     async function copyToClipboard(text, btn) {
@@ -168,13 +157,6 @@
         if (el) el.textContent = done ? '✓' : numeral;
     }
 
-    function blockButton(id, blocked, why) {
-        const btn = document.getElementById(id);
-        if (!btn) return;
-        btn.disabled = blocked;
-        if (blocked) btn.title = why; else btn.removeAttribute('title');
-    }
-
     function updateChain() {
         setStage('stageServers', stageState(servers.length, true));
         setStage('stageRepos', stageState(repos.length, servers.length > 0));
@@ -185,7 +167,6 @@
         setNode('repoNode', '2', repos.length > 0);
         setNode('jobNode', '3', jobs.length > 0);
 
-        blockButton('newJobBtn', repos.length === 0, 'Add a backup repository first');
         updateScheduleSummary();
     }
 
@@ -540,72 +521,27 @@
             jobs = await jsonOrThrow(await fetch('/backup-jobs', { cache: 'no-store' }));
             renderJobs();
             updateChain();
-            jobs.forEach(refreshRunBadge);
         } catch (e) {
             if (handleGated(e)) return;
             list.innerHTML = `<div class="error">Couldn't load jobs: ${escapeHtml(e.message)}</div>`;
         }
     }
 
-    // A run that went wrong and has something to say about it. The happy path never has diagnostics, so a
-    // clean run gets no disclosure and the row stays quiet.
-    function hasDiagnostics(run) {
-        return !!run && !!run.diagnostics && run.diagnostics.trim() !== ''
-            && (run.status === 'WARNING' || run.status === 'FAILED' || run.status === 'UNKNOWN');
-    }
+    // Jobs are created, edited, deleted, run and enabled in the Explorer now, on each machine's `backup`
+    // entry. This link points there from both the empty state and the read-only list.
+    const MANAGE_JOBS_LINK =
+        '<a class="bk-designate-link" href="/explorer.html">Manage backup jobs in the Explorer</a>';
 
-    function statusPill(run) {
-        const t = formatTime(run.finishedAt || run.startedAt);
-        const time = t ? `<span class="bk-run-time">${escapeHtml(t)}</span>` : '';
-        switch (run.status) {
-            case 'RUNNING': return '<span class="status status-running"><span class="status-indicator"></span>Running</span>';
-            case 'SUCCESS': return `<span class="status status-ok"><span class="status-indicator"></span>Success</span>${time}`;
-            case 'WARNING': return `<span class="status status-warn"><span class="status-indicator"></span>Warnings</span>${time}`;
-            case 'FAILED':  return `<span class="status status-error"><span class="status-indicator"></span>Failed</span>${time}`;
-            default:        return `<span class="status status-unknown"><span class="status-indicator"></span>Unknown</span>${time}`;
-        }
-    }
-
-    // The pill, wrapped in the page's existing disclosure control when — and only when — the run left
-    // diagnostics worth reading. Reuses .bk-disclosure/.bk-disclosure-caret from the repo-path advanced row.
-    function statusBadge(run) {
-        if (!run) return '<span class="status status-unknown"><span class="status-indicator"></span>Never run</span>';
-        const pill = statusPill(run);
-        if (!hasDiagnostics(run)) return pill;
-        return `<button type="button" class="bk-disclosure bk-run-disclosure" aria-expanded="false"
-                    title="Show what borg reported">${pill}<span class="bk-disclosure-caret">›</span></button>`;
-    }
-
-    // The diagnostic lines themselves: borg's skipped-file / error output, as the backend's run diagnostics
-    // (the JSON stats blob is already stripped server-side). Untrusted remote paths — always escaped.
-    function diagnosticsPanel(run) {
-        if (!hasDiagnostics(run)) return '';
-        const tone = run.status === 'WARNING' ? 'warn' : 'err';
-        return `<pre class="bk-run-diag ${tone}" hidden>${escapeHtml(run.diagnostics)}</pre>`;
-    }
-
-    // Wire the disclosure inside one job row. Scoped to the row, so no ids and no collisions between jobs.
-    function bindDiagnostics(item) {
-        const toggle = item.querySelector('.bk-run-disclosure');
-        const panel = item.querySelector('.bk-run-diag');
-        if (!toggle || !panel) return;
-        toggle.addEventListener('click', () => {
-            const open = toggle.getAttribute('aria-expanded') !== 'true';
-            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-            toggle.classList.toggle('open', open);
-            panel.hidden = !open;
-        });
-    }
-
+    // Read-only: each job's name, machine, target repository, source-path count, retention, and an
+    // enabled/disabled badge. There are no actions on the row except the provisioning wizard's readiness
+    // check — creating, editing, deleting, running and enabling all live in the Explorer.
     function renderJobs() {
         const list = document.getElementById('jobList');
         if (jobs.length === 0) {
-            list.innerHTML = repos.length === 0
-                ? `<div class="bk-empty"><b>Waiting on step 2.</b>
-                    A job needs a repository to write into.</div>`
-                : `<div class="bk-empty"><b>Back up a machine.</b>
-                    Pick the machine, the paths, and the repository the archives land in. Vaier installs borg
-                    on the machine and trusts its key when you check readiness.</div>`;
+            list.innerHTML = `<div class="bk-empty"><b>No backup jobs yet.</b>
+                You create jobs in the Explorer, on each machine's backup entry — pick the paths, the
+                repository the archives land in, and how long to keep them.
+                <div class="bk-designate-note">${MANAGE_JOBS_LINK}</div></div>`;
             return;
         }
         list.innerHTML = '';
@@ -614,11 +550,13 @@
             el.className = 'bk-item';
             el.dataset.job = job.name;
             const sources = (job.sourcePaths || []).length;
+            const enabled = job.enabled
+                ? '<span class="badge badge-success">enabled</span>'
+                : '<span class="badge bk-badge-muted">disabled</span>';
             el.innerHTML = `
                 <div class="bk-item-main">
                     <div class="bk-item-title">
                         <span class="bk-item-name">${escapeHtml(job.name)}</span>
-                        <span class="bk-run-badge">${statusBadge(latestRuns[job.name])}</span>
                     </div>
                     <div class="bk-meta">
                         <span><span class="bk-meta-k">Machine</span><span class="bk-meta-v">${escapeHtml(job.machineName)}</span></span>
@@ -627,177 +565,19 @@
                     </div>
                     <div class="bk-tags">
                         <span class="bk-retention">keep <b>${escapeHtml(String(job.keepDaily))}d</b> · <b>${escapeHtml(String(job.keepWeekly))}w</b> · <b>${escapeHtml(String(job.keepMonthly))}m</b></span>
-                        <label class="bk-toggle"><input type="checkbox" class="js-enabled" ${job.enabled ? 'checked' : ''}> Enabled</label>
+                        ${enabled}
                     </div>
-                    <div class="bk-run-diag-slot">${diagnosticsPanel(latestRuns[job.name])}</div>
                 </div>
                 <div class="bk-item-actions">
-                    <button class="btn btn-small btn-success js-run">Run now</button>
+                    <button class="btn btn-small btn-secondary js-readiness">Check readiness</button>
                 </div>`;
-            bindDiagnostics(el);
-            el.querySelector('.js-run').addEventListener('click', () => runJob(job));
-            el.querySelector('.js-enabled').addEventListener('change', ev => toggleEnabled(job, ev.target.checked));
-            el.querySelector('.bk-item-actions').appendChild(actionMenu([
-                { label: 'Check readiness', onClick: () => checkReadiness(job) },
-                { label: 'Edit', onClick: () => openJobModal(job) },
-                { label: 'Delete', cls: 'btn-danger', onClick: () => confirmDeleteJob(job) }
-            ]));
+            el.querySelector('.js-readiness').addEventListener('click', () => checkReadiness(job));
             list.appendChild(el);
         });
-    }
-
-    // Repaint just one job's last-run badge (and its diagnostics) without re-rendering the whole list.
-    function paintBadge(jobName) {
-        const item = document.querySelector(`.bk-item[data-job="${CSS.escape(jobName)}"]`);
-        if (!item) return;
-        const badge = item.querySelector('.bk-run-badge');
-        const slot = item.querySelector('.bk-run-diag-slot');
-        if (badge) badge.innerHTML = statusBadge(latestRuns[jobName]);
-        if (slot) slot.innerHTML = diagnosticsPanel(latestRuns[jobName]);
-        bindDiagnostics(item);   // the toggle is fresh markup, so it needs its listener back
-    }
-
-    async function refreshRunBadge(job) {
-        try {
-            const res = await fetch('/backup-jobs/' + encodeURIComponent(job.name) + '/runs', { cache: 'no-store' });
-            if (res.status === 404) { latestRuns[job.name] = null; paintBadge(job.name); return; }
-            latestRuns[job.name] = await jsonOrThrow(res);
-        } catch (_) {
-            // Leave the badge as-is on a transient error.
-        }
-        paintBadge(job.name);
-    }
-
-    function jobBody() {
-        const lines = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
-        return {
-            machineName: document.getElementById('jobMachine').value,
-            repositoryName: document.getElementById('jobRepository').value,
-            sourcePaths: lines('jobSourcePaths'),
-            excludes: lines('jobExcludes'),
-            keepDaily: parseInt(document.getElementById('jobKeepDaily').value, 10) || 0,
-            keepWeekly: parseInt(document.getElementById('jobKeepWeekly').value, 10) || 0,
-            keepMonthly: parseInt(document.getElementById('jobKeepMonthly').value, 10) || 0,
-            compression: document.getElementById('jobCompression').value.trim() || 'zstd,6',
-            enabled: document.getElementById('jobEnabled').checked,
-            backupAsRoot: document.getElementById('jobBackupAsRoot').checked
-        };
-    }
-
-    function openJobModal(job) {
-        editingJobName = job ? job.name : null;
-        clearModalError('jobModalError');
-        document.getElementById('jobModalTitle').textContent = job ? 'Edit backup job' : 'New backup job';
-        const nameEl = document.getElementById('jobName');
-        nameEl.value = job ? job.name : '';
-        nameEl.disabled = !!job;
-        document.getElementById('jobNameNote').style.display = job ? 'none' : '';
-        fillSelect('jobMachine', machines, job ? job.machineName : null,
-            machines.length ? 'Select a machine' : 'No machines yet — add one under Infrastructure');
-        fillSelect('jobRepository', repos.map(r => r.name), job ? job.repositoryName : null,
-            repos.length ? 'Select a repository' : 'No repositories yet — add one above');
-        document.getElementById('jobSourcePaths').value = job ? (job.sourcePaths || []).join('\n') : '';
-        document.getElementById('jobExcludes').value = job ? (job.excludes || []).join('\n') : '';
-        document.getElementById('jobKeepDaily').value = job ? job.keepDaily : 7;
-        document.getElementById('jobKeepWeekly').value = job ? job.keepWeekly : 4;
-        document.getElementById('jobKeepMonthly').value = job ? job.keepMonthly : 6;
-        document.getElementById('jobCompression').value = job ? job.compression : 'zstd,6';
-        document.getElementById('jobEnabled').checked = job ? job.enabled : true;
-        // Opt-in, never inherited: a new job starts as the SSH user, like every job that exists today.
-        document.getElementById('jobBackupAsRoot').checked = job ? !!job.backupAsRoot : false;
-        openModal('jobModal');
-        if (!job) nameEl.focus();
-    }
-
-    async function saveJob() {
-        clearModalError('jobModalError');
-        const name = document.getElementById('jobName').value.trim();
-        const body = jobBody();
-        if (!name) { showModalError('jobModalError', 'A job name is required.'); return; }
-        if (!body.machineName) { showModalError('jobModalError', 'Choose the machine to back up.'); return; }
-        if (!body.repositoryName) { showModalError('jobModalError', 'Choose a backup repository.'); return; }
-        if (body.sourcePaths.length === 0) { showModalError('jobModalError', 'Add at least one source path.'); return; }
-        const btn = document.getElementById('jobSaveBtn');
-        btn.disabled = true;
-        try {
-            await jsonOrThrow(await fetch('/backup-jobs/' + encodeURIComponent(name), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            }));
-            closeModal('jobModal');
-            msg('Job "' + name + '" saved.', 'success');
-            await loadJobs();
-        } catch (e) {
-            showModalError('jobModalError', e.message);
-        } finally {
-            btn.disabled = false;
-        }
-    }
-
-    // The enabled flag rides on the whole job spec, so a toggle re-saves the job with the flag flipped.
-    async function toggleEnabled(job, enabled) {
-        try {
-            const body = {
-                machineName: job.machineName, repositoryName: job.repositoryName,
-                sourcePaths: job.sourcePaths, excludes: job.excludes,
-                keepDaily: job.keepDaily, keepWeekly: job.keepWeekly, keepMonthly: job.keepMonthly,
-                compression: job.compression, enabled
-            };
-            await jsonOrThrow(await fetch('/backup-jobs/' + encodeURIComponent(job.name), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            }));
-            job.enabled = enabled;
-            updateChain();   // the nightly schedule's reach just changed
-            msg('Job "' + job.name + '" ' + (enabled ? 'enabled' : 'disabled') + '.', 'success');
-        } catch (e) {
-            msg(e.message, 'error');
-            await loadJobs();
-        }
-    }
-
-    function confirmDeleteJob(job) {
-        openConfirm('Delete backup job',
-            'Delete job "' + job.name + '"? Existing archives in the repository are not removed.',
-            async () => {
-                await jsonOrThrow(await fetch('/backup-jobs/' + encodeURIComponent(job.name), { method: 'DELETE' }));
-                pendingRunJobs.delete(job.name);
-                delete latestRuns[job.name];
-                msg('Job "' + job.name + '" deleted.', 'success');
-                await loadJobs();
-            });
-    }
-
-    async function runJob(job) {
-        msg('Starting run for "' + job.name + '"…', '');
-        try {
-            const run = await jsonOrThrow(await fetch('/backup-jobs/' + encodeURIComponent(job.name) + '/runs', { method: 'POST' }));
-            latestRuns[job.name] = run;
-            paintBadge(job.name);
-            // Show RUNNING, then wait for the backend-pushed `run-settled` SSE event — the frontend never polls.
-            pendingRunJobs.add(job.name);
-            msg('Run started for "' + job.name + '".', 'success');
-        } catch (e) {
-            msg(e.message, 'error');
-        }
-    }
-
-    // Handle a backend-pushed run settle event (SSE). Guarded by pendingRunJobs so an event for another job
-    // never refreshes the wrong card: only re-fetch the job we launched, and only its latest run.
-    async function onRunSettled(payload) {
-        if (!payload || !payload.jobName || !pendingRunJobs.has(payload.jobName)) return;
-        const jobName = payload.jobName;
-        pendingRunJobs.delete(jobName);
-        try {
-            const res = await fetch('/backup-jobs/' + encodeURIComponent(jobName) + '/runs', { cache: 'no-store' });
-            if (res.ok) { latestRuns[jobName] = await res.json(); paintBadge(jobName); }
-        } catch (_) { /* the event already told us the outcome; the badge repaints on the next load */ }
-        // Point the operator at the detail that now exists on the row, instead of stating a dead end.
-        if (payload.status === 'SUCCESS') msg('Backup of "' + jobName + '" finished.', 'success');
-        else if (payload.status === 'WARNING') msg('Backup of "' + jobName + '" completed with warnings. Open the Warnings badge on the job to see which files were skipped.', 'warning');
-        else if (payload.status === 'FAILED') msg('Backup of "' + jobName + '" failed — admins were emailed. Open the Failed badge on the job to see what borg reported.', 'error');
+        const note = document.createElement('div');
+        note.className = 'bk-designate-note';
+        note.innerHTML = MANAGE_JOBS_LINK;
+        list.appendChild(note);
     }
 
     // Readiness for the provisioning wizard. borgAuthOk and versionsCompatible are shown prominently:
@@ -1021,31 +801,6 @@
         }
     }
 
-    // --- Generic confirm ---
-    function openConfirm(title, text, callback) {
-        confirmCallback = callback;
-        document.getElementById('confirmTitle').textContent = title;
-        document.getElementById('confirmText').textContent = text;
-        openModal('confirmModal');
-    }
-
-    async function runConfirm() {
-        if (!confirmCallback) return;
-        const btn = document.getElementById('confirmOkBtn');
-        btn.disabled = true;
-        try {
-            await confirmCallback();
-            closeModal('confirmModal');
-            confirmCallback = null;
-        } catch (e) {
-            closeModal('confirmModal');
-            confirmCallback = null;
-            msg(e.message, 'error');
-        } finally {
-            btn.disabled = false;
-        }
-    }
-
     // --- Wiring ---
     function wire() {
         document.getElementById('setupCloseBtn').addEventListener('click', () => closeModal('setupModal'));
@@ -1058,14 +813,7 @@
         document.getElementById('authorizeCloseBtn').addEventListener('click', () => closeModal('authorizeModal'));
         document.getElementById('authorizeOkBtn').addEventListener('click', authorizeHost);
 
-        document.getElementById('newJobBtn').addEventListener('click', () => openJobModal(null));
-        document.getElementById('jobCancelBtn').addEventListener('click', () => closeModal('jobModal'));
-        document.getElementById('jobSaveBtn').addEventListener('click', saveJob);
-
         document.getElementById('provisionCloseBtn').addEventListener('click', () => closeModal('provisionModal'));
-
-        document.getElementById('confirmCancelBtn').addEventListener('click', () => { closeModal('confirmModal'); confirmCallback = null; });
-        document.getElementById('confirmOkBtn').addEventListener('click', runConfirm);
 
         document.getElementById('saveScheduleBtn').addEventListener('click', saveSchedule);
 
@@ -1082,8 +830,8 @@
     }
 
     // The backup UI never polls: it opens ONE backend SSE stream and reacts to pushed settle events. A
-    // backend sweep does all the host-side polling and pushes when a borg-client install, an on-demand run,
-    // or a server provision finishes.
+    // backend sweep does all the host-side polling and pushes when a borg-client install or a server
+    // provision finishes — the two wizards that still run from this bridge page.
     function subscribeToBackupEvents() {
         try {
             const es = new EventSource('/backup-jobs/events');
@@ -1093,7 +841,6 @@
                 if (payload) handler(payload);
             });
             on('prepare-client-settled', onPrepareSettled);
-            on('run-settled', onRunSettled);
             on('provision-settled', onProvisionSettled);
         } catch (_) { /* SSE unavailable — the action still works, just without live settle */ }
     }

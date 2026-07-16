@@ -868,6 +868,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 /* A confirm dialog, centred over its own scrim (reusing .ex-scrim's backdrop). */
 .ex-dialog {
     width: 440px; max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 40px); overflow-y: auto;
     padding: 20px;
     background: var(--bg-panel);
     border: 1px solid var(--border-hi);
@@ -941,6 +942,13 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
     font-size: 13px; color: var(--text-muted); line-height: 1.45; cursor: pointer;
 }
 .ex-check-row input { margin-top: 2px; accent-color: var(--accent); }
+.ex-form-row { display: flex; gap: 10px; }
+.ex-form-row .ex-field { flex: 1; min-width: 0; }
+.ex-textarea { resize: vertical; min-height: 62px; line-height: 1.5; }
+.ex-select { cursor: pointer; }
+/* A machine's job subheading, and its last-run status line — a dot and a phrase, the fleet's own four colours. */
+.ex-sub { font-family: var(--mono); font-size: 14px; color: var(--text); margin: 16px 0 6px; }
+.ex-runline { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-muted); }
 
 @media (prefers-reduced-motion: reduce) {
     .ex-app *, .ex-app { transition: none !important; animation: none !important; }
