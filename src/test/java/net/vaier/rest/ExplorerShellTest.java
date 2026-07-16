@@ -431,13 +431,13 @@ class ExplorerShellTest {
     @Test
     void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
         // Three mutating verbs ship now, each backed by a real endpoint. DELETE unpublishes a service (slice C),
-        // deletes a file/folder (slice 5), removes the backup-server designation, and deletes a backup
-        // repository or job. PUT sets a disk watch (#325), designates/edits the backup server, saves a
-        // repository, and saves/enables a job. POST copies across the fleet (/transfers, slice 2) and starts a
-        // backup run (/backup-jobs/{name}/runs). Each move into the tree invents no verb — the backup server,
-        // its repositories and its jobs all reuse PUT/DELETE/POST against endpoints the Backups page already
-        // drove. Publishing (POST /publish) still needs a form and stays on the Infrastructure bridge. The
-        // distinct verb set is pinned here; an invented one shows up.
+        // deletes a file/folder (slice 5), removes the backup-server designation, deletes a repository, stops a
+        // machine's backup (deletes its job), and removes protected paths. PUT sets a disk watch (#325),
+        // designates/edits the backup server, and saves a repository. POST copies across the fleet (/transfers,
+        // slice 2), starts a backup run (/backup-jobs/{name}/runs), and protects paths
+        // (/machines/{m}/backup/paths). A job is never PUT from the shell any more — it is Vaier's, configured
+        // by which files you protect, not by a form. Publishing (POST /publish) still needs a form and stays on
+        // the Infrastructure bridge. The distinct verb set is pinned here; an invented one shows up.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);

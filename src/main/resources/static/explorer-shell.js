@@ -1772,12 +1772,12 @@
         return (s.length <= 60 && s.indexOf('{') === -1 && s.indexOf('\n') === -1) ? s : '';
     }
 
+    // A machine is backed up by one job that Vaier owns — this READS it, it does not configure it. What's
+    // protected is chosen in the file browser (tick and Back up); the schedule is fleet-wide; retention and
+    // whether to read as root are Vaier's to decide, not knobs to turn. So the whole entry is a readout with a
+    // single intent — run it now — and one way out — stop backing this machine up.
     function renderJobsBackup(body, machine, jobs) {
-        body.appendChild(section(jobs.length === 1 ? 'Backup job' : 'Backup jobs'));
         jobs.forEach((job) => renderOneJob(body, machine, job, jobs.length > 1));
-        const acts = el('div', 'ex-lactions is-static');
-        acts.appendChild(selVerb('archive', 'New backup job', 'ex-btn', () => newJob(machine)));
-        body.appendChild(acts);
     }
 
     function renderOneJob(body, machine, job, named) {
@@ -1786,24 +1786,31 @@
             h.textContent = job.name;
             body.appendChild(h);
         }
-        body.appendChild(kv([
-            ['Backs up', (job.sourcePaths || []).join(', ')],
-            ['Excludes', (job.excludes || []).join(', ')],
-            ['To repository', job.repositoryName],
-            ['Keep', job.keepDaily + ' daily · ' + job.keepWeekly + ' weekly · ' + job.keepMonthly + ' monthly'],
-            ['Compression', job.compression],
-            ['As root', job.backupAsRoot ? 'Yes' : 'No'],
-            ['Schedule', job.enabled ? 'Nightly' : 'Off — runs only when you start it'],
-        ]));
 
-        // A jump to the repository this job writes to — it lives on the server's machine, wherever that is.
-        const server = S.backupServer;
-        if (server && reposOn(server).some((r) => r.name === job.repositoryName)) {
-            const open = el('div', 'ex-lactions is-static');
-            open.appendChild(selVerb('box', 'Open repository ' + job.repositoryName, 'ex-btn',
-                () => go(['fleet', server.machineName, 'backup', job.repositoryName])));
-            body.appendChild(open);
+        // What's protected — each a link back into the file browser, where it is added and removed. The paths
+        // are the only backup fact the operator owns; everything else is Vaier's.
+        body.appendChild(section('Protected'));
+        const paths = job.sourcePaths || [];
+        if (!paths.length) {
+            body.appendChild(note('Nothing is backed up on this machine yet. Open its files, tick what matters '
+                + 'and choose Back up.', false));
+        } else {
+            const list = el('div', 'ex-brepos');
+            paths.forEach((sp) => {
+                const row = el('div', 'ex-brepo');
+                const nm = el('button', 'ex-brepo-name is-link');
+                nm.textContent = sp;
+                nm.onclick = () => openTo(['fleet', machine, 'files'].concat(sp.split('/').filter(Boolean)));
+                row.appendChild(nm);
+                list.appendChild(row);
+            });
+            body.appendChild(list);
         }
+
+        body.appendChild(section('Schedule'));
+        const sched = el('div', 'ex-runline');
+        sched.textContent = 'Runs every night. A failed run emails the admins.';
+        body.appendChild(sched);
 
         // The last run, read on view and refreshed when the backend says it settled.
         const held = S.jobRuns.get(job.name);
@@ -1842,10 +1849,16 @@
             () => runNow(job));
         if (running) run.disabled = true;
         acts.append(run);
-        acts.appendChild(selVerb('gear', 'Edit', 'ex-btn', () => editJob(job)));
-        acts.appendChild(selVerb('check', job.enabled ? 'Disable' : 'Enable', 'ex-btn', () => toggleJob(job)));
-        acts.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => deleteJob(job)));
+        acts.appendChild(selVerb('cross', 'Stop backing up this machine', 'ex-btn is-danger',
+            () => stopMachineBackup(job)));
         body.appendChild(acts);
+    }
+
+    // Open the tree to a path and select it — used by the protected-path links, which jump you into the file
+    // browser where the backup set is actually edited.
+    function openTo(path) {
+        for (let i = 1; i < path.length; i++) S.open.add(key(path.slice(0, i + 1)));
+        go(path);
     }
 
     // The last run, read on view (404 means it has never run) and again on the run-settled push. Not skipped on
@@ -1891,197 +1904,23 @@
 
     // Enable/disable rides on the whole job spec — the flag has no endpoint of its own, so a toggle re-saves the
     // job with it flipped. Everything else is carried through unchanged.
-    function toggleJob(job) {
-        putJob(job.name, {
-            machineName: job.machineName, repositoryName: job.repositoryName,
-            sourcePaths: job.sourcePaths, excludes: job.excludes,
-            keepDaily: job.keepDaily, keepWeekly: job.keepWeekly, keepMonthly: job.keepMonthly,
-            compression: job.compression, enabled: !job.enabled, backupAsRoot: job.backupAsRoot,
-        }, job.enabled ? 'disabled' : 'enabled');
-    }
-
-    async function putJob(name, body, verbedPast) {
-        try {
-            const res = await fetch('/backup-jobs/' + encodeURIComponent(name), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                toast(err.message || 'Vaier could not save the job.');
-                return;
-            }
-            await loadBackup();
-            toast('Backup job ' + verbedPast + '.');
-            go(['fleet', body.machineName, 'backup']);
-        } catch (e) {
-            toast('Vaier could not save the job.');
-        }
-    }
-
-    // Deleting a job stops the schedule and forgets the job — it never touches the archives already written.
-    // Plain confirm, like a repository: the data on the server is the thing you do not want to lose, and this
-    // does not risk it.
-    async function deleteJob(job) {
-        const ok = await confirmModal('Delete backup job ' + job.name + '?',
-            'Vaier stops backing up ' + job.machineName + ' — the nightly schedule is removed. The archives '
-            + 'already in ' + job.repositoryName + ' are untouched; they stay on the server.', 'Delete');
+    // Stop backing this machine up entirely — Vaier forgets the job and its schedule. It never touches the
+    // archives already made; they stay on the server. (Removing individual paths is done in the file browser;
+    // this is the one-click "stop everything".) A plain confirm: the data you'd hate to lose is not at risk.
+    async function stopMachineBackup(job) {
+        const ok = await confirmModal('Stop backing up ' + job.machineName + '?',
+            'Vaier stops backing up ' + job.machineName + ' — nothing new is protected and the nightly run '
+            + 'stops. The archives already made are untouched; they stay on the server.', 'Stop backing up');
         if (!ok) return;
         try {
             const res = await fetch('/backup-jobs/' + encodeURIComponent(job.name), { method: 'DELETE' });
-            if (!res.ok && res.status !== 404) { toast('Vaier could not delete the job.'); return; }
-        } catch (e) { toast('Vaier could not delete the job.'); return; }
+            if (!res.ok && res.status !== 404) { toast('Vaier could not stop the backup.'); return; }
+        } catch (e) { toast('Vaier could not stop the backup.'); return; }
         const machine = job.machineName;
         S.jobRuns.delete(job.name);
         await loadBackup();
-        toast('Backup job deleted.');
-        go(['fleet', machine]);   // the machine may have no `backup` entry left; the machine always stands
-    }
-
-    function newJob(machine) {
-        if (!reposOn(S.backupServer).length) {
-            toast('Add a repository first — a job needs somewhere to back up to.');
-            return;
-        }
-        jobForm({
-            title: 'New backup job for ' + machine,
-            intro: 'Back ' + machine + ' up nightly to a repository on '
-                + (S.backupServer ? S.backupServer.name : 'the server') + '.',
-            machine: machine, existing: null, confirmLabel: 'Create',
-        }).then((r) => { if (r) putJob(r.name, r.body, 'created'); });
-    }
-
-    function editJob(job) {
-        jobForm({
-            title: 'Edit ' + job.name,
-            intro: 'What ' + job.machineName + ' backs up, where to, and how it is kept.',
-            machine: job.machineName, existing: job, confirmLabel: 'Save',
-        }).then((r) => { if (r) putJob(job.name, r.body, 'saved'); });
-    }
-
-    // The job form — the biggest of the dialogs, because a job carries the most: what to back up, what to skip,
-    // where to, how long to keep it, and how. The machine is fixed (it is the entry you opened), the repository
-    // is chosen from those on the server, and paths are one-per-line. Resolves { name, body } on confirm, null
-    // otherwise; the confirm stays disabled until there is a name (on create) and at least one source path.
-    function jobForm({ title, intro, machine, existing, confirmLabel }) {
-        return new Promise((resolve) => {
-            const creating = !existing;
-            const repos = reposOn(S.backupServer);
-            const scrim = el('div', 'ex-scrim is-on');
-            const dialog = el('div', 'ex-dialog');
-            const h = el('div', 'ex-dialog-title');
-            h.textContent = title;
-            const sub = el('div', 'ex-dialog-body');
-            sub.textContent = intro;
-            const form = el('div', 'ex-form');
-
-            const field = (label, hint, control) => {
-                const f = el('div', 'ex-field');
-                const l = el('label');
-                l.textContent = label;
-                f.append(l, control);
-                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
-                return f;
-            };
-            const textInput = (value, ph) => {
-                const i = el('input', 'ex-input');
-                i.type = 'text'; i.value = value == null ? '' : String(value);
-                if (ph) i.placeholder = ph; i.autocomplete = 'off'; i.spellcheck = false;
-                return i;
-            };
-            const numInput = (value) => {
-                const i = el('input', 'ex-input');
-                i.type = 'number'; i.min = '0'; i.value = String(value);
-                return i;
-            };
-            const area = (value, ph) => {
-                const t = el('textarea', 'ex-input ex-textarea');
-                t.value = value || ''; t.rows = 3; if (ph) t.placeholder = ph; t.spellcheck = false;
-                return t;
-            };
-            const lines = (v) => v.split('\n').map((s) => s.trim()).filter(Boolean);
-
-            const name = textInput(existing ? existing.name
-                : machine.toLowerCase().replace(/[^a-z0-9]+/g, ''), 'e.g. colina27');
-            if (!creating) name.disabled = true;
-
-            const repository = el('select', 'ex-input ex-select');
-            repos.forEach((r) => {
-                const o = el('option'); o.value = r.name; o.textContent = r.name; repository.appendChild(o);
-            });
-            repository.value = existing ? existing.repositoryName : repos[0].name;
-
-            const sourcePaths = area(existing ? (existing.sourcePaths || []).join('\n') : '', '/home/geir');
-            const excludes = area(existing ? (existing.excludes || []).join('\n') : '', 'home/*/.cache/*');
-            const keepDaily = numInput(existing ? existing.keepDaily : 7);
-            const keepWeekly = numInput(existing ? existing.keepWeekly : 4);
-            const keepMonthly = numInput(existing ? existing.keepMonthly : 6);
-            const compression = textInput(existing ? existing.compression : 'zstd,6', 'zstd,6');
-            const backupAsRoot = el('input'); backupAsRoot.type = 'checkbox';
-            backupAsRoot.checked = !!(existing && existing.backupAsRoot);
-            const enabled = el('input'); enabled.type = 'checkbox';
-            enabled.checked = existing ? existing.enabled : true;
-
-            const keepRow = el('div', 'ex-form-row');
-            keepRow.append(field('Keep daily', null, keepDaily), field('Keep weekly', null, keepWeekly),
-                field('Keep monthly', null, keepMonthly));
-            const rootRow = el('label', 'ex-check-row');
-            const rtxt = el('span'); rtxt.textContent = 'Back up as root — needed to read files the SSH user cannot';
-            rootRow.append(backupAsRoot, rtxt);
-            const enabledRow = el('label', 'ex-check-row');
-            const etxt = el('span'); etxt.textContent = 'Enabled — run nightly on the fleet schedule';
-            enabledRow.append(enabled, etxt);
-
-            form.append(
-                field('Name', creating ? 'Letters, digits, dot, dash, underscore.' : null, name),
-                field('Back up to', 'A repository on ' + (S.backupServer ? S.backupServer.name : 'the server') + '.', repository),
-                field('Source paths', 'One per line. Absolute paths on ' + machine + '.', sourcePaths),
-                field('Excludes', 'One per line. Optional borg patterns.', excludes),
-                keepRow,
-                field('Compression', null, compression),
-                rootRow,
-                enabledRow,
-            );
-
-            const actions = el('div', 'ex-dialog-actions');
-            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
-            const ok = el('button', 'ex-btn is-accent'); ok.textContent = confirmLabel || 'Save';
-            actions.append(cancel, ok);
-
-            dialog.append(h, sub, form, actions);
-            scrim.appendChild(dialog);
-            document.body.appendChild(scrim);
-
-            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
-            const onKey = (e) => { if (e.key === 'Escape') close(null); };
-            const armed = () => (!creating || name.value.trim() !== '') && lines(sourcePaths.value).length > 0;
-            const sync = () => { ok.disabled = !armed(); };
-            name.oninput = sync; sourcePaths.oninput = sync;
-            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
-            cancel.onclick = () => close(null);
-            ok.onclick = () => {
-                if (!armed()) return;
-                close({
-                    name: creating ? name.value.trim() : existing.name,
-                    body: {
-                        machineName: machine,
-                        repositoryName: repository.value,
-                        sourcePaths: lines(sourcePaths.value),
-                        excludes: lines(excludes.value),
-                        keepDaily: parseInt(keepDaily.value, 10) || 0,
-                        keepWeekly: parseInt(keepWeekly.value, 10) || 0,
-                        keepMonthly: parseInt(keepMonthly.value, 10) || 0,
-                        compression: compression.value.trim() || 'zstd,6',
-                        enabled: enabled.checked,
-                        backupAsRoot: backupAsRoot.checked,
-                    },
-                });
-            };
-            document.addEventListener('keydown', onKey);
-            sync();
-            (creating ? name : sourcePaths).focus();
-        });
+        toast('Stopped backing up ' + machine + '.');
+        go(['fleet', machine]);   // the `backup` entry is gone now; the machine always stands
     }
 
     // The backups stream — the fourth and last the shell holds. It carries a run's outcome: when a launched
