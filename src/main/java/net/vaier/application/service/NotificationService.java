@@ -6,11 +6,13 @@ import net.vaier.application.NotifyAdminsOfBackupServerDownUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
+import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.DiskFillForecast;
 import net.vaier.domain.DiskFillForecastCleared;
+import net.vaier.domain.ImageUpdateRollup;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.AccessEntry;
@@ -36,6 +38,7 @@ public class NotificationService implements
         NotifyAdminsOfDiskFillForecastUseCase,
         NotifyAdminsOfBackupFailureUseCase,
         NotifyAdminsOfBackupServerDownUseCase,
+        NotifyAdminsOfUpdateAvailableUseCase,
         ForNotifyingAdmins {
 
     private static final int DEFAULT_SMTP_PORT = 587;
@@ -119,6 +122,17 @@ public class NotificationService implements
         sendToAdmins(server.recoverySubject(),
                 server.recoveryBody(configResolver.getDomain()),
                 "backup server recovery: " + server.name());
+    }
+
+    /**
+     * One rollup mail for the images that just became out of date. The rollup renders itself — subject, body
+     * and the "Vaier does not pull" line are the domain's words, not this service's; it only sequences the send.
+     */
+    @Override
+    public void notifyAdminsOfUpdateAvailable(ImageUpdateRollup rollup) {
+        sendToAdmins(rollup.subject(),
+                rollup.body(configResolver.getDomain()),
+                "update available for " + rollup.images().size() + " image(s)");
     }
 
     /**

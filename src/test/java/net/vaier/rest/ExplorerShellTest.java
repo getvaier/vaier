@@ -693,4 +693,141 @@ class ExplorerShellTest {
         assertThat(read("explorer.js")).contains("result.error");
         assertThat(read("explorer-shell.js")).contains("entry.error");
     }
+
+    // --- 15. #57 slice 2: the Update available mark -----------------------------------------------------
+    //
+    // A stale vaultwarden image on apalveien5 broke Bitwarden sync with no signal to the operator. Slice 1
+    // taught the domain to notice; this slice is the mark on the page. The whole risk of the slice is that the
+    // browser starts deciding — comparing tags, or reading digests — so most of what is pinned here is what
+    // the shell must NOT do.
+
+    /** The helper that turns the backend's verdict into a mark, isolated so the rule can be read off it. */
+    private static String updateMarkBody(String js) {
+        int from = js.indexOf("function updateMark(");
+        assertThat(from).as("the verdict -> mark helper").isPositive();
+        return js.substring(from, js.indexOf("\n    }", from));
+    }
+
+    @Test
+    void theShell_neverDecidesForItselfWhetherAnUpdateIsAvailable() throws IOException {
+        // THE test of the slice, and hex rule 1. UpdateAvailability.compare() in the domain is the one place
+        // the two digests are ever weighed — the sweep that raises the admin email and the mark on this page
+        // must reach the same verdict from the same fact, and the only way to guarantee that is for the
+        // browser never to hold the inputs at all. So the shell does not read imageDigest, does not know what
+        // a sha256 is, and does not compare an image or a tag to anything: it reads one enum and paints it.
+        String js = read("explorer-shell.js");
+        assertThat(js).as("the digest is an input to the decision, and the decision is not the browser's")
+            .doesNotContain("imageDigest");
+        assertThat(js).doesNotContain("sha256");
+        assertThat(js).doesNotContain("RepoDigests");
+
+        // and the mark helper itself weighs nothing. It equality-checks one enum — which is the whole of its
+        // logic — and it never touches the facts the verdict was computed FROM. If it ever reads an image or a
+        // version, someone has started deciding here. (An == on the verdict is fine and is the point; what is
+        // banned is string surgery on a tag, which is how a browser-side rule always begins.)
+        String body = updateMarkBody(js);
+        assertThat(body).contains("updateAvailable");
+        assertThat(body).as("the inputs to the decision have no business in the browser")
+            .doesNotContain(".image").doesNotContain(".version").doesNotContain("digest");
+        assertThat(body).as("no tag string surgery — that is a rule in disguise")
+            .doesNotContain("indexOf").doesNotContain("split").doesNotContain("startsWith");
+    }
+
+    @Test
+    void aContainerWithAnUpdateAvailable_wearsAMarkInTheRail() throws IOException {
+        // Container rows are first-class entries, so the rail is where an operator scanning the fleet sees it
+        // without opening anything. Until now the machine's liveness dot was the only per-row mark.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function branch(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function", from));
+        assertThat(body).as("the rail's container rows carry the mark").contains("'container'");
+        assertThat(body).contains("updateMark(");
+    }
+
+    @Test
+    void anUnknownVerdict_paintsNoMarkAtAll() throws IOException {
+        // UNKNOWN is the resting state, not an exception: the registry is unreachable, there is no egress, or
+        // no sweep has run yet. A grey smudge on every container row for the first 24 hours of a deployment is
+        // how an operator learns to stop reading the column — so unknown is silent, and only UPDATE_AVAILABLE
+        // ever draws. (The nuance that silence is not a promise of "up to date" is carried in the single
+        // container's Inspector, which has room for the honest sentence — see below.)
+        String body = updateMarkBody(read("explorer-shell.js"));
+        assertThat(body).contains("'UPDATE_AVAILABLE'");
+        assertThat(body).as("unknown is not a state the mark renders").doesNotContain("'UNKNOWN'");
+        assertThat(body).as("nor is up-to-date — a mark for it would be noise on every healthy row")
+            .doesNotContain("'UP_TO_DATE'");
+    }
+
+    @Test
+    void theMark_isAdvisory_neverAnAlarm() throws IOException {
+        // Nothing is broken when an update exists — the container is running fine. Red is reserved for down
+        // and failed, and it has to keep meaning that or the fleet's colours stop carrying information. The
+        // mark takes the yellow the degraded dot already uses.
+        String css = read("explorer-shell.css");
+        int from = css.indexOf(".ex-update");
+        assertThat(from).as("the mark's own rule").isPositive();
+        String block = css.substring(from, css.indexOf("}", from));
+        assertThat(block).contains("var(--yellow)");
+        assertThat(block).doesNotContain("var(--red)");
+    }
+
+    @Test
+    void theMark_saysWhatTheOperatorDoes_notWhatVaierWillDo() throws IOException {
+        // Vaier is read-only for containers: there is no endpoint to pull an image or restart a container, and
+        // shipping a mark that reads like a promise would be the same lie as shipping a dead button. The
+        // tooltip names the operator's own action, and the canonical term is used exactly
+        // (UBIQUITOUS_LANGUAGE.md) — not "outdated", not "stale", not "needs upgrade".
+        String js = read("explorer-shell.js");
+        String body = updateMarkBody(js);
+        assertThat(body).contains("Update available");
+        assertThat(body).contains("title");
+        for (String banned : List.of("outdated", "stale", "drift", "needs upgrade", "Outdated", "Stale")) {
+            assertThat(body).as("a near-synonym of \"Update available\" (%s)", banned).doesNotContain(banned);
+        }
+        // and the slice opened no verb: still only the three mutating methods, none of them aimed at a container
+        assertThat(js).doesNotContain("/pull").doesNotContain("Pull now").doesNotContain("Update now");
+    }
+
+    @Test
+    void theSingleContainer_saysWhichOfTheThreeVerdictsItIs_includingCannotTell() throws IOException {
+        // Absence of a mark in the rail must never be read as a promise that the image is current. The rail
+        // has no room to say so; the Inspector does, so this is where UNKNOWN is spoken aloud rather than
+        // silently collapsed into "up to date" — which is precisely the lie #57 was filed about.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderContainer(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    // --- services", from));
+
+        assertThat(body).contains("'Update'");
+        assertThat(body).contains("updateAvailable");
+        // all three verdicts are nameable here, and the third one is honest about not knowing
+        assertThat(js).contains("Update available");
+        assertThat(js).contains("Up to date");
+        assertThat(js).containsIgnoringCase("cannot tell");
+    }
+
+    @Test
+    void theContainerList_carriesTheSameMarkAsTheRail_fromTheSameHelper() throws IOException {
+        // One verdict, one helper, two places it is drawn. A second copy of "when do we draw this" is a second
+        // place it can drift from the domain.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderContainers(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function renderContainer(", from));
+        assertThat(body).contains("updateMark(");
+
+        // drawn in exactly the two places, off the one helper
+        assertThat(js.split("updateMark\\(", -1).length - 1)
+            .as("the helper, and its two call sites").isEqualTo(3);
+    }
+
+    @Test
+    void theMark_doesNotAppearWhenBrowsingTheArchive() throws IOException {
+        // Same reasoning as the liveness dot, which the stylesheet hides in the past: an archive is a photo of
+        // a filesystem, and "there is a newer image in the registry" is a fact about now. Reporting today's
+        // registry against a container as it stood in March would be a claim about a moment that has passed.
+        // The shield does this with an !S.at gate in JS, and the mark follows the nearer precedent.
+        assertThat(updateMarkBody(read("explorer-shell.js"))).contains("S.at");
+    }
 }

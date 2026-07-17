@@ -375,6 +375,32 @@ class NotificationServiceTest {
     }
 
     @Test
+    void notifyAdminsOfUpdateAvailableSendsOneRollupToAdminsOnly() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));
+        when(accessStore.getEntries()).thenReturn(List.of(
+                admin("alice@example.com"),
+                user("carol@example.com")));
+        when(configResolver.getDomain()).thenReturn("example.com");
+        net.vaier.domain.ImageUpdateRollup rollup = new net.vaier.domain.ImageUpdateRollup(
+                List.of("vaultwarden/server:latest", "lscr.io/linuxserver/wireguard:1.0.x"));
+
+        service.notifyAdminsOfUpdateAvailable(rollup);
+
+        ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(),
+                recipients.capture(), subject.capture(), body.capture());
+        assertThat(recipients.getValue()).containsExactly("alice@example.com");
+        assertThat(subject.getValue()).isEqualTo(rollup.subject());
+        assertThat(body.getValue())
+                .contains("vaultwarden/server:latest")
+                .contains("lscr.io/linuxserver/wireguard:1.0.x")
+                .contains("vaier.example.com");
+    }
+
+    @Test
     void notifyAdmins_swallowsSenderExceptionsSoSchedulerKeepsRunning() {
         when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
         when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("p"));

@@ -15,6 +15,48 @@ class DockerServiceTest {
     }
 
     @Test
+    void digestFromRepoDigests_readsTheRegistryDigestOfTheMatchingRepository() {
+        // A container can carry several repo digests when its image is tagged into more than one repository;
+        // the one that matters is the one for the repository the container actually runs.
+        String digest = DockerService.digestFromRepoDigests(
+            List.of("other/image@sha256:aaa", "vaultwarden/server@sha256:bbb"), "vaultwarden/server:latest");
+
+        assertThat(digest).isEqualTo("sha256:bbb");
+    }
+
+    @Test
+    void digestFromRepoDigests_fallsBackToTheSoleDigestWhenNoRepositoryMatches() {
+        String digest = DockerService.digestFromRepoDigests(
+            List.of("vaultwarden/server@sha256:bbb"), "registry-1.docker.io/vaultwarden/server:latest");
+
+        assertThat(digest).isEqualTo("sha256:bbb");
+    }
+
+    @Test
+    void digestFromRepoDigests_isNullWhenTheImageWasNeverPulledFromARegistry() {
+        // A locally-built image has no repo digest at all — unknown, never "up to date".
+        assertThat(DockerService.digestFromRepoDigests(List.of(), "my-local-build:latest")).isNull();
+        assertThat(DockerService.digestFromRepoDigests(null, "my-local-build:latest")).isNull();
+    }
+
+    @Test
+    void updateAvailabilityDefaultsToUnknownOnAScrapedContainer() {
+        assertThat(container(List.of("bridge")).updateAvailable()).isEqualTo(UpdateAvailability.UNKNOWN);
+    }
+
+    @Test
+    void withUpdateAvailability_returnsACopyCarryingTheVerdictAndLeavesTheOriginalAlone() {
+        DockerService scraped = container(List.of("bridge"));
+
+        DockerService judged = scraped.withUpdateAvailability(UpdateAvailability.UPDATE_AVAILABLE);
+
+        assertThat(judged.updateAvailable()).isEqualTo(UpdateAvailability.UPDATE_AVAILABLE);
+        assertThat(judged.containerId()).isEqualTo(scraped.containerId());
+        assertThat(judged.image()).isEqualTo(scraped.image());
+        assertThat(scraped.updateAvailable()).isEqualTo(UpdateAvailability.UNKNOWN);
+    }
+
+    @Test
     void isOnNetwork_trueWhenAttachedToThatNetwork() {
         assertThat(container(List.of("vaier-network")).isOnNetwork("vaier-network")).isTrue();
         assertThat(container(List.of("bridge")).isOnNetwork("vaier-network")).isFalse();

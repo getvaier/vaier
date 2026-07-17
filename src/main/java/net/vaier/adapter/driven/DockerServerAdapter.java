@@ -14,6 +14,7 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.domain.Server;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.UpdateAvailability;
 import net.vaier.domain.port.ForGettingServerInfo;
 import jakarta.annotation.PreDestroy;
 import java.net.URI;
@@ -77,17 +78,20 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                 if (!portMappings.isEmpty()) {
                     String containerName = extractContainerName(container.getNames());
                     String image = container.getImage();
-                    String version = resolveVersion(container.getImageId(), image, dockerClient);
+                    // One inspect, both facts: the version labels and the registry digest (#57).
+                    InspectImageResponse imageInfo = inspectImage(container.getImageId(), dockerClient);
                     List<String> networks = extractNetworks(container);
 
                     services.add(new DockerService(
                         container.getId(),
                         containerName,
                         image,
-                        version,
+                        resolveVersion(imageInfo, image),
                         portMappings,
                         networks,
-                        container.getState()
+                        container.getState(),
+                        resolveImageDigest(imageInfo, image),
+                        UpdateAvailability.UNKNOWN
                     ));
                 }
             }
@@ -237,15 +241,33 @@ public class DockerServerAdapter implements ForGettingServerInfo {
         return new ArrayList<>(networkSettings.getNetworks().keySet());
     }
 
-    private String resolveVersion(String imageId, String image, DockerClient dockerClient) {
+    /** One image inspect, or null when it fails. A scrape must survive an image that has gone. */
+    private InspectImageResponse inspectImage(String imageId, DockerClient dockerClient) {
         try {
-            InspectImageResponse info = dockerClient.inspectImageCmd(imageId).exec();
-            java.util.Map<String, String> labels = info.getConfig() != null ? info.getConfig().getLabels() : null;
-            return DockerService.versionFromLabels(labels, image);
+            return dockerClient.inspectImageCmd(imageId).exec();
         } catch (Exception e) {
-            log.debug("Could not inspect image {} for version labels: {}", imageId, e.getMessage());
-            return DockerService.versionFromLabels(null, image);
+            log.debug("Could not inspect image {}: {}", imageId, e.getMessage());
+            return null;
         }
+    }
+
+    private String resolveVersion(InspectImageResponse info, String image) {
+        java.util.Map<String, String> labels = info != null && info.getConfig() != null
+            ? info.getConfig().getLabels() : null;
+        return DockerService.versionFromLabels(labels, image);
+    }
+
+    /**
+     * The registry digest of the image this container runs, read from {@code RepoDigests} — translation only;
+     * which entry belongs to this image is {@link DockerService#digestFromRepoDigests}'s call.
+     *
+     * <p>Deliberately not {@code getImageId()}: that is the image's <em>config</em> sha, a different number
+     * from the manifest digest a registry serves, and comparing it to one would report every container in the
+     * fleet as having an update available, forever. Null when there is nothing to read — a locally-built image
+     * or a failed inspect — which the domain renders as unknown.
+     */
+    private String resolveImageDigest(InspectImageResponse info, String image) {
+        return info == null ? null : DockerService.digestFromRepoDigests(info.getRepoDigests(), image);
     }
 
     private String extractContainerName(String[] names) {

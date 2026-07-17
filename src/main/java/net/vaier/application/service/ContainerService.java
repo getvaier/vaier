@@ -9,8 +9,11 @@ import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.PublishableService;
 import net.vaier.domain.PublishableService.PublishableSource;
 import net.vaier.application.RefreshContainerStateUseCase;
+import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.domain.DockerService;
+import net.vaier.domain.ImageUpdateSweep;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.UpdateAvailability;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VaierServerCatalogue;
@@ -26,11 +29,13 @@ import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVaierServerDockerServices;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingRegistryDigest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Slf4j
@@ -41,6 +46,7 @@ public class ContainerService implements
     GetServerInfoUseCase,
     GetVaierServerDockerServicesUseCase,
     RefreshContainerStateUseCase,
+    SweepImageUpdatesUseCase,
     ForDiscoveringVaierServerContainers,
     ForDiscoveringPeerContainers,
     ForDiscoveringLanServerContainers,
@@ -51,6 +57,7 @@ public class ContainerService implements
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingLanServers forGettingLanServers;
+    private final ForResolvingRegistryDigest forResolvingRegistryDigest;
     private final String vaierNetworkName;
     private final String dockerGatewayIp;
 
@@ -67,14 +74,23 @@ public class ContainerService implements
      */
     private volatile List<DockerService> vaierServerContainersSnapshot = List.of();
 
+    /**
+     * Last update-available sweep's verdicts, image → verdict, applied to the snapshots as they are served so
+     * the Explorer can badge a container without anyone scraping or asking a registry on a request thread.
+     * Empty until the first sweep runs, which reads as {@link UpdateAvailability#UNKNOWN} — never as up to
+     * date.
+     */
+    private volatile Map<String, UpdateAvailability> imageUpdateVerdicts = Map.of();
+
     @Autowired
     public ContainerService(ForGettingServerInfo forGettingServerInfo,
                             ForGettingVpnClients forGettingVpnClients,
                             ForResolvingPeerNames forResolvingPeerNames,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
-                            ForGettingLanServers forGettingLanServers) {
+                            ForGettingLanServers forGettingLanServers,
+                            ForResolvingRegistryDigest forResolvingRegistryDigest) {
         this(forGettingServerInfo, forGettingVpnClients, forResolvingPeerNames, forGettingPeerConfigurations,
-            forGettingLanServers,
+            forGettingLanServers, forResolvingRegistryDigest,
             System.getenv().getOrDefault("VAIER_NETWORK_NAME", "vaier-network"),
             System.getenv().getOrDefault("VAIER_DOCKER_GATEWAY", "172.20.0.1"));
     }
@@ -84,6 +100,7 @@ public class ContainerService implements
                      ForResolvingPeerNames forResolvingPeerNames,
                      ForGettingPeerConfigurations forGettingPeerConfigurations,
                      ForGettingLanServers forGettingLanServers,
+                     ForResolvingRegistryDigest forResolvingRegistryDigest,
                      String vaierNetworkName,
                      String dockerGatewayIp) {
         this.forGettingServerInfo = forGettingServerInfo;
@@ -91,6 +108,7 @@ public class ContainerService implements
         this.forResolvingPeerNames = forResolvingPeerNames;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingLanServers = forGettingLanServers;
+        this.forResolvingRegistryDigest = forResolvingRegistryDigest;
         this.vaierNetworkName = vaierNetworkName;
         this.dockerGatewayIp = dockerGatewayIp;
     }
@@ -98,7 +116,48 @@ public class ContainerService implements
     /** Cache read — backed by {@link #refresh()}; the launchpad never scrapes Docker on-thread. */
     @Override
     public List<DockerService> discover() {
-        return vaierServerContainersSnapshot;
+        return withUpdateVerdicts(vaierServerContainersSnapshot);
+    }
+
+    /**
+     * The scrape as the host reported it, carrying the last sweep's update-available verdicts.
+     *
+     * <p>Decorating on the way out rather than on the way in is deliberate: the two run on different clocks —
+     * the container scrape every 30s, the registry sweep once a day — and a scrape must never be able to
+     * silently erase a verdict it knows nothing about. An image the sweep has not judged reads
+     * {@link UpdateAvailability#UNKNOWN}, which is the truth.
+     */
+    private List<DockerService> withUpdateVerdicts(List<DockerService> containers) {
+        Map<String, UpdateAvailability> verdicts = imageUpdateVerdicts;
+        if (verdicts.isEmpty()) {
+            return containers;
+        }
+        // No default here on purpose: "an unswept image reads unknown" is DockerService's rule, and stating it
+        // twice is how the two would one day disagree. A null verdict is normalised by the domain.
+        return containers.stream()
+            .map(c -> c.withUpdateAvailability(verdicts.get(c.image())))
+            .toList();
+    }
+
+    /**
+     * Ask the registries what they serve now, for every container Vaier can see on its own host and on its
+     * server peers — the sweep the daily watcher drives.
+     *
+     * <p>The service decides nothing here: it reads its snapshots, hands the domain the registry port, and
+     * keeps the answer. {@link ImageUpdateSweep} is what judges which images are worth asking about, asks each
+     * distinct one exactly once, and rules an unreachable registry unknown rather than outdated.
+     *
+     * <p>Reads the cached snapshots rather than re-scraping: the sweep asks registries, not hosts, and the
+     * scheduler has already refreshed these within the last 30 seconds.
+     */
+    @Override
+    public Map<String, UpdateAvailability> sweepImageUpdates() {
+        List<DockerService> containers = new ArrayList<>(vaierServerContainersSnapshot);
+        peerContainersSnapshot.forEach(peer -> containers.addAll(peer.containers()));
+
+        Map<String, UpdateAvailability> verdicts = ImageUpdateSweep.sweep(containers, forResolvingRegistryDigest);
+        imageUpdateVerdicts = verdicts;
+        return verdicts;
     }
 
     List<DockerService> scrapeVaierServerContainers() {
@@ -113,7 +172,10 @@ public class ContainerService implements
     /** Cache read — the launchpad and {@code /docker-services/peers} never scrape on-thread. */
     @Override
     public List<PeerContainers> discoverAll() {
-        return peerContainersSnapshot;
+        return peerContainersSnapshot.stream()
+            .map(peer -> new PeerContainers(peer.peerName(), peer.vpnIp(), peer.status(),
+                withUpdateVerdicts(peer.containers()), peer.wireguardOutdated(), peer.wireguardExpectedImage()))
+            .toList();
     }
 
     @Override

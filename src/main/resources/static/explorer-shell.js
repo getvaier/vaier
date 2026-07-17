@@ -35,6 +35,11 @@
         warn:    '<path d="M8 2.4l6.1 11.1H1.9z"/><path d="M8 6.4v3.3"/><circle cx="8" cy="11.4" r=".5" fill="currentColor" stroke="none"/>',
         cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
         refresh: '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.4v3.1h-3.1"/>',
+        // A newer image exists. Deliberately not the bare `download` arrow and not `refresh`: both of those
+        // are verbs elsewhere in this shell (a Download button, a Reissue button), and a mark that borrows a
+        // verb's glyph reads as a control — which is the one thing this must never do, since Vaier cannot
+        // pull an image. Enclosing the arrow makes it a badge rather than a button.
+        arrowup: '<circle cx="8" cy="8" r="6"/><path d="M8 11.2V5.2"/><path d="M5.6 7.6L8 5.2l2.4 2.4"/>',
         trash:   '<path d="M3 4.5h10M6.5 4.5V3a.8.8 0 0 1 .8-.8h1.4a.8.8 0 0 1 .8.8v1.5"/><path d="M4.2 4.5l.6 8a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8"/><path d="M6.7 7v4M9.3 7v4"/>',
         shield:  '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M5.7 8l1.6 1.7L10.4 6"/>',
         shieldhalf: '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M3 8.3h10"/>',
@@ -646,6 +651,13 @@
         }
 
         if (kind === 'machine') row.appendChild(dot(path[1]));
+        // A container row wears its update mark in the rail, so an operator scanning the fleet sees the one
+        // that needs them without opening anything. The verdict is the backend's; updateMark decides nothing
+        // but whether there is something worth drawing.
+        if (kind === 'container') {
+            const mark = updateMark(containersOn(path[1]).find((c) => c.containerName === path[3]));
+            if (mark) row.appendChild(mark);
+        }
 
         row.onclick = () => {
             if (expandable) {
@@ -1413,7 +1425,7 @@
             rows.appendChild(listRow(
                 'box', c.containerName, () => go(['fleet', machine, 'containers', c.containerName]),
                 [c.image || '—', c.state || 'unknown'],
-                c.state === 'running' ? 'OK' : 'DOWN'));
+                c.state === 'running' ? 'OK' : 'DOWN', updateMark(c)));
         });
         body.appendChild(rows);
         pane.appendChild(body);
@@ -1435,9 +1447,14 @@
         const ports = (c.ports || []).map((p) => (p.publicPort ? p.publicPort + '→' : '')
             + p.privatePort + '/' + (p.type || 'tcp')).join('  ');
 
+        // The Inspector is where the verdict is spoken in words, all three of them. No mark in the rail does
+        // NOT mean the image is current — it means either "current" or "Vaier cannot tell", and those are very
+        // different facts to an operator. The rail has no room for the difference; this row does, and #57 was
+        // filed precisely because "cannot tell" had been quietly rendered as "fine".
         body.appendChild(kv([
             ['Image', c.image],
             ['Version', c.version],
+            ['Update', UPDATE_SAYS[c.updateAvailable] || UPDATE_SAYS.UNKNOWN],
             ['State', c.state],
             ['Ports', ports],
             ['Networks', (c.networks || []).join(', ')],
@@ -1897,7 +1914,8 @@
         return head;
     }
 
-    function listRow(icon, name, onClick, meta, state) {
+    // `mark` is an optional badge riding just after the name — the same shape the file browser's shield takes.
+    function listRow(icon, name, onClick, meta, state, mark) {
         const row = document.createElement('div');
         row.className = 'ex-lrow';
 
@@ -1908,6 +1926,7 @@
         nm.className = 'ex-nm';
         nm.textContent = name;
         btn.appendChild(nm);
+        if (mark) btn.appendChild(mark);
         btn.onclick = onClick;
         row.appendChild(btn);
 
@@ -1925,6 +1944,38 @@
         });
         return row;
     }
+
+    // --- the Update available mark (#57) ---------------------------------------------------------------
+    //
+    // Whether a newer image is being served for the tag a container runs is NOT decided here. The domain owns
+    // it — UpdateAvailability.compare() weighs the two digests, once, and the backend stamps each container
+    // with the verdict. The sweep that mails the admins and this mark therefore say the same thing about the
+    // same container by construction; a second comparison in JS is exactly how they would drift apart. The
+    // shell reads one enum and paints it, and never sees a digest at all.
+    //
+    // Only UPDATE_AVAILABLE draws. UNKNOWN — registry unreachable, image built locally, tag pinned to an
+    // immutable digest, or simply no sweep yet — draws nothing: it is the ordinary resting state, and a mark
+    // on every row for it would train the operator to ignore the column that matters. The silence is not a
+    // promise that the image is current, which is why renderContainer() says the verdict in words.
+    //
+    // And nothing here is a verb. Vaier has no endpoint to pull an image, so the tooltip names the operator's
+    // own action, not Vaier's.
+    function updateMark(container) {
+        // The past has no update to report: an archive is how a filesystem stood then, and the registry's
+        // answer is about now. (Same reasoning as the liveness dot, which the stylesheet hides in the past.)
+        if (S.at || !container || container.updateAvailable !== 'UPDATE_AVAILABLE') return null;
+        const mark = el('span', 'ex-update');
+        mark.innerHTML = svg('arrowup', 'ex-ico');
+        mark.title = 'Update available — pull this image on the machine yourself';
+        return mark;
+    }
+
+    // The verdict in words, for the one place with room to be honest about not knowing.
+    const UPDATE_SAYS = {
+        UPDATE_AVAILABLE: 'Update available',
+        UP_TO_DATE: 'Up to date',
+        UNKNOWN: 'Vaier cannot tell',
+    };
 
     // A published service's State is the domain's own (OK / UNKNOWN / anything else is down) — read exactly
     // as the Infrastructure page reads it, so one service cannot be green on one page and red on the other.

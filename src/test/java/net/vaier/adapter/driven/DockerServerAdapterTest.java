@@ -484,4 +484,111 @@ class DockerServerAdapterTest {
 
         assertThat(name).isEmpty();
     }
+
+    /**
+     * #57: the local digest must come from RepoDigests. getImageId() is the image's *config* sha and never
+     * matches what a registry serves for a tag — comparing it would flag every container forever.
+     */
+    @Test
+    void getServicesWithExposedPorts_capturesTheLocalRegistryDigestFromRepoDigests() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = mock(Container.class);
+        when(container.getId()).thenReturn("c1");
+        when(container.getNames()).thenReturn(new String[]{"/vaultwarden"});
+        when(container.getImage()).thenReturn("vaultwarden/server:latest");
+        when(container.getImageId()).thenReturn("sha256:configsha");
+        when(container.getState()).thenReturn("running");
+        ContainerPort exposed = port(80, 8080);
+        when(container.getPorts()).thenReturn(new ContainerPort[]{exposed});
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:configsha")).thenReturn(inspectImageCmd);
+        InspectImageResponse imageResponse = mock(InspectImageResponse.class);
+        when(imageResponse.getRepoDigests())
+            .thenReturn(List.of("vaultwarden/server@sha256:registrydigest"));
+        when(inspectImageCmd.exec()).thenReturn(imageResponse);
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
+
+        assertThat(services).singleElement()
+            .extracting(DockerService::imageDigest).isEqualTo("sha256:registrydigest");
+    }
+
+    @Test
+    void getServicesWithExposedPorts_locallyBuiltImageHasNoDigestAndDoesNotFailTheScrape() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = mock(Container.class);
+        when(container.getId()).thenReturn("c2");
+        when(container.getNames()).thenReturn(new String[]{"/my-build"});
+        when(container.getImage()).thenReturn("my-build:latest");
+        when(container.getImageId()).thenReturn("sha256:configsha");
+        when(container.getState()).thenReturn("running");
+        ContainerPort exposed = port(80, 8080);
+        when(container.getPorts()).thenReturn(new ContainerPort[]{exposed});
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:configsha")).thenReturn(inspectImageCmd);
+        InspectImageResponse imageResponse = mock(InspectImageResponse.class);
+        when(imageResponse.getRepoDigests()).thenReturn(List.of());
+        when(inspectImageCmd.exec()).thenReturn(imageResponse);
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
+
+        assertThat(services).singleElement().extracting(DockerService::imageDigest).isNull();
+    }
+
+    @Test
+    void getServicesWithExposedPorts_aFailedImageInspectLeavesTheDigestNullRatherThanFailing() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = mock(Container.class);
+        when(container.getId()).thenReturn("c3");
+        when(container.getNames()).thenReturn(new String[]{"/app"});
+        when(container.getImage()).thenReturn("some/app:1.0");
+        when(container.getImageId()).thenReturn("sha256:gone");
+        when(container.getState()).thenReturn("running");
+        ContainerPort exposed = port(80, 8080);
+        when(container.getPorts()).thenReturn(new ContainerPort[]{exposed});
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:gone")).thenReturn(inspectImageCmd);
+        when(inspectImageCmd.exec()).thenThrow(new RuntimeException("no such image"));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
+
+        assertThat(services).singleElement().extracting(DockerService::imageDigest).isNull();
+        assertThat(services).singleElement().extracting(DockerService::containerName).isEqualTo("app");
+    }
+
+    private static ContainerPort port(int privatePort, int publicPort) {
+        ContainerPort p = mock(ContainerPort.class);
+        when(p.getPrivatePort()).thenReturn(privatePort);
+        when(p.getPublicPort()).thenReturn(publicPort);
+        when(p.getType()).thenReturn("tcp");
+        when(p.getIp()).thenReturn("0.0.0.0");
+        return p;
+    }
 }

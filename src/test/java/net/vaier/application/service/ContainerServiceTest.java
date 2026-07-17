@@ -19,6 +19,8 @@ import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForResolvingRegistryDigest;
+import net.vaier.domain.UpdateAvailability;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +50,7 @@ class ContainerServiceTest {
     @Mock ForResolvingPeerNames forResolvingPeerNames;
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock ForGettingLanServers forGettingLanServers;
+    @Mock ForResolvingRegistryDigest forResolvingRegistryDigest;
 
     ContainerService service;
 
@@ -55,7 +58,86 @@ class ContainerServiceTest {
     void setUp() {
         service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
             forResolvingPeerNames, forGettingPeerConfigurations, forGettingLanServers,
-            VAIER_NETWORK, GATEWAY_IP);
+            forResolvingRegistryDigest, VAIER_NETWORK, GATEWAY_IP);
+    }
+
+    // --- Update available (#57) ---
+
+    private static DockerService imaged(String name, String image, String localDigest) {
+        return new DockerService("id-" + name, name, image, "v",
+            List.of(new PortMapping(80, 8080, "tcp", "0.0.0.0")), List.of(VAIER_NETWORK), "running",
+            localDigest, UpdateAvailability.UNKNOWN);
+    }
+
+    @Test
+    void sweepImageUpdates_judgesVaierServerContainersAgainstTheRegistry() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forResolvingRegistryDigest.resolveDigest(any())).thenReturn(Optional.of("sha256:new"));
+        service.refresh();
+
+        assertThat(service.sweepImageUpdates())
+            .containsEntry("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    @Test
+    void discover_decoratesTheSnapshotWithTheLastSweepsVerdict() {
+        // The flag must reach the REST payload so the Explorer can badge it — without a second scrape.
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forResolvingRegistryDigest.resolveDigest(any())).thenReturn(Optional.of("sha256:new"));
+        service.refresh();
+        service.sweepImageUpdates();
+
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    @Test
+    void discover_reportsUnknownBeforeAnySweepHasRun() {
+        // A scrape reads the host; only the sweep asks the registry. Un-swept is unknown, never up to date.
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        service.refresh();
+
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UNKNOWN);
+        verify(forResolvingRegistryDigest, never()).resolveDigest(any());
+    }
+
+    @Test
+    void sweepImageUpdates_coversPeerContainersToo() {
+        // The #57 incident was a peer's container: apalveien5's vaultwarden.
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+            argThat(s -> s != null && s.dockerHostUrl().equals("unix:///var/run/docker.sock"))))
+            .thenReturn(List.of());
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.6/32")));
+        when(forResolvingPeerNames.resolvePeerNameByIp("10.13.13.6")).thenReturn("Apalveien 5");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.6"))
+            .thenReturn(Optional.of(peerConfig("Apalveien 5", "10.13.13.6", MachineType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(argThat(s -> s != null && "10.13.13.6".equals(s.getAddress()))))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigest(any())).thenReturn(Optional.of("sha256:new"));
+        service.refresh();
+
+        assertThat(service.sweepImageUpdates())
+            .containsEntry("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    @Test
+    void sweepImageUpdates_leavesTheVerdictUnknownWhenTheRegistryCannotBeReached() {
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forResolvingRegistryDigest.resolveDigest(any()))
+            .thenThrow(new RuntimeException("no egress"));
+        service.refresh();
+
+        assertThat(service.sweepImageUpdates())
+            .containsEntry("vaultwarden/server:latest", UpdateAvailability.UNKNOWN);
     }
 
     // --- Vaier-server container scrape + discover cache (local) ---

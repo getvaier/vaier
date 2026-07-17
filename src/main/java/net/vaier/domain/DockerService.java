@@ -4,6 +4,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * One container as Vaier sees it on a host, plus what Vaier has decided about its image.
+ *
+ * @param imageDigest     the registry digest of the image this container actually runs, read from the image's
+ *                        {@code RepoDigests}. Null when there is none to read — a locally-built image, or an
+ *                        image whose inspect failed. Not the config sha ({@code ImageId}), which is a
+ *                        different number entirely and never matches what a registry serves.
+ * @param updateAvailable Vaier's verdict on this container's image. {@link UpdateAvailability#UNKNOWN} on a
+ *                        freshly-scraped container: a scrape reads the host, and the verdict needs the
+ *                        registry, which only the update sweep asks.
+ */
 public record DockerService(
         String containerId,
         String containerName,
@@ -11,8 +22,66 @@ public record DockerService(
         String version,
         List<PortMapping> ports,
         List<String> networks,
-        String state
+        String state,
+        String imageDigest,
+        UpdateAvailability updateAvailable
 ) {
+
+    /**
+     * A container as a host scrape knows it: no registry digest, and no verdict yet. The update sweep is the
+     * only thing that can supply either, so an un-swept container reads as {@link UpdateAvailability#UNKNOWN}
+     * rather than quietly as up to date.
+     */
+    public DockerService(String containerId, String containerName, String image, String version,
+                         List<PortMapping> ports, List<String> networks, String state) {
+        this(containerId, containerName, image, version, ports, networks, state, null,
+            UpdateAvailability.UNKNOWN);
+    }
+
+    /** Null-safe: a record built with no verdict still reads as {@link UpdateAvailability#UNKNOWN}. */
+    public DockerService {
+        updateAvailable = updateAvailable == null ? UpdateAvailability.UNKNOWN : updateAvailable;
+    }
+
+    /** This container carrying {@code verdict}. The scrape stays as the host reported it. */
+    public DockerService withUpdateAvailability(UpdateAvailability verdict) {
+        return new DockerService(containerId, containerName, image, version, ports, networks, state,
+            imageDigest, verdict);
+    }
+
+    /**
+     * The registry digest for {@code image} out of an image's {@code RepoDigests} — the {@code sha256:…} half
+     * of an entry like {@code vaultwarden/server@sha256:bbb}.
+     *
+     * <p>An image tagged into several repositories carries several repo digests, and only the one for the
+     * repository this container runs is the right one to compare — so the entries are matched on repository
+     * rather than taken blind. Where nothing matches (Docker reports the repository differently than the
+     * container's image string spells it) a lone digest is taken as this image's; anything more ambiguous is
+     * null, and a null digest renders unknown.
+     */
+    public static String digestFromRepoDigests(List<String> repoDigests, String image) {
+        if (repoDigests == null || repoDigests.isEmpty()) {
+            return null;
+        }
+        String repository = repositoryOf(image);
+        for (String entry : repoDigests) {
+            int at = entry == null ? -1 : entry.indexOf('@');
+            if (at > 0 && repositoryOf(entry.substring(0, at)).equals(repository)) {
+                return entry.substring(at + 1);
+            }
+        }
+        if (repoDigests.size() == 1) {
+            String only = repoDigests.get(0);
+            int at = only == null ? -1 : only.indexOf('@');
+            return at > 0 ? only.substring(at + 1) : null;
+        }
+        return null;
+    }
+
+    /** An image string reduced to its repository, so {@code RepoDigests} entries can be matched to it. */
+    private static String repositoryOf(String image) {
+        return ImageReference.parse(image).map(ImageReference::repository).orElse(image);
+    }
 
     public boolean isRunning() {
         return "running".equalsIgnoreCase(state);

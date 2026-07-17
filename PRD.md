@@ -314,26 +314,27 @@ Export and import the full Vaier configuration as a snapshot.
 
 ---
 
-### 6.8 Container Update Notifications 🔲 (planned, tracked in [#57](https://github.com/getvaier/vaier/issues/57))
+### 6.8 Container Update Notifications 🟡 (detection, rollup email and the Explorer mark implemented — [#57](https://github.com/getvaier/vaier/issues/57))
 
-Keep the operator aware when Docker images have newer versions available.
+Keep the operator aware when a container's image has an **update available**. Reopened after a stale `vaultwarden` image on a server peer silently broke Bitwarden mobile sync: pulling it fixed it in seconds, but nothing in Vaier knew, so nothing could tell the operator. This is that signal.
 
-**Requirements:**
-- For each container running on any VPN peer (and the Vaier server), check whether the current image digest has a newer version available on Docker Hub
-- Surface outdated containers in the UI: badge count on the nav item, per-container badge in the peer's container list and in service cards
-- No automatic updates — notification only
-- Check interval: every 24 hours (not configurable in v1) *(OQ4 resolved: UI-only in v1)*
-- Containers running the `latest` tag display a warning that version tracking is unreliable for that tag (digest comparison is still attempted but flagged as approximate)
-- Only Docker Hub is supported in v1 *(OQ2 resolved: Docker Hub only for v1)*
+**What's implemented:**
+- **Detection is digest drift on the same tag.** The **local image digest** (read from Docker's `RepoDigests` — *not* `ImageId`, which is the config sha and never matches a registry) is compared against the **registry digest** that registry serves for the very same tag today. Different digest ⇒ **update available**. `UpdateAvailability.compare` owns the verdict so the sweep, the email and the REST payload can never disagree.
+- **Registry-generic, not Docker Hub-specific.** `RegistryV2ImageAdapter` (`ForResolvingRegistryDigest`) speaks the plain Registry v2 HEAD-manifest + anonymous bearer-token flow: HEAD → 401 challenge → pull-scoped token from the realm the challenge names → HEAD with the bearer. Docker Hub, `ghcr.io` and `lscr.io` differ only in host and realm, so all three work with no credentials configured. `ImageReference` parses Docker's implicit naming grammar (`redis` → `registry-1.docker.io/library/redis:latest`; `lscr.io/…` → that host) — the first segment is a registry host only if it has a dot or colon, or is `localhost`.
+- **Three verdicts, and UNKNOWN is the point.** `UPDATE_AVAILABLE`, `UP_TO_DATE`, `UNKNOWN`. An unreachable/rate-limited registry, a locally-built image with no registry digest, and a digest-pinned (`@sha256:…`) image all render UNKNOWN — never outdated, never up to date. Collapsing "cannot tell" into either answer makes the monitor lie (into up-to-date it hides the vaultwarden case; into update-available it cries wolf until admins filter the mail).
+- **Daily sweep, 24 h TTL cache.** `ImageUpdateWatcher` runs `@Scheduled(fixedDelay = 24 h, initialDelay = 2 min)`; `ImageUpdateSweep` asks **once per distinct image**, not once per container, because rate limits count requests (anonymous Docker Hub ≈ 100 manifest requests / 6 h). Successful answers are cached 24 h keyed by canonical image reference; **failures are deliberately not cached** — one blip must not blind the next sweep. The 30s container scrape never touches a registry. The sweep is total: a throwing/timing-out registry degrades that one image to UNKNOWN and the sweep carries on.
+- **Edge-transition rollup email.** `ImageUpdateTracker` reports only images that have *just* become out of date; `ImageUpdateRollup` renders one mail listing them (three stale images in one sweep = one email; nothing changed = no email) to every **admin**-role **access entry**, via the shared SMTP notifier. Two rules differ from `RemoteDiskPressureTracker` / `PeerConnectivityTracker`, both deliberately: it is **not baseline-quiet** (an image already stale at the first sweep *is* reported — that is the incident this feature exists for), and **UNKNOWN is not a change** (it leaves the last known verdict standing, so a rate-limited sweep can't re-mail about an image already reported).
+- **No auto-upgrade, ever.** Read-only detection: Vaier never pulls and never restarts. The mail says so explicitly ("Vaier does not pull or restart anything — updating is your call").
+- **Coverage:** the Vaier server's own containers and VPN **server peer** containers (`ContainerService.sweepImageUpdates`, over the existing snapshots).
+- **No new REST endpoint.** The verdict ships on the existing `/docker-services/*` payloads: `DockerService` gained `updateAvailable` (defaulting to `UNKNOWN`, since a host scrape can't know it) and `imageDigest`.
+- ✅ **The Explorer mark (UI slice).** A container with an **update available** wears a small yellow mark in the Explorer: in the tree beside its name (container rows are first-class entries, so it is visible while scanning the fleet) and in the machine's container list. One helper, `updateMark()`, decides only *whether there is something worth drawing* — it reads the `updateAvailable` enum and nothing else. **The browser never sees a digest**: `imageDigest` is not read in JS at all, so `UpdateAvailability.compare` in the domain stays the only place the two digests are ever weighed, and the rollup email and the mark cannot disagree. Advisory yellow (the degraded dot's colour), never red — nothing is broken when an update exists, and red must keep meaning down. **UNKNOWN renders nothing**, deliberately: it is the resting state (unreachable registry, no sweep yet), and a mark on every row for it would train the operator to ignore the column. Because absence of a mark is therefore not a promise, the single container's Inspector carries an honest `Update` row naming the verdict in words — "Update available" / "Up to date" / "Vaier cannot tell". No verb ships with it: Vaier has no endpoint to pull or restart, so the tooltip names the *operator's* action ("pull this image on the machine yourself"), consistent with the read-only container Inspector.
 
-**Implementation sketch:**
-- Background scheduled task (`@Scheduled`) queries each peer's Docker API for running image refs
-- For each image ref, call Docker Hub Registry API v2 to compare remote digest vs. local image digest
-- Cache results in-memory (TTL: 24 h) to avoid hammering the registry
-- Expose via existing `/docker-services/peers` response — add `updateAvailable: boolean` field per container
-- Frontend receives updates via SSE (Server-Sent Events) for immediate feedback without polling
+**Backlog (not built):**
+- 🔲 **LAN-server container coverage.** LAN-server containers are not swept and therefore render UNKNOWN. Their scrape goes through a relay peer, so the sweep needs those snapshots folded in.
+- 🔲 **Newer-tag detection for pinned tags.** Digest drift cannot see a *newer tag*: `traefik:v3.2.1` never drifts, so a released `v3.3.0` is invisible and the image reads UP_TO_DATE — correctly, for the question asked. Detecting "a newer tag exists" is tag-list + version-ordering work (and per-registry), explicitly a later slice.
+- 🔲 **Live push.** The verdict is read from the payload on load; there is no SSE event for a sweep settling, so a sweep that lands while the Explorer is open does not repaint the mark until the containers are re-read. Now that the mark exists, this is worth doing — the shell never polls, so it means publishing a sweep-settled event on an existing topic and listening for it.
 
-**Out of scope for v1:** GHCR, self-hosted registries, push notifications (webhook/email).
+**Out of scope:** automatic updates (never — see above), self-hosted/authenticated private registries, webhook/push notifications.
 
 ---
 
@@ -1520,11 +1521,13 @@ Three things this buys that a set of pages structurally cannot:
 3. Developer downloads QR code or docker-compose file
 4. Peer is running; developer can see handshake status in Vaier
 
-### 7.3 Check for stale containers
+### 7.3 Learn that a container has an update available
 
-1. Developer opens VPN Peers view
-2. Containers with available updates show an "update available" badge
-3. Developer updates container manually on the peer host
+1. Vaier sweeps the fleet's registries once a day and finds an image whose registry now serves a different digest for the tag the container runs
+2. Every admin gets one rollup email naming the image(s) that *newly* went out of date — Vaier pulls nothing and restarts nothing
+3. Developer updates the container manually on its host
+
+**Success:** the operator hears about a stale image instead of discovering it through the outage it causes. Both halves now exist: the push side (§6.8) is the rollup email, and the pull side is the mark in the **Explorer** — so an operator who opens the tree for any other reason still sees which containers want attention, and a container's Inspector says which of the three verdicts it is (including "Vaier cannot tell"). Vaier pulls nothing either way; step 3 stays the operator's.
 
 ### 7.5 First-time setup
 
