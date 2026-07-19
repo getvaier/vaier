@@ -382,8 +382,9 @@ class NotificationServiceTest {
                 admin("alice@example.com"),
                 user("carol@example.com")));
         when(configResolver.getDomain()).thenReturn("example.com");
-        net.vaier.domain.ImageUpdateRollup rollup = new net.vaier.domain.ImageUpdateRollup(
-                List.of("vaultwarden/server:latest", "lscr.io/linuxserver/wireguard:1.0.x"));
+        net.vaier.domain.ImageUpdateRollup rollup = new net.vaier.domain.ImageUpdateRollup(List.of(
+                new net.vaier.domain.ScopedImage("Apalveien 5", "vaultwarden/server:latest"),
+                new net.vaier.domain.ScopedImage("Colina 27", "lscr.io/linuxserver/wireguard:1.0.x")));
 
         service.notifyAdminsOfUpdateAvailable(rollup);
 
@@ -395,8 +396,8 @@ class NotificationServiceTest {
         assertThat(recipients.getValue()).containsExactly("alice@example.com");
         assertThat(subject.getValue()).isEqualTo(rollup.subject());
         assertThat(body.getValue())
-                .contains("vaultwarden/server:latest")
-                .contains("lscr.io/linuxserver/wireguard:1.0.x")
+                .contains("vaultwarden/server:latest on Apalveien 5")
+                .contains("lscr.io/linuxserver/wireguard:1.0.x on Colina 27")
                 .contains("vaier.example.com");
     }
 

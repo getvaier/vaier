@@ -1,5 +1,6 @@
 package net.vaier.application;
 
+import net.vaier.domain.ScopedImage;
 import net.vaier.domain.UpdateAvailability;
 
 import java.util.Map;
@@ -15,9 +16,10 @@ import java.util.Map;
 public interface SweepImageUpdatesUseCase {
 
     /**
-     * Sweep now and return each running container image's verdict, keyed by the image string as its host
-     * reports it. Total: an unreachable registry yields {@link UpdateAvailability#UNKNOWN} for that image
-     * rather than an exception or a false "up to date".
+     * Sweep now and return each running container's verdict, keyed by the {@link ScopedImage} it is — the
+     * image string <b>and</b> the machine it runs on, so the same tag on two hosts is two verdicts. Total: an
+     * unreachable registry yields {@link UpdateAvailability#UNKNOWN} for that image rather than an exception or
+     * a false "up to date".
      */
-    Map<String, UpdateAvailability> sweepImageUpdates();
+    Map<ScopedImage, UpdateAvailability> sweepImageUpdates();
 }

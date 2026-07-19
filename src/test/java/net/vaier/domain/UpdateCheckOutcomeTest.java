@@ -18,11 +18,15 @@ class UpdateCheckOutcomeTest {
 
     private static final Instant AT = Instant.parse("2026-07-17T12:00:00Z");
 
+    private static ScopedImage si(String image) {
+        return new ScopedImage("Vaier server", image);
+    }
+
     @Test
     void aCheckThatChangedNothing_saysSo_butStillSaysItChecked() {
         // The commonest outcome by far, and the one the UI must not dress up. The operator pulled, Vaier
         // already agreed, and "nothing new" is a real answer rather than a failure.
-        Map<String, UpdateAvailability> same = Map.of("redis:7.2", UpdateAvailability.UP_TO_DATE);
+        Map<ScopedImage, UpdateAvailability> same = Map.of(si("redis:7.2"), UpdateAvailability.UP_TO_DATE);
 
         UpdateCheckOutcome outcome = UpdateCheckOutcome.checked(same, same, AT);
 
@@ -35,8 +39,8 @@ class UpdateCheckOutcomeTest {
     void aCheckThatClearedTheMark_isAChange() {
         // The story this slice was built for: the mark said update available, they pulled, they clicked.
         UpdateCheckOutcome outcome = UpdateCheckOutcome.checked(
-            Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE),
-            Map.of("vaultwarden/server:latest", UpdateAvailability.UP_TO_DATE), AT);
+            Map.of(si("vaultwarden/server:latest"), UpdateAvailability.UPDATE_AVAILABLE),
+            Map.of(si("vaultwarden/server:latest"), UpdateAvailability.UP_TO_DATE), AT);
 
         assertThat(outcome.changed()).isTrue();
     }
@@ -45,9 +49,9 @@ class UpdateCheckOutcomeTest {
     void aVerdictAppearingOrVanishingIsAChangeToo() {
         // A container started or stopped between sweeps: the page is now wrong in a way a repaint fixes.
         assertThat(UpdateCheckOutcome.checked(
-            Map.of(), Map.of("redis:7.2", UpdateAvailability.UP_TO_DATE), AT).changed()).isTrue();
+            Map.of(), Map.of(si("redis:7.2"), UpdateAvailability.UP_TO_DATE), AT).changed()).isTrue();
         assertThat(UpdateCheckOutcome.checked(
-            Map.of("redis:7.2", UpdateAvailability.UP_TO_DATE), Map.of(), AT).changed()).isTrue();
+            Map.of(si("redis:7.2"), UpdateAvailability.UP_TO_DATE), Map.of(), AT).changed()).isTrue();
     }
 
     @Test
@@ -55,11 +59,11 @@ class UpdateCheckOutcomeTest {
         // The push exists to repaint. Publishing when nothing moved would wake every open Explorer in the
         // fleet to redraw the identical page — and the clicking browser learns "nothing new" from its own
         // response, so it needs no event to be told.
-        Map<String, UpdateAvailability> same = Map.of("redis:7.2", UpdateAvailability.UP_TO_DATE);
+        Map<ScopedImage, UpdateAvailability> same = Map.of(si("redis:7.2"), UpdateAvailability.UP_TO_DATE);
 
         assertThat(UpdateCheckOutcome.checked(same, same, AT).worthPublishing()).isFalse();
         assertThat(UpdateCheckOutcome.checked(
-            same, Map.of("redis:7.2", UpdateAvailability.UPDATE_AVAILABLE), AT).worthPublishing()).isTrue();
+            same, Map.of(si("redis:7.2"), UpdateAvailability.UPDATE_AVAILABLE), AT).worthPublishing()).isTrue();
     }
 
     @Test

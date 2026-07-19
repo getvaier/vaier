@@ -22,6 +22,7 @@ import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingRegistryDigest;
 import net.vaier.domain.ImageUpdateTracker;
+import net.vaier.domain.ScopedImage;
 import net.vaier.domain.UpdateAvailability;
 import net.vaier.domain.UpdateCheckOutcome;
 import org.junit.jupiter.api.BeforeEach;
@@ -93,6 +94,11 @@ class ContainerServiceTest {
             localDigest, UpdateAvailability.UNKNOWN);
     }
 
+    /** An image on the Vaier server — the machine the local-container scrape reports under. */
+    private static ScopedImage onVaierServer(String image) {
+        return new ScopedImage("Vaier server", image);
+    }
+
     @Test
     void sweepImageUpdates_judgesVaierServerContainersAgainstTheRegistry() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
@@ -102,7 +108,7 @@ class ContainerServiceTest {
         service.refresh();
 
         assertThat(service.sweepImageUpdates())
-            .containsEntry("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE);
+            .containsEntry(onVaierServer("vaultwarden/server:latest"), UpdateAvailability.UPDATE_AVAILABLE);
     }
 
     @Test
@@ -115,6 +121,23 @@ class ContainerServiceTest {
         service.refresh();
         service.sweepImageUpdates();
 
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    @Test
+    void sweepKeysVaierServerContainersUnderTheVaierServerName_andTheUiMarkStillLightsUp() {
+        // #57 refinement: the Vaier server's own containers are scoped under LanAnchor.VAIER_SERVER_NAME. The
+        // sweep's key and discover()'s decoration key must be the same ScopedImage, or the mark would never
+        // light up for a local container.
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forResolvingRegistryDigest.resolveDigest(any())).thenReturn(Optional.of("sha256:new"));
+        service.refresh();
+
+        assertThat(service.sweepImageUpdates())
+            .containsKey(onVaierServer("vaultwarden/server:latest"));
         assertThat(service.discover()).singleElement()
             .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UPDATE_AVAILABLE);
     }
@@ -148,7 +171,8 @@ class ContainerServiceTest {
         service.refresh();
 
         assertThat(service.sweepImageUpdates())
-            .containsEntry("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE);
+            .containsEntry(new ScopedImage("Apalveien 5", "vaultwarden/server:latest"),
+                UpdateAvailability.UPDATE_AVAILABLE);
     }
 
     // --- #57 slice 3: the check the operator asked for ---
@@ -278,7 +302,8 @@ class ContainerServiceTest {
         // The manual check must not permanently silence a future alert. Once the check has confirmed the pull,
         // the tracker must have forgotten the image — so if it goes stale again months later, the edge fires
         // and the operator IS mailed. (The tracker's own test proves the rule; this proves it is wired.)
-        tracker.update(java.util.Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
+        tracker.update(java.util.Map.of(
+            onVaierServer("vaultwarden/server:latest"), UpdateAvailability.UPDATE_AVAILABLE));
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:same")));
@@ -286,10 +311,10 @@ class ContainerServiceTest {
 
         service.checkForImageUpdates();
 
-        assertThat(tracker.update(
-            java.util.Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+        assertThat(tracker.update(java.util.Map.of(
+            onVaierServer("vaultwarden/server:latest"), UpdateAvailability.UPDATE_AVAILABLE)))
             .as("stale again after a confirmed pull — that is news again")
-            .containsExactly("vaultwarden/server:latest");
+            .containsExactly(onVaierServer("vaultwarden/server:latest"));
     }
 
     @Test
@@ -304,10 +329,10 @@ class ContainerServiceTest {
 
         service.checkForImageUpdates();
 
-        assertThat(tracker.update(
-            java.util.Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+        assertThat(tracker.update(java.util.Map.of(
+            onVaierServer("vaultwarden/server:latest"), UpdateAvailability.UPDATE_AVAILABLE)))
             .as("the mail the check must not have swallowed")
-            .containsExactly("vaultwarden/server:latest");
+            .containsExactly(onVaierServer("vaultwarden/server:latest"));
     }
 
     @Test
@@ -337,7 +362,7 @@ class ContainerServiceTest {
         service.refresh();
 
         assertThat(service.sweepImageUpdates())
-            .containsEntry("vaultwarden/server:latest", UpdateAvailability.UNKNOWN);
+            .containsEntry(onVaierServer("vaultwarden/server:latest"), UpdateAvailability.UNKNOWN);
     }
 
     // --- Vaier-server container scrape + discover cache (local) ---

@@ -4,6 +4,7 @@ import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.domain.ImageUpdateRollup;
 import net.vaier.domain.ImageUpdateTracker;
+import net.vaier.domain.ScopedImage;
 import net.vaier.domain.UpdateAvailability;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,10 +36,16 @@ class ImageUpdateWatcherTest {
         watcher = new ImageUpdateWatcher(sweep, notifier, new ImageUpdateTracker());
     }
 
-    private static Map<String, UpdateAvailability> verdicts(Object... pairs) {
-        Map<String, UpdateAvailability> map = new LinkedHashMap<>();
+    private static final String HOST = "Vaier server";
+
+    private static ScopedImage si(String image) {
+        return new ScopedImage(HOST, image);
+    }
+
+    private static Map<ScopedImage, UpdateAvailability> verdicts(Object... pairs) {
+        Map<ScopedImage, UpdateAvailability> map = new LinkedHashMap<>();
         for (int i = 0; i < pairs.length; i += 2) {
-            map.put((String) pairs[i], (UpdateAvailability) pairs[i + 1]);
+            map.put(si((String) pairs[i]), (UpdateAvailability) pairs[i + 1]);
         }
         return map;
     }
@@ -52,7 +59,7 @@ class ImageUpdateWatcherTest {
 
         ArgumentCaptor<ImageUpdateRollup> rollup = ArgumentCaptor.forClass(ImageUpdateRollup.class);
         verify(notifier).notifyAdminsOfUpdateAvailable(rollup.capture());
-        assertThat(rollup.getValue().images()).containsExactly("vaultwarden/server:latest");
+        assertThat(rollup.getValue().images()).containsExactly(si("vaultwarden/server:latest"));
     }
 
     @Test
@@ -66,7 +73,7 @@ class ImageUpdateWatcherTest {
 
         ArgumentCaptor<ImageUpdateRollup> rollup = ArgumentCaptor.forClass(ImageUpdateRollup.class);
         verify(notifier, times(1)).notifyAdminsOfUpdateAvailable(rollup.capture());
-        assertThat(rollup.getValue().images()).containsExactly("a:1", "b:1", "c:1");
+        assertThat(rollup.getValue().images()).containsExactly(si("a:1"), si("b:1"), si("c:1"));
     }
 
     @Test
@@ -112,7 +119,7 @@ class ImageUpdateWatcherTest {
 
         ArgumentCaptor<ImageUpdateRollup> rollup = ArgumentCaptor.forClass(ImageUpdateRollup.class);
         verify(notifier, times(2)).notifyAdminsOfUpdateAvailable(rollup.capture());
-        assertThat(rollup.getAllValues().get(1).images()).containsExactly("b:1");
+        assertThat(rollup.getAllValues().get(1).images()).containsExactly(si("b:1"));
     }
 
     @Test

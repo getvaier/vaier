@@ -28,16 +28,26 @@ public final class ImageUpdateSweep {
     private ImageUpdateSweep() {}
 
     /**
-     * Judge every container's image, keyed by the image string as the host reports it.
+     * One machine's running containers, so the sweep can scope each verdict to the host it runs on.
+     *
+     * @param machine    the machine's name — {@code LanAnchor.VAIER_SERVER_NAME} for the Vaier server's own
+     *                   containers, or a server peer's name
+     * @param containers the containers scraped from that machine
+     */
+    public record MachineContainers(String machine, List<DockerService> containers) {}
+
+    /**
+     * Judge every container's image, keyed by the {@link ScopedImage} it is — image <b>and</b> the machine it
+     * runs on, so the same tag on two hosts is two verdicts rather than one last-wins collapse.
      *
      * <p>Containers that are not running are left out entirely: a stopped container is not serving anything,
      * so "there is a newer image" is not news the operator can act on. Images that cannot drift — pinned by
      * digest, built locally, an unparseable name — are reported {@link UpdateAvailability#UNKNOWN} without the
      * registry ever being asked.
      */
-    public static Map<String, UpdateAvailability> sweep(List<DockerService> containers,
-                                                        ForResolvingRegistryDigest registry) {
-        return sweep(containers, registry, false);
+    public static Map<ScopedImage, UpdateAvailability> sweep(List<MachineContainers> machines,
+                                                             ForResolvingRegistryDigest registry) {
+        return sweep(machines, registry, false);
     }
 
     /**
@@ -53,37 +63,44 @@ public final class ImageUpdateSweep {
      * matters more here, not less, since nothing else stands between an impatient click and the rate limit),
      * nothing asked about an image that cannot drift, and a failure ruled unknown rather than outdated.
      */
-    public static Map<String, UpdateAvailability> sweepFresh(List<DockerService> containers,
-                                                             ForResolvingRegistryDigest registry) {
-        return sweep(containers, registry, true);
+    public static Map<ScopedImage, UpdateAvailability> sweepFresh(List<MachineContainers> machines,
+                                                                  ForResolvingRegistryDigest registry) {
+        return sweep(machines, registry, true);
     }
 
-    private static Map<String, UpdateAvailability> sweep(List<DockerService> containers,
-                                                         ForResolvingRegistryDigest registry,
-                                                         boolean fresh) {
-        Map<String, UpdateAvailability> verdicts = new LinkedHashMap<>();
-        if (containers == null || containers.isEmpty()) {
+    private static Map<ScopedImage, UpdateAvailability> sweep(List<MachineContainers> machines,
+                                                              ForResolvingRegistryDigest registry,
+                                                              boolean fresh) {
+        Map<ScopedImage, UpdateAvailability> verdicts = new LinkedHashMap<>();
+        if (machines == null || machines.isEmpty()) {
             return verdicts;
         }
 
-        // One question per distinct image, not per container: rate limits are counted in requests.
+        // One question per distinct image STRING, never per (machine, image): the same tag resolves to the
+        // same digest everywhere, so scoping the question to a machine would only multiply the rate-limited
+        // requests by the fleet size. The per-machine granularity comes from comparing each container's own
+        // local digest against this one shared registry answer.
         Map<String, String> registryDigests = new LinkedHashMap<>();
         Set<String> resolved = new LinkedHashSet<>();
 
-        for (DockerService container : containers) {
-            if (!container.isRunning()) {
-                continue;
+        for (MachineContainers machine : machines) {
+            for (DockerService container : machine.containers()) {
+                if (!container.isRunning()) {
+                    continue;
+                }
+                String image = container.image();
+                ScopedImage scoped = new ScopedImage(machine.machine(), image);
+                var reference = ImageReference.parse(image);
+                if (reference.isEmpty() || container.imageDigest() == null) {
+                    verdicts.put(scoped, UpdateAvailability.UNKNOWN);
+                    continue;
+                }
+                if (resolved.add(image)) {
+                    resolveInto(registryDigests, image, reference.get(), registry, fresh);
+                }
+                verdicts.put(scoped,
+                    UpdateAvailability.compare(container.imageDigest(), registryDigests.get(image)));
             }
-            String image = container.image();
-            var reference = ImageReference.parse(image);
-            if (reference.isEmpty() || container.imageDigest() == null) {
-                verdicts.put(image, UpdateAvailability.UNKNOWN);
-                continue;
-            }
-            if (resolved.add(image)) {
-                resolveInto(registryDigests, image, reference.get(), registry, fresh);
-            }
-            verdicts.put(image, UpdateAvailability.compare(container.imageDigest(), registryDigests.get(image)));
         }
         return verdicts;
     }

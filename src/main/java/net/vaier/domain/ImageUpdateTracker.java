@@ -1,7 +1,7 @@
 package net.vaier.domain;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,34 +27,38 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class ImageUpdateTracker {
 
-    /** Image → whether it was last *known* to be out of date. Unknown verdicts never write here. */
-    private final Map<String, Boolean> lastKnown = new ConcurrentHashMap<>();
+    /**
+     * Image-on-a-machine → whether it was last *known* to be out of date. Keyed by {@link ScopedImage}, not by
+     * image string, so the same tag going stale on a second machine is a fresh edge rather than a state the
+     * first machine's verdict already claimed. Unknown verdicts never write here.
+     */
+    private final Map<ScopedImage, Boolean> lastKnown = new ConcurrentHashMap<>();
 
     /**
-     * Record a sweep's verdicts and report the images that have <b>just</b> become out of date, alphabetically
-     * so a rollup email reads the same way twice.
+     * Record a sweep's verdicts and report the images-on-a-machine that have <b>just</b> become out of date,
+     * ordered by their rendered label so a rollup email reads the same way twice.
      *
-     * <p>Images absent from {@code verdicts} are forgotten: the container is gone, and if that image ever
-     * comes back stale it is news again rather than a silence.
+     * <p>Entries absent from {@code verdicts} are forgotten: the container is gone, and if that image ever
+     * comes back stale on that machine it is news again rather than a silence.
      */
-    public synchronized List<String> update(Map<String, UpdateAvailability> verdicts) {
-        List<String> newlyOutOfDate = new ArrayList<>();
+    public synchronized List<ScopedImage> update(Map<ScopedImage, UpdateAvailability> verdicts) {
+        List<ScopedImage> newlyOutOfDate = new ArrayList<>();
 
-        for (Map.Entry<String, UpdateAvailability> entry : verdicts.entrySet()) {
+        for (Map.Entry<ScopedImage, UpdateAvailability> entry : verdicts.entrySet()) {
             UpdateAvailability verdict = entry.getValue();
             if (verdict == null || verdict == UpdateAvailability.UNKNOWN) {
                 continue;   // Cannot tell — leave what was known standing, and say nothing.
             }
-            String image = entry.getKey();
+            ScopedImage scoped = entry.getKey();
             boolean outOfDate = verdict.isUpdateAvailable();
-            Boolean previous = lastKnown.put(image, outOfDate);
+            Boolean previous = lastKnown.put(scoped, outOfDate);
             if (outOfDate && !Boolean.TRUE.equals(previous)) {
-                newlyOutOfDate.add(image);
+                newlyOutOfDate.add(scoped);
             }
         }
 
-        lastKnown.keySet().removeIf(image -> !verdicts.containsKey(image));
-        Collections.sort(newlyOutOfDate);
+        lastKnown.keySet().removeIf(scoped -> !verdicts.containsKey(scoped));
+        newlyOutOfDate.sort(Comparator.comparing(ScopedImage::label));
         return newlyOutOfDate;
     }
 
@@ -78,10 +82,10 @@ public class ImageUpdateTracker {
      * <p>{@link UpdateAvailability#UNKNOWN} clears nothing, for {@link #update}'s reason: a rate-limited
      * registry is not evidence that anybody pulled anything.
      */
-    public synchronized void clearUpToDate(Map<String, UpdateAvailability> verdicts) {
-        verdicts.forEach((image, verdict) -> {
+    public synchronized void clearUpToDate(Map<ScopedImage, UpdateAvailability> verdicts) {
+        verdicts.forEach((scoped, verdict) -> {
             if (verdict == UpdateAvailability.UP_TO_DATE) {
-                lastKnown.remove(image);
+                lastKnown.remove(scoped);
             }
         });
     }

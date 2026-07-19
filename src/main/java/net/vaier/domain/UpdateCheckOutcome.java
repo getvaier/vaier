@@ -25,8 +25,8 @@ public record UpdateCheckOutcome(boolean checked, boolean changed, Instant lastC
      * A check that really happened. It changed something iff the fleet's verdicts are not what they were —
      * decided here, once, so that the push and the operator's own answer cannot tell different stories.
      */
-    public static UpdateCheckOutcome checked(Map<String, UpdateAvailability> before,
-                                             Map<String, UpdateAvailability> after,
+    public static UpdateCheckOutcome checked(Map<ScopedImage, UpdateAvailability> before,
+                                             Map<ScopedImage, UpdateAvailability> after,
                                              Instant at) {
         return new UpdateCheckOutcome(true, !before.equals(after), at);
     }

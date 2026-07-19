@@ -13,8 +13,11 @@ import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.ImageUpdateSweep;
+import net.vaier.domain.ImageUpdateSweep.MachineContainers;
 import net.vaier.domain.ImageUpdateTracker;
+import net.vaier.domain.LanAnchor;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.ScopedImage;
 import net.vaier.domain.UpdateAvailability;
 import net.vaier.domain.UpdateCheckFloor;
 import net.vaier.domain.UpdateCheckOutcome;
@@ -100,7 +103,7 @@ public class ContainerService implements
      * Empty until the first sweep runs, which reads as {@link UpdateAvailability#UNKNOWN} — never as up to
      * date.
      */
-    private volatile Map<String, UpdateAvailability> imageUpdateVerdicts = Map.of();
+    private volatile Map<ScopedImage, UpdateAvailability> imageUpdateVerdicts = Map.of();
 
     @Autowired
     public ContainerService(ForGettingServerInfo forGettingServerInfo,
@@ -149,7 +152,7 @@ public class ContainerService implements
     /** Cache read — backed by {@link #refresh()}; the launchpad never scrapes Docker on-thread. */
     @Override
     public List<DockerService> discover() {
-        return withUpdateVerdicts(vaierServerContainersSnapshot);
+        return withUpdateVerdicts(LanAnchor.VAIER_SERVER_NAME, vaierServerContainersSnapshot);
     }
 
     /**
@@ -160,15 +163,17 @@ public class ContainerService implements
      * silently erase a verdict it knows nothing about. An image the sweep has not judged reads
      * {@link UpdateAvailability#UNKNOWN}, which is the truth.
      */
-    private List<DockerService> withUpdateVerdicts(List<DockerService> containers) {
-        Map<String, UpdateAvailability> verdicts = imageUpdateVerdicts;
+    private List<DockerService> withUpdateVerdicts(String machine, List<DockerService> containers) {
+        Map<ScopedImage, UpdateAvailability> verdicts = imageUpdateVerdicts;
         if (verdicts.isEmpty()) {
             return containers;
         }
-        // No default here on purpose: "an unswept image reads unknown" is DockerService's rule, and stating it
-        // twice is how the two would one day disagree. A null verdict is normalised by the domain.
+        // Keyed by ScopedImage so the mark on a container matches the verdict the sweep settled for THAT
+        // machine's copy of the image — the same tag on two machines can read differently. No default here on
+        // purpose: "an unswept image reads unknown" is DockerService's rule, and stating it twice is how the
+        // two would one day disagree. A null verdict is normalised by the domain.
         return containers.stream()
-            .map(c -> c.withUpdateAvailability(verdicts.get(c.image())))
+            .map(c -> c.withUpdateAvailability(verdicts.get(new ScopedImage(machine, c.image()))))
             .toList();
     }
 
@@ -184,8 +189,8 @@ public class ContainerService implements
      * scheduler has already refreshed these within the last 30 seconds.
      */
     @Override
-    public Map<String, UpdateAvailability> sweepImageUpdates() {
-        Map<String, UpdateAvailability> verdicts =
+    public Map<ScopedImage, UpdateAvailability> sweepImageUpdates() {
+        Map<ScopedImage, UpdateAvailability> verdicts =
             ImageUpdateSweep.sweep(everyContainerVaierCanSee(), forResolvingRegistryDigest);
         imageUpdateVerdicts = verdicts;
         return verdicts;
@@ -216,8 +221,8 @@ public class ContainerService implements
         }
 
         refresh();
-        Map<String, UpdateAvailability> before = imageUpdateVerdicts;
-        Map<String, UpdateAvailability> after =
+        Map<ScopedImage, UpdateAvailability> before = imageUpdateVerdicts;
+        Map<ScopedImage, UpdateAvailability> after =
             ImageUpdateSweep.sweepFresh(everyContainerVaierCanSee(), forResolvingRegistryDigest);
         imageUpdateVerdicts = after;
         imageUpdateTracker.clearUpToDate(after);
@@ -229,11 +234,18 @@ public class ContainerService implements
         return outcome;
     }
 
-    /** The Vaier server's own containers and its server peers'. LAN-server containers are not swept yet. */
-    private List<DockerService> everyContainerVaierCanSee() {
-        List<DockerService> containers = new ArrayList<>(vaierServerContainersSnapshot);
-        peerContainersSnapshot.forEach(peer -> containers.addAll(peer.containers()));
-        return containers;
+    /**
+     * The Vaier server's own containers and its server peers', each group carrying the machine it came from so
+     * the sweep can scope every verdict to a host. The Vaier server's containers sit under the reserved name
+     * {@link LanAnchor#VAIER_SERVER_NAME}; each peer's under its own peer name. LAN-server containers are not
+     * swept yet.
+     */
+    private List<MachineContainers> everyContainerVaierCanSee() {
+        List<MachineContainers> machines = new ArrayList<>();
+        machines.add(new MachineContainers(LanAnchor.VAIER_SERVER_NAME, vaierServerContainersSnapshot));
+        peerContainersSnapshot.forEach(peer ->
+            machines.add(new MachineContainers(peer.peerName(), peer.containers())));
+        return machines;
     }
 
     List<DockerService> scrapeVaierServerContainers() {
@@ -250,7 +262,8 @@ public class ContainerService implements
     public List<PeerContainers> discoverAll() {
         return peerContainersSnapshot.stream()
             .map(peer -> new PeerContainers(peer.peerName(), peer.vpnIp(), peer.status(),
-                withUpdateVerdicts(peer.containers()), peer.wireguardOutdated(), peer.wireguardExpectedImage()))
+                withUpdateVerdicts(peer.peerName(), peer.containers()),
+                peer.wireguardOutdated(), peer.wireguardExpectedImage()))
             .toList();
     }
 

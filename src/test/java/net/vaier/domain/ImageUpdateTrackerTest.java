@@ -9,6 +9,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ImageUpdateTrackerTest {
 
+    private static final String HOST = "Vaier server";
+
+    /** An image on the default host, so a test that does not care about machines reads as before. */
+    private static ScopedImage si(String image) {
+        return new ScopedImage(HOST, image);
+    }
+
+    private static Map<ScopedImage, UpdateAvailability> verdicts(Object... pairs) {
+        Map<ScopedImage, UpdateAvailability> map = new LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            ScopedImage key = pairs[i] instanceof ScopedImage s ? s : si((String) pairs[i]);
+            map.put(key, (UpdateAvailability) pairs[i + 1]);
+        }
+        return map;
+    }
+
     // --- #57 slice 3: what an operator-driven check may do to the alert state -------------------------
     //
     // The forced check is a partial-purpose observation: the operator is confirming their own pull, not
@@ -22,14 +38,14 @@ class ImageUpdateTrackerTest {
         // and the operator is never told. A button that quietly disables a future alarm is worse than no
         // button: they would trust a signal that had been switched off by their own diligence.
         ImageUpdateTracker tracker = new ImageUpdateTracker();
-        assertThat(tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("vaultwarden/server:latest");        // reported once
+        assertThat(tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+            .containsExactly(si("vaultwarden/server:latest"));        // reported once
 
-        tracker.clearUpToDate(Map.of("vaultwarden/server:latest", UpdateAvailability.UP_TO_DATE));
+        tracker.clearUpToDate(verdicts("vaultwarden/server:latest", UpdateAvailability.UP_TO_DATE));
 
-        assertThat(tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+        assertThat(tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
             .as("it went stale again — that is news again")
-            .containsExactly("vaultwarden/server:latest");
+            .containsExactly(si("vaultwarden/server:latest"));
     }
 
     @Test
@@ -40,11 +56,11 @@ class ImageUpdateTrackerTest {
         // send. A check may only ever clear good news; bad news stays the mailer's to break.
         ImageUpdateTracker tracker = new ImageUpdateTracker();
 
-        tracker.clearUpToDate(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
+        tracker.clearUpToDate(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
 
-        assertThat(tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+        assertThat(tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
             .as("the mail the forced check must not have eaten")
-            .containsExactly("vaultwarden/server:latest");
+            .containsExactly(si("vaultwarden/server:latest"));
     }
 
     @Test
@@ -52,11 +68,11 @@ class ImageUpdateTrackerTest {
         // The duplicate-mail rule. Still stale, already told them: clearing touches nothing, and the next
         // daily sweep still finds previous=true and stays quiet.
         ImageUpdateTracker tracker = new ImageUpdateTracker();
-        tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
+        tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
 
-        tracker.clearUpToDate(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
+        tracker.clearUpToDate(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
 
-        assertThat(tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+        assertThat(tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
             .isEmpty();
     }
 
@@ -65,11 +81,11 @@ class ImageUpdateTrackerTest {
         // Same reasoning as update()'s: a rate-limited registry is not evidence the operator pulled. Reading
         // it as such would re-arm the alert and re-mail them about an image they were already told about.
         ImageUpdateTracker tracker = new ImageUpdateTracker();
-        tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
+        tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
 
-        tracker.clearUpToDate(Map.of("vaultwarden/server:latest", UpdateAvailability.UNKNOWN));
+        tracker.clearUpToDate(verdicts("vaultwarden/server:latest", UpdateAvailability.UNKNOWN));
 
-        assertThat(tracker.update(Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+        assertThat(tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
             .as("nothing was learned, so nothing was cleared")
             .isEmpty();
     }
@@ -78,18 +94,10 @@ class ImageUpdateTrackerTest {
     void clearingIsSafeOnAnImageTheTrackerHasNeverSeen() {
         ImageUpdateTracker tracker = new ImageUpdateTracker();
 
-        tracker.clearUpToDate(Map.of("redis:7.2", UpdateAvailability.UP_TO_DATE));
+        tracker.clearUpToDate(verdicts("redis:7.2", UpdateAvailability.UP_TO_DATE));
 
-        assertThat(tracker.update(Map.of("redis:7.2", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("redis:7.2");
-    }
-
-    private static Map<String, UpdateAvailability> verdicts(Object... pairs) {
-        Map<String, UpdateAvailability> map = new LinkedHashMap<>();
-        for (int i = 0; i < pairs.length; i += 2) {
-            map.put((String) pairs[i], (UpdateAvailability) pairs[i + 1]);
-        }
-        return map;
+        assertThat(tracker.update(verdicts("redis:7.2", UpdateAvailability.UPDATE_AVAILABLE)))
+            .containsExactly(si("redis:7.2"));
     }
 
     @Test
@@ -100,7 +108,7 @@ class ImageUpdateTrackerTest {
         ImageUpdateTracker tracker = new ImageUpdateTracker();
 
         assertThat(tracker.update(verdicts("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("vaultwarden/server:latest");
+            .containsExactly(si("vaultwarden/server:latest"));
     }
 
     @Test
@@ -121,7 +129,7 @@ class ImageUpdateTrackerTest {
             "a:1", UpdateAvailability.UPDATE_AVAILABLE,
             "b:1", UpdateAvailability.UPDATE_AVAILABLE,
             "c:1", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("b:1", "c:1");
+            .containsExactly(si("b:1"), si("c:1"));
     }
 
     @Test
@@ -139,7 +147,7 @@ class ImageUpdateTrackerTest {
         tracker.update(verdicts("a:1", UpdateAvailability.UP_TO_DATE));   // operator pulled
 
         assertThat(tracker.update(verdicts("a:1", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("a:1");
+            .containsExactly(si("a:1"));
     }
 
     @Test
@@ -169,16 +177,40 @@ class ImageUpdateTrackerTest {
         tracker.update(verdicts());
 
         assertThat(tracker.update(verdicts("a:1", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("a:1");
+            .containsExactly(si("a:1"));
     }
 
     @Test
-    void reportsNewlyOutOfDateImagesInAStableAlphabeticalOrder() {
+    void reportsNewlyOutOfDateImagesInAStableLabelOrder() {
         ImageUpdateTracker tracker = new ImageUpdateTracker();
 
         assertThat(tracker.update(verdicts(
             "zeta:1", UpdateAvailability.UPDATE_AVAILABLE,
             "alpha:1", UpdateAvailability.UPDATE_AVAILABLE)))
-            .containsExactly("alpha:1", "zeta:1");
+            .containsExactly(si("alpha:1"), si("zeta:1"));
+    }
+
+    // --- machine-aware tracking (#57 refinement) -----------------------------------------------------
+
+    @Test
+    void theSameImageGoingStaleOnASecondMachineIsReportedAsNewlyOutOfDate() {
+        // The missed-alert bug this refinement fixes. vaultwarden goes stale on Apalveien 5 and is reported.
+        // Later the same tag goes stale on Colina 27 too. Keyed by image string alone, the tracker would find
+        // previous=true from Apalveien 5's edge and stay silent — the operator would never learn Colina 27
+        // also needs pulling. Scoping to the machine makes the second machine its own edge.
+        ScopedImage onApalveien = new ScopedImage("Apalveien 5", "vaultwarden/server:latest");
+        ScopedImage onColina = new ScopedImage("Colina 27", "vaultwarden/server:latest");
+        ImageUpdateTracker tracker = new ImageUpdateTracker();
+
+        assertThat(tracker.update(Map.of(
+            onApalveien, UpdateAvailability.UPDATE_AVAILABLE,
+            onColina, UpdateAvailability.UP_TO_DATE)))
+            .containsExactly(onApalveien);
+
+        assertThat(tracker.update(Map.of(
+            onApalveien, UpdateAvailability.UPDATE_AVAILABLE,
+            onColina, UpdateAvailability.UPDATE_AVAILABLE)))
+            .as("Colina 27 is newly out of date even though Apalveien 5 already was")
+            .containsExactly(onColina);
     }
 }

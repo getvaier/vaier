@@ -3,6 +3,7 @@ package net.vaier.integration.controller;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
+import net.vaier.domain.ScopedImage;
 import net.vaier.domain.UpdateAvailability;
 import net.vaier.domain.UpdateCheckOutcome;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
@@ -168,8 +169,10 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
     void checkForImageUpdates_reportsWhatVaierActuallyDid() throws Exception {
         when(checkForImageUpdatesUseCase.checkForImageUpdates())
             .thenReturn(UpdateCheckOutcome.checked(
-                Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE),
-                Map.of("vaultwarden/server:latest", UpdateAvailability.UP_TO_DATE),
+                Map.of(new ScopedImage("Vaier server", "vaultwarden/server:latest"),
+                    UpdateAvailability.UPDATE_AVAILABLE),
+                Map.of(new ScopedImage("Vaier server", "vaultwarden/server:latest"),
+                    UpdateAvailability.UP_TO_DATE),
                 Instant.parse("2026-07-17T12:00:00Z")));
 
         mockMvc.perform(post("/docker-services/image-updates/check"))

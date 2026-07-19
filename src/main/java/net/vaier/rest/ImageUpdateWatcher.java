@@ -5,6 +5,7 @@ import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.domain.ImageUpdateRollup;
 import net.vaier.domain.ImageUpdateTracker;
+import net.vaier.domain.ScopedImage;
 import net.vaier.domain.UpdateAvailability;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -62,8 +63,8 @@ public class ImageUpdateWatcher {
     @Scheduled(fixedDelay = ONE_DAY_MS, initialDelay = INITIAL_DELAY_MS)
     public void checkForImageUpdates() {
         try {
-            Map<String, UpdateAvailability> verdicts = sweep.sweepImageUpdates();
-            List<String> newlyOutOfDate = tracker.update(verdicts);
+            Map<ScopedImage, UpdateAvailability> verdicts = sweep.sweepImageUpdates();
+            List<ScopedImage> newlyOutOfDate = tracker.update(verdicts);
 
             ImageUpdateRollup rollup = new ImageUpdateRollup(newlyOutOfDate);
             if (rollup.worthSending()) {
