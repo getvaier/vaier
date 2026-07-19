@@ -82,6 +82,18 @@ class MinaSftpAdapterTest {
         return remoteRoot.resolve(relative).toAbsolutePath().toString();
     }
 
+    /**
+     * The adapter closes its side of the connection synchronously, but the server drops the session from its
+     * active set asynchronously as it processes the disconnect — so assert the session is gone within a short
+     * window, not in the same instant the call returns. Otherwise the check races the server-side teardown.
+     */
+    private void assertServerHasNoActiveSessions() throws InterruptedException {
+        for (int i = 0; i < 100 && !server.getActiveSessions().isEmpty(); i++) {
+            Thread.sleep(20);
+        }
+        assertThat(server.getActiveSessions()).isEmpty();
+    }
+
     @Test
     void listsADirectory_reportingNamesPathsKindsAndSizes() throws Exception {
         int port = startServer();
@@ -496,7 +508,7 @@ class MinaSftpAdapterTest {
         // Every file was seen (40 across two directories) over exactly one SSH session — not one per file.
         assertThat(visitor.files).hasSize(40);
         assertThat(sessionsCreated.get()).isEqualTo(1);
-        assertThat(server.getActiveSessions()).isEmpty();
+        assertServerHasNoActiveSessions();
     }
 
     @Test
@@ -510,6 +522,6 @@ class MinaSftpAdapterTest {
 
         adapter.delete(target(port), remote("a"));
 
-        assertThat(server.getActiveSessions()).isEmpty();
+        assertServerHasNoActiveSessions();
     }
 }
