@@ -221,6 +221,26 @@ class BackupServiceTest {
     }
 
     @Test
+    void protectNeverRegeneratesThePassphraseOfARepositoryThatAlreadyExists() {
+        // The orphaning bug: a machine already has a borg repository whose passphrase seals it on the NAS,
+        // but its job's repositoryName no longer resolves to it (a historical name/slug mismatch). The
+        // get-or-create lookup misses, and minting a fresh repository would overwrite the live passphrase —
+        // orphaning the repo, since borg can no longer decrypt it. Reuse-by-name must win over regenerate.
+        service.saveBackupServer(server());
+        repositories.store.add(new BackupRepository("Colina-27", "nas-borg", null,
+            "theRealPassphraseThatSealsTheRepo", false));
+        jobs.store.add(new BackupJob("Colina-27", "Colina 27", "Colina 27",
+            List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false));
+
+        service.protect("Colina 27", List.of("/etc/nginx"));
+
+        // The repository's passphrase is untouched, and there is still exactly one repository.
+        assertThat(repositories.getByName("Colina-27").orElseThrow().passphrase())
+            .isEqualTo("theRealPassphraseThatSealsTheRepo");
+        assertThat(repositories.getAll()).hasSize(1);
+    }
+
+    @Test
     void protectOnAMachinesFirstBackupReadiesTheHostThroughThePortAndCarriesTheOutcome() {
         // The first back-up creates the job, and the newly-created job decides its host must be readied: the
         // service passes the driven port in, the domain calls it, and the outcome rides back on the result.

@@ -97,12 +97,34 @@ public class BackupRepositoryFileAdapter implements ForPersistingBackupRepositor
             return null;
         }
         // The name/path fields are now identifier/safe-path validated at construction. A pre-fix entry may
-        // carry an unsafe value (e.g. a name with a space, created before the fix) — skip it with a warning
-        // rather than let the IllegalArgumentException abort the load of every other repository.
+        // carry an unsafe name (e.g. a space, created before names were slugged). Repair it to its safe slug
+        // rather than dropping it: a silently dropped repository is invisible to the backup service's
+        // get-or-create, which then mints a DUPLICATE repository with a fresh passphrase over the live one
+        // and orphans it (borg can no longer decrypt the repo). Only a name that cannot be repaired at all
+        // (slugs to nothing) is skipped, with a warning, so one bad entry never aborts the whole load.
         try {
             return new BackupRepository(name, serverName, repoPath, passphrase, appendOnly);
         } catch (IllegalArgumentException e) {
-            log.warn("Skipping invalid backup-repository entry in {}: {}", FILE_NAME, e.getMessage());
+            return repairName(name, serverName, repoPath, passphrase, appendOnly, e);
+        }
+    }
+
+    /**
+     * Repair an entry whose stored {@code name} is not a safe identifier by re-keying it on its slug (e.g.
+     * {@code "NUC 02"} → {@code "NUC-02"}), so a legacy repository stays visible and reusable instead of
+     * being dropped. A name that slugs to nothing, or is still invalid once slugged, is skipped with a
+     * warning. The slug rule is deliberately case-preserving (see {@link BackupRepository#sanitizedName}):
+     * lower-casing here would re-key a currently-valid repository and orphan it.
+     */
+    private BackupRepository repairName(String name, String serverName, String repoPath, String passphrase,
+                                        boolean appendOnly, IllegalArgumentException original) {
+        try {
+            String slug = BackupRepository.sanitizedName(name);
+            BackupRepository repaired = new BackupRepository(slug, serverName, repoPath, passphrase, appendOnly);
+            log.warn("Repaired unsafe backup-repository name '{}' to '{}' in {}", name, slug, FILE_NAME);
+            return repaired;
+        } catch (IllegalArgumentException stillInvalid) {
+            log.warn("Skipping invalid backup-repository entry in {}: {}", FILE_NAME, original.getMessage());
             return null;
         }
     }

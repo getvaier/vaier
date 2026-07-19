@@ -65,6 +65,7 @@ class BorgCommandTest {
                 + "borg info " + url + " > /dev/null 2>&1 || "
                 + "borg init --encryption=repokey-blake2 --make-parent-dirs " + url
                 + " && borg create --json --stats --compression zstd,6 --exclude-caches"
+                + " --exclude '/var/lib/vaier-backup' --exclude '*/.config/borg'"
                 + " --exclude '*.tmp' --exclude '/var/cache' "
                 + url + "::'{hostname}-{now:%Y-%m-%dT%H:%M:%S}' '/home/geir' '/etc'"
                 + " && borg prune --list --glob-archives '{hostname}-*'"
@@ -309,6 +310,18 @@ class BorgCommandTest {
         // Sources come after the repo::archive target.
         assertThat(cmd.exec().indexOf("::'{hostname}"))
             .isLessThan(cmd.exec().indexOf("'/home/geir'"));
+    }
+
+    @Test
+    void create_excludesBorgsOwnStateAndVaiersWorkDir_soARunIsCleanAndNeverArchivesThePassFile() {
+        // A run's source paths routinely include a user home, which contains borg's own ~/.config/borg —
+        // whose per-repo security "nonce" changes mid-run and yields a spurious WARNING — and Vaier's
+        // <workDir>, which holds the 0600 pass file (the repo passphrase must never land in the archive).
+        // Both are excluded automatically, so a run comes back a clean SUCCESS.
+        String create = BorgCommand.create(server(), job(), repo(), WORK_DIR).exec();
+
+        assertThat(create).contains("--exclude '" + WORK_DIR + "'");
+        assertThat(create).contains("--exclude '*/.config/borg'");
     }
 
     @Test
@@ -975,8 +988,49 @@ class BorgCommandTest {
     }
 
     @Test
+    void umount_verifiesTheMountIsActuallyGone_soAFailedUnmountIsDetectable() {
+        // borg umount is best-effort (2>/dev/null) and a FUSE "device busy" leaves the mount in place while
+        // the command still exits 0. The command must re-probe after unmounting and report the truth, so the
+        // sweep can tell a real release from a failed one and keep retrying rather than forgetting the mount.
+        String umount = BorgCommand.umount(MOUNTPOINT);
+
+        assertThat(umount).contains("mountpoint -q '" + MOUNTPOINT + "'");
+        assertThat(umount).contains("UNMOUNTED");
+        assertThat(umount).contains("STILL_MOUNTED");
+    }
+
+    @Test
+    void parseUnmounted_readsWhetherTheMountWasReleased() {
+        // Distinct tokens so STILL_MOUNTED is never read as a release.
+        assertThat(BorgCommand.parseUnmounted("UNMOUNTED")).isTrue();
+        assertThat(BorgCommand.parseUnmounted("STILL_MOUNTED")).isFalse();
+        assertThat(BorgCommand.parseUnmounted("")).isFalse();
+        assertThat(BorgCommand.parseUnmounted(null)).isFalse();
+    }
+
+    @Test
     void isMounted_probesWhetherTheMountpointIsAlreadyAMount() {
         assertThat(BorgCommand.isMounted(MOUNTPOINT)).contains("mountpoint -q '" + MOUNTPOINT + "'");
+    }
+
+    @Test
+    void listArchiveMounts_listsRealMountsUnderTheWorkDirMountsDir() {
+        // After a Vaier restart the in-memory mount registry is empty, so reconciliation asks the host what
+        // is actually mounted under <workDir>/mounts and adopts anything the registry has forgotten.
+        String list = BorgCommand.listArchiveMounts(WORK_DIR);
+
+        assertThat(list).contains("'" + WORK_DIR + "/mounts'");
+        assertThat(list).contains("mountpoint -q");
+        assertThat(list).contains("MOUNT:");
+    }
+
+    @Test
+    void parseArchiveMounts_readsTheMountpoints() {
+        assertThat(BorgCommand.parseArchiveMounts("MOUNT:/a/mounts/aa\nMOUNT:/a/mounts/bb\nMOUNTS_LISTED"))
+            .containsExactly("/a/mounts/aa", "/a/mounts/bb");
+        assertThat(BorgCommand.parseArchiveMounts("MOUNTS_LISTED")).isEmpty();
+        assertThat(BorgCommand.parseArchiveMounts("")).isEmpty();
+        assertThat(BorgCommand.parseArchiveMounts(null)).isEmpty();
     }
 
     @Test

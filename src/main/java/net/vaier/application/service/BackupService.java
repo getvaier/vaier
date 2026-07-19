@@ -187,11 +187,25 @@ public class BackupService implements
                 "Designate a backup server before backing up machines."));
     }
 
-    /** Create and persist a machine's repository with a fresh backend-generated passphrase. */
+    /**
+     * Get-or-create the repository named {@code name}: reuse the stored one if it already exists, otherwise
+     * create and persist it with a fresh backend-generated passphrase.
+     *
+     * <p><b>Reuse must win over regenerate.</b> A repository's passphrase seals its borg repo on the NAS, and
+     * borg has no way to adopt a new one — so minting a fresh passphrase over an <em>existing</em> repository
+     * orphans it (borg can no longer decrypt it, and every backup then fails to authenticate). Because the
+     * get-or-create in {@link #protect} looks the repository up by the job's {@code repositoryName}, a
+     * name/slug mismatch can make that lookup miss for a repository that really exists under the slug; this
+     * name-keyed guard makes creation idempotent so such a miss reuses the live repository rather than
+     * clobbering its secret. A truly-new repository — no stored entry under this name — is the only case that
+     * gets a fresh passphrase.
+     */
     private BackupRepository createRepository(String name, BackupServer server) {
-        BackupRepository repository =
-            new BackupRepository(name, server.name(), null, Passphrases.strong(), false);
-        repositories.save(repository);
-        return repository;
+        return repositories.getByName(name).orElseGet(() -> {
+            BackupRepository repository =
+                new BackupRepository(name, server.name(), null, Passphrases.strong(), false);
+            repositories.save(repository);
+            return repository;
+        });
     }
 }

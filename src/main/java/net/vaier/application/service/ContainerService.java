@@ -8,12 +8,16 @@ import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.PublishableService;
 import net.vaier.domain.PublishableService.PublishableSource;
+import net.vaier.application.CheckForImageUpdatesUseCase;
 import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.ImageUpdateSweep;
+import net.vaier.domain.ImageUpdateTracker;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.UpdateAvailability;
+import net.vaier.domain.UpdateCheckFloor;
+import net.vaier.domain.UpdateCheckOutcome;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
 import net.vaier.domain.VaierServerCatalogue;
@@ -28,11 +32,13 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVaierServerDockerServices;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingRegistryDigest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +53,7 @@ public class ContainerService implements
     GetVaierServerDockerServicesUseCase,
     RefreshContainerStateUseCase,
     SweepImageUpdatesUseCase,
+    CheckForImageUpdatesUseCase,
     ForDiscoveringVaierServerContainers,
     ForDiscoveringPeerContainers,
     ForDiscoveringLanServerContainers,
@@ -58,8 +65,21 @@ public class ContainerService implements
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingLanServers forGettingLanServers;
     private final ForResolvingRegistryDigest forResolvingRegistryDigest;
+    private final ForPublishingEvents forPublishingEvents;
+    private final ImageUpdateTracker imageUpdateTracker;
+    private final UpdateCheckFloor updateCheckFloor;
     private final String vaierNetworkName;
     private final String dockerGatewayIp;
+
+    /**
+     * Where a settled update-available verdict is pushed. The container payloads already ride this
+     * topic/event — {@code DockerEventListener} publishes it when a container changes state, and the Explorer
+     * re-reads its containers on it — so a re-checked verdict travels the road that already exists rather than
+     * inventing a second one for the same payload.
+     */
+    private static final String SSE_TOPIC = "published-services";
+    private static final String SSE_EVENT = "service-updated";
+    private static final String SSE_DATA = "image-updates-checked";
 
     /**
      * Last peer-container scrape, served by {@link #discoverAll()}. Empty until the first
@@ -88,9 +108,12 @@ public class ContainerService implements
                             ForResolvingPeerNames forResolvingPeerNames,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
                             ForGettingLanServers forGettingLanServers,
-                            ForResolvingRegistryDigest forResolvingRegistryDigest) {
+                            ForResolvingRegistryDigest forResolvingRegistryDigest,
+                            ForPublishingEvents forPublishingEvents,
+                            ImageUpdateTracker imageUpdateTracker,
+                            Clock clock) {
         this(forGettingServerInfo, forGettingVpnClients, forResolvingPeerNames, forGettingPeerConfigurations,
-            forGettingLanServers, forResolvingRegistryDigest,
+            forGettingLanServers, forResolvingRegistryDigest, forPublishingEvents, imageUpdateTracker, clock,
             System.getenv().getOrDefault("VAIER_NETWORK_NAME", "vaier-network"),
             System.getenv().getOrDefault("VAIER_DOCKER_GATEWAY", "172.20.0.1"));
     }
@@ -101,6 +124,9 @@ public class ContainerService implements
                      ForGettingPeerConfigurations forGettingPeerConfigurations,
                      ForGettingLanServers forGettingLanServers,
                      ForResolvingRegistryDigest forResolvingRegistryDigest,
+                     ForPublishingEvents forPublishingEvents,
+                     ImageUpdateTracker imageUpdateTracker,
+                     Clock clock,
                      String vaierNetworkName,
                      String dockerGatewayIp) {
         this.forGettingServerInfo = forGettingServerInfo;
@@ -109,6 +135,13 @@ public class ContainerService implements
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingLanServers = forGettingLanServers;
         this.forResolvingRegistryDigest = forResolvingRegistryDigest;
+        this.forPublishingEvents = forPublishingEvents;
+        this.imageUpdateTracker = imageUpdateTracker;
+        // Owned outright, unlike the tracker, because this service is the only thing that can spend the
+        // registries' rate limit on demand — one singleton service, one floor, so the limit is a limit. If a
+        // second entry point ever forces a sweep it must share THIS floor (a bean, as the tracker had to
+        // become); two floors would each admit a check a minute and quietly double the ceiling.
+        this.updateCheckFloor = new UpdateCheckFloor(clock);
         this.vaierNetworkName = vaierNetworkName;
         this.dockerGatewayIp = dockerGatewayIp;
     }
@@ -152,12 +185,55 @@ public class ContainerService implements
      */
     @Override
     public Map<String, UpdateAvailability> sweepImageUpdates() {
-        List<DockerService> containers = new ArrayList<>(vaierServerContainersSnapshot);
-        peerContainersSnapshot.forEach(peer -> containers.addAll(peer.containers()));
-
-        Map<String, UpdateAvailability> verdicts = ImageUpdateSweep.sweep(containers, forResolvingRegistryDigest);
+        Map<String, UpdateAvailability> verdicts =
+            ImageUpdateSweep.sweep(everyContainerVaierCanSee(), forResolvingRegistryDigest);
         imageUpdateVerdicts = verdicts;
         return verdicts;
+    }
+
+    /**
+     * The update check the operator asked for: re-scrape, ask the registries afresh, keep the answer, push it.
+     *
+     * <p>The service decides nothing here either — it sequences four domain calls and passes the ports in.
+     * {@link UpdateCheckFloor} rules whether the registries may be asked at all, {@link ImageUpdateSweep}
+     * judges the images, {@link ImageUpdateTracker} rules what the check may do to the alert state, and
+     * {@link UpdateCheckOutcome} decides what the operator is told and whether anything is worth pushing.
+     *
+     * <p><b>The scrape comes first, and that ordering is the feature.</b> The local digest is whatever the 30s
+     * container scrape last saw, and the operator clicks seconds after pulling — so sweeping the snapshot in
+     * hand would read the pre-pull digest and confirm the very mark the button was pressed to clear. Refusing
+     * remembered registry answers (the other half, in {@code sweepFresh}) fixes the mirror image of the same
+     * bug. Both are needed: they are stale on opposite sides of the comparison.
+     *
+     * <p>Refused checks cost nothing at all — no scrape, no registry request — because the abuse a floor is
+     * there to stop must not simply move from the registries onto the fleet's Docker daemons.
+     */
+    @Override
+    public UpdateCheckOutcome checkForImageUpdates() {
+        UpdateCheckFloor.Admission admission = updateCheckFloor.admit();
+        if (!admission.admitted()) {
+            return UpdateCheckOutcome.coalesced(admission.lastCheckedAt());
+        }
+
+        refresh();
+        Map<String, UpdateAvailability> before = imageUpdateVerdicts;
+        Map<String, UpdateAvailability> after =
+            ImageUpdateSweep.sweepFresh(everyContainerVaierCanSee(), forResolvingRegistryDigest);
+        imageUpdateVerdicts = after;
+        imageUpdateTracker.clearUpToDate(after);
+
+        UpdateCheckOutcome outcome = UpdateCheckOutcome.checked(before, after, admission.lastCheckedAt());
+        if (outcome.worthPublishing()) {
+            forPublishingEvents.publish(SSE_TOPIC, SSE_EVENT, SSE_DATA);
+        }
+        return outcome;
+    }
+
+    /** The Vaier server's own containers and its server peers'. LAN-server containers are not swept yet. */
+    private List<DockerService> everyContainerVaierCanSee() {
+        List<DockerService> containers = new ArrayList<>(vaierServerContainersSnapshot);
+        peerContainersSnapshot.forEach(peer -> containers.addAll(peer.containers()));
+        return containers;
     }
 
     List<DockerService> scrapeVaierServerContainers() {

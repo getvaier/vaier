@@ -37,6 +37,30 @@ public final class ImageUpdateSweep {
      */
     public static Map<String, UpdateAvailability> sweep(List<DockerService> containers,
                                                         ForResolvingRegistryDigest registry) {
+        return sweep(containers, registry, false);
+    }
+
+    /**
+     * The sweep the <b>operator asked for</b>: same rules, but no remembered registry answer is allowed.
+     *
+     * <p>They pulled an image and want Vaier to agree. A remembered answer is exactly what cannot be trusted
+     * to settle that: it holds what the registry said <em>before</em> they pulled, so if upstream moved in the
+     * interim the sweep would compare their new local digest against an old registry one, find a difference,
+     * and report an update available on the image they just updated. The daily sweep tolerates a remembered
+     * answer because nothing is riding on the minute; this one cannot.
+     *
+     * <p>Every other rule is deliberately identical to {@link #sweep} — one question per distinct image (which
+     * matters more here, not less, since nothing else stands between an impatient click and the rate limit),
+     * nothing asked about an image that cannot drift, and a failure ruled unknown rather than outdated.
+     */
+    public static Map<String, UpdateAvailability> sweepFresh(List<DockerService> containers,
+                                                             ForResolvingRegistryDigest registry) {
+        return sweep(containers, registry, true);
+    }
+
+    private static Map<String, UpdateAvailability> sweep(List<DockerService> containers,
+                                                         ForResolvingRegistryDigest registry,
+                                                         boolean fresh) {
         Map<String, UpdateAvailability> verdicts = new LinkedHashMap<>();
         if (containers == null || containers.isEmpty()) {
             return verdicts;
@@ -57,7 +81,7 @@ public final class ImageUpdateSweep {
                 continue;
             }
             if (resolved.add(image)) {
-                resolveInto(registryDigests, image, reference.get(), registry);
+                resolveInto(registryDigests, image, reference.get(), registry, fresh);
             }
             verdicts.put(image, UpdateAvailability.compare(container.imageDigest(), registryDigests.get(image)));
         }
@@ -69,9 +93,10 @@ public final class ImageUpdateSweep {
      * fact — Vaier could not find out — and both leave no digest recorded, which reads as unknown.
      */
     private static void resolveInto(Map<String, String> digests, String image, ImageReference reference,
-                                    ForResolvingRegistryDigest registry) {
+                                    ForResolvingRegistryDigest registry, boolean fresh) {
         try {
-            registry.resolveDigest(reference).ifPresent(digest -> digests.put(image, digest));
+            var digest = fresh ? registry.resolveDigestNow(reference) : registry.resolveDigest(reference);
+            digest.ifPresent(d -> digests.put(image, d));
         } catch (Exception e) {
             // Unreachable, rate-limited, unauthorized, no egress: unknown, and on to the next image.
         }

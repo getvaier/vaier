@@ -240,4 +240,74 @@ class RegistryV2ImageAdapterTest {
 
         assertThat(sent).hasSize(2);
     }
+
+    // --- #57 slice 3: the forced read ------------------------------------------------------------------
+    //
+    // The cache holds the REGISTRY's answer. When the operator pulls, the thing that changes is the LOCAL
+    // digest — the registry's answer is exactly what it was. So a "check now" that reads this cache is not a
+    // check at all, and worse, it is a check that can invert: see below.
+
+    @Test
+    void aForcedLookup_asksTheRegistryEvenWhenAFreshAnswerIsCached() throws Exception {
+        respondInOrder(response(200, Map.of("Docker-Content-Digest", List.of("sha256:served")), ""));
+        RegistryV2ImageAdapter adapter = adapter();
+        ImageReference ref = ImageReference.parse("vaultwarden/server:latest").orElseThrow();
+
+        adapter.resolveDigest(ref);
+        assertThat(sent).as("the ordinary read caches").hasSize(1);
+
+        adapter.resolveDigestNow(ref);
+
+        assertThat(sent).as("a forced read is worthless if it answers from memory").hasSize(2);
+    }
+
+    @Test
+    void aForcedLookup_returnsWhatTheRegistryServesNow_notWhatItServedThisMorning() throws Exception {
+        // THE inversion this slice exists to prevent, at the adapter's own level. Cache holds X from 20h ago;
+        // upstream has since moved to Y. The operator pulls Y and clicks check. If the forced read answered X,
+        // the sweep would compare local Y against registry X, find a mismatch, and report UPDATE AVAILABLE on
+        // the image they just updated — Vaier looking broken at the exact moment it is being checked.
+        respondInOrder(
+            response(200, Map.of("Docker-Content-Digest", List.of("sha256:X")), ""),
+            response(200, Map.of("Docker-Content-Digest", List.of("sha256:Y")), ""));
+        RegistryV2ImageAdapter adapter = adapter();
+        ImageReference ref = ImageReference.parse("vaultwarden/server:latest").orElseThrow();
+
+        assertThat(adapter.resolveDigest(ref)).contains("sha256:X");
+        clock.advance(Duration.ofHours(20));            // still well inside the 24h TTL
+
+        assertThat(adapter.resolveDigestNow(ref)).contains("sha256:Y");
+    }
+
+    @Test
+    void aForcedLookup_replacesTheCachedAnswerSoTheNextOrdinarySweepAgreesWithIt() throws Exception {
+        // A forced read that left the stale answer behind would let the daily sweep re-report the image the
+        // operator just fixed — the same inversion, merely deferred by an hour.
+        respondInOrder(
+            response(200, Map.of("Docker-Content-Digest", List.of("sha256:X")), ""),
+            response(200, Map.of("Docker-Content-Digest", List.of("sha256:Y")), ""));
+        RegistryV2ImageAdapter adapter = adapter();
+        ImageReference ref = ImageReference.parse("vaultwarden/server:latest").orElseThrow();
+        adapter.resolveDigest(ref);
+        adapter.resolveDigestNow(ref);
+
+        assertThat(adapter.resolveDigest(ref)).as("the fresh answer is now the cached one").contains("sha256:Y");
+        assertThat(sent).as("and it is served from cache, not a third request").hasSize(2);
+    }
+
+    @Test
+    void aForcedLookupThatFails_answersEmptyAndLeavesTheCachedAnswerStanding() throws Exception {
+        // Empty reads as "cannot tell" for this check — honest. But the registry being down for one click is
+        // no reason to throw away a good answer the daily sweep can still use.
+        respondInOrder(
+            response(200, Map.of("Docker-Content-Digest", List.of("sha256:X")), ""),
+            response(429, Map.of(), "too many requests"));
+        RegistryV2ImageAdapter adapter = adapter();
+        ImageReference ref = ImageReference.parse("vaultwarden/server:latest").orElseThrow();
+        adapter.resolveDigest(ref);
+
+        assertThat(adapter.resolveDigestNow(ref)).isEmpty();
+        assertThat(adapter.resolveDigest(ref)).as("the good answer survives a failed forced read")
+            .contains("sha256:X");
+    }
 }

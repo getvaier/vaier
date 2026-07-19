@@ -106,14 +106,37 @@ class BackupRepositoryFileAdapterTest {
     }
 
     @Test
-    void skipsEntryWithAnInvalidName() throws Exception {
+    void repairsAnInvalidNameToItsSlug_ratherThanDroppingTheRepository() throws Exception {
         // A repository created before names were validated (a space in "NUC 02") is now invalid by
-        // construction. The tolerant load must SKIP it with a warning, never abort the load of the whole
-        // file — the valid entry alongside it still comes back.
+        // construction. Silently dropping it is data loss with teeth: it vanishes from get-or-create, which
+        // then mints a duplicate repository with a fresh passphrase over the live one and orphans it (borg
+        // can no longer decrypt the repo). Instead the tolerant load REPAIRS the name to its safe slug
+        // ("NUC-02") so the repository stays visible and gets reused — and never aborts the whole load.
         Path file = tempDir.resolve("backup-repositories.yml");
         Files.writeString(file, """
             repositories:
             - name: NUC 02
+              serverName: nas-borg
+              appendOnly: false
+            - name: colina27
+              serverName: nas-borg
+              repoPath: ./colina
+              appendOnly: false
+            """);
+
+        assertThat(adapter.getAll()).containsExactlyInAnyOrder(
+            new BackupRepository("NUC-02", "nas-borg", null, null, false),
+            new BackupRepository("colina27", "nas-borg", "./colina", null, false));
+    }
+
+    @Test
+    void skipsAnEntryWhoseNameCannotBeRepaired() throws Exception {
+        // A name that slugs to nothing cannot be repaired, so it is skipped with a warning rather than
+        // aborting the load — the valid entry alongside it still comes back.
+        Path file = tempDir.resolve("backup-repositories.yml");
+        Files.writeString(file, """
+            repositories:
+            - name: '@@@'
               serverName: nas-borg
               appendOnly: false
             - name: colina27

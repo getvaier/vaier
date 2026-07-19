@@ -3,17 +3,22 @@ package net.vaier.integration.controller;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.DockerService.PortMapping;
+import net.vaier.domain.UpdateAvailability;
+import net.vaier.domain.UpdateCheckOutcome;
 import net.vaier.integration.base.VaierWebMvcIntegrationBase;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
@@ -155,5 +160,42 @@ class DockerServiceRestControllerIT extends VaierWebMvcIntegrationBase {
                .andExpect(jsonPath("$[0].peerName").value("peer2"))
                .andExpect(jsonPath("$[0].status").value("UNREACHABLE"))
                .andExpect(jsonPath("$[0].containers").isEmpty());
+    }
+
+    // --- #57 slice 3: the operator's own update check ---
+
+    @Test
+    void checkForImageUpdates_reportsWhatVaierActuallyDid() throws Exception {
+        when(checkForImageUpdatesUseCase.checkForImageUpdates())
+            .thenReturn(UpdateCheckOutcome.checked(
+                Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE),
+                Map.of("vaultwarden/server:latest", UpdateAvailability.UP_TO_DATE),
+                Instant.parse("2026-07-17T12:00:00Z")));
+
+        mockMvc.perform(post("/docker-services/image-updates/check"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.checked").value(true))
+               .andExpect(jsonPath("$.changed").value(true))
+               .andExpect(jsonPath("$.lastCheckedAt").value("2026-07-17T12:00:00Z"));
+    }
+
+    @Test
+    void checkForImageUpdates_tellsTheBrowserWhenItDidNotActuallyCheck() throws Exception {
+        // The rate-limit floor's honesty rule, all the way out to the wire. A coalesced check must not be
+        // dressed up as a real one — the browser needs the difference to say something true.
+        when(checkForImageUpdatesUseCase.checkForImageUpdates())
+            .thenReturn(UpdateCheckOutcome.coalesced(Instant.parse("2026-07-17T11:59:30Z")));
+
+        mockMvc.perform(post("/docker-services/image-updates/check"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.checked").value(false))
+               .andExpect(jsonPath("$.changed").value(false))
+               .andExpect(jsonPath("$.lastCheckedAt").value("2026-07-17T11:59:30Z"));
+    }
+
+    @Test
+    void checkForImageUpdates_isNotAGet_becauseItReallyGoesAndAsksEveryRegistry() throws Exception {
+        mockMvc.perform(get("/docker-services/image-updates/check"))
+               .andExpect(status().isMethodNotAllowed());
     }
 }

@@ -4,12 +4,14 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
+import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
+import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -33,11 +35,17 @@ public class LanScannerRestController {
 
     private final ScanLanUseCase scanLan;
     private final GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines;
+    private final IgnoreLanMachineUseCase ignoreLanMachine;
+    private final UnignoreLanMachineUseCase unignoreLanMachine;
 
     public LanScannerRestController(ScanLanUseCase scanLan,
-                                    GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines) {
+                                    GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines,
+                                    IgnoreLanMachineUseCase ignoreLanMachine,
+                                    UnignoreLanMachineUseCase unignoreLanMachine) {
         this.scanLan = scanLan;
         this.getDiscoveredLanMachines = getDiscoveredLanMachines;
+        this.ignoreLanMachine = ignoreLanMachine;
+        this.unignoreLanMachine = unignoreLanMachine;
     }
 
     @PostMapping
@@ -59,22 +67,42 @@ public class LanScannerRestController {
         return ResponseEntity.ok(new LanScanResponse(snapshot.status().name(), completed, machines));
     }
 
+    @PostMapping("/ignore")
+    @Operation(summary = "Dismiss a discovered host from the list")
+    public ResponseEntity<Void> ignore(@RequestBody IgnoreRequest request) {
+        ignoreLanMachine.ignore(request.key());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/unignore")
+    @Operation(summary = "Reveal a previously dismissed host")
+    public ResponseEntity<Void> unignore(@RequestBody IgnoreRequest request) {
+        unignoreLanMachine.unignore(request.key());
+        return ResponseEntity.noContent().build();
+    }
+
     /** The scan snapshot the Machines page renders: status, when it last finished, and the hosts. */
     public record LanScanResponse(String status, String lastScanCompleted,
                                   List<DiscoveredMachineDto> machines) {}
+
+    /** Body for ignore/unignore: the discovered host's stable {@code ignoreKey}. */
+    public record IgnoreRequest(String key) {}
 
     /**
      * What the launchpad/machines page renders per discovered host. {@code deviceCategory} is the
      * derived (never persisted) icon hint: {@code DeviceCategory.detect(hostname, null, role)} —
      * hostname keyword first, then the guessed role, then GENERIC. Lets the UI show a device icon
-     * per scanned host.
+     * per scanned host. {@code ignored} lets the UI group dismissed hosts and {@code ignoreKey} is
+     * the stable key it posts back to ignore/unignore.
      */
     public record DiscoveredMachineDto(String ipAddress, String hostname, List<Integer> openPorts,
-                                       String role, String relayAnchor, String deviceCategory) {
+                                       String role, String relayAnchor, String deviceCategory,
+                                       boolean ignored, String ignoreKey) {
         static DiscoveredMachineDto from(DiscoveredLanMachine m) {
             return new DiscoveredMachineDto(m.ipAddress(), m.hostname(), m.openPorts(),
                 m.guessedRole().name(), m.relayAnchor(),
-                net.vaier.domain.DeviceCategory.detect(m.hostname(), null, m.guessedRole()).name());
+                net.vaier.domain.DeviceCategory.detect(m.hostname(), null, m.guessedRole()).name(),
+                m.ignored(), m.ignoreKey());
         }
     }
 }

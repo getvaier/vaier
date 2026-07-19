@@ -49,7 +49,7 @@ public final class BorgCommand {
      * invocation and masked in the redacted form.
      */
     public static BuiltCommand create(BackupServer server, BackupJob job, BackupRepository repo, String workDir) {
-        String cmd = exportPasscommand(repo, workDir) + buildCreateBody(server, job, repo, "borg");
+        String cmd = exportPasscommand(repo, workDir) + buildCreateBody(server, job, repo, "borg", workDir);
         return new BuiltCommand(cmd, cmd);
     }
 
@@ -73,7 +73,7 @@ public final class BorgCommand {
     public static BuiltCommand detachedRun(BackupServer server, BackupJob job, BackupRepository repo,
                                            String runId, String workDir, String sshHome) {
         String borg = borgBinary(job, repo, workDir, sshHome);
-        String chainBody = buildRunChain(server, job, repo, borg);
+        String chainBody = buildRunChain(server, job, repo, borg, workDir);
         String cmd = assembleDetached(repo, chainBody, runId, workDir);
         // The passphrase never appears in the run command (it comes from the provisioned pass file via
         // BORG_PASSCOMMAND), so there is nothing to mask: the redacted twin is identical to exec.
@@ -164,9 +164,10 @@ public final class BorgCommand {
      * first failure. Prune is scoped by {@code --glob-archives '{hostname}-*'} so a repository shared by several
      * jobs never cross-deletes another host's archives.
      */
-    private static String buildRunChain(BackupServer server, BackupJob job, BackupRepository repo, String borg) {
+    private static String buildRunChain(BackupServer server, BackupJob job, BackupRepository repo, String borg,
+                                        String workDir) {
         return ensureInitializedBody(server, repo, borg)
-            + " && " + buildCreateBody(server, job, repo, borg)
+            + " && " + buildCreateBody(server, job, repo, borg, workDir)
             + " && " + buildPruneBody(server, job, repo, borg)
             + " && " + buildCompactBody(server, repo, borg);
     }
@@ -253,11 +254,30 @@ public final class BorgCommand {
      * umount} (its own wrapper over {@code fusermount -u}), then {@code rmdir}. Both are best-effort
      * ({@code 2>/dev/null}) so an already-unmounted or missing mountpoint is not an error — the idle sweep
      * must be able to run this without a stray failure when a mount vanished on its own.
+     *
+     * <p>The command then <em>re-probes</em> and reports the truth: {@code UNMOUNTED} only when the mountpoint
+     * is genuinely no longer a mount, {@code STILL_MOUNTED} otherwise. A FUSE unmount routinely fails with
+     * "Device or resource busy" while a handle is still open, and {@code borg umount}'s {@code 2>/dev/null}
+     * hides that — the command would exit 0 regardless. Distinct post-check tokens let the sweep tell a real
+     * release from a failed one, so it can keep the mount tracked and retry rather than forgetting it (a
+     * forgotten mount is how a {@code borg mount} orphans and holds the repository lock forever). Read with
+     * {@link #parseUnmounted}.
      */
     public static String umount(String mountpoint) {
         String qMount = singleQuote(mountpoint);
         return "borg umount " + qMount + " 2>/dev/null; "
-            + "rmdir " + qMount + " 2>/dev/null; echo UNMOUNTED";
+            + "rmdir " + qMount + " 2>/dev/null; "
+            + "mountpoint -q " + qMount + " && echo STILL_MOUNTED || echo UNMOUNTED";
+    }
+
+    /**
+     * Read an {@link #umount} run's post-check: {@code true} only when it reported {@code UNMOUNTED} (the
+     * mount is genuinely gone). {@code STILL_MOUNTED}, blank or null all read as "not released", so a failed
+     * unmount keeps the mount tracked for a later retry. Whether a release actually took is a domain reading
+     * of the command's output, so it lives here. Never throws.
+     */
+    public static boolean parseUnmounted(String stdout) {
+        return stdout != null && stdout.contains("UNMOUNTED");
     }
 
     /**
@@ -272,6 +292,41 @@ public final class BorgCommand {
     /** Read an {@link #isMounted} probe: {@code IS_MOUNTED} means the archive is already mounted. */
     public static boolean parseMounted(String stdout) {
         return stdout != null && stdout.contains("IS_MOUNTED");
+    }
+
+    /**
+     * List the archive mounts that are actually live under a machine's {@code <workDir>/mounts} — one
+     * {@code MOUNT:<mountpoint>} line per subdirectory that is a real mount, then a {@code MOUNTS_LISTED}
+     * marker so an empty result is distinguishable from a failed run. This is how mount tracking is
+     * reconciled with reality after a Vaier restart: the in-memory registry does not survive a restart, so a
+     * {@code borg mount} left live on a host would otherwise never be swept. Asking the host what is mounted
+     * lets Vaier adopt and reap those orphans (which hold the repository lock and block backups). A missing
+     * mounts dir simply lists nothing. Read with {@link #parseArchiveMounts}.
+     */
+    public static String listArchiveMounts(String workDir) {
+        String mountsDir = singleQuote(workDir + "/mounts");
+        return "for m in " + mountsDir + "/*; do "
+            + "mountpoint -q \"$m\" 2>/dev/null && echo \"MOUNT:$m\"; "
+            + "done 2>/dev/null; echo MOUNTS_LISTED";
+    }
+
+    /**
+     * Read a {@link #listArchiveMounts} run into the mountpoints it reported — every {@code MOUNT:<path>}
+     * line, in order. Blank, null, or a bare {@code MOUNTS_LISTED} marker mean no live mounts. Which lines
+     * name a mount is a domain reading of the command's output, so it lives here. Never throws.
+     */
+    public static java.util.List<String> parseArchiveMounts(String stdout) {
+        if (stdout == null) {
+            return java.util.List.of();
+        }
+        java.util.List<String> mounts = new java.util.ArrayList<>();
+        for (String line : stdout.split("\\R")) {
+            String trimmed = line.strip();
+            if (trimmed.startsWith("MOUNT:")) {
+                mounts.add(trimmed.substring("MOUNT:".length()));
+            }
+        }
+        return mounts;
     }
 
     /**
@@ -781,10 +836,20 @@ public final class BorgCommand {
         return borg + " compact " + singleQuote(repo.borgRepoUrl(server));
     }
 
-    private static String buildCreateBody(BackupServer server, BackupJob job, BackupRepository repo, String borg) {
+    private static String buildCreateBody(BackupServer server, BackupJob job, BackupRepository repo, String borg,
+                                          String workDir) {
         StringBuilder cmd = new StringBuilder(borg + " create --json --stats --compression ")
             .append(job.compression())
             .append(" --exclude-caches");
+        // Keep borg's own state and Vaier's work dir out of every archive, so a run whose source paths
+        // include a user home comes back a clean SUCCESS rather than a spurious WARNING:
+        //   * <workDir> holds the 0600 pass file (the repo passphrase must NEVER be archived) and, for an
+        //     as-root run, borg's BORG_BASE_DIR (its cache + security dir) under <workDir>/root;
+        //   * '*/.config/borg' is a non-root run's borg security dir, whose per-repo "nonce" file changes
+        //     mid-run — borg would otherwise report "file changed while we backed it up" and exit WARNING.
+        // The pattern is single-quoted so the shell never globs it; borg applies it as an fnmatch exclude.
+        cmd.append(" --exclude ").append(singleQuote(workDir));
+        cmd.append(" --exclude ").append(singleQuote("*/.config/borg"));
         for (String exclude : job.excludes()) {
             cmd.append(" --exclude ").append(singleQuote(exclude));
         }

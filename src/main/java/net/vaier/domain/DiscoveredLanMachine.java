@@ -15,13 +15,25 @@ import java.util.List;
  * @param openPorts    the probed service ports the host answered on
  * @param relayAnchor  the relay peer id whose LAN this host sits on, or
  *                     {@link LanAnchor#VAIER_SERVER_NAME} for the Vaier server's own LAN
+ * @param ignored      whether the operator has dismissed this host from the discovered list —
+ *                     applied at read time from the ignore-list, so an ignored host stays visible
+ *                     (under "ignored") for the operator to reveal and un-dismiss
  */
 public record DiscoveredLanMachine(
     String ipAddress,
     String hostname,
     List<Integer> openPorts,
-    String relayAnchor
+    String relayAnchor,
+    boolean ignored
 ) {
+    /**
+     * Convenience constructor for a freshly scanned host — not yet flagged against the ignore-list.
+     * The scan produces these; {@link #withIgnored(Collection)} later stamps the flag.
+     */
+    public DiscoveredLanMachine(String ipAddress, String hostname, List<Integer> openPorts, String relayAnchor) {
+        this(ipAddress, hostname, openPorts, relayAnchor, false);
+    }
+
     /** The advisory role guessed from {@link #openPorts}. */
     public LanMachineRole guessedRole() {
         return LanMachineRole.fromOpenPorts(openPorts);
@@ -44,5 +56,23 @@ public record DiscoveredLanMachine(
      */
     public String ignoreKey() {
         return relayAnchor + "|" + ipAddress;
+    }
+
+    /**
+     * True when the operator's ignore-list holds this host's {@link #ignoreKey()} — the parallel of
+     * {@link #isAlreadyRegistered(Collection)} for dismissal rather than registration. The decision
+     * lives here so neither the service nor the controller has to reason about the ignore-list.
+     */
+    public boolean isIgnored(Collection<String> ignoredKeys) {
+        return ignoredKeys.contains(ignoreKey());
+    }
+
+    /**
+     * A copy of this host with its {@link #ignored} flag set from the current ignore-list. Applied at
+     * snapshot read time (ignore happens between scans, with no rescan), so the flag reflects the
+     * operator's latest choice immediately.
+     */
+    public DiscoveredLanMachine withIgnored(Collection<String> ignoredKeys) {
+        return new DiscoveredLanMachine(ipAddress, hostname, openPorts, relayAnchor, isIgnored(ignoredKeys));
     }
 }

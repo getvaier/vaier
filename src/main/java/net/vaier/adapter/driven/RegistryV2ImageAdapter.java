@@ -44,6 +44,10 @@ import java.util.regex.Pattern;
  * <p><b>The cache is not an optimisation.</b> Answers are held for {@value #CACHE_TTL_HOURS} hours, keyed by
  * the fully-qualified image reference, which is what keeps a fleet-wide sweep under the anonymous rate limit.
  * Failures are deliberately <em>not</em> cached: caching "unknown" would let one blip blind Vaier for a day.
+ *
+ * <p>What is cached is the <b>registry's</b> answer, never the local image's digest — the distinction the
+ * whole update-available feature turns on. {@link #resolveDigestNow} is the way past it, for the one caller
+ * whose question a remembered answer cannot honestly answer; the port explains why at length.
  */
 @Component
 @Slf4j
@@ -97,14 +101,34 @@ public class RegistryV2ImageAdapter implements ForResolvingRegistryDigest {
         if (reference == null) {
             return Optional.empty();
         }
-        String key = reference.canonical();
-        CachedDigest cached = cache.get(key);
+        CachedDigest cached = cache.get(reference.canonical());
         if (cached != null && !isStale(cached)) {
             return Optional.of(cached.digest());
         }
+        return fetchAndRemember(reference);
+    }
+
+    /**
+     * The forced read: skip the cache entirely and have the conversation again.
+     *
+     * <p>The refreshed answer <em>replaces</em> the cached one rather than bypassing it, and that matters. A
+     * forced read that left the old answer behind would let the next daily sweep compare the operator's newly
+     * pulled image against the digest from before they pulled — re-reporting, hours later, the very image the
+     * button just confirmed. Bypassing the cache and refreshing it are the same act here.
+     */
+    @Override
+    public Optional<String> resolveDigestNow(ImageReference reference) {
+        if (reference == null) {
+            return Optional.empty();
+        }
+        return fetchAndRemember(reference);
+    }
+
+    private Optional<String> fetchAndRemember(ImageReference reference) {
         Optional<String> digest = fetchDigest(reference);
-        // Only successes are cached: an outage must not blind the next sweep too.
-        digest.ifPresent(d -> cache.put(key, new CachedDigest(d, clock.instant())));
+        // Only successes are remembered: an outage must not blind the next sweep too, and a forced read that
+        // fails must leave the good answer it could not improve on standing.
+        digest.ifPresent(d -> cache.put(reference.canonical(), new CachedDigest(d, clock.instant())));
         return digest;
     }
 

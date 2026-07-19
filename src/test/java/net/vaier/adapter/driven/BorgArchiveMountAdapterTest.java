@@ -125,6 +125,9 @@ class BorgArchiveMountAdapterTest {
             if (cmd.contains("borg mount")) {
                 return ok("MOUNTED");
             }
+            if (cmd.contains("borg umount")) {
+                return ok("UNMOUNTED"); // a clean release
+            }
             return ok(""); // ensure-pass-file and anything else
         });
     }
@@ -204,6 +207,60 @@ class BorgArchiveMountAdapterTest {
 
         verify(ssh).run(any(), contains("borg umount"));
         verify(ssh).run(any(), contains("rmdir '" + MOUNTPOINT + "'"));
+    }
+
+    @Test
+    void unmountIdle_whenTheUnmountFails_keepsTrackingSoALaterSweepRetries() {
+        sshBehaves(false);
+        adapter.mount(MACHINE, ARCHIVE_ID); // touched at 10:00:00
+
+        // The unmount does not take — a FUSE handle is still open, so the mount is still there afterwards.
+        // Dropping it from tracking here is exactly how a mount orphans and holds the repo lock forever.
+        when(ssh.run(any(), contains("borg umount"))).thenReturn(ok("STILL_MOUNTED"));
+
+        now.set(Instant.parse("2026-07-15T10:20:00Z"));
+        adapter.unmountIdle(Duration.ofMinutes(15).toMillis());
+        verify(ssh, org.mockito.Mockito.times(1)).run(any(), contains("borg umount"));
+
+        // Because the release failed, the mount is still tracked and a later sweep tries again.
+        now.set(Instant.parse("2026-07-15T10:40:00Z"));
+        adapter.unmountIdle(Duration.ofMinutes(15).toMillis());
+        verify(ssh, org.mockito.Mockito.times(2)).run(any(), contains("borg umount"));
+    }
+
+    @Test
+    void reconcileMounts_adoptsAnOrphanMountNotInTheRegistry_soTheSweepCanReapIt() {
+        // Simulates a Vaier restart: a borg mount is still live on the host, but the in-memory registry did
+        // not survive the restart, so nothing tracks it and the ordinary idle sweep would never touch it.
+        // Reconciliation must discover it from the host and adopt it into the idle lifecycle.
+        when(jobs.getAll()).thenReturn(List.of(job()));
+        when(ssh.run(any(), any())).thenAnswer(inv -> {
+            String cmd = inv.getArgument(1);
+            if (cmd.contains("MOUNTS_LISTED")) {
+                return ok("MOUNT:" + MOUNTPOINT + "\nMOUNTS_LISTED");
+            }
+            if (cmd.contains("borg umount")) {
+                return ok("UNMOUNTED");
+            }
+            return ok("");
+        });
+
+        adapter.reconcileMounts(); // adopts the orphan, last-accessed now (10:00:00)
+
+        // It now ages out of the idle window and is released like any other tracked mount.
+        now.set(Instant.parse("2026-07-15T10:20:00Z"));
+        adapter.unmountIdle(Duration.ofMinutes(15).toMillis());
+        verify(ssh).run(any(), contains("borg umount '" + MOUNTPOINT + "'"));
+    }
+
+    @Test
+    void releaseAll_unmountsEveryTrackedMount_forAGracefulShutdown() {
+        sshBehaves(false);
+        adapter.mount(MACHINE, ARCHIVE_ID);
+
+        adapter.releaseAll();
+
+        verify(ssh).run(any(), contains("borg umount '" + MOUNTPOINT + "'"));
     }
 
     @Test

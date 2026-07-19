@@ -10,6 +10,7 @@ import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForManagingIgnoredLanMachines;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForScanningLan;
@@ -17,9 +18,11 @@ import net.vaier.domain.port.ForScanningLan.ScannedHost;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,6 +33,14 @@ class LanScannerServiceTest {
     // A recording event publisher so we can assert the completion notification fires.
     private final List<String> events = new ArrayList<>();
     private final ForPublishingEvents recordingEvents = (topic, name, data) -> events.add(name);
+
+    // An in-memory ignore-list the tests can drive through the service's use cases.
+    private final Set<String> ignoredKeys = new LinkedHashSet<>();
+    private final ForManagingIgnoredLanMachines ignoreStore = new ForManagingIgnoredLanMachines() {
+        public Set<String> getIgnoredKeys() { return ignoredKeys; }
+        public void ignore(String key) { ignoredKeys.add(key); }
+        public void unignore(String key) { ignoredKeys.remove(key); }
+    };
 
     private PeerConfiguration relay(String id, String lanCidr) {
         return new PeerConfiguration(id, id, "10.13.13.5", "", MachineType.UBUNTU_SERVER, lanCidr, null, null);
@@ -47,7 +58,8 @@ class LanScannerServiceTest {
         ForResolvingServerLanCidr serverLanCidr = () -> serverCidr;
         ForGettingLanServers lanServers = () -> registered.stream()
             .map(s -> new LanServerView(s, "x")).toList();
-        return new LanScannerService(scanner, peerConfigs, serverLanCidr, lanServers, recordingEvents, executor);
+        return new LanScannerService(scanner, peerConfigs, serverLanCidr, lanServers, ignoreStore,
+            recordingEvents, executor);
     }
 
     /** Runs the scan task inline so the test stays deterministic. */
@@ -144,6 +156,28 @@ class LanScannerServiceTest {
         service.startScan();
 
         assertThat(events).containsExactly("lan-scan-updated");
+    }
+
+    @Test
+    void ignoredMachineStaysInTheSnapshotButFlaggedIgnored() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24")),
+            Map.of("192.168.3.0/24", List.of(new ScannedHost("192.168.3.111", List.of(9100), "printer"))),
+            Optional.empty(), List.of(), INLINE);
+        service.startScan();
+
+        // Ignore happens between scans — no rescan. The flag is applied at snapshot() read time.
+        service.ignore("apalveien5|192.168.3.111");
+
+        assertThat(service.snapshot().machines())
+            .extracting(DiscoveredLanMachine::ipAddress, DiscoveredLanMachine::ignored)
+            .containsExactly(tuple("192.168.3.111", true));
+
+        service.unignore("apalveien5|192.168.3.111");
+
+        assertThat(service.snapshot().machines())
+            .extracting(DiscoveredLanMachine::ipAddress, DiscoveredLanMachine::ignored)
+            .containsExactly(tuple("192.168.3.111", false));
     }
 
     @Test

@@ -57,4 +57,32 @@ public class ImageUpdateTracker {
         Collections.sort(newlyOutOfDate);
         return newlyOutOfDate;
     }
+
+    /**
+     * Fold an <b>update check</b>'s verdicts in — the check the operator asked for, rather than a sweep the
+     * mailer drove. It may <em>clear</em> an image's alert state and it may never <em>consume</em> one, and
+     * that asymmetry is the whole of the rule. Both halves are a real bug if dropped.
+     *
+     * <p><b>Clearing.</b> An image found up to date is forgotten, so if it ever goes stale again the operator
+     * IS told. Without this, confirming a pull would leave the tracker still believing the image is out of
+     * date, and the next genuine staleness would find {@code previous=true} and fire no edge — the operator's
+     * own diligence would have silently disarmed a future alarm. A signal you switched off by checking it is
+     * worse than no signal.
+     *
+     * <p><b>Not consuming.</b> An image found <em>stale</em> is deliberately not recorded, which is why this
+     * is not {@link #update}. Recording it would mark it "seen" without anyone having been told, and the next
+     * daily sweep would then find {@code previous=true} and stay quiet — so pressing the button would have
+     * cost the operator the very email this feature exists to send. Bad news stays the mailer's to break; a
+     * check may only ever clear good news.
+     *
+     * <p>{@link UpdateAvailability#UNKNOWN} clears nothing, for {@link #update}'s reason: a rate-limited
+     * registry is not evidence that anybody pulled anything.
+     */
+    public synchronized void clearUpToDate(Map<String, UpdateAvailability> verdicts) {
+        verdicts.forEach((image, verdict) -> {
+            if (verdict == UpdateAvailability.UP_TO_DATE) {
+                lastKnown.remove(image);
+            }
+        });
+    }
 }

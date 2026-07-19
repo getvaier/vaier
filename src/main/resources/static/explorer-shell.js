@@ -857,39 +857,35 @@
             if (scanning) {
                 body.appendChild(note('Looking across the relay LANs — this can take a minute.', false));
             }
-            if (found.length) {
-                const sorted = found.slice().sort((a, b) =>
-                    discoveredRank(a) - discoveredRank(b) || ipOrder(a.ipAddress).localeCompare(ipOrder(b.ipAddress)));
+            const byUse = (a, b) =>
+                discoveredRank(a) - discoveredRank(b) || ipOrder(a.ipAddress).localeCompare(ipOrder(b.ipAddress));
+            const active = found.filter((d) => !d.ignored).sort(byUse);
+            const ignored = found.filter((d) => d.ignored).sort(byUse);
+            if (active.length) {
                 const list = el('div', 'ex-disc');
-                sorted.forEach((d) => {
-                    const row = el('div', 'ex-disc-row');
-                    const ic = el('span', 'ex-disc-icon');
-                    ic.innerHTML = svg(iconByCategory(d.deviceCategory), 'ex-disc-svg');   // trusted: key is an ICON name
-                    const info = el('div', 'ex-disc-info');
-                    const host = realHostname(d);
-                    const line = el('div', 'ex-disc-line');
-                    const nm = el('span', 'ex-disc-name'); nm.textContent = host || discoveredLabel(d);
-                    line.appendChild(nm);
-                    if (host) {                                    // a real name leads; the guess becomes a chip
-                        const chip = el('span', 'ex-disc-kind'); chip.textContent = discoveredLabel(d);
-                        line.appendChild(chip);
-                    }
-                    const meta = el('span', 'ex-disc-meta');
-                    const bits = [d.ipAddress];
-                    const relay = relayName(d.relayAnchor);
-                    if (relay) bits.push('behind ' + relay);
-                    const hint = portHint(d.openPorts);
-                    if (hint) bits.push(hint);
-                    meta.textContent = bits.join(' · ');
-                    info.append(line, meta);
-                    const acts = el('div', 'ex-lactions is-static');
-                    acts.appendChild(selVerb('server', 'Register', 'ex-btn is-accent', () => registerDiscovered(d)));
-                    row.append(ic, info, acts);
-                    list.appendChild(row);
-                });
+                active.forEach((d) => list.appendChild(discoveredRow(d, [
+                    selVerb('server', 'Register', 'ex-btn is-accent', () => registerDiscovered(d)),
+                    selVerb('cross', 'Ignore', 'ex-btn', () => ignoreDiscovered(d)),
+                ])));
                 body.appendChild(list);
             } else if (!scanning) {
                 body.appendChild(note('No unregistered machines found. Scan to look again.', false));
+            }
+            // The dismissed finds, folded away behind a toggle so a wall of gadgets doesn't crowd the list.
+            if (ignored.length) {
+                const toggle = el('div', 'ex-lactions is-static');
+                toggle.appendChild(selVerb('chev',
+                    (_showIgnoredLan ? 'Hide ignored' : 'Show ignored') + ' (' + ignored.length + ')',
+                    'ex-btn' + (_showIgnoredLan ? ' is-open' : ''),
+                    () => { _showIgnoredLan = !_showIgnoredLan; render(); }));
+                body.appendChild(toggle);
+                if (_showIgnoredLan) {
+                    const list = el('div', 'ex-disc is-ignored');
+                    ignored.forEach((d) => list.appendChild(discoveredRow(d, [
+                        selVerb('check', 'Unignore', 'ex-btn', () => unignoreDiscovered(d)),
+                    ])));
+                    body.appendChild(list);
+                }
             }
         }
 
@@ -1416,6 +1412,27 @@
                 + 'none are running, or the machine is not answering on its Docker port.', false));
             pane.appendChild(body);
             return;
+        }
+
+        // The one place the update check is offered, and it sits above the list for the same reason the LAN
+        // scan's does: it is a "go and re-read what is below" control, and it must be reachable without
+        // scrolling a long list of containers. It is HERE, and only here, because this is where the operator
+        // lands — they pull a whole compose stack on one machine and then look at that machine's containers.
+        // Not on each container's Inspector (they did not pull one image) and not in three places, since the
+        // check is a single fleet-wide act however many buttons front it. The check covers everything Vaier
+        // can see, because the backend's sweep does; a per-machine control would be a lie about what happens.
+        // Hidden in the archive for the same reason the mark is: there is no "now" back there to re-check.
+        if (!S.at) {
+            const act = el('div', 'ex-lactions is-static');
+            const btn = selVerb('refresh', _updateChecking ? 'Checking…' : 'Check the registries now',
+                'ex-btn', () => checkForUpdates());
+            btn.title = 'Ask each registry whether it now serves a newer image for the tag these containers '
+                + 'run. Vaier only reads — it never pulls an image or touches a container.';
+            if (_updateChecking) btn.disabled = true;
+            act.appendChild(btn);
+            body.appendChild(act);
+            const said = updateCheckNote();
+            if (said) body.appendChild(said);
         }
 
         const rows = document.createElement('div');
@@ -1976,6 +1993,66 @@
         UP_TO_DATE: 'Up to date',
         UNKNOWN: 'Vaier cannot tell',
     };
+
+    // --- checking the registries on demand (#57 slice 3) -----------------------------------------------
+    //
+    // The sweep behind the mark runs once a day, which leaves the operator ahead of it: they read the rollup
+    // mail, pull the image, and Vaier goes on saying "update available" for hours about something already
+    // fixed. That lingering mark is corrosive — a mark you know is wrong is a mark you learn to ignore — and
+    // it would eventually cost the whole column its credibility. This is the button that settles it.
+    //
+    // It is a legitimate control on a page that deliberately offers no container verbs (see renderContainer)
+    // for exactly one reason: it acts on VAIER'S OWN KNOWLEDGE, never on a container. It checks. It cannot
+    // pull, cannot restart, and there is no endpoint for it to do either with. Hence "Check the registries
+    // now" rather than "Check for updates": the latter is what every OS updater says immediately before
+    // installing something, and that connotation is the one thing this must not carry.
+    //
+    // Nothing here decides anything. The browser asks the backend to re-take the verdict and renders what it
+    // is told; UpdateAvailability.compare() in the domain remains the only place two digests ever meet.
+    let _updateCheck = null;        // the last outcome, exactly as the backend reported it
+    let _updateChecking = false;
+
+    async function checkForUpdates() {
+        if (_updateChecking || S.at) return;         // the archive has no "now" to re-check against
+        _updateChecking = true;
+        _updateCheck = null;
+        render();
+        try {
+            const res = await fetch('/docker-services/image-updates/check', { method: 'POST' });
+            _updateCheck = res.ok ? await res.json() : { failed: true };
+        } catch (e) {
+            _updateCheck = { failed: true };
+        }
+        _updateChecking = false;
+        // A moved verdict is pushed to every open Explorer on `published-services` (watchServices re-reads
+        // the containers on it). This browser re-reads anyway: the operator who clicked must never be left
+        // waiting on an event to see the answer they personally asked for.
+        await loadContainers();
+    }
+
+    // What Vaier says it did — and it only ever says what actually happened. "Checked, nothing new" and "did
+    // not check, here is when it last did" are different facts, and the backend keeps them apart precisely so
+    // this can too. None of these sentences may imply Vaier changed anything: it read.
+    function updateCheckNote() {
+        if (_updateChecking) return note('Checking the registries…', false);
+        if (!_updateCheck) return null;
+        if (_updateCheck.failed) {
+            return note('Vaier could not reach the registries just now, so the marks below stand as they '
+                + 'were. Nothing on any machine was touched.', true);
+        }
+        if (!_updateCheck.checked) {
+            // The floor refused. Say so plainly rather than painting a tick over a check that never ran — and
+            // say it by reporting WHEN Vaier last looked, which is the fact the backend sent for exactly this
+            // purpose. Spelling the floor's own length out in prose here would copy a domain constant into
+            // English: change UpdateCheckFloor and the sentence quietly becomes false — the same
+            // wrong-but-confident claim this whole feature exists to stop making.
+            return note('Vaier last checked ' + timeAgo(_updateCheck.lastCheckedAt) + ', so it did not ask '
+                + 'again — that answer still stands.', false);
+        }
+        return note(_updateCheck.changed
+            ? 'Checked just now against the registries.'
+            : 'Checked just now against the registries — nothing new.', false);
+    }
 
     // A published service's State is the domain's own (OK / UNKNOWN / anything else is down) — read exactly
     // as the Infrastructure page reads it, so one service cannot be green on one page and red on the other.
@@ -3773,6 +3850,10 @@
         if (!stillInPast) S.at = null;
         // A tick belongs to the listing it was made in; navigating anywhere clears the multi-selection.
         if (key(path) !== key(S.path)) S.sel = new Set();
+        // "Checked just now" is only true just now. It is the receipt for an action, not a fact about the
+        // fleet, so it does not follow the operator around — left on screen it would quietly become a lie,
+        // which is the one thing this feature cannot afford. The verdicts it settled are on the rows already.
+        if (key(path) !== key(S.path)) _updateCheck = null;
         S.path = path;
         if (kindOf(path) === 'shell' && window.TerminalDock) TerminalDock.open(path[1]);
         render();
@@ -3870,6 +3951,7 @@
     // (the backend pushes lan-scan-updated on the vpn-peers stream, so this never polls). A Community instance
     // is refused with 402; the section then simply does not show. Guarded so a re-render can't re-fetch it.
     let _lanScanLoading = false;
+    let _showIgnoredLan = false;   // whether the dismissed finds are revealed under the "Show ignored" toggle
     async function loadLanScan() {
         if (_lanScanLoading) return;
         _lanScanLoading = true;
@@ -3905,6 +3987,18 @@
             description: '', deviceCategory: d.deviceCategory,
         }, 'Registering ' + registerName(d) + '…',
            async () => { await loadFleet(); await loadLanScan(); }, 'Could not register that machine.');
+    }
+
+    // Dismiss a discovered thing so it stops cluttering the list. It survives the next scan (the ignore is
+    // keyed on the relay + address, persisted server-side) and can be brought back under "Show ignored".
+    function ignoreDiscovered(d) {
+        saveJson('/lan-scan/ignore', 'POST', { key: d.ignoreKey },
+            'Ignored ' + registerName(d) + '.', () => loadLanScan(), 'Could not ignore that.');
+    }
+
+    function unignoreDiscovered(d) {
+        saveJson('/lan-scan/unignore', 'POST', { key: d.ignoreKey },
+            registerName(d) + ' is back in the list.', () => loadLanScan(), 'Could not unignore that.');
     }
 
     // --- discovered-machine presentation — lead with WHAT it is, not its reverse-DNS name -----------------
@@ -3972,6 +4066,35 @@
     const DISCOVERED_RANK = { DOCKER_HOST: 0, WEB_UI: 1, SSH_HOST: 2, PRINTER: 4, UNKNOWN: 5 };
     const discoveredRank = (d) => (DISCOVERED_RANK[d.role] === undefined ? 3 : DISCOVERED_RANK[d.role]);
     const ipOrder = (ip) => (ip || '').split('.').map((n) => ('00' + n).slice(-3)).join('');
+
+    // One discovered-machine row: the device icon, its human name (a real hostname if any, else the guessed
+    // kind), a plain-language line (IP · relay · what the ports mean), and the actions handed in.
+    function discoveredRow(d, buttons) {
+        const row = el('div', 'ex-disc-row');
+        const ic = el('span', 'ex-disc-icon');
+        ic.innerHTML = svg(iconByCategory(d.deviceCategory), 'ex-disc-svg');   // trusted: key is an ICON name
+        const info = el('div', 'ex-disc-info');
+        const host = realHostname(d);
+        const line = el('div', 'ex-disc-line');
+        const nm = el('span', 'ex-disc-name'); nm.textContent = host || discoveredLabel(d);
+        line.appendChild(nm);
+        if (host) {                                    // a real name leads; the guess becomes a chip
+            const chip = el('span', 'ex-disc-kind'); chip.textContent = discoveredLabel(d);
+            line.appendChild(chip);
+        }
+        const meta = el('span', 'ex-disc-meta');
+        const bits = [d.ipAddress];
+        const relay = relayName(d.relayAnchor);
+        if (relay) bits.push('behind ' + relay);
+        const hint = portHint(d.openPorts);
+        if (hint) bits.push(hint);
+        meta.textContent = bits.join(' · ');
+        info.append(line, meta);
+        const acts = el('div', 'ex-lactions is-static');
+        buttons.forEach((b) => acts.appendChild(b));
+        row.append(ic, info, acts);
+        return row;
+    }
 
     function watchFleet() {
         const events = new EventSource('/vpn/peers/events');

@@ -44,11 +44,19 @@ public class ImageUpdateWatcher {
 
     private final SweepImageUpdatesUseCase sweep;
     private final NotifyAdminsOfUpdateAvailableUseCase notifier;
-    private final ImageUpdateTracker tracker = new ImageUpdateTracker();
 
-    public ImageUpdateWatcher(SweepImageUpdatesUseCase sweep, NotifyAdminsOfUpdateAvailableUseCase notifier) {
+    /**
+     * Injected rather than owned since #57 slice 3: the operator's own update check clears an image's alert
+     * state once it confirms a pull, so the check and this watcher must share one memory. See
+     * {@code ImageUpdateConfig} for what two instances would cost.
+     */
+    private final ImageUpdateTracker tracker;
+
+    public ImageUpdateWatcher(SweepImageUpdatesUseCase sweep, NotifyAdminsOfUpdateAvailableUseCase notifier,
+                              ImageUpdateTracker tracker) {
         this.sweep = sweep;
         this.notifier = notifier;
+        this.tracker = tracker;
     }
 
     @Scheduled(fixedDelay = ONE_DAY_MS, initialDelay = INITIAL_DELAY_MS)

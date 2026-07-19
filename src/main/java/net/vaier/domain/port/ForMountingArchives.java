@@ -34,4 +34,14 @@ public interface ForMountingArchives {
      * @param idleWindowMillis how long a mount may sit unused before it is released
      */
     void unmountIdle(long idleWindowMillis);
+
+    /**
+     * Reconcile mount tracking with reality: ask each backed-up machine what is actually mounted under its
+     * work dir and adopt any live archive mount the in-memory registry has forgotten, so it re-enters the
+     * idle lifecycle and gets swept. The registry does not survive a Vaier restart, so a {@code borg mount}
+     * left live across a restart would otherwise linger forever — holding the repository's read-lock and
+     * blocking that machine's scheduled backups (the "lock timeout" symptom). Called by a slower scheduled
+     * pass than {@link #unmountIdle}; never throws.
+     */
+    void reconcileMounts();
 }

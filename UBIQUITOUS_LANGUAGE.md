@@ -201,6 +201,8 @@ Avoid: "vhost", "site", "auth provider".
 | **Up to date** | Vaier's verdict on a container's image when its **registry digest** and **image digest** are the same. |
 | **Unknown** (update verdict) | Vaier's verdict on a container's image when it cannot compare the two digests — the registry is unreachable or rate-limited, the image was built locally and has no **registry digest**, or the image is pinned to an exact digest. Distinct from both **update available** and **up to date**: it means unknowable, never either answer. The Explorer draws no mark for it, so the absence of a mark means either **up to date** or **unknown** and is not a claim that an image is current; a container's Inspector names the verdict in words to carry that difference. |
 | **Update sweep** | The daily pass in which Vaier asks each **registry** for the current digest of every running container's image and settles each one's verdict. |
+| **Update check** | An **update sweep** the operator asked for rather than the daily schedule, from **Check the registries now** in the Explorer. Fleet-wide, and always fresh: it re-reads the containers and refuses every remembered **registry digest**, so it can never answer from before the operator's pull. Read-only like the rest of **update available** — it checks, it never pulls. |
+| **Update check floor** | The minimum interval between two **update checks**. A check inside it is **coalesced**: Vaier asks nothing and reports when it last really looked, rather than claiming to have checked. |
 | **Update-available alert** | Email sent to every **admin**-role **access entry** naming the images that have newly become **update available** — one mail per **update sweep**, however many images it names. |
 | **Wireguard out of date** | Badge on a peer card whose running wireguard image differs from `WireguardClientImage.EXPECTED`. Operator action: re-download the client compose and redeploy. |
 
@@ -281,6 +283,7 @@ These pairs come up often. Use the left, never the right.
 | public host | server hostname, our IP |
 | update available | outdated, stale, drift, upgrade available (all fine internally about *digests*; never the operator-facing name) |
 | image digest | image id, image sha (means the config sha, which no registry serves) |
+| update check | refresh, re-sync, "check for updates" (the last is what every OS updater says immediately before installing something — Vaier only ever reads) |
 
 ---
 

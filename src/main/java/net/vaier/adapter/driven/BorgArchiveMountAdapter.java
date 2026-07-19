@@ -182,17 +182,70 @@ public class BorgArchiveMountAdapter implements ForMountingArchives {
         }
     }
 
-    /** Unmount one idle mount and forget it. A failure is logged, not thrown — the sweep must not break. */
+    @Override
+    public void reconcileMounts() {
+        // Distinct backed-up machines: a machine may have more than one job, but its mounts all live under
+        // the one work dir, so probe each machine once.
+        for (String machineName : jobs.getAll().stream().map(BackupJob::machineName).distinct().toList()) {
+            adoptOrphanMountsOn(machineName);
+        }
+    }
+
+    /**
+     * Ask one machine what is really mounted under its work dir and adopt any archive mount the registry has
+     * forgotten (last-accessed now, so it gets a full idle window before the sweep releases it — never
+     * racing a mount the current process just made). Best-effort per machine: an unreachable host is skipped,
+     * never allowed to break the reconcile of the rest of the fleet.
+     */
+    private void adoptOrphanMountsOn(String machineName) {
+        try {
+            String workDir = workDirResolver.workDirFor(machineName);
+            SshTarget target = sshTargets.resolve(machineName);
+            CommandResult result = ssh.run(target, BorgCommand.listArchiveMounts(workDir));
+            for (String mountpoint : BorgCommand.parseArchiveMounts(result.stdout())) {
+                LiveMount adopted = new LiveMount(machineName, new MountedArchive(mountpoint), clock.instant());
+                if (liveMounts.putIfAbsent(mountpoint, adopted) == null) {
+                    log.info("Adopted orphaned archive mount {} on {} for reaping", mountpoint, machineName);
+                }
+            }
+        } catch (RuntimeException e) {
+            log.debug("Could not reconcile archive mounts on {}: {}", machineName, e.getMessage());
+        }
+    }
+
+    /**
+     * Release every tracked mount on a graceful shutdown, so a redeploy does not strand a live {@code borg
+     * mount} holding the repository lock. Best-effort — {@link #releaseMount} never throws — and a hard kill
+     * that skips this is caught afterwards by {@link #reconcileMounts} on the next start.
+     */
+    @jakarta.annotation.PreDestroy
+    public void releaseAll() {
+        for (LiveMount live : List.copyOf(liveMounts.values())) {
+            releaseMount(live);
+        }
+    }
+
+    /**
+     * Unmount one idle mount and forget it — but only when the release actually took. A failed unmount (FUSE
+     * busy) or an SSH error leaves the mount <em>tracked</em>, so the next sweep retries; dropping it here
+     * regardless is exactly how a {@code borg mount} orphans and holds the repository lock forever. A failure
+     * is logged, not thrown — the sweep must not break.
+     */
     private void releaseMount(LiveMount live) {
         try {
             SshTarget target = sshTargets.resolve(live.machineName());
-            ssh.run(target, BorgCommand.umount(live.mounted().mountpoint()));
-            log.info("Released idle archive mount {} on {}", live.mounted().mountpoint(), live.machineName());
+            CommandResult result = ssh.run(target, BorgCommand.umount(live.mounted().mountpoint()));
+            if (BorgCommand.parseUnmounted(result.stdout())) {
+                liveMounts.remove(live.mounted().mountpoint());
+                log.info("Released idle archive mount {} on {}", live.mounted().mountpoint(),
+                    live.machineName());
+            } else {
+                log.warn("Idle archive mount {} on {} is still mounted after umount; keeping it tracked to "
+                    + "retry", live.mounted().mountpoint(), live.machineName());
+            }
         } catch (RuntimeException e) {
-            log.debug("Could not release idle mount {} on {}: {}",
+            log.debug("Could not release idle mount {} on {}; keeping it tracked to retry: {}",
                 live.mounted().mountpoint(), live.machineName(), e.getMessage());
-        } finally {
-            liveMounts.remove(live.mounted().mountpoint());
         }
     }
 }

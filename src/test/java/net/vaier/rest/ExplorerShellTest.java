@@ -830,4 +830,145 @@ class ExplorerShellTest {
         // The shield does this with an !S.at gate in JS, and the mark follows the nearer precedent.
         assertThat(updateMarkBody(read("explorer-shell.js"))).contains("S.at");
     }
+
+    // --- 16. #57 slice 3: checking the registries on demand --------------------------------------------
+    //
+    // Slice 2 put the mark on the page but left it up to 24h behind the operator. They read the rollup mail,
+    // SSH in, pull, and then want Vaier to agree — now. A mark you know is wrong is a mark you learn to
+    // ignore, so a stale mark corrodes the whole feature. This is the button that settles it.
+    //
+    // The control is legitimate only because of what it does NOT do: it acts on Vaier's own knowledge and
+    // never on a container. Most of what is pinned here is that distinction holding.
+
+    private static String checkForUpdatesBody(String js) {
+        int from = js.indexOf("async function checkForUpdates(");
+        assertThat(from).as("the update check's handler").isPositive();
+        return js.substring(from, js.indexOf("\n    }", from));
+    }
+
+    @Test
+    void theShell_canAskVaierToCheckTheRegistriesNow() throws IOException {
+        // The endpoint is the one the backend opened, and it is a POST: the check really goes and asks every
+        // registry, which is a side effect with a rate limit behind it.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("/docker-services/image-updates/check");
+        assertThat(checkForUpdatesBody(js)).contains("POST");
+    }
+
+    @Test
+    void theCheckButton_saysItChecks_andCouldNotBeReadAsAPromiseToUpdate() throws IOException {
+        // THE copy rule of the slice, and the reason the container Inspector offers no verbs at all: Vaier has
+        // no endpoint to pull an image or restart a container, so a control that hinted otherwise would be a
+        // dead button — the exact lie renderContainer() exists to refuse. "Check for updates" is the phrasing
+        // every OS updater uses immediately before installing something, and that connotation is precisely
+        // what must not attach here. The label names the read.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("Check the registries now");
+        // and the slice still opens no verb aimed at a container
+        assertThat(js).doesNotContain("/pull").doesNotContain("Pull now").doesNotContain("Update now")
+            .doesNotContain("Update all").doesNotContain("Restart");
+    }
+
+    @Test
+    void theCheckButton_isHonestWhileItWorksAndAfterwards() throws IOException {
+        // Clicking and seeing nothing happen is the failure this button exists to avoid, so it says it is
+        // working; and "nothing new" is a real answer rather than a failure, so it says that too. Neither
+        // sentence may imply Vaier changed anything — it read, and that is all it ever does.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("Checking the registries…");
+        assertThat(js).containsIgnoringCase("nothing new");
+    }
+
+    @Test
+    void aCoalescedCheck_saysVaierDidNotCheck_ratherThanClaimingItDid() throws IOException {
+        // The floor's honesty rule reaching the page. The backend may refuse to re-ask the registries (a
+        // click-spammed forced check is a direct route to a 429, which would degrade every image to unknown
+        // and blind the fleet). When it refuses, the UI must not paint "Checked!" over a check that never
+        // happened — that is the same species of lie as the stale mark, told faster.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains(".checked");
+        assertThat(js).as("it reports when Vaier last really looked").contains("lastCheckedAt");
+    }
+
+    @Test
+    void theCoalescedMessage_readsTheFact_ratherThanRestatingTheFloorsLength() throws IOException {
+        // The floor's duration is a domain constant (UpdateCheckFloor). Spelling it out in English here —
+        // "checked less than a minute ago" — would copy that decision into the browser, where changing
+        // UpdateCheckFloor to five minutes leaves the sentence confidently false. That is precisely the
+        // wrong-but-confident claim this whole feature exists to stop making, so it must not be reintroduced
+        // by the fix for it. lastCheckedAt is on the wire for exactly this reason; the UI renders that.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function updateCheckNote(");
+        assertThat(from).as("the helper that speaks the outcome").isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("the fact the backend sent, not a copy of the rule").contains("lastCheckedAt");
+        assertThat(body).as("no duration restated in prose")
+            .doesNotContain("a minute").doesNotContain("60").doesNotContain("minutes ago");
+    }
+
+    @Test
+    void theCheckResult_isPushed_notPolled() throws IOException {
+        // Hard project rule, and slice 2's known gap: a settled sweep did not repaint an open Explorer. The
+        // backend publishes on `published-services`/`service-updated` — the topic the container payloads
+        // already ride — and watchServices() already re-reads containers on it, so the repaint needs no new
+        // stream and above all no poll.
+        String js = read("explorer-shell.js");
+        assertThat(js).doesNotContain("setInterval");
+        assertThat(js).doesNotContain("setTimeout(checkForUpdates");
+        int from = js.indexOf("function watchServices(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("the stream that carries a re-checked verdict home").contains("service-updated");
+    }
+
+    @Test
+    void theShell_stillNeverDecidesWhetherAnUpdateIsAvailable() throws IOException {
+        // Slice 2's central invariant, re-pinned now that the browser can trigger the decision. Triggering a
+        // check is not making one: the handler asks the backend and reads the answer, and must not acquire a
+        // taste for digests on the way.
+        String body = checkForUpdatesBody(read("explorer-shell.js"));
+        assertThat(body).doesNotContain("digest").doesNotContain("sha256");
+        assertThat(body).as("the verdict is the domain's; the browser only asks for it to be re-taken")
+            .doesNotContain("UPDATE_AVAILABLE");
+    }
+
+    @Test
+    void theCheck_isOneControl_whereTheOperatorLandsAfterPulling() throws IOException {
+        // Judgement, pinned so it is argued rather than drifted into. The operator's move is
+        // `docker compose pull && up -d` on ONE machine and then a look at that machine's containers — so the
+        // control belongs on that list, not on each container's Inspector (they pulled a whole stack, not one
+        // image) and not in three places. The check it triggers is fleet-wide because the backend's sweep is:
+        // it re-scrapes and re-asks for everything Vaier can see, and a per-machine button would be a lie
+        // about what actually happens.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderContainers(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function renderContainer(", from));
+        assertThat(body).as("the control sits on the machine's containers list").contains("checkForUpdates");
+
+        assertThat(js.split("checkForUpdates\\(", -1).length - 1)
+            .as("the handler, its one call site, and nothing else").isEqualTo(2);
+    }
+
+    @Test
+    void theCheck_isNotOfferedWhileBrowsingTheArchive() throws IOException {
+        // Same rule as the mark it re-evaluates: the registry's answer is a fact about now, and offering to
+        // re-check it against a filesystem as it stood in March would be a claim about a moment that passed.
+        assertThat(checkForUpdatesBody(read("explorer-shell.js"))).contains("S.at");
+    }
+
+    @Test
+    void theCheckReceipt_doesNotFollowTheOperatorAround() throws IOException {
+        // "Checked just now" is true for about a minute. It is the receipt for an action, not a fact about the
+        // fleet, so navigating away drops it — otherwise it sits there going quietly stale on a pane the
+        // operator never checked, which is precisely the class of lie this whole feature exists to stop
+        // telling. The verdicts the check settled are on the container rows themselves and do persist.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function go(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("go() drops the receipt, as it already drops the selection")
+            .contains("_updateCheck = null");
+    }
 }

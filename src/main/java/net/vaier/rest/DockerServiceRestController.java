@@ -4,14 +4,17 @@ import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContaine
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
+import net.vaier.application.CheckForImageUpdatesUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.MachineStatus;
 import net.vaier.domain.Server;
+import net.vaier.domain.UpdateCheckOutcome;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,15 +27,18 @@ public class DockerServiceRestController {
     private final DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
     private final DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
     private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
+    private final CheckForImageUpdatesUseCase checkForImageUpdatesUseCase;
 
     public DockerServiceRestController(GetServerInfoUseCase getServerInfoUseCase,
                                        DiscoverPeerContainersUseCase discoverPeerContainersUseCase,
                                        DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase,
-                                       GetLanServerScrapeUseCase getLanServerScrapeUseCase) {
+                                       GetLanServerScrapeUseCase getLanServerScrapeUseCase,
+                                       CheckForImageUpdatesUseCase checkForImageUpdatesUseCase) {
         this.getServerInfoUseCase = getServerInfoUseCase;
         this.discoverPeerContainersUseCase = discoverPeerContainersUseCase;
         this.discoverVaierServerContainersUseCase = discoverVaierServerContainersUseCase;
         this.getLanServerScrapeUseCase = getLanServerScrapeUseCase;
+        this.checkForImageUpdatesUseCase = checkForImageUpdatesUseCase;
     }
 
     @GetMapping
@@ -68,4 +74,28 @@ public class DockerServiceRestController {
     public ResponseEntity<List<LanServerContainers>> discoverLanServerContainers() {
         return ResponseEntity.ok(getLanServerScrapeUseCase.getLanServerContainers());
     }
+
+    /**
+     * Check the fleet's images against their registries right now, because the operator asked (#57 slice 3).
+     *
+     * <p>POST, not GET: it really does go and ask every registry, and that is a side effect with a rate limit
+     * behind it. It remains the only mutating thing here that touches no container — Vaier still has no
+     * endpoint to pull an image or restart anything, and this opens none. It acts on Vaier's own knowledge.
+     *
+     * <p>Authenticated like every other admin endpoint, via Traefik forward-auth. Nothing to add: it is not on
+     * any anonymous path, so an unauthenticated caller cannot spend the fleet's rate limit.
+     */
+    @PostMapping("/image-updates/check")
+    public ResponseEntity<UpdateCheckResponse> checkForImageUpdates() {
+        UpdateCheckOutcome outcome = checkForImageUpdatesUseCase.checkForImageUpdates();
+        return ResponseEntity.ok(new UpdateCheckResponse(
+            outcome.checked(), outcome.changed(), outcome.lastCheckedAt().toString()));
+    }
+
+    /**
+     * @param checked       whether the registries were really asked, or the check was coalesced by the floor
+     * @param changed       whether any verdict moved
+     * @param lastCheckedAt when Vaier last really looked, ISO-8601 — the honest answer for a coalesced check
+     */
+    record UpdateCheckResponse(boolean checked, boolean changed, String lastCheckedAt) {}
 }

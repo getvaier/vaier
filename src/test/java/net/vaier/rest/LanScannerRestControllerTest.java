@@ -3,9 +3,12 @@ package net.vaier.rest;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.ScanStatus;
+import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
+import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.rest.LanScannerRestController.DiscoveredMachineDto;
+import net.vaier.rest.LanScannerRestController.IgnoreRequest;
 import net.vaier.rest.LanScannerRestController.LanScanResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +29,8 @@ class LanScannerRestControllerTest {
 
     @Mock ScanLanUseCase scanLanUseCase;
     @Mock GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
+    @Mock IgnoreLanMachineUseCase ignoreLanMachineUseCase;
+    @Mock UnignoreLanMachineUseCase unignoreLanMachineUseCase;
 
     @InjectMocks LanScannerRestController controller;
 
@@ -51,7 +56,37 @@ class LanScannerRestControllerTest {
         assertThat(response.getBody().status()).isEqualTo("IDLE");
         assertThat(response.getBody().lastScanCompleted()).isEqualTo("2026-06-04T12:00:00Z");
         assertThat(response.getBody().machines()).containsExactly(new DiscoveredMachineDto(
-            "192.168.3.10", "docker01", List.of(2375, 22), "DOCKER_HOST", "apalveien5", "SERVER"));
+            "192.168.3.10", "docker01", List.of(2375, 22), "DOCKER_HOST", "apalveien5", "SERVER",
+            false, "apalveien5|192.168.3.10"));
+    }
+
+    @Test
+    void getCarriesTheIgnoredFlagAndIgnoreKey() {
+        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
+            ScanStatus.IDLE,
+            List.of(new DiscoveredLanMachine("192.168.3.111", "printer", List.of(9100), "apalveien5", true)),
+            Instant.parse("2026-06-04T12:00:00Z")));
+
+        var machine = controller.getSnapshot().getBody().machines().get(0);
+
+        assertThat(machine.ignored()).isTrue();
+        assertThat(machine.ignoreKey()).isEqualTo("apalveien5|192.168.3.111");
+    }
+
+    @Test
+    void ignoreEndpointCallsTheUseCaseAndReturns204() {
+        ResponseEntity<Void> response = controller.ignore(new IgnoreRequest("apalveien5|192.168.3.111"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(ignoreLanMachineUseCase).ignore("apalveien5|192.168.3.111");
+    }
+
+    @Test
+    void unignoreEndpointCallsTheUseCaseAndReturns204() {
+        ResponseEntity<Void> response = controller.unignore(new IgnoreRequest("apalveien5|192.168.3.111"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(204);
+        verify(unignoreLanMachineUseCase).unignore("apalveien5|192.168.3.111");
     }
 
     @Test

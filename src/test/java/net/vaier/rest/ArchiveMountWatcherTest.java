@@ -22,4 +22,16 @@ class ArchiveMountWatcherTest {
 
         verify(mounts).unmountIdle(ArchiveMountWatcher.IDLE_WINDOW_MS);
     }
+
+    @Test
+    void reconcile_adoptsOrphanMountsLeftBehindByARestart() {
+        // The idle sweep only knows the in-memory registry, which does not survive a restart. A separate,
+        // slower reconcile asks the fleet what is really mounted and adopts orphans so they get reaped.
+        ForMountingArchives mounts = mock(ForMountingArchives.class);
+        ArchiveMountWatcher watcher = new ArchiveMountWatcher(mounts);
+
+        watcher.reconcileOrphanMounts();
+
+        verify(mounts).reconcileMounts();
+    }
 }

@@ -3,6 +3,7 @@ package net.vaier.rest;
 import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.domain.ImageUpdateRollup;
+import net.vaier.domain.ImageUpdateTracker;
 import net.vaier.domain.UpdateAvailability;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,9 @@ class ImageUpdateWatcherTest {
     void setUp() {
         sweep = mock(SweepImageUpdatesUseCase.class);
         notifier = mock(NotifyAdminsOfUpdateAvailableUseCase.class);
-        watcher = new ImageUpdateWatcher(sweep, notifier);
+        // The tracker is injected since #57 slice 3 — the operator's own update check shares this memory, so
+        // that a confirmed pull clears the alert state the watcher would otherwise keep believing.
+        watcher = new ImageUpdateWatcher(sweep, notifier, new ImageUpdateTracker());
     }
 
     private static Map<String, UpdateAvailability> verdicts(Object... pairs) {

@@ -203,6 +203,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetLanServerScrapeUseCase getLanServerScrapeUseCase;
 
+    @MockBean
+    protected CheckForImageUpdatesUseCase checkForImageUpdatesUseCase;
+
     // --- LAN server use cases ---
     @MockBean
     protected RegisterLanServerUseCase registerLanServerUseCase;
@@ -317,6 +320,12 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
+
+    @MockBean
+    protected IgnoreLanMachineUseCase ignoreLanMachineUseCase;
+
+    @MockBean
+    protected UnignoreLanMachineUseCase unignoreLanMachineUseCase;
 
     // --- Fleet backup (Enterprise) CRUD use cases ---
     @MockBean

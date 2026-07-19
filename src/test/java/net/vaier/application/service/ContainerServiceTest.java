@@ -19,20 +19,30 @@ import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForResolvingPeerNames;
+import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingRegistryDigest;
+import net.vaier.domain.ImageUpdateTracker;
 import net.vaier.domain.UpdateAvailability;
+import net.vaier.domain.UpdateCheckOutcome;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -51,14 +61,28 @@ class ContainerServiceTest {
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock ForGettingLanServers forGettingLanServers;
     @Mock ForResolvingRegistryDigest forResolvingRegistryDigest;
+    @Mock ForPublishingEvents forPublishingEvents;
 
     ContainerService service;
+    ImageUpdateTracker tracker;
+    MutableClock clock;
+
+    /** Wind-forward clock, so the update check's 60s floor can be proven without sleeping. */
+    private static class MutableClock extends Clock {
+        private Instant now = Instant.parse("2026-07-17T12:00:00Z");
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
+        void advance(Duration by) { now = now.plus(by); }
+    }
 
     @BeforeEach
     void setUp() {
+        tracker = new ImageUpdateTracker();
+        clock = new MutableClock();
         service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
             forResolvingPeerNames, forGettingPeerConfigurations, forGettingLanServers,
-            forResolvingRegistryDigest, VAIER_NETWORK, GATEWAY_IP);
+            forResolvingRegistryDigest, forPublishingEvents, tracker, clock, VAIER_NETWORK, GATEWAY_IP);
     }
 
     // --- Update available (#57) ---
@@ -125,6 +149,182 @@ class ContainerServiceTest {
 
         assertThat(service.sweepImageUpdates())
             .containsEntry("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    // --- #57 slice 3: the check the operator asked for ---
+
+    @Test
+    void checkForImageUpdates_reScrapesTheContainersBeforeSweeping_soItReadsThePostPullDigest() {
+        // The 30s trap. The local digest comes from the container scrape, and the operator clicks SECONDS
+        // after pulling — so the snapshot in hand is very likely the pre-pull one. Sweeping that would compare
+        // yesterday's local digest against a fresh registry answer and report the update they had just
+        // applied as still pending: the button confirming the mark it was pressed to clear.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:new")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:new"));
+        service.refresh();                      // the scheduler's scrape — taken before the operator pulled
+
+        UpdateCheckOutcome outcome = service.checkForImageUpdates();
+
+        assertThat(outcome.checked()).isTrue();
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UP_TO_DATE);
+    }
+
+    @Test
+    void checkForImageUpdates_agreesWithTheOperatorWhoJustPulled_evenIfTheRememberedAnswerIsStale() {
+        // THE inversion, through the service. The remembered registry answer is X, fetched hours ago; upstream
+        // has since moved to Y; the operator pulled and now runs Y. A check that accepted the remembered
+        // answer would compare local Y against registry X, find a difference, and report UPDATE AVAILABLE on
+        // the image they just updated — Vaier looking broken at the exact moment it is being audited.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:Y")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:Y"));
+
+        service.checkForImageUpdates();
+
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UP_TO_DATE);
+        verify(forResolvingRegistryDigest, never()).resolveDigest(any());
+    }
+
+    @Test
+    void checkForImageUpdates_stampsTheSnapshotSoAnOpenExplorerReadsTheNewVerdict() {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:new"));
+
+        service.checkForImageUpdates();
+
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UPDATE_AVAILABLE);
+    }
+
+    @Test
+    void checkForImageUpdates_pushesTheResultOnTheTopicTheContainerPayloadsAlreadyRideSoTheExplorerRepaints() {
+        // Clicking and seeing nothing change is the whole failure of this feature. The verdict moved, so every
+        // open Explorer must be told to re-read — on the same topic/event DockerEventListener already uses for
+        // a container changing state, because the shell listens to exactly that and the frontend never polls.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:new"));
+
+        service.checkForImageUpdates();
+
+        verify(forPublishingEvents).publish(eq("published-services"), eq("service-updated"), any());
+    }
+
+    @Test
+    void checkForImageUpdates_pushesNothingWhenNoVerdictMoved() {
+        // The commonest outcome: they pulled, Vaier already agreed. Waking every open Explorer in the fleet to
+        // redraw an identical page is noise, and the browser that clicked learns "nothing new" from its own
+        // response rather than from an event.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:same")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:same"));
+        service.checkForImageUpdates();                     // settles the verdict at UP_TO_DATE (a change)
+        clearInvocations(forPublishingEvents);
+        clock.advance(Duration.ofSeconds(90));              // past the floor, so this really checks again
+
+        UpdateCheckOutcome second = service.checkForImageUpdates();
+
+        assertThat(second.checked()).isTrue();
+        assertThat(second.changed()).isFalse();
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
+    }
+
+    @Test
+    void checkForImageUpdates_insideTheFloor_asksTheRegistriesNothingAndDoesNotClaimToHaveChecked() {
+        // The rate-limit floor. A forced check bypasses every cache, so a click-spammed button is a direct
+        // route to a 429 — which degrades every image to unknown and blinds the fleet at the worst moment.
+        // Refuse honestly rather than re-issue: the operator is told when Vaier last really looked.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:new"));
+        Instant firstCheckedAt = service.checkForImageUpdates().lastCheckedAt();
+
+        clock.advance(Duration.ofSeconds(5));
+        UpdateCheckOutcome second = service.checkForImageUpdates();
+
+        assertThat(second.checked()).as("it did not check, and must not say it did").isFalse();
+        assertThat(second.lastCheckedAt()).isEqualTo(firstCheckedAt);
+        verify(forResolvingRegistryDigest, times(1)).resolveDigestNow(any());
+    }
+
+    @Test
+    void checkForImageUpdates_insideTheFloor_doesNotReScrapeTheFleetEither() {
+        // A refused check must cost nothing at all. Re-scraping every peer's Docker daemon over the VPN on a
+        // rejected click would move the abuse from the registries onto the fleet.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:new"));
+        service.checkForImageUpdates();
+
+        service.checkForImageUpdates();
+
+        verify(forGettingServerInfo, times(1)).getServicesWithExposedPorts(any());
+    }
+
+    @Test
+    void checkForImageUpdates_clearsTheAlertStateOfAnImageItConfirmsUpToDate() {
+        // The manual check must not permanently silence a future alert. Once the check has confirmed the pull,
+        // the tracker must have forgotten the image — so if it goes stale again months later, the edge fires
+        // and the operator IS mailed. (The tracker's own test proves the rule; this proves it is wired.)
+        tracker.update(java.util.Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE));
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:same")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:same"));
+
+        service.checkForImageUpdates();
+
+        assertThat(tracker.update(
+            java.util.Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+            .as("stale again after a confirmed pull — that is news again")
+            .containsExactly("vaultwarden/server:latest");
+    }
+
+    @Test
+    void checkForImageUpdates_doesNotEatTheRollupMailForAnImageItFindsNewlyStale() {
+        // A check is the operator confirming their own pull, not a stand-in for the mailer. If it recorded a
+        // newly stale image as "seen", the next daily sweep would find previous=true and stay silent — so
+        // pressing the button would have cost them the very email #57 exists to send.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any())).thenReturn(Optional.of("sha256:new"));
+
+        service.checkForImageUpdates();
+
+        assertThat(tracker.update(
+            java.util.Map.of("vaultwarden/server:latest", UpdateAvailability.UPDATE_AVAILABLE)))
+            .as("the mail the check must not have swallowed")
+            .containsExactly("vaultwarden/server:latest");
+    }
+
+    @Test
+    void checkForImageUpdates_survivesADeadRegistryAndSaysItChecked() {
+        // Total, like the daily sweep. A button that 500s because one registry is down would be a worse lie
+        // than the stale mark it is clearing.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(imaged("vaultwarden", "vaultwarden/server:latest", "sha256:old")));
+        when(forResolvingRegistryDigest.resolveDigestNow(any()))
+            .thenThrow(new RuntimeException("rate limited"));
+
+        UpdateCheckOutcome outcome = service.checkForImageUpdates();
+
+        assertThat(outcome.checked()).isTrue();
+        assertThat(service.discover()).singleElement()
+            .extracting(DockerService::updateAvailable).isEqualTo(UpdateAvailability.UNKNOWN);
     }
 
     @Test

@@ -2,13 +2,16 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
+import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
+import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForManagingIgnoredLanMachines;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForScanningLan;
@@ -37,7 +40,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Service
 @Slf4j
-public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachinesUseCase {
+public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachinesUseCase,
+    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase {
 
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-scan-updated";
@@ -46,6 +50,7 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
     private final ForGettingPeerConfigurations peerConfigurations;
     private final ForResolvingServerLanCidr serverLanCidr;
     private final ForGettingLanServers lanServers;
+    private final ForManagingIgnoredLanMachines ignoredMachines;
     private final ForPublishingEvents events;
     private final Executor scanExecutor;
 
@@ -58,9 +63,10 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
                              ForGettingPeerConfigurations peerConfigurations,
                              ForResolvingServerLanCidr serverLanCidr,
                              ForGettingLanServers lanServers,
+                             ForManagingIgnoredLanMachines ignoredMachines,
                              ForPublishingEvents events) {
         // A single-thread executor: scans are serialised and never pile up on the request threads.
-        this(scanner, peerConfigurations, serverLanCidr, lanServers, events,
+        this(scanner, peerConfigurations, serverLanCidr, lanServers, ignoredMachines, events,
             Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "lan-scanner");
                 t.setDaemon(true);
@@ -72,12 +78,14 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
                       ForGettingPeerConfigurations peerConfigurations,
                       ForResolvingServerLanCidr serverLanCidr,
                       ForGettingLanServers lanServers,
+                      ForManagingIgnoredLanMachines ignoredMachines,
                       ForPublishingEvents events,
                       Executor scanExecutor) {
         this.scanner = scanner;
         this.peerConfigurations = peerConfigurations;
         this.serverLanCidr = serverLanCidr;
         this.lanServers = lanServers;
+        this.ignoredMachines = ignoredMachines;
         this.events = events;
         this.scanExecutor = scanExecutor;
     }
@@ -103,7 +111,23 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
     @Override
     public LanScanSnapshot snapshot() {
         ScanStatus status = scanning.get() ? ScanStatus.SCANNING : ScanStatus.IDLE;
-        return new LanScanSnapshot(status, lastResults, lastScanCompleted);
+        // Ignore happens between scans (no rescan), so the ignored flag is applied at read time —
+        // the domain owns the decision. Ignored hosts stay visible so the UI can offer Unignore.
+        Set<String> ignoredKeys = ignoredMachines.getIgnoredKeys();
+        List<DiscoveredLanMachine> flagged = lastResults.stream()
+            .map(m -> m.withIgnored(ignoredKeys))
+            .toList();
+        return new LanScanSnapshot(status, flagged, lastScanCompleted);
+    }
+
+    @Override
+    public void ignore(String ignoreKey) {
+        ignoredMachines.ignore(ignoreKey);
+    }
+
+    @Override
+    public void unignore(String ignoreKey) {
+        ignoredMachines.unignore(ignoreKey);
     }
 
     private List<DiscoveredLanMachine> performScan() {

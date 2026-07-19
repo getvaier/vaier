@@ -933,18 +933,23 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 .ex-disc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ex-disc-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .ex-disc-name {
-    color: var(--text); font-size: 14px; font-weight: 500;
+    color: var(--text); font-size: 15px; font-weight: 600;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ex-disc-kind {
-    flex: none; font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+    flex: none; font-family: var(--mono); font-size: 12px; color: var(--text);
     padding: 1px 6px; border: 1px solid var(--border-hi); border-radius: var(--radius-1);
 }
 .ex-disc-meta {
-    color: var(--text-dim); font-family: var(--mono); font-size: 12px;
+    color: var(--text-muted); font-family: var(--mono); font-size: 13px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ex-disc-row .ex-lactions { flex: none; }
+.ex-disc.is-ignored .ex-disc-row { opacity: .72; }
+.ex-disc.is-ignored .ex-disc-name { font-weight: 500; }
+/* the show/hide-ignored disclosure: the chevron turns down when its list is open */
+.ex-btn.is-open .ex-ico { transform: rotate(90deg); }
+.ex-btn .ex-ico { transition: transform .12s ease; }
 button.ex-brepo-name {
     background: none; border: 0; padding: 0;
     font: inherit; color: var(--text); text-align: left; cursor: pointer;
