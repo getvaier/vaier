@@ -54,6 +54,16 @@
     const _phone = window.matchMedia('(max-width: 720px)');
     function isPhone() { return _phone.matches; }
     function termFontSize() { return isPhone() ? 10 : 13; }
+
+    // xterm draws to a canvas and assembles its own font string — it does NOT resolve CSS custom properties.
+    // Handing it 'var(--mono)' left every shell in the browser's default (often proportional) font, and it
+    // measured the character cell against that font too, so the fit computed the wrong column count and the
+    // terminal ran wider than the screen. Resolve the token to its real stack, once, so xterm gets a font it
+    // can actually use and measure.
+    function monoFontStack() {
+        const v = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim();
+        return v || 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    }
     try {
         _phone.addEventListener('change', () => {
             const size = termFontSize();
@@ -99,7 +109,7 @@
         pane.querySelector('.term-pane-head').appendChild(tab);
 
         const term = new Terminal({
-            cursorBlink: true, fontFamily: 'var(--mono, monospace)', fontSize: termFontSize(),
+            cursorBlink: true, fontFamily: monoFontStack(), fontSize: termFontSize(),
             theme: { background: '#000000' }, scrollback: 5000,
         });
         const fit = new FitAddon.FitAddon();
@@ -150,6 +160,7 @@
             const reconnected = state.retries > 0;
             state.retries = 0;
             state.shellMode = null;         // the server re-reports how this connection resolved
+            VaierPanes.beat(state.paneId);  // tell the windows this dock pane holds the session now
             setDot(id, null);
             setStatus(id, null);
             // A fresh connection re-reports both: prompt state as output flows, availability right away.
@@ -192,53 +203,20 @@
         ws.onerror = () => { /* the close handler reports the reason */ };
     }
 
-    // A stable, per-pane id used to name the machine's tmux session. Random per pane so two panes never
-    // share a session; held on the pane's state so every reconnect (including across a Vaier redeploy, the
-    // page stays loaded) sends the same id and reattaches to the same shell.
-    function randomPaneId() {
-        try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* fall back */ }
-        return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-    }
-
     // --- pane ids that outlive the page --------------------------------------------------------------
     //
-    // A pane id names a tmux session on the machine, and that session outlives the browser by design. So the
-    // id has to outlive the browser too: held only in memory, a reload would forget every id, mint fresh ones
-    // on the next open, and strand the old sessions on the host with no way to ever name them again — running
-    // forever, invisible. Persisting the ids means a reload reattaches to the shells you already have instead
-    // of leaking them. An id is released only when its shell is explicitly ended.
-    const PANE_STORE_KEY = 'vaier.terminal.panes';
-
-    function readPaneStore() {
-        try { return JSON.parse(localStorage.getItem(PANE_STORE_KEY)) || {}; } catch (e) { return {}; }
-    }
-    function writePaneStore(store) {
-        try { localStorage.setItem(PANE_STORE_KEY, JSON.stringify(store)); } catch (e) { /* private mode */ }
-    }
-
-    // The pane id to open a shell on `machineName` with: the first id we already own for that machine and are
-    // not already showing (so the shell it names is reattached, not orphaned), else a fresh one.
+    // A pane id names a tmux session on the machine, and that session outlives the browser by design, so the id
+    // has to outlive the browser too. Ownership lives in terminal-panes.js now — shared with the pop-out
+    // windows, so a shell moved between the dock and a window is coordinated (a heartbeat keeps the session
+    // claimed by whichever document holds it, and only an unheld id is ever reused). Held only in memory, a
+    // reload would forget every id and strand the sessions on the host; persisted, a reload reattaches.
     function claimPaneId(machineName) {
-        const store = readPaneStore();
-        const owned = store[machineName] || [];
-        const onScreen = new Set([..._terminals.values()]
-            .filter(s => s.machine === machineName).map(s => s.paneId));
-        const reusable = owned.find(pid => !onScreen.has(pid));
-        if (reusable) return reusable;
-
-        const fresh = randomPaneId();
-        store[machineName] = owned.concat(fresh);
-        writePaneStore(store);
-        return fresh;
+        const onScreen = [..._terminals.values()].filter((s) => s.machine === machineName).map((s) => s.paneId);
+        return VaierPanes.claim(machineName, onScreen);
     }
 
     // The shell for this pane has been ended for good, so stop owning its id.
-    function releasePaneId(machineName, paneId) {
-        const store = readPaneStore();
-        const owned = (store[machineName] || []).filter(pid => pid !== paneId);
-        if (owned.length) store[machineName] = owned; else delete store[machineName];
-        writePaneStore(store);
-    }
+    function releasePaneId(machineName, paneId) { VaierPanes.release(machineName, paneId); }
 
     // On a reconnect, wait for the server's shell-mode frame before writing the banner. If it never comes
     // (an older server), fall back to a neutral banner that claims no continuity it can't prove.
@@ -438,6 +416,50 @@
         layout();
         if (_focusedId != null) focusTerm(_focusedId);
         notifyChange();
+    }
+
+    // Take a shell out of the dock without ending it — the tmux session on the machine stays alive and the id
+    // stays owned, because a pop-out is handing the session to a window, not closing it. This is closeShell
+    // minus the end-shell frame and minus releasing the id. The window's heartbeat picks the session up; the
+    // dock's stops, so the claim passes to the window without a gap either side could reuse.
+    function detachShell(id) {
+        const s = _terminals.get(id);
+        if (!s) return;
+        if (_menu && _menu.id === id) closeTabMenu();
+        clearTimeout(s.reconnectTimer);
+        clearTimeout(s.bannerTimer);
+        clearTimeout(s.loginScanTimer);
+        if (s.ws) try { s.ws.onclose = null; s.ws.close(); } catch (e) { /* ignore */ }
+        if (s.term) try { s.term.dispose(); } catch (e) { /* ignore */ }
+        if (s.pane && s.pane.parentNode) s.pane.parentNode.removeChild(s.pane);
+        if (s.tab && s.tab.parentNode) s.tab.parentNode.removeChild(s.tab);
+        _terminals.delete(id);
+        syncWakeLock();
+        removeFromGrid(id);
+        if (_maximizedId === id) _maximizedId = null;
+        if (_focusedId === id) _focusedId = gridIds()[0] ?? null;
+        layout();
+        if (_focusedId != null) focusTerm(_focusedId);
+        notifyChange();
+    }
+
+    // Move this shell into its own browser window — a full-window terminal the operator can size and place
+    // wherever they like, and have several of at once. The window reattaches to this exact tmux session (its id
+    // travels in the URL), so nothing is lost. Opened from the tab-menu click, which is the user gesture a
+    // browser needs to let window.open through; if it is blocked anyway, the pane stays put and says so.
+    function popOut(id) {
+        const s = _terminals.get(id);
+        if (!s) return;
+        const url = 'terminal.html?machine=' + encodeURIComponent(s.machine)
+            + '&pane=' + encodeURIComponent(s.paneId);
+        // `popup` drops the browser's tab strip and address bar; the pane's own id names the window so a
+        // second pop-out of the same shell focuses its window rather than opening another.
+        const win = window.open(url, 'vaier-shell-' + encodeURIComponent(s.paneId), 'popup,width=1024,height=680');
+        if (!win) {
+            setStatus(id, 'Your browser blocked the pop-out window. Allow pop-ups for Vaier and try again.', true);
+            return;
+        }
+        detachShell(id);
     }
 
     // Render the grid: a vertical stack of rows (each a horizontal strip of panes) with a drag-divider
@@ -958,6 +980,12 @@
             },
             run: (id) => toggleMaximize(id),
         },
+        {
+            glyph: '⧉', label: 'Open in a window',
+            enabled: () => true,
+            title: () => 'Move this shell into its own resizable browser window',
+            run: (id) => popOut(id),
+        },
     ];
 
     function toggleTabMenu(id, anchor) {
@@ -1255,7 +1283,14 @@
         window.addEventListener('resize', fitVisibleSoon);
     }
 
-    function init() { buildKeyBar(); layout(); initResizeWatch(); }
+    // Keep every open dock shell's session marked live, so a pop-out window (or another tab) knows the dock
+    // still holds it and never reuses its id. The interval simply stops mattering when a shell is detached or
+    // closed — that pane drops out of _terminals, its beat stops, and its id goes stale for reattachment.
+    function beatSessions() {
+        for (const [, s] of _terminals) if (s.ws && s.ws.readyState === WebSocket.OPEN) VaierPanes.beat(s.paneId);
+    }
+
+    function init() { buildKeyBar(); layout(); initResizeWatch(); setInterval(beatSessions, 5000); }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

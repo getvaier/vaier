@@ -25,6 +25,10 @@ class TerminalDockShellLifetimeTest {
         return Files.readString(Path.of("src/main/resources/static/terminal-dock.js"));
     }
 
+    private String panes() throws Exception {
+        return Files.readString(Path.of("src/main/resources/static/terminal-panes.js"));
+    }
+
     @Test
     void closingAPane_tellsTheServerToEndTheShell() throws Exception {
         // Without this frame the server cannot distinguish "I am done" from "my tunnel dropped", and a
@@ -46,9 +50,17 @@ class TerminalDockShellLifetimeTest {
 
     @Test
     void paneIdsSurviveAPageReload() throws Exception {
-        // Held only in memory, a reload would forget every id and orphan its session on the host.
-        assertThat(dock()).contains("localStorage.getItem(PANE_STORE_KEY)");
-        assertThat(dock()).contains("localStorage.setItem(PANE_STORE_KEY");
+        // Held only in memory, a reload would forget every id and orphan its session on the host. Persistence
+        // now lives in the shared terminal-panes.js — so the dock and the pop-out windows own sessions together,
+        // and a shell handed from one to the other is never claimed by both — keyed the same as before so shells
+        // opened before the split still reattach.
+        String panes = panes();
+        assertThat(panes).contains("localStorage.getItem");
+        assertThat(panes).contains("localStorage.setItem");
+        assertThat(panes).contains("'vaier.terminal.panes'");
+        // The dock reaches that persistence only through the shared module now.
+        assertThat(dock()).contains("VaierPanes.claim(");
+        assertThat(dock()).contains("VaierPanes.release(");
     }
 
     @Test

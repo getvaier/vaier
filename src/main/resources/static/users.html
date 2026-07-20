@@ -331,6 +331,12 @@
             }
             .person-actions { justify-content: flex-start; }
             .lastadmin-note { justify-self: start; text-align: left; }
+            /* The Groups row's label rides above its picker instead of stealing width from it. */
+            .groups-cell { flex-direction: column; gap: 0.5rem; }
+            .groups-label { padding-top: 0; }
+            .groups-save { align-self: flex-end; }
+            /* Beat the .chip-input-row .form-input rule so the group field doesn't zoom the page on focus. */
+            .chip-input-row .form-input { font-size: 16px; }
         }
     </style>
 </head>

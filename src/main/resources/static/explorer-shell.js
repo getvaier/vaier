@@ -44,7 +44,7 @@
         shield:  '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M5.7 8l1.6 1.7L10.4 6"/>',
         shieldhalf: '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M3 8.3h10"/>',
         map:     '<path d="M8 1.7c-2.5 0-4.4 1.9-4.4 4.3 0 3.1 4.4 8.3 4.4 8.3s4.4-5.2 4.4-8.3c0-2.4-1.9-4.3-4.4-4.3z"/><circle cx="8" cy="6" r="1.6"/>',
-        // Device forms, matched to the Infrastructure page's machine icons (vpn-peers-helpers.js) so a machine
+        // Device forms, matched to the machine icons the Infrastructure page used, so a machine
         // wears the same shape in the tree as on its card — just smaller. Keyed by device category, lowercased.
         server:  '<rect x="2.5" y="2.5" width="11" height="4" rx=".8"/><rect x="2.5" y="9" width="11" height="4" rx=".8"/><circle cx="4.6" cy="4.5" r=".55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r=".55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/>',
         nas:     '<rect x="4" y="1.5" width="8" height="13" rx="1"/><line x1="6.2" y1="3.5" x2="6.2" y2="10.5"/><line x1="8" y1="3.5" x2="8" y2="10.5"/><line x1="9.8" y1="3.5" x2="9.8" y2="10.5"/><circle cx="8" cy="12.5" r=".55" fill="currentColor" stroke="none"/>',
@@ -68,15 +68,14 @@
 
     // --- the bridge: TRANSITIONAL, and deleted a slice at a time ---------------------------------------
     //
-    // Infrastructure, Backups, Users, Settings and Concepts are not part of the tree yet. Rather than leave
-    // them unreachable from the shell — or, worse, ship the shell as a second place the operator has to give
-    // up on and go back to admin.html — each appears as an entry whose Inspector is the existing page, framed
-    // whole. This is scaffolding, not architecture: slices C and E replace these entries with real ones
-    // (containers, services, disk, DNS, access, settings), and each one that lands deletes its line here.
-    // When the last is gone, this array, the iframe, and admin.html itself go with it.
+    // Backups, Users and Concepts are not part of the tree yet. Rather than leave them unreachable from the
+    // shell — or, worse, ship the shell as a second place the operator has to give up on and go back to
+    // admin.html — each appears as an entry whose Inspector is the existing page, framed whole. This is
+    // scaffolding, not architecture: later slices replace these entries with real ones, and each one that
+    // lands deletes its line here. Infrastructure was the largest, and it is gone — machines, services, the
+    // map, editing, publishing and the LAN scan are native entries now. When the last bridge is gone, this
+    // array, the iframe, and admin.html itself go with it.
     const BRIDGES = [
-        { name: 'infrastructure', label: 'Infrastructure', icon: 'infra',   page: 'vpn-peers.html',
-          note: 'Machines, services, the map' },
         { name: 'backups',        label: 'Backups',        icon: 'archive', page: 'backups.html',
           note: 'Jobs, runs and archives' },
     ];
@@ -97,6 +96,16 @@
         WINDOWS_SERVER: 'Windows server',
         LAN_SERVER:     'LAN server',
     };
+
+    // The device shapes an operator can pin a machine to — the same set the Infrastructure page offered, and the
+    // same keys the tree's icons are drawn from (see ICON). The empty value is "let Vaier choose from what it
+    // sees" (clears the override); everything else pins the icon and the map marker.
+    const DEVICE_CATEGORIES = [
+        ['', 'Auto-detect'], ['PHONE', 'Phone'], ['LAPTOP', 'Laptop'], ['DESKTOP', 'Desktop'],
+        ['SERVER', 'Server'], ['NAS', 'NAS'], ['PRINTER', 'Printer'], ['ROUTER', 'Router'],
+        ['GATEWAY', 'Gateway'], ['IOT', 'IoT device'], ['CAMERA', 'Camera'], ['MEDIA', 'TV / Media'],
+        ['GENERIC', 'Generic'],
+    ];
 
     // The Vaier server is a machine in the fleet like any other (#311) — but it is *this* machine, the one
     // serving the page. Mirrors LanAnchor.VAIER_SERVER_NAME.
@@ -147,6 +156,15 @@
     const key = (path) => '/' + path.join('/');
     const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
 
+    const app = document.querySelector('.ex-app');
+
+    // The tree drawer, on a phone. Off-screen until opened; a scrim sits over the pane while it is. On a wide
+    // screen .tree-open styles nothing, so this is harmless there — go() calls it on every navigation.
+    function setTree(open) {
+        app.classList.toggle('tree-open', open);
+        $('exMenuBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
     // --- what an entry IS, read off its own path -------------------------------------------------------
     //
     // The path is the whole model. A tree that also kept a parallel object graph would be two truths about
@@ -177,7 +195,7 @@
 
     // Machines are ordered the way the Infrastructure page orders them, so the two never disagree: the Vaier
     // server first, then the servers, then the clients, each group alphabetical. Server-ness is the machine's
-    // type (the domain's isServerType — Ubuntu/Windows/LAN server), the same split vpn-peers.js draws.
+    // type (the domain's isServerType — Ubuntu/Windows/LAN server), the same split the fleet grid draws.
     const SERVER_TYPES = new Set(['UBUNTU_SERVER', 'WINDOWS_SERVER', 'LAN_SERVER']);
     const machineRank = (m) => (m.name === VAIER_SERVER ? 0 : (SERVER_TYPES.has(m.type) ? 1 : 2));
     const sortedMachines = () => S.machines.slice()
@@ -206,7 +224,7 @@
     // --- which machine a published service lives on ----------------------------------------------------
     //
     // A published service is one thing with three homes: a container on a machine, a Traefik route, and a DNS
-    // record. The tree files it under the machine, and it decides which machine by the rule vpn-peers.js
+    // record. The tree files it under the machine, and it decides which machine by the rule the Infrastructure page
     // already uses — a LAN service by its LAN server (falling back to the relay peer when no registered LAN
     // server matches its address), the hub's own routes on the Vaier server, everything else by its host. A
     // second rule here would put the same service under two different machines in two different pages.
@@ -555,7 +573,7 @@
 
     // The domain's four-state MachineStatus, mapped to a dot. The *combination* (reachability + Docker scrape
     // + runsDocker) is decided server-side in MachineStatus.forLanServer — the browser only picks a colour, and
-    // vpn-peers.js picks the same four. Note what is deliberately NOT green: UNKNOWN means no probe has run
+    // the fleet map picks the same four. Note what is deliberately NOT green: UNKNOWN means no probe has run
     // yet, and painting that up would be Vaier claiming to know something it does not. Grey is the honest
     // answer to a question nobody has asked yet.
     const STATUS_DOT = {
@@ -828,7 +846,7 @@
         const grid = document.createElement('div');
         grid.className = 'ex-grid';
         if (!S.machines.length) {
-            body.appendChild(note('No machines yet. Add one on Infrastructure and it will appear here.',
+            body.appendChild(note('No machines yet. Add one with the Add machine button and it will appear here.',
                 false));
         } else {
             sortedMachines().forEach((m) => {
@@ -904,7 +922,7 @@
     // peer (latitude/longitude/city). Leaflet, loaded from explorer.html; if it did not load, the entry says so
     // rather than breaking. The map is torn down and rebuilt on each render (rare — peer stats only repaint the
     // dots, so the map is not thrashed), and requestAnimationFrame — never a timer — settles its size.
-    // The fleet on a map — a faithful port of the Infrastructure page's map (vpn-peers-map.js). Clustered so
+    // The fleet on a map — a faithful port of the Infrastructure page's map. Clustered so
     // co-located machines gather and spiderfy on click; a client shows twice — a weak marker where it connects
     // from and a firm one where its traffic surfaces (the Vaier server); LAN servers sit at their relay; the
     // Vaier server itself is the big marker in Frankfurt. Leaflet + markercluster load from explorer.html.
@@ -931,7 +949,7 @@
             if (!ln || !ln.text) return;
             box.appendChild(el('br'));
             const s = el('span');
-            if (ln.mono) s.style.fontFamily = 'monospace';
+            if (ln.mono) s.style.fontFamily = 'var(--mono)';
             if (ln.muted) { s.style.color = '#888'; s.style.fontSize = '0.85em'; }
             s.textContent = ln.text; box.appendChild(s);
         });
@@ -1046,7 +1064,7 @@
         if (!inside.length) {
             body.appendChild(note('Vaier cannot reach anything inside this machine. It has no SSH access, so '
                 + 'no files, no shell and no disk reading; it runs no Docker Vaier knows of; and nothing is '
-                + 'published from it. Give it an SSH credential on its Infrastructure card and it opens up.',
+                + 'published from it. Turn on SSH access below and give it a credential, and it opens up.',
                 false));
         } else {
             const grid = document.createElement('div');
@@ -1080,29 +1098,256 @@
             body.appendChild(act);
         }
 
-        // The SSH login Vaier holds for this machine — what opens its files, shell, disk and backups. Offered on
-        // any machine Vaier would SSH (a server or a LAN server), never on a phone or laptop client.
+        // SSH is what opens this machine's files, shell, disk and backups — so it is two things, shown together:
+        // whether Vaier may open a session at all (the access flag), and the login it uses when it does (the
+        // credential). Offered on any machine Vaier would SSH (a server or a LAN server), never on a phone or
+        // laptop client. Turning access off hides the files/shell/disk entries above — the tree stops claiming a
+        // reach it no longer has.
         if (m.type !== 'MOBILE_CLIENT' && m.type !== 'WINDOWS_CLIENT') {
-            body.appendChild(section('SSH credential'));
-            const cred = el('div', 'ex-lactions is-static');
-            cred.appendChild(selVerb('gear', m.sshAccess ? 'Edit SSH credential' : 'Set SSH credential', 'ex-btn',
-                () => credentialDialog(m.name)));
-            body.appendChild(cred);
+            body.appendChild(section('SSH access'));
+            const access = el('label', 'ex-check-row');
+            const box = el('input'); box.type = 'checkbox'; box.checked = !!m.sshAccess;
+            box.onchange = () => toggleSshAccess(m.name, box.checked, box);
+            const atxt = el('span'); atxt.textContent = 'Let Vaier open an SSH session to this machine';
+            access.append(box, atxt);
+            body.appendChild(access);
+            if (m.sshAccess) {
+                const cred = el('div', 'ex-lactions is-static');
+                cred.appendChild(selVerb('gear', 'SSH credential', 'ex-btn', () => credentialDialog(m.name)));
+                body.appendChild(cred);
+            } else {
+                body.appendChild(note('Off — Vaier holds no session to this machine, so it has no files, shell '
+                    + 'or disk reading here. Turn it on to give it an SSH credential.', false));
+            }
         }
 
-        // Removing a machine is destructive — its WireGuard peer (or LAN-server registration) is deleted and it
-        // can no longer reach the VPN — so it takes the typed-name gate. The Vaier server is this machine; it is
-        // never offered for removal.
+        // Everything you do TO the machine, rather than reach INSIDE it. Editing its details is common enough to
+        // sit in the open; the rest — reissuing or regenerating a peer's config, showing a LAN host's setup
+        // script, and removing the machine — is rare or destructive, so it folds away behind Advanced and does
+        // not crowd the pane. The Vaier server is this machine: it is never edited or removed here.
         if (m.name !== VAIER_SERVER) {
             body.appendChild(section('This machine'));
-            const rm = el('div', 'ex-lactions is-static');
-            if (S.peers.has(m.name)) {
-                rm.appendChild(selVerb('refresh', 'Reissue config', 'ex-btn', () => reissuePeer(m)));
+            const edit = el('div', 'ex-lactions is-static');
+            edit.appendChild(selVerb('gear', 'Edit details', 'ex-btn', () => editMachine(m)));
+            if (m.type === 'LAN_SERVER') {
+                edit.appendChild(selVerb('download', 'Setup script', 'ex-btn', () => lanSetupScript(m.name)));
             }
+            body.appendChild(edit);
+
+            const adv = disclosure('Advanced');
+            if (S.peers.has(m.name)) {
+                const cfg = el('div', 'ex-lactions is-static');
+                cfg.appendChild(selVerb('refresh', 'Reissue config', 'ex-btn', () => reissuePeer(m)));
+                cfg.appendChild(selVerb('refresh', 'Regenerate config', 'ex-btn', () => regenerateMachine(m)));
+                adv.appendChild(cfg);
+                adv.appendChild(note('Reissue re-hands the same identity’s config. Regenerate replaces the '
+                    + 'keypair — a new identity on the VPN — and the old config stops working at once.', false));
+            }
+            const rm = el('div', 'ex-lactions is-static');
             rm.appendChild(selVerb('trash', 'Remove machine', 'ex-btn is-danger', () => removeMachine(m)));
-            body.appendChild(rm);
+            adv.appendChild(rm);
+            body.appendChild(adv);
         }
         pane.appendChild(body);
+    }
+
+    // --- editing a machine, and its SSH access ---------------------------------------------------------
+
+    function editMachine(m) {
+        editMachineForm(m).then((vals) => { if (vals) saveMachineEdits(m, vals); });
+    }
+
+    // Saves only what changed, each field to its own endpoint (the same ones the Infrastructure page used), and
+    // renames last because a rename changes the key every other edit keyed off. Peers are addressed by id, LAN
+    // servers by name. Then the fleet reloads and we follow the machine to its — possibly new — name.
+    async function saveMachineEdits(m, v) {
+        const isLan = m.type === 'LAN_SERVER';
+        const peer = S.peers.get(m.name);
+        const pid = peer ? peer.id : null;
+        if (!isLan && !pid) { toast('Vaier cannot edit that machine.'); return; }
+        const enc = encodeURIComponent;
+        const base = isLan ? '/lan-servers/' + enc(m.name) : '/vpn/peers/' + enc(pid);
+        const rec = S.peers.get(m.name) || S.lan.get(m.name) || {};
+        let ok = true, renamedTo = m.name;
+
+        if (v.description !== (rec.description || '')) {
+            ok = await patchJson(base + '/description', { description: v.description },
+                'Could not save the description.') && ok;
+        }
+        // LAN address and CIDR are a server peer's to edit — the endpoints exist only for peers, and only a
+        // server routes a subnet.
+        if (!isLan && SERVER_TYPES.has(m.type)) {
+            if (v.lanAddress !== (m.lanAddress || '')) {
+                ok = await patchJson(base + '/lan-address', { lanAddress: v.lanAddress },
+                    'Could not save the LAN address.') && ok;
+            }
+            if (v.lanCidr !== (m.lanCidr || '')) {
+                ok = await patchJson(base + '/lan-cidr', { lanCidr: v.lanCidr },
+                    'Could not save the LAN behind it.') && ok;
+            }
+        }
+        if (v.deviceCategory !== (m.deviceCategory || '')) {
+            ok = await patchJson(base + '/device-category', { deviceCategory: v.deviceCategory },
+                'Could not save the device category.') && ok;
+        }
+        if (v.name && v.name !== m.name) {
+            const url = isLan ? '/lan-servers/' + enc(m.name) : '/vpn/peers/' + enc(pid);
+            const renamed = await patchJson(url, { newName: v.name },
+                'Could not rename the machine — is the name taken?');
+            ok = renamed && ok;
+            if (renamed) renamedTo = v.name;
+        }
+        await loadFleet();
+        await loadServices();   // a rename shifts the host key services hang under
+        if (ok) toast(m.name + ' updated.');
+        S.open.add(key(['fleet', renamedTo]));
+        go(['fleet', renamedTo]);
+    }
+
+    // The edit form: a machine's human details, resolved as a body or null. A server peer also gets its LAN
+    // address and CIDR; every machine gets a device category. Keys and tunnel address are never asked — they
+    // are Vaier's.
+    function editMachineForm(m) {
+        return new Promise((resolve) => {
+            const rec = S.peers.get(m.name) || S.lan.get(m.name) || {};
+            const isServerPeer = S.peers.has(m.name) && SERVER_TYPES.has(m.type);
+            const scrim = el('div', 'ex-scrim is-on');
+            const dialog = el('div', 'ex-dialog');
+            const h = el('div', 'ex-dialog-title'); h.textContent = 'Edit ' + m.name;
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'What Vaier knows about this machine. Its keys and tunnel address are Vaier’s to '
+                + 'keep — everything here is yours to name.';
+            const form = el('div', 'ex-form');
+            const field = (label, hint, control) => {
+                const f = el('div', 'ex-field'); const l = el('label'); l.textContent = label; f.append(l, control);
+                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+                return f;
+            };
+            const text = (val, ph) => { const i = el('input', 'ex-input'); i.type = 'text';
+                i.value = val == null ? '' : String(val); if (ph) i.placeholder = ph;
+                i.autocomplete = 'off'; i.spellcheck = false; return i; };
+            const name = text(m.name);
+            const desc = text(rec.description || '');
+            const lanAddr = text(m.lanAddress || '', 'e.g. 192.168.1.10');
+            const lanCidr = text(m.lanCidr || '', 'e.g. 192.168.1.0/24');
+            const cat = catSelect(m.deviceCategory);
+            form.append(field('Name', null, name), field('Description', 'Optional.', desc));
+            if (isServerPeer) {
+                form.append(field('LAN address', 'Where this server answers on its own network.', lanAddr),
+                    field('LAN behind it', 'The subnet it routes to, so the fleet can reach it.', lanCidr));
+            }
+            form.append(field('Device category', 'Its shape in the tree and on the map. Auto-detect lets Vaier '
+                + 'choose from what it sees.', cat));
+
+            const actions = el('div', 'ex-dialog-actions');
+            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
+            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Save';
+            actions.append(cancel, ok);
+            dialog.append(h, sub, form, actions);
+            scrim.appendChild(dialog); document.body.appendChild(scrim);
+
+            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            const sync = () => { ok.disabled = name.value.trim() === ''; };
+            name.oninput = sync;
+            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
+            cancel.onclick = () => close(null);
+            ok.onclick = () => {
+                if (!name.value.trim()) return;
+                close({ name: name.value.trim(), description: desc.value.trim(),
+                    lanAddress: lanAddr.value.trim(), lanCidr: lanCidr.value.trim(), deviceCategory: cat.value });
+            };
+            document.addEventListener('keydown', onKey);
+            sync(); name.focus();
+        });
+    }
+
+    // Whether Vaier may open an SSH session to a machine at all — the switch above the credential. Distinct from
+    // the credential itself: this is the capability, that is the login. Optimistic, with the checkbox reverted if
+    // the server refuses; on success the fleet reloads so the files/shell/disk entries appear or vanish with it.
+    async function toggleSshAccess(machine, enabled, checkbox) {
+        checkbox.disabled = true;
+        const ok = await patchJson('/machines/' + encodeURIComponent(machine) + '/ssh-access', { enabled },
+            'Could not update SSH access.');
+        if (!ok) { checkbox.checked = !enabled; checkbox.disabled = false; return; }
+        await loadFleet();
+        toast(enabled ? 'Vaier can now open SSH sessions to ' + machine + '.'
+                      : 'SSH sessions to ' + machine + ' turned off.');
+        render();
+    }
+
+    // Regenerate a peer's config — delete the peer and recreate it, which mints a fresh keypair (#202). Unlike
+    // reissue, this is a new identity on the VPN: the old config is dead the instant the peer is deleted, so it
+    // asks first and shows the new config once, exactly as a new machine does. Recreated from what /machines and
+    // the peer record already hold, so the machine keeps its name, type, LAN and description.
+    async function regenerateMachine(m) {
+        const peer = S.peers.get(m.name);
+        if (!peer) return;
+        const ok = await confirmModal('Regenerate ' + m.name + '’s config?',
+            'Vaier deletes ' + m.name + '’s WireGuard peer and recreates it with a fresh keypair — a brand-new '
+            + 'identity on the VPN. The current config stops working the moment the peer is deleted, and ' + m.name
+            + ' can only reconnect once the new one is installed. Reissue keeps the same keys; regenerate '
+            + 'replaces them. Only regenerate when the keypair itself must change.', 'Regenerate');
+        if (!ok) return;
+        const rec = S.peers.get(m.name) || {};
+        const recreate = { name: m.name, peerType: m.type, lanCidr: m.lanCidr || null,
+            lanAddress: m.lanAddress || null, description: rec.description || null };
+        try {
+            const del = await fetch('/vpn/peers/' + encodeURIComponent(peer.id), { method: 'DELETE' });
+            if (!del.ok && del.status !== 204) { toast('Vaier could not regenerate ' + m.name + '.'); return; }
+            const res = await fetch('/vpn/peers', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(recreate) });
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}));
+                toast(e.message || 'Vaier deleted the old peer but could not recreate it.');
+                await loadFleet(); render(); return;
+            }
+            const created = await res.json();
+            await loadFleet();
+            toast(m.name + '’s config regenerated — save the new config now.');
+            createResult(created);   // the same one-shot config view a new machine gets
+        } catch (e) {
+            toast('Vaier could not regenerate ' + m.name + '.');
+        }
+    }
+
+    // A LAN host's setup script — served whole and unauthenticated at a per-host URL. Vaier hands over the
+    // curl one-liner to run on the host and a direct download; it holds no secret. (A VPN peer's setup script is
+    // not re-viewable — it is shown once with its config; reissue or regenerate to see it again.)
+    function lanSetupScript(machine) {
+        const url = window.location.origin + '/lan-servers/' + encodeURIComponent(machine) + '/setup.sh';
+        setupScriptDialog({
+            title: 'Set up ' + machine,
+            body: 'Idempotent — it adapts to this host: opens the Docker engine API if it runs Docker and '
+                + 'installs routes to the fleet via its relay peer. No secrets, served unauthenticated. Run it '
+                + 'on ' + machine + ' itself.',
+            curl: 'curl -sSL ' + url + ' | sudo bash',
+            downloadUrl: url,
+        });
+    }
+
+    function setupScriptDialog(opts) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog is-wide');
+        const h = el('div', 'ex-dialog-title'); h.textContent = opts.title;
+        const sub = el('div', 'ex-dialog-body'); sub.textContent = opts.body;
+        dialog.append(h, sub);
+        const pre = el('pre', 'ex-config'); pre.textContent = opts.curl; dialog.appendChild(pre);
+        const row = el('div', 'ex-set-actions');
+        const copy = el('button', 'ex-btn'); copy.textContent = 'Copy command';
+        copy.onclick = () => navigator.clipboard.writeText(opts.curl)
+            .then(() => toast('Command copied.')).catch(() => toast('Could not copy the command.'));
+        const dl = el('button', 'ex-btn is-accent'); dl.textContent = 'Download setup.sh';
+        dl.onclick = () => { window.location.href = opts.downloadUrl; };
+        row.append(copy, dl); dialog.appendChild(row);
+        const actions = el('div', 'ex-dialog-actions');
+        const done = el('button', 'ex-btn'); done.textContent = 'Done'; actions.appendChild(done);
+        dialog.appendChild(actions);
+        scrim.appendChild(dialog); document.body.appendChild(scrim);
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        done.onclick = close; scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
     }
 
     // --- adding and removing a machine -----------------------------------------------------------------
@@ -1113,7 +1358,40 @@
     // typed-name gate. LAN servers are usually found by the scan, so the add form offers the peer kinds.
 
     function addMachine() {
-        machineForm().then((body) => { if (body) createPeer(body); });
+        machineForm().then((body) => {
+            if (!body) return;
+            if (body.kind === 'lan') createLanServer(body); else createPeer(body);
+        });
+    }
+
+    // Register a LAN server by hand — a machine on a relay's LAN that is not a WireGuard peer of its own (a NAS,
+    // a printer, an appliance). It is reached through its relay, so Vaier only needs where it answers and, if it
+    // speaks Docker, on which port. Usually these are found by the scan; this is the by-hand path. A 400 means
+    // the address is not inside any relay's LAN — the one failure worth its own sentence.
+    async function createLanServer(body) {
+        try {
+            const res = await fetch('/lan-servers', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: body.name, lanAddress: body.lanAddress, runsDocker: body.runsDocker,
+                    dockerPort: body.dockerPort, description: body.description,
+                    deviceCategory: body.deviceCategory || null }),
+            });
+            if (res.status === 400) {
+                toast(body.lanAddress + ' isn’t on any relay’s LAN, so the fleet can’t reach it.');
+                return;
+            }
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || 'Vaier could not add that machine.');
+                return;
+            }
+            await loadFleet();
+            toast(body.name + ' added.');
+            S.open.add(key(['fleet', body.name]));
+            go(['fleet', body.name]);
+        } catch (e) {
+            toast('Vaier could not add that machine.');
+        }
     }
 
     async function createPeer(body) {
@@ -1195,8 +1473,9 @@
             const dialog = el('div', 'ex-dialog');
             const h = el('div', 'ex-dialog-title'); h.textContent = 'Add a machine';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A new WireGuard peer. Vaier assigns its address and keys and hands you the config '
-                + 'to install.';
+            sub.textContent = 'A WireGuard peer gets a tunnel address, keys and a config to install — Vaier '
+                + 'assigns them. A LAN server has no WireGuard of its own; it is reached through its relay, so '
+                + 'Vaier only needs where it answers.';
             const form = el('div', 'ex-form');
 
             const field = (label, hint, control) => {
@@ -1209,20 +1488,42 @@
             name.autocomplete = 'off'; name.spellcheck = false;
             const type = el('select', 'ex-input');
             [['MOBILE_CLIENT', 'Phone / mobile'], ['WINDOWS_CLIENT', 'Windows client'],
-             ['UBUNTU_SERVER', 'Ubuntu server'], ['WINDOWS_SERVER', 'Windows server']].forEach(([v, t]) => {
+             ['UBUNTU_SERVER', 'Ubuntu server'], ['WINDOWS_SERVER', 'Windows server'],
+             ['LAN_SERVER', 'LAN server (no WireGuard)']].forEach(([v, t]) => {
                 const o = el('option'); o.value = v; o.textContent = t; type.appendChild(o);
             });
             const lanCidr = el('input', 'ex-input'); lanCidr.type = 'text';
             lanCidr.placeholder = 'e.g. 192.168.1.0/24'; lanCidr.autocomplete = 'off'; lanCidr.spellcheck = false;
-            const lanField = field('LAN behind it', 'The subnet this server routes to, so the fleet can reach it.', lanCidr);
+            const lanCidrField = field('LAN behind it', 'The subnet this server routes to, so the fleet can reach it.', lanCidr);
+            // The LAN-server-only fields: where it answers, and whether it speaks Docker.
+            const lanAddr = el('input', 'ex-input'); lanAddr.type = 'text'; lanAddr.placeholder = 'e.g. 192.168.1.50';
+            lanAddr.autocomplete = 'off'; lanAddr.spellcheck = false;
+            const lanAddrField = field('LAN address', 'Where this machine answers on its relay’s network.', lanAddr);
+            const dockerBox = el('input'); dockerBox.type = 'checkbox';
+            const dockerRow = el('label', 'ex-check-row');
+            const dtxt = el('span'); dtxt.textContent = 'It runs Docker Vaier can read';
+            dockerRow.append(dockerBox, dtxt);
+            const dockerPort = el('input', 'ex-input'); dockerPort.type = 'number'; dockerPort.min = '1';
+            dockerPort.max = '65535'; dockerPort.value = '2375'; dockerPort.placeholder = '2375';
+            const dockerPortField = field('Docker API port', 'The port its Docker engine API listens on.', dockerPort);
+            const cat = catSelect('');
+            const catField = field('Device category', 'Its shape in the tree and on the map. Optional.', cat);
             const desc = el('input', 'ex-input'); desc.type = 'text'; desc.autocomplete = 'off';
 
-            const isServer = () => SERVER_TYPES.has(type.value);
-            const syncLan = () => { lanField.style.display = isServer() ? '' : 'none'; };
-            type.onchange = syncLan;
+            const isServer = () => SERVER_TYPES.has(type.value) && type.value !== 'LAN_SERVER';
+            const isLan = () => type.value === 'LAN_SERVER';
+            const syncFields = () => {
+                lanCidrField.style.display = isServer() ? '' : 'none';
+                lanAddrField.style.display = isLan() ? '' : 'none';
+                dockerRow.style.display = isLan() ? '' : 'none';
+                dockerPortField.style.display = (isLan() && dockerBox.checked) ? '' : 'none';
+                catField.style.display = isLan() ? '' : 'none';
+                sync();
+            };
+            type.onchange = syncFields; dockerBox.onchange = syncFields;
 
-            form.append(field('Name', null, name), field('Type', null, type), lanField,
-                field('Description', 'Optional.', desc));
+            form.append(field('Name', null, name), field('Type', null, type), lanCidrField, lanAddrField,
+                dockerRow, dockerPortField, catField, field('Description', 'Optional.', desc));
 
             const actions = el('div', 'ex-dialog-actions');
             const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
@@ -1233,18 +1534,27 @@
 
             const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
             const onKey = (e) => { if (e.key === 'Escape') close(null); };
-            const sync = () => { ok.disabled = name.value.trim() === ''; };
-            name.oninput = sync;
+            const armed = () => name.value.trim() !== '' && (!isLan() || lanAddr.value.trim() !== '');
+            const sync = () => { ok.disabled = !armed(); };
+            name.oninput = sync; lanAddr.oninput = sync;
             scrim.onclick = (e) => { if (e.target === scrim) close(null); };
             cancel.onclick = () => close(null);
             ok.onclick = () => {
-                if (!name.value.trim()) return;
-                close({ name: name.value.trim(), peerType: type.value,
-                    lanCidr: isServer() ? lanCidr.value.trim() : '', lanAddress: '',
-                    description: desc.value.trim() });
+                if (!armed()) return;
+                if (isLan()) {
+                    const runsDocker = dockerBox.checked;
+                    const port = parseInt(dockerPort.value, 10);
+                    close({ kind: 'lan', name: name.value.trim(), lanAddress: lanAddr.value.trim(),
+                        runsDocker: runsDocker, dockerPort: runsDocker && port > 0 ? port : null,
+                        deviceCategory: cat.value, description: desc.value.trim() });
+                } else {
+                    close({ kind: 'peer', name: name.value.trim(), peerType: type.value,
+                        lanCidr: isServer() ? lanCidr.value.trim() : '', lanAddress: '',
+                        description: desc.value.trim() });
+                }
             };
             document.addEventListener('keydown', onKey);
-            syncLan(); sync(); name.focus();
+            syncFields(); name.focus();
         });
     }
 
@@ -1271,6 +1581,13 @@
                 const dc = el('button', 'ex-btn'); dc.textContent = 'Download docker-compose.yml';
                 dc.onclick = () => downloadText('docker-compose.yml', p.dockerCompose);
                 row.appendChild(dc);
+            }
+            // A server peer also ships a setup script — the one-shot provisioning step that installs WireGuard,
+            // opens Docker and adds the fleet routes. Shown here or nowhere: like the config, it is not stored.
+            if (p.setupScript) {
+                const sc = el('button', 'ex-btn'); sc.textContent = 'Download setup-' + p.name + '.sh';
+                sc.onclick = () => downloadText('setup-' + p.name + '.sh', p.setupScript);
+                row.appendChild(sc);
             }
             dialog.appendChild(row);
         }
@@ -1558,10 +1875,31 @@
             if (!body) return;
             saveJson('/published-services/publish', 'POST', {
                 address: c.address, port: c.port, subdomain: body.subdomain, requiresAuth: body.requiresAuth,
-                rootRedirectPath: c.rootRedirectPath || '', directUrlDisabled: false, pathPrefix: '',
+                rootRedirectPath: body.rootRedirectPath, directUrlDisabled: body.directUrlDisabled,
+                pathPrefix: body.pathPrefix,
             }, 'Publishing ' + body.subdomain + '…', () => reloadServices(machine),
                'Could not publish that.');
         });
+    }
+
+    // The advanced-publish fold, shared by both publish forms: a path prefix, a root redirect, and whether to
+    // link straight to the LAN URL. Rare at publish time — most services want none of it — so it stays folded.
+    // Returns the three controls so the caller can read them back. `redirect` is prefilled (a candidate can
+    // suggest one), and the fold opens itself when it is, so a suggested redirect is never hidden.
+    function publishAdvanced(form, prefillRedirect) {
+        const adv = disclosure('Advanced');
+        const pathPrefix = plainInput('', 'e.g. /grafana');
+        const redirect = plainInput(prefillRedirect || '', 'e.g. /dashboard');
+        const directRow = el('label', 'ex-check-row');
+        const direct = el('input'); direct.type = 'checkbox'; direct.checked = true;
+        const dtxt = el('span'); dtxt.textContent = 'Link straight to the LAN URL when the visitor shares its network';
+        directRow.append(direct, dtxt);
+        adv.append(formField('Path prefix', 'Serve it under a sub-path of another name instead of its own '
+            + 'subdomain.', pathPrefix), formField('Root redirect', 'Send the bare address on to a sub-path.',
+            redirect), directRow);
+        if (prefillRedirect) adv.open = true;
+        form.appendChild(adv);
+        return { pathPrefix, redirect, direct };
     }
 
     function ignoreCandidate(machine, c) {
@@ -1613,6 +1951,7 @@
             const atxt = el('span'); atxt.textContent = 'Require a login to reach it';
             authRow.append(auth, atxt);
             form.append(subF, authRow);
+            const advanced = publishAdvanced(form, c.rootRedirectPath);
 
             const actions = el('div', 'ex-dialog-actions');
             const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
@@ -1627,7 +1966,9 @@
             subIn.oninput = sync;
             scrim.onclick = (e) => { if (e.target === scrim) close(null); };
             cancel.onclick = () => close(null);
-            ok.onclick = () => { if (subIn.value.trim()) close({ subdomain: subIn.value.trim(), requiresAuth: auth.checked }); };
+            ok.onclick = () => { if (subIn.value.trim()) close({ subdomain: subIn.value.trim(),
+                requiresAuth: auth.checked, pathPrefix: advanced.pathPrefix.value.trim(),
+                rootRedirectPath: advanced.redirect.value.trim(), directUrlDisabled: !advanced.direct.checked }); };
             document.addEventListener('keydown', onKey);
             sync(); subIn.focus();
         });
@@ -1641,7 +1982,8 @@
             if (!body) return;
             saveJson('/published-services/lan', 'POST', {
                 subdomain: body.subdomain, machineName: machine, port: body.port, protocol: body.protocol,
-                requireAuth: body.requireAuth, directUrlDisabled: false, rootRedirectPath: '', pathPrefix: '',
+                requireAuth: body.requireAuth, directUrlDisabled: body.directUrlDisabled,
+                rootRedirectPath: body.rootRedirectPath, pathPrefix: body.pathPrefix,
             }, 'Publishing ' + body.subdomain + '…', () => reloadServices(machine), 'Could not publish that.');
         });
     }
@@ -1673,6 +2015,7 @@
             authRow.append(auth, atxt);
             form.append(field('Subdomain', null, subIn), field('Port on ' + machine, null, port),
                 field('Speaks', 'How the backend serves — http or https.', protocol), authRow);
+            const advanced = publishAdvanced(form, '');
 
             const actions = el('div', 'ex-dialog-actions');
             const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
@@ -1689,10 +2032,128 @@
             scrim.onclick = (e) => { if (e.target === scrim) close(null); };
             cancel.onclick = () => close(null);
             ok.onclick = () => { if (armed()) close({ subdomain: subIn.value.trim(), port: parseInt(port.value, 10),
-                protocol: protocol.value, requireAuth: auth.checked }); };
+                protocol: protocol.value, requireAuth: auth.checked, pathPrefix: advanced.pathPrefix.value.trim(),
+                rootRedirectPath: advanced.redirect.value.trim(), directUrlDisabled: !advanced.direct.checked }); };
             document.addEventListener('keydown', onKey);
             sync(); subIn.focus();
         });
+    }
+
+    // --- shared field builders (forms and inline pane editors both use these) --------------------------
+
+    function formField(label, hint, control) {
+        const f = el('div', 'ex-field');
+        const l = el('label'); l.textContent = label; f.append(l, control);
+        if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+        return f;
+    }
+    function plainInput(value, ph) {
+        const i = el('input', 'ex-input'); i.type = 'text';
+        i.value = value == null ? '' : String(value); if (ph) i.placeholder = ph;
+        i.autocomplete = 'off'; i.spellcheck = false;
+        return i;
+    }
+    // An input that saves on blur only when its value actually changed, Enter blurs to save, and its baseline
+    // advances on a save that stuck — the same edit-in-place idiom the Infrastructure page used. onSave returns
+    // a truthy/Promise result; a save reported as false leaves the baseline so the next blur retries.
+    function blurInput(value, ph, onSave) {
+        const i = plainInput(value, ph);
+        i.dataset.original = i.value;
+        i.onkeydown = (e) => { if (e.key === 'Enter') i.blur(); };
+        i.onblur = () => {
+            const val = i.value.trim();
+            if (val === (i.dataset.original || '')) return;
+            Promise.resolve(onSave(val)).then((ok) => { if (ok !== false) i.dataset.original = val; });
+        };
+        return i;
+    }
+    function checkRow(labelText, checked, onChange) {
+        const row = el('label', 'ex-check-row');
+        const box = el('input'); box.type = 'checkbox'; box.checked = !!checked;
+        box.onchange = () => onChange(box.checked);
+        const t = el('span'); t.textContent = labelText;
+        row.append(box, t);
+        return row;
+    }
+    // A stable id from a string — for pairing a datalist with its input without Math.random (banned here).
+    function hashStr(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return h; }
+    // The group names already in use across the fleet's routes — a suggestion set, gathered from what Vaier
+    // already holds so it needs no extra fetch.
+    function accessGroupSuggestions() {
+        const set = new Set();
+        Object.values(S.access).forEach((gs) => (gs || []).forEach((g) => set.add(g)));
+        return Array.from(set).sort();
+    }
+
+    // --- editing a published service -------------------------------------------------------------------
+    //
+    // A published route is not just coordinates to read — who may reach it, what it is called on the launchpad,
+    // and a handful of advanced knobs are the operator's. All ride the one PATCH the Infrastructure page used
+    // (path-prefixed routes carry their prefix in the query); the allowed groups are the exception — they are an
+    // access rule, PUT whole under the route's DNS name. Each save reloads the routes and repaints in place.
+
+    const patchUrl = (s) => {
+        const base = '/published-services/' + encodeURIComponent(s.dnsAddress);
+        return s.pathPrefix ? base + '?pathPrefix=' + encodeURIComponent(s.pathPrefix) : base;
+    };
+    function patchService(s, patch, failMsg) {
+        return patchJson(patchUrl(s), patch, failMsg || 'Could not save the change.',
+            async () => { await loadServices(); render(); });
+    }
+    async function saveAccessGroups(host, groups) {
+        try {
+            const r = await fetch('/access/services/' + encodeURIComponent(host) + '/groups', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groups }) });
+            if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.message || 'Could not update the allowed groups.'); return; }
+            await loadServices(); render();
+        } catch (e) { toast('Could not update the allowed groups.'); }
+    }
+
+    function allowedGroupsEditor(s) {
+        const host = s.dnsAddress;
+        const groups = (S.access[host] || []).slice();
+        const wrap = el('div', 'ex-field');
+        const l = el('label'); l.textContent = 'Allowed groups'; wrap.appendChild(l);
+
+        const chips = el('div', 'ex-chips');
+        if (!groups.length) {
+            const empty = el('span', 'ex-chip is-empty'); empty.textContent = 'Any signed-in, approved user';
+            chips.appendChild(empty);
+        } else {
+            groups.forEach((g) => {
+                const chip = el('span', 'ex-chip');
+                const t = el('span'); t.textContent = g; chip.appendChild(t);
+                const x = el('button', 'ex-chip-x'); x.innerHTML = svg('cross', 'ex-ico');
+                x.title = 'Remove ' + g; x.setAttribute('aria-label', 'Remove ' + g);
+                x.onclick = () => saveAccessGroups(host, groups.filter((y) => y !== g));
+                chip.append(x); chips.appendChild(chip);
+            });
+        }
+        wrap.appendChild(chips);
+
+        const row = el('div', 'ex-chip-add');
+        const inp = plainInput('', 'Add a group…');
+        const listId = 'ex-groups-' + Math.abs(hashStr(host));
+        const dl = el('datalist'); dl.id = listId;
+        accessGroupSuggestions().filter((g) => !groups.includes(g)).forEach((g) => {
+            const o = el('option'); o.value = g; dl.appendChild(o);
+        });
+        inp.setAttribute('list', listId);
+        const add = () => {
+            const v = inp.value.trim(); inp.value = '';
+            if (!v || groups.some((g) => g.toLowerCase() === v.toLowerCase())) return;
+            saveAccessGroups(host, groups.concat(v));
+        };
+        inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+        const btn = el('button', 'ex-btn'); btn.textContent = 'Add'; btn.onclick = add;
+        row.append(inp, dl, btn);
+        wrap.appendChild(row);
+        const hint = el('div', 'ex-hint');
+        hint.textContent = 'Empty means any signed-in, approved user. Otherwise a visitor needs at least one of '
+            + 'these groups.';
+        wrap.appendChild(hint);
+        return wrap;
     }
 
     function renderService(pane) {
@@ -1702,20 +2163,16 @@
             true));
 
         const head = paneHead(s.dnsAddress || serviceName(s), true, machine);
-        const actions = document.createElement('div');
-        actions.className = 'ex-pane-actions';
-        const del = document.createElement('button');
-        del.className = 'ex-btn is-danger';
-        del.textContent = 'Unpublish';
+        const actions = el('div', 'ex-pane-actions');
+        const del = el('button', 'ex-btn is-danger'); del.textContent = 'Unpublish';
         del.onclick = () => unpublish(s, machine);
         actions.appendChild(del);
         head.appendChild(actions);
         pane.appendChild(head);
 
-        const body = document.createElement('div');
-        body.className = 'ex-pane-body';
+        const body = el('div', 'ex-pane-body');
 
-        const groups = S.access[s.dnsAddress] || [];
+        // The coordinates — the read-only truth about the route, its DNS record and its backend.
         body.appendChild(kv([
             ['DNS record', s.dnsAddress],
             ['DNS state', s.dnsState],
@@ -1724,9 +2181,58 @@
             ['Path prefix', s.pathPrefix],
             ['Container image', s.image],
             ['Version', s.version],
-            ['Auth', s.authMode === 'social' ? 'Social login' : 'Open to anyone'],
-            ['Allowed groups', groups.length ? groups.join(', ') : 'Any signed-in user'],
         ]));
+
+        // Access — who may reach it. The sign-in mode, and (behind a login) which groups are let through.
+        body.appendChild(section('Access'));
+        const authMode = s.authMode || (s.authenticated ? 'social' : 'none');
+        const authSel = el('select', 'ex-input');
+        [['none', 'Public — no sign-in'], ['social', 'Social login (Google)']].forEach(([v, t]) => {
+            const o = el('option'); o.value = v; o.textContent = t; if (v === authMode) o.selected = true;
+            authSel.appendChild(o);
+        });
+        authSel.onchange = () => patchService(s, { authMode: authSel.value },
+            'Could not update the sign-in requirement.');
+        body.appendChild(formField('Sign-in', 'Which login a visitor must pass to reach this service.', authSel));
+        if (authMode === 'social') body.appendChild(allowedGroupsEditor(s));
+
+        // Launchpad — its name and whether it shows a tile at all.
+        body.appendChild(section('Launchpad'));
+        body.appendChild(formField('Display name', 'The name on its launchpad tile — defaults to the subdomain.',
+            blurInput(s.launchpadAlias || '', '(default)',
+                (val) => patchService(s, { launchpadAlias: val }, 'Could not save the display name.'))));
+        body.appendChild(checkRow('Show a tile for this service on the launchpad', !s.hiddenFromLaunchpad,
+            (checked) => patchService(s, { hiddenFromLaunchpad: !checked },
+                'Could not update the launchpad visibility.')));
+
+        // Advanced — the mechanism, folded away: a root redirect, the version probe, and the direct-LAN link.
+        const adv = disclosure('Advanced');
+        adv.appendChild(formField('Root redirect', 'Send the bare address straight on to a sub-path.',
+            blurInput(s.rootRedirectPath || '', 'e.g. /dashboard',
+                (val) => patchService(s, { rootRedirectPath: val }, 'Could not save the redirect.'))));
+
+        const ve = plainInput(s.versionEndpoint || '', '/sys/metrics');
+        const vp = plainInput(s.versionProperty || '', 'property');
+        ve.dataset.original = s.versionEndpoint || ''; vp.dataset.original = s.versionProperty || '';
+        const saveVersion = () => {
+            const endpoint = ve.value.trim(), property = vp.value.trim();
+            if (endpoint === (ve.dataset.original || '') && property === (vp.dataset.original || '')) return;
+            patchService(s, { versionEndpoint: endpoint, versionProperty: property },
+                'Could not save the version endpoint.').then((ok) => {
+                    if (ok !== false) { ve.dataset.original = endpoint; vp.dataset.original = property; }
+                });
+        };
+        ve.onblur = saveVersion; vp.onblur = saveVersion;
+        ve.onkeydown = vp.onkeydown = (e) => { if (e.key === 'Enter') e.target.blur(); };
+        const verPair = el('div', 'ex-field-pair'); verPair.append(ve, vp);
+        adv.appendChild(formField('Version endpoint',
+            'Where Vaier reads this service’s running version, and the JSON property to read from it.', verPair));
+
+        adv.appendChild(checkRow('Link straight to the LAN URL when the visitor shares its network',
+            !s.directUrlDisabled,
+            (checked) => patchService(s, { directUrlDisabled: !checked },
+                'Could not update the direct LAN URL setting.')));
+        body.appendChild(adv);
 
         // The point of the single namespace, said plainly. These three are not three things that happen to
         // share a name — they are one service, and when one of them is wrong the service is down.
@@ -2794,12 +3300,59 @@
 
     // The terminal itself is in the dock, not in the pane: the tree, the address bar and the shell are all on
     // screen at once, which is the whole point of moving the dock in here.
+    // A machine's shell opens in its own browser window — the default now, because a window is bigger, resizes
+    // freely, and you can have several across a wide screen, none of which the bottom dock could give. One
+    // window per machine: re-opening focuses the one already there rather than spawning a second. `popup` drops
+    // the browser's tab strip and address bar — chrome a terminal has no use for.
+    function openShellWindow(machine, fresh) {
+        const features = 'popup,width=1024,height=680';
+        // Duplicate: another, separate shell on the same machine. A brand-new session id, and a window named by
+        // that id (never the machine), so it opens beside the machine's window instead of focusing it — that is
+        // what lets you have several shells open on one machine at once.
+        if (fresh) {
+            const pane = (window.VaierPanes && VaierPanes.newId) ? VaierPanes.newId() : ('p-' + Date.now());
+            const w = window.open('terminal.html?machine=' + encodeURIComponent(machine)
+                + '&pane=' + encodeURIComponent(pane), 'vaier-shell-' + encodeURIComponent(pane), features);
+            if (!w) { toast('Your browser blocked the shell window. Allow pop-ups for Vaier and try again.'); return; }
+            w.focus();
+            return;
+        }
+        // The machine's primary shell window — one per machine, so re-opening focuses the one already there.
+        const w = window.open('', 'vaier-shell-' + machine, features);
+        if (!w) { toast('Your browser blocked the shell window. Allow pop-ups for Vaier and try again.'); return; }
+        // A fresh window lands on about:blank — point it at the terminal. One that is already there is only
+        // focused, so its live session is never navigated away from.
+        let href = '';
+        try { href = w.location.href; } catch (e) { href = ''; }
+        if (!href || href === 'about:blank') {
+            w.location.href = 'terminal.html?machine=' + encodeURIComponent(machine);
+        }
+        w.focus();
+    }
+
     function renderShell(pane) {
-        pane.appendChild(paneHead(S.path[1] + ' / shell', true, 'A terminal on this machine'));
+        const machine = S.path[1];
+        const head = paneHead(machine + ' / shell', true, 'A terminal on this machine');
+        const actions = el('div', 'ex-pane-actions');
+        const win = el('button', 'ex-btn is-accent');
+        win.textContent = 'Open shell window';
+        win.title = 'A full-window terminal on ' + machine + ', in its own window';
+        win.onclick = () => openShellWindow(machine);
+        const dup = el('button', 'ex-btn');
+        dup.textContent = 'Duplicate';
+        dup.title = 'Open another, separate shell on ' + machine + ' in its own window';
+        dup.onclick = () => openShellWindow(machine, true);
+        actions.append(win, dup);
+        head.appendChild(actions);
+        pane.appendChild(head);
+
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
-        body.appendChild(note('The shell is open in the dock below. It stays open while you move around the '
-            + 'tree — nothing here is loaded in a frame, so no navigation can tear the session down.', false));
+        body.appendChild(note('This machine’s shell opens in its own window — a full-window, resizable terminal '
+            + 'you can place anywhere, and have several of at once. It should have opened just now; if your '
+            + 'browser blocked it, or you closed it, use Open shell window. Need more than one shell on this '
+            + 'machine? Duplicate opens another, separate one beside it. Each window reattaches to its own '
+            + 'session, so reopening never loses your place.', false));
         pane.appendChild(body);
     }
 
@@ -3347,6 +3900,49 @@
         return b;
     }
 
+    // A quiet progressive-disclosure fold — the shell's one home for rare or advanced controls, kept out of
+    // sight until asked for. Native <details> so it is keyboard- and screen-reader-friendly for free; the
+    // caller appends the body after the returned summary. Deliberately plain: this shell spends its boldness
+    // elsewhere, and mechanism the operator rarely touches should not shout.
+    function disclosure(summaryText) {
+        const d = el('details', 'ex-adv');
+        const s = el('summary', 'ex-adv-sum');
+        s.textContent = summaryText;
+        d.appendChild(s);
+        return d;
+    }
+
+    // The device-category picker, pre-selected to a machine's current shape. Shared by the add and edit forms —
+    // the empty option clears the override back to what Vaier detects.
+    function catSelect(current) {
+        const sel = el('select', 'ex-input');
+        DEVICE_CATEGORIES.forEach(([v, t]) => {
+            const o = el('option'); o.value = v; o.textContent = t;
+            if (v === (current || '')) o.selected = true;
+            sel.appendChild(o);
+        });
+        return sel;
+    }
+
+    // A small PATCH helper for the fire-and-refresh machine/service edits: send, on success reload the fleet and
+    // repaint where we stand; on failure toast the server's own reason. Returns whether it worked.
+    async function patchJson(url, body, failMsg, after) {
+        try {
+            const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body) });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                toast(err.message || failMsg);
+                return false;
+            }
+            if (after) await after();
+            return true;
+        } catch (e) {
+            toast(failMsg);
+            return false;
+        }
+    }
+
     function selCopy(machine, chosen) {
         chosen.forEach((entry) => {
             const id = clipId(machine, entry.path, S.at);
@@ -3855,7 +4451,11 @@
         // which is the one thing this feature cannot afford. The verdicts it settled are on the rows already.
         if (key(path) !== key(S.path)) _updateCheck = null;
         S.path = path;
-        if (kindOf(path) === 'shell' && window.TerminalDock) TerminalDock.open(path[1]);
+        setTree(false);   // navigating closes the phone drawer; a no-op on a wide screen
+        // Selecting a shell entry opens that machine's terminal in its own window (the default now — bigger and
+        // resizable, several at once). go() is only ever reached by an explicit navigation, so the window opens
+        // inside a user gesture; a repaint never calls it, so it can never spawn a shell on its own.
+        if (kindOf(path) === 'shell') openShellWindow(path[1]);
         render();
     }
 
@@ -4128,7 +4728,7 @@
 
     // The fleet's second stream, and the last one. `published-services` is a different topic on a different
     // controller — PublishingService, the published-services controller and DockerEventListener all publish
-    // on it — and vpn-peers.js already holds both streams open, so this is the shape the codebase has, not a
+    // on it — and the fleet already holds both streams open, so this is the shape the codebase has, not a
     // new one. It is what keeps the services (and the containers behind them) honest without a single poll:
     // the backend watches, the backend pushes, the browser listens.
     function watchServices() {
@@ -4206,6 +4806,11 @@
 
     $('exPalBtn').onclick = openPalette;
     $('exAddBtn').onclick = () => addMachine();
+
+    // The tree drawer (phone only — on a wide screen the tree is always in view and this class does nothing).
+    // go() drops .tree-open on every navigation, so selecting a machine closes the drawer behind you.
+    $('exMenuBtn').onclick = () => setTree(!app.classList.contains('tree-open'));
+    $('exTreeScrim').onclick = () => setTree(false);
     $('exScrim').onclick = (e) => { if (e.target === $('exScrim')) closePalette(); };
     $('exPalInput').oninput = () => { S.palSel = 0; paintPalette($('exPalInput').value); };
     $('exPalInput').onkeydown = (e) => {
@@ -4227,6 +4832,7 @@
     };
     document.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openPalette(); }
+        if (e.key === 'Escape' && app.classList.contains('tree-open')) setTree(false);
     });
 
     // On a phone the soft keyboard shrinks the visual viewport but not the layout viewport, which would leave

@@ -634,15 +634,19 @@ body {
 .term-keybar::-webkit-scrollbar { display: none; }
 
 .term-key {
-    flex: 1 0 auto;
-    min-width: 3rem;
-    padding: 0.7rem 0.5rem;
+    /* Eight keys divide the bar's width and fit the screen, instead of each holding a 3rem floor and spilling
+       into a sideways scroll that pushed the arrow keys off the edge. */
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0.7rem 0.3rem;
     background: var(--bg-input);
     border: 1px solid var(--border-hi);
     border-radius: 7px;
     color: var(--text);
-    font-family: var(--mono);
-    font-size: 1.05rem;
+    /* inherit, not var(--mono): every other button in the app is the UI sans, so the lone mono bar read as a
+       foreign element down here. The arrows render as UI glyphs to match the Esc/Tab/Ctrl labels. */
+    font-family: inherit;
+    font-size: 0.95rem;
     font-weight: 500;
     line-height: 1;
     cursor: pointer;
@@ -960,6 +964,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 /* Mobile */
 @media (max-width: 600px) {
     .container { padding: 1rem; }
+
+    /* 16px is the smallest a field can be before iOS zooms the page on focus — every shared form input, on
+       every page, takes it on a phone. */
+    .form-input, input.form-input, select.form-input, textarea.form-input { font-size: 16px; }
 
     .topbar { padding: 0 8px; gap: 2px; }
     .topbar-brand { margin-right: 2px; }

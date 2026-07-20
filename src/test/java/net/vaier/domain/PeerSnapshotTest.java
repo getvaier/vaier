@@ -27,7 +27,7 @@ class PeerSnapshotTest {
         assertThat(body).contains("Status: connected");
         assertThat(body).contains("Last handshake: ");
         assertThat(body).contains("LAN address: 192.168.1.50");
-        assertThat(body).contains("https://vaier.example.com/vpn-peers.html");
+        assertThat(body).contains("https://vaier.example.com/explorer.html");
     }
 
     @Test

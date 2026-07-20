@@ -1,0 +1,114 @@
+/* The pop-out terminal window (terminal.html). A single shell filling the window: a slim top bar with the
+   machine's name, status and actions, and the terminal taking everything below it. Deliberately spare — the
+   window is the chrome, so the page adds almost none. */
+
+html, body { height: 100%; }
+body.tw {
+    margin: 0;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #000;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.tw-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+}
+.tw-dot {
+    flex: none;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--green);
+    transition: background .15s ease;
+}
+.tw-dot.error { background: var(--red); }
+.tw-name { flex: none; font-family: var(--mono); font-size: 14px; color: var(--text); }
+.tw-status {
+    flex: 1 1 auto; min-width: 0;
+    font-size: 13px; color: var(--text-dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tw-status.error { color: var(--red); }
+.tw-status-btn { margin-left: 6px; }
+
+.tw-actions { flex: none; display: flex; gap: 8px; }
+.tw-btn {
+    padding: 4px 11px;
+    background: var(--bg);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-1);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+}
+.tw-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tw-btn:disabled { opacity: .4; cursor: not-allowed; }
+.tw-btn:disabled:hover { border-color: var(--border-hi); color: var(--text-muted); }
+.tw-btn.tw-danger:hover { border-color: var(--red); color: var(--red); }
+
+.tw-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+.tw-term { flex: 1 1 auto; min-height: 0; }
+.tw-term .xterm { height: 100%; padding: 6px 8px; }
+
+/* The on-screen key row — the keys a soft keyboard can't reach. Hidden on desktop; shown on a phone. Eight
+   keys divide the width so they fit without a sideways scroll, matching the dock's bar. */
+.tw-keys {
+    display: none;
+    flex: none;
+    gap: 5px;
+    padding: 6px 7px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+}
+.tw-key {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 11px 4px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-hi);
+    border-radius: 7px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+}
+.tw-key:active { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+/* An armed sticky modifier glows in the accent, so it's unmistakable which will catch the next key. */
+.tw-key-mod.is-armed { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+
+@media (max-width: 720px) {
+    .tw-keys { display: flex; }
+    /* The top bar stays one line: smaller action buttons, the status truncates, and the buttons scroll
+       sideways rather than wrapping the bar to a second row (which would eat terminal height). */
+    .tw-bar { gap: 6px; padding: 5px 8px; }
+    .tw-name { font-size: 12px; }
+    .tw-btn { padding: 2px 6px; font-size: 11px; white-space: nowrap; }
+    .tw-actions { gap: 5px; overflow-x: auto; scrollbar-width: none; }
+    .tw-actions::-webkit-scrollbar { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tw-dot { transition: none; }
+}

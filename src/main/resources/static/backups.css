@@ -633,6 +633,8 @@
     .bk-item-actions { justify-content: flex-start; }
     .bk-menu-list { right: auto; left: 0; }
     .bk-schedule-card { flex-direction: column; align-items: flex-start; }
+    /* Let the Hour/Save/note row wrap instead of pushing a save note off the card's right edge. */
+    .bk-schedule-control { flex-wrap: wrap; }
 
     /* Keep the spine on mobile — it's the whole point of the page — but narrow its gutter, and let a
        stage head stack so the "New…" button doesn't squeeze the title. */

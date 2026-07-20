@@ -72,8 +72,14 @@ class ExplorerShellTest {
 
     @Test
     void theShell_isNeverLoadedIntoTheAdminIframe() throws IOException {
-        // If the shell were a section of admin.html it would be inside the very iframe it exists to retire.
-        assertThat(read("admin.html")).doesNotContain("explorer.html");
+        // If the shell were a section of admin.html it would be inside the very iframe it exists to retire. A
+        // top-level redirect to it (a stale #infrastructure bookmark leaving admin for the shell, now that
+        // Infrastructure is native) is the opposite of embedding, and allowed — so the guard is against
+        // embedding the shell as a section, not against naming it in a navigation.
+        String admin = read("admin.html");
+        assertThat(admin).doesNotContain("data-page=\"explorer.html\"");
+        assertThat(admin).doesNotContain("src=\"explorer.html\"");
+        assertThat(admin).doesNotContain("src='explorer.html'");
     }
 
     // --- 3. the dock moved in ---------------------------------------------------------------------------
@@ -91,26 +97,40 @@ class ExplorerShellTest {
     }
 
     @Test
-    void aShellEntryOnAMachine_opensTheDockOnThatMachine() throws IOException {
-        // "shell" is an entry under a machine now, not a button on a card in another page.
+    void aShellEntryOnAMachine_opensItInItsOwnWindow() throws IOException {
+        // "shell" is an entry under a machine, and selecting it opens that machine's terminal in its own
+        // browser window now — the default, since a window is bigger, resizes freely, and you can have several
+        // at once. The Explorer no longer opens the bottom dock for a shell (the dock stays for admin.html).
         String js = read("explorer-shell.js");
-        assertThat(js).contains("TerminalDock.open(");
+        assertThat(js).contains("function openShellWindow(");
+        assertThat(js).contains("terminal.html?machine=");
         assertThat(js).contains("'shell'");
+        assertThat(js).doesNotContain("TerminalDock.open(");
     }
 
     @Test
-    void aRepaint_neverSpawnsASecondShell() throws IOException {
-        // TerminalDock.open() is not idempotent by design — every call is another shell, which is what an
-        // operator wants when they ask for one twice. So it may only be reached by an explicit selection.
-        // Reached from the Inspector's renderer instead, every repaint (a machine coming online, say) would
-        // silently open another tmux session on the host, forever.
+    void aRepaint_neverSpawnsAShell() throws IOException {
+        // A shell window opens only from an explicit action — navigating to a shell entry (go), or a button the
+        // operator clicks (Open shell window, Duplicate). It must never be opened at the top level of a render
+        // function, or every repaint (a machine coming online, a stats push) would open a window on its own.
         String js = read("explorer-shell.js");
-        assertThat(js.split("TerminalDock\\.open\\(", -1).length - 1).isEqualTo(1);
+        assertThat(js).contains("function openShellWindow(");
 
         int go = js.indexOf("function go(path) {");
         assertThat(go).isPositive();
-        String body = js.substring(go, js.indexOf("\n    }", go));
-        assertThat(body).as("the one call site is navigation, not rendering").contains("TerminalDock.open(");
+        String goBody = js.substring(go, js.indexOf("\n    }", go));
+        assertThat(goBody).as("navigating to a shell entry opens its window").contains("openShellWindow(");
+
+        // In the render path it is only ever wired to a click handler, never called as the pane renders.
+        int rs = js.indexOf("function renderShell(");
+        assertThat(rs).isPositive();
+        String rsBody = js.substring(rs, js.indexOf("\n    }", rs));
+        for (String line : rsBody.split("\n")) {
+            if (line.contains("openShellWindow(")) {
+                assertThat(line).as("renderShell reaches openShellWindow only through a handler: %s", line)
+                    .contains("onclick");
+            }
+        }
     }
 
     // --- 4. the frontend never polls --------------------------------------------------------------------
@@ -194,12 +214,14 @@ class ExplorerShellTest {
     void theSectionsNotYetPorted_areBridgedIntoTheTreeAndMarkedTransitional() throws IOException {
         String js = read("explorer-shell.js");
         // Settings is native now (a top-level global, no longer an iframe), so settings.html is gone from the
-        // shell. Infrastructure and Backups stay transitional bridges; Users and Concepts are top-level globals
-        // that still bridge their pages until they are ported.
-        for (String page : List.of("vpn-peers.html", "backups.html", "users.html", "concepts.html")) {
+        // shell. Infrastructure is native too — machines, services, the map, editing, publishing and the LAN
+        // scan are all real entries now, so vpn-peers.html is deleted and no longer bridged. Backups stays a
+        // transitional bridge; Users and Concepts are top-level globals that still bridge their pages.
+        for (String page : List.of("backups.html", "users.html", "concepts.html")) {
             assertThat(js).as("bridge to %s", page).contains(page);
         }
         assertThat(js).doesNotContain("settings.html");   // ported to a native entry, not framed
+        assertThat(js).doesNotContain("vpn-peers.html");  // Infrastructure is native — the bridge is gone
         // A bridge nobody labelled is a bridge nobody deletes.
         assertThat(js).containsIgnoringCase("transitional");
     }
@@ -434,14 +456,15 @@ class ExplorerShellTest {
 
     @Test
     void theOnlyMutatingCallsInTheShell_areTheOnesThatReallyExist() throws IOException {
-        // Three mutating verbs ship now, each backed by a real endpoint. DELETE unpublishes a service (slice C),
-        // deletes a file/folder (slice 5), removes the backup-server designation, deletes a repository, stops a
-        // machine's backup (deletes its job), and removes protected paths. PUT sets a disk watch (#325),
-        // designates/edits the backup server, and saves a repository. POST copies across the fleet (/transfers,
-        // slice 2), starts a backup run (/backup-jobs/{name}/runs), and protects paths
-        // (/machines/{m}/backup/paths). A job is never PUT from the shell any more — it is Vaier's, configured
-        // by which files you protect, not by a form. Publishing (POST /publish) still needs a form and stays on
-        // the Infrastructure bridge. The distinct verb set is pinned here; an invented one shows up.
+        // Four mutating verbs ship now, each backed by a real endpoint. DELETE unpublishes a service, deletes a
+        // file/folder, removes the backup-server designation, deletes a repository, stops a machine's backup,
+        // removes protected paths, and (regenerate) drops a peer before recreating it. PUT sets a disk watch
+        // (#325), designates/edits the backup server, saves a repository, and replaces a service's allowed
+        // groups. POST copies across the fleet (/transfers), starts a backup run, protects paths, adds a peer or
+        // a LAN server, reissues a config, and publishes a service — publishing is native now, no longer a
+        // bridge. PATCH is the Infrastructure edits ported in: a machine's name/description/LAN/device-category,
+        // its SSH-access flag, and a published service's auth mode, alias, redirect, version probe and launchpad
+        // visibility. The distinct verb set is pinned here; an invented one shows up.
         String js = read("explorer-shell.js");
 
         Matcher m = Pattern.compile("method:\\s*'([A-Z]+)'").matcher(js);
@@ -450,7 +473,7 @@ class ExplorerShellTest {
             methods.add(m.group(1));
         }
         assertThat(methods.stream().distinct().toList()).as("the shell's mutating verbs")
-            .containsExactlyInAnyOrder("PUT", "DELETE", "POST");
+            .containsExactlyInAnyOrder("PUT", "DELETE", "POST", "PATCH");
         assertThat(js).contains("/published-services/");
         assertThat(js).contains("/disk/watch");
         assertThat(js).contains("'/transfers'");
@@ -471,7 +494,7 @@ class ExplorerShellTest {
     void aPublishedService_isFiledUnderTheMachineItRunsOn_byTheRuleTheInfrastructurePageAlreadyUses()
             throws IOException {
         // A published service is one thing with three homes: a container on a machine, a Traefik route and a
-        // DNS record. Which machine it belongs to is decided exactly as vpn-peers.js decides it — a LAN
+        // DNS record. Which machine it belongs to is decided exactly as the Infrastructure page decided it — a LAN
         // service by its LAN server (falling back to the relay peer when no registered LAN server matches),
         // and everything else by its host name, with the hub's own routes on the Vaier server. A second rule
         // here would put the same service under two different machines in two different pages.
@@ -620,15 +643,26 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theInfrastructureBridge_survivesSliceC() throws IOException {
-        // The epic said slice C "retires" vpn-peers.html. It does not: that page still owns machine creation,
-        // the LAN scan, the world map, SSH credentials, setup scripts, allowed groups and discovered
-        // candidates. The bridge stays until parity is real — regressing function to make the tree look
-        // finished would be the worst trade in the epic.
+    void theInfrastructurePage_isDeleted_itsFunctionPortedNatively() throws IOException {
+        // Parity is real: everything vpn-peers.html owned — machine creation and editing, the LAN scan, the
+        // world map, SSH credentials and access, setup scripts, config reissue and regeneration, publishing
+        // with its advanced fields, the published-service editor and allowed groups, and discovered candidates
+        // — is a native entry in the tree now. So the page and its assets are gone, and the bridge with them.
+        assertThat(Files.exists(STATIC.resolve("vpn-peers.html"))).isFalse();
+        assertThat(Files.exists(STATIC.resolve("vpn-peers.js"))).isFalse();
+        assertThat(Files.exists(STATIC.resolve("vpn-peers-map.js"))).isFalse();
+        assertThat(Files.exists(STATIC.resolve("vpn-peers-helpers.js"))).isFalse();
+        assertThat(Files.exists(STATIC.resolve("vpn-peers.css"))).isFalse();
+
+        // The native controls that replaced the page, pinned so a regression that quietly drops one is caught.
         String js = read("explorer-shell.js");
-        assertThat(js).contains("vpn-peers.html");
-        assertThat(Files.exists(STATIC.resolve("vpn-peers.html"))).isTrue();
-        assertThat(Files.exists(STATIC.resolve("vpn-peers.js"))).isTrue();
+        assertThat(js).contains("function editMachineForm");     // machine editing
+        assertThat(js).contains("function toggleSshAccess");     // SSH access, distinct from the credential
+        assertThat(js).contains("function regenerateMachine");   // keypair rotation (#202)
+        assertThat(js).contains("function lanSetupScript");      // the LAN host setup script
+        assertThat(js).contains("function createLanServer");     // add a LAN server by hand
+        assertThat(js).contains("function allowedGroupsEditor"); // per-service access groups
+        assertThat(js).contains("function publishAdvanced");     // path prefix / redirect / direct-URL
     }
 
     // --- 14. #326: a machine's file tree begins at its SFTP root ----------------------------------------

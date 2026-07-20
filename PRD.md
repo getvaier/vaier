@@ -351,7 +351,7 @@ Vaier ships an SMTP notifier that carries Vaier's admin alert emails (machine up
 - **Send test email** button does a full AUTH + roundtrip send via Jakarta Mail so misconfigurations surface without touching the auth layer.
 - **Save** verifies credentials against the SMTP server *before* storing them. On failure the REST endpoint returns HTTP 400 with the upstream SMTP error. The password is persisted to `vaier-config.yml` (owner-only); saving no longer writes any Authelia notifier block or restarts a container — the Authelia integration is gone entirely.
 - Password field can be left blank on save/test to reuse the stored value, so host/sender/etc. can be edited without retyping the secret.
-- **Server machine up/down alerts** ([#173](https://github.com/getvaier/vaier/issues/173)): two 30s schedulers — one watching WireGuard handshake age for `UBUNTU_SERVER`/`WINDOWS_SERVER` peers, one watching the LAN reachability TCP probe for `LAN_SERVER` machines. Mobile/Windows clients are excluded — their disconnects are routine user behaviour. On a state change either watcher emails every **admin**-role **access entry** with subject `[Vaier] <name> is now <connected|disconnected>` and a body containing the machine's name, type, last handshake (or last-seen timestamp for LAN servers), LAN address, and a link back to `vaier.<domain>/vpn-peers.html`. Per-machine state is in-memory; the first observation after Vaier startup is treated as a baseline so a restart never produces a notification storm. No quiet-hours setting — alerts fire 24/7.
+- **Server machine up/down alerts** ([#173](https://github.com/getvaier/vaier/issues/173)): two 30s schedulers — one watching WireGuard handshake age for `UBUNTU_SERVER`/`WINDOWS_SERVER` peers, one watching the LAN reachability TCP probe for `LAN_SERVER` machines. Mobile/Windows clients are excluded — their disconnects are routine user behaviour. On a state change either watcher emails every **admin**-role **access entry** with subject `[Vaier] <name> is now <connected|disconnected>` and a body containing the machine's name, type, last handshake (or last-seen timestamp for LAN servers), LAN address, and a link back to `vaier.<domain>/explorer.html` (was `/vpn-peers.html` before the Infrastructure page was deleted). Per-machine state is in-memory; the first observation after Vaier startup is treated as a baseline so a restart never produces a notification storm. No quiet-hours setting — alerts fire 24/7.
 - **Reachability debounce for LAN servers**: a probe result must hold for 3 consecutive 30s cycles (≈60s of consistency) before the published cache flips and an email goes out. Dampens both the WireGuard tunnel warmup window after a Vaier restart (no false-down email when it takes one cycle for the relay handshake to complete) and ordinary network flapping (a single transient timeout never propagates). The UI shows the icon as grey ("warming up") until the first state confirms.
 - **Last-seen timestamp inside the card** ([#173](https://github.com/getvaier/vaier/issues/173)): every machine's expanded card has a "Last Seen" detail row derived from the latest handshake (or the latest successful LAN reachability probe), updated live by the `peers-stats` SSE stream so the value stays current without a manual refresh. The header row itself signals liveness through the machine-icon colour rather than a separate widget.
 - **Host disk-pressure alerts** ✅ — originally a dedicated local watcher reading the Vaier host's own filesystem directly; fully retired in favour of a single alerting path for the whole fleet. See **#316** below: the Vaier host is now covered by `RemoteDiskWatcher` over SSH-to-self exactly like any other machine, so it no longer double-notifies alongside a local watcher. The entire local host-disk-reading stack was removed once the watcher was gone and nothing else consumed it — `DiskUsageWatcher`, `NotifyAdminsOfDiskPressureUseCase`, `GetHostDiskUsageUseCase`, `HostMonitoringService`, the `ForReadingDiskUsage` port and its `HostDiskUsageAdapter` (which read the host root via `Files.getFileStore` over the `VAIER_HOST_ROOT_PATH` bind mount), and the `domain.DiskUsage` value object are all deleted. What survives is the threshold config — `diskMonitorThresholdPercent` in `vaier-config.yml` (default 85, valid 1–99, validated in `domain.VaierConfig`), exposed via `ConfigResolver.getDiskMonitorThresholdPercent()` and editable through `PUT /settings/disk-monitor` (`UpdateDiskMonitorSettingsUseCase` on `SettingsService`) — which now governs remote disk pressure across the fleet. Since **#325** it is the **fleet-wide fallback**: it judges every filesystem whose **disk watch** carries no threshold of its own.
@@ -1324,8 +1324,10 @@ Three things this buys that a set of pages structurally cannot:
   LAN server, falling back to the relay peer; the hub's own routes on the **Vaier server**; everything else by
   host) — a second rule would file one service under two machines on two pages. **One verb ships**, because one
   is backed: **Unpublish** (`DELETE /published-services/{dnsName}`, path-prefix-aware), behind a confirmation,
-  since it tears down a route and a DNS record. **Publishing is deliberately not in the tree** — it needs a
-  subdomain / auth-mode / backend form and stays on Infrastructure rather than being half-built here.
+  since it tears down a route and a DNS record. **Publishing was deliberately not in the tree** in slice C — it
+  needed a subdomain / auth-mode / backend form and stayed on Infrastructure rather than being half-built here.
+  *(Superseded: publishing is native in the tree now — see the "Infrastructure ported, and the page deleted ✅"
+  slice.)*
   **Liveness, still never polled.** The shell now holds a **second** `EventSource`, on the existing
   `published-services` topic (`service-updated`, `publish-traefik-active`, `publish-rolled-back`) — a different
   topic on a different controller, and the shape `vpn-peers.js` already has. Two streams is the ceiling; a test
@@ -1352,10 +1354,13 @@ Three things this buys that a set of pages structurally cannot:
   gives it a threshold of its own. See §6.9.)* The **disk forecast / runway is deliberately not exposed** —
   `RemoteDiskForecastTracker` needs a *history* of samples and is private state inside the scheduled watcher;
   a single on-demand reading cannot produce a trend (see backlog).
-  **The Infrastructure bridge stays.** The epic optimistically said this slice retires `vpn-peers.html`. It does
-  not, and a test pins that too: that page still owns machine creation, the LAN scan, the world map, SSH
-  credentials, setup scripts, allowed groups and discovered candidates. Regressing function to make the tree
-  look finished would be the worst trade in the epic — the bridge goes when parity is real, not before.
+  **The Infrastructure bridge stays — *for now*.** The epic optimistically said this slice retires
+  `vpn-peers.html`. In slice C it did not, and a test pinned that: that page still owned machine creation, the
+  LAN scan, the world map, SSH credentials, setup scripts, allowed groups and discovered candidates. Regressing
+  function to make the tree look finished would have been the worst trade in the epic — the bridge goes when
+  parity is real, not before. *(Superseded: parity was later reached and the bridge removed — `vpn-peers.html`
+  is deleted and its function is native in the tree. See the "Infrastructure ported, and the page deleted ✅"
+  slice below.)*
   Refactor along the way: trust-on-first-use had been copied into `TerminalService` and `ExplorerService`; the
   third copy (the disk read) is what made it worth having exactly one, so the rule now lives on
   `SshTarget.pinOnFirstUse` and every SSH path (shell, exec, SFTP, disk) pins from it.
@@ -1490,8 +1495,31 @@ Three things this buys that a set of pages structurally cannot:
   `provision-settled`. The nightly schedule and run semantics (warnings/failed/diagnostics, self-initialising
   repository, admin failure email, `~/.vaier-backup` working state) are unchanged (§6.19) — only *where* a run is
   triggered, and the run-status display, moved. Part of epic [#323](https://github.com/getvaier/vaier/issues/323).
-- [ ] **E — The rest.** DNS, access, settings. `admin.html` and the iframes are deleted, and the bridge with
-  them.
+- [x] **Infrastructure ported, and the page deleted ✅.** The Infrastructure page's whole function moved into the
+  tree as native entries/panes, and `vpn-peers.html` (+ `vpn-peers.js`, `vpn-peers-map.js`,
+  `vpn-peers-helpers.js`, `vpn-peers.css`) was **deleted**. Ported: **machine editing** (an **Edit details**
+  dialog on a machine's pane — rename, description, LAN address/CIDR for server peers, device category); the
+  **SSH access** toggle (whether Vaier may open an SSH session, distinct from *storing* the credential — turning
+  it off hides that machine's `files`/`shell`/`disk`); **setup scripts** (the show-once peer setup-script
+  download in the new-config dialog, and a re-viewable LAN-host `setup.sh` dialog — curl one-liner + download);
+  **Regenerate config** (#202 — rotate a peer's keypair by delete+recreate) and **Reissue** (same keypair), both
+  under an **Advanced** fold on the machine pane; the **published-service editor** (auth mode public/social,
+  allowed-group chips, launchpad display name + visibility, and an **Advanced** fold for root redirect, version
+  endpoint/property, direct-LAN-URL); the **publish forms** for a discovered container and a by-hand LAN
+  host:port (each gaining an **Advanced** fold — path prefix, root redirect, direct-URL); **Add Machine**
+  including the **LAN server** type (LAN address, runs-Docker + port, device category); and the world **Map**
+  (now a fleet-root entry). New UI pattern: a quiet **Advanced** progressive-disclosure fold (native
+  `<details>`) that keeps rare/advanced controls out of sight. The `BRIDGES` array drops its Infrastructure
+  entry — only **Backups** is left in it; **Users** and **Concepts** are the remaining bridged globals, and
+  **Settings** is native. `admin.html`'s Infrastructure tab is removed; a stale `/admin.html#infrastructure`
+  (and the `#services` / `#vpn` aliases) now redirects to `/explorer.html`; the launchpad's **Infrastructure**
+  link points to `/explorer.html`; and `PeerSnapshot`'s peer-notification "Vaier UI" link points to
+  `/explorer.html` instead of `/vpn-peers.html`. (Note: `vpn-peers` remains an SSE **topic** name on the event
+  bus — unrelated to the deleted page — and is unchanged.) This closes the slice-C "the Infrastructure bridge
+  stays" caveat and the "Publish from the tree" / "Retiring the Infrastructure bridge" backlog items below. Part
+  of epic [#323](https://github.com/getvaier/vaier/issues/323).
+- [ ] **E — The rest.** DNS, access (Users), Concepts. `admin.html` and the last iframes are deleted, and the
+  bridge with them.
 
 **Backlog (deliberately deferred out of slice C):**
 - **Container control endpoints** — start / stop / restart a container, and read its logs. Vaier has none: the
@@ -1499,17 +1527,20 @@ Three things this buys that a set of pages structurally cannot:
   remote-exec surface. This is its own change with its own security thinking (who may restart what, whether it
   goes through the socket proxy or the machine's SSH, what an audit trail looks like) — not a button bolted onto
   the Inspector. Until it exists, the Inspector says plainly that the machine's **shell** is where that is done.
-- **Publish from the tree.** Unpublish shipped because `DELETE /published-services/{dnsName}` exists; publishing
-  needs a form (subdomain, **auth mode**, **path prefix**, backend, root redirect) and the **publishable
-  service** candidate feed behind it. It stays on **Infrastructure** until the tree can host that form honestly.
+- ~~**Publish from the tree.**~~ ✅ **Done** — publishing is native in the tree now: a machine's
+  discovered-but-unpublished containers appear as **+ Publish** rows and a relay-anchored LAN server offers a
+  by-hand **Publish LAN port** form, each with a subdomain / **auth mode** / **path prefix** / backend / root
+  redirect (behind an **Advanced** fold). Shipped in the "Infrastructure ported, and the page deleted ✅" slice.
 - **The disk forecast in the Inspector.** `GET /machines/{machine}/disk` reports level, not trend: the
   **runway** and fill rate come from `RemoteDiskForecastTracker`, which needs a *history* of samples and is
   private state inside the scheduled `RemoteDiskWatcher`. Exposing **runway** means exposing that history (a
   read port onto the tracker, or persisting the samples) — a real design decision, not a field to add. Folds
   together with the host-monitoring backlog item in §6.9.
-- **Retiring the Infrastructure bridge.** Only once the tree reaches parity: machine creation, the **LAN
-  scanner**, the map, **host credentials**, backup setup scripts, **allowed groups**, and the discovered-candidate
-  → publish flow all still live only on `vpn-peers.html`.
+- ~~**Retiring the Infrastructure bridge.**~~ ✅ **Done** — parity was reached and the bridge removed: machine
+  creation, the **LAN scanner**, the map, **host credentials**, setup scripts, **allowed groups**, and the
+  discovered-candidate → publish flow are all native in the tree, and `vpn-peers.html` is deleted. Shipped in
+  the "Infrastructure ported, and the page deleted ✅" slice. (The remaining bridges are **Backups**, **Users**
+  and **Concepts** — slice E.)
 
 **Decided up front — where the tree does not fit:**
 - **Wizards.** Fleet backup is a guided flow; a tree cannot teach. It stays a flow, rendered as the Inspector

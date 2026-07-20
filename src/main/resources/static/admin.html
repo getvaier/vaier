@@ -60,14 +60,9 @@
             <span>V<span class="brand-ai">ai</span>er</span>
         </a>
         <nav class="topbar-nav" id="adminTabs">
-            <button class="topbar-item" data-page="vpn-peers.html" data-hash="infrastructure">
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="1" y="2" width="14" height="10" rx="1"/>
-                    <line x1="5" y1="15" x2="11" y2="15"/>
-                    <line x1="8" y1="12" x2="8" y2="15"/>
-                </svg>
-                <span class="link-label">Infrastructure</span>
-            </button>
+            <!-- Infrastructure is gone from admin.html: its page (vpn-peers.html) was deleted once the Explorer
+                 shell took over machines, services, the map, editing, publishing and the LAN scan natively
+                 (#323). Reach all of that in the Explorer now. -->
             <!-- The Explorer name now belongs to the tree shell (#323), which is a page of its own and not a
                  section of this one. This tab keeps the #321 file browser reachable under its own name while
                  the shell is built; it retires with the last slice, along with admin.html itself. -->
@@ -156,6 +151,7 @@
     <script src="vendor/xterm/5.3.0/xterm.js"></script>
     <script src="vendor/xterm/5.3.0/xterm-addon-fit.js"></script>
     <script src="vendor/xterm/5.3.0/xterm-addon-web-links.js"></script>
+    <script src="terminal-panes.js"></script>
     <script src="terminal-dock.js"></script>
     <script>
         const mainContent = document.getElementById('mainContent');
@@ -197,8 +193,10 @@
         tabs.forEach(tab => tab.addEventListener('click', () => showSection(tab)));
         terminalTab.addEventListener('click', showTerminal);
 
-        const infraTab = document.querySelector('#adminTabs .topbar-item[data-hash="infrastructure"]');
-        function goInfrastructure() { if (infraTab) showSection(infraTab); }
+        // Infrastructure is a page of its own now — the Explorer shell (#323) owns machines, services, the
+        // map, editing, publishing and the LAN scan. admin.html no longer has that tab, so "go to
+        // infrastructure" leaves admin.html for the Explorer.
+        function goInfrastructure() { window.location.href = '/explorer.html'; }
 
         // Opened from a machine card's Terminal button in the Infrastructure iframe (window.parent).
         window.vaierOpenTerminal = function (machineName) {
@@ -230,9 +228,9 @@
                 else goInfrastructure();
                 return;
             }
-            // The old #services and #vpn sections merged into #infrastructure (slice 3); keep old
-            // links/bookmarks working by aliasing them, and the click() rewrites the hash.
-            if (hash === 'services' || hash === 'vpn') hash = 'infrastructure';
+            // #infrastructure (and its old #services / #vpn aliases) now lives in the Explorer — an old
+            // link or bookmark to it lands there rather than on a tab admin.html no longer has.
+            if (hash === 'services' || hash === 'vpn' || hash === 'infrastructure') { goInfrastructure(); return; }
             const tab = document.querySelector(`#adminTabs .topbar-item[data-hash="${hash}"]`);
             if (tab) tab.click();
         }

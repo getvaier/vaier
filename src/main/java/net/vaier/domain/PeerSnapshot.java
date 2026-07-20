@@ -40,7 +40,7 @@ public record PeerSnapshot(
         if (baseDomain != null && !baseDomain.isBlank()) {
             body.append("\nVaier UI: https://")
                 .append(new VaierHostnames(baseDomain).vaierServerFqdn())
-                .append("/vpn-peers.html\n");
+                .append("/explorer.html\n");
         }
         return body.toString();
     }

@@ -25,10 +25,15 @@
     --accent-hover: #eebb7c;
 }
 
-html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html { height: 100%; }
+/* dvh, not vh: a phone's 100vh is the *large* viewport (address bar retracted), so with the body clipped a
+   showing toolbar pushed the foot of the shell below the fold with no way to scroll to it. dvh tracks the
+   viewport the browser chrome actually leaves. The 100vh line is the fallback for the rare engine without dvh.
+   The soft keyboard is a separate case, handled by binding the body to visualViewport in the shell script. */
+body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: none; }
 
 .ex-app {
-    height: 100vh;
+    height: 100%;
     display: grid;
     grid-template-rows: 48px 1fr auto;   /* topbar · tree+inspector · dock */
     transition: background .5s ease;
@@ -87,13 +92,38 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
     cursor: pointer;
 }
 .ex-kbd:hover { color: var(--text-muted); border-color: var(--border-hi); }
+/* The magnifier only shows once the button loses its words on a phone; on a wide screen the label and the
+   ⌘K chip carry it, exactly as before. */
+.ex-kbd-ico { display: none; }
+.ex-kbd-chip { color: var(--text-dim); }
+
 /* Add machine — the one create action prominent in the chrome, next to search. */
 .ex-topbtn {
-    flex: none; height: 28px; padding: 0 11px;
+    flex: none; display: inline-flex; align-items: center; gap: 4px;
+    height: 28px; padding: 0 11px;
     background: none; border: 1px solid var(--accent); border-radius: var(--radius-1);
     color: var(--accent); font-family: var(--mono); font-size: 12px; cursor: pointer;
 }
 .ex-topbtn:hover { background: var(--accent); color: var(--bg); }
+
+/* The drawer toggle. It only exists on a phone (revealed in the width query below); on a wide screen the
+   tree is a permanent column and there is nothing to open. */
+.ex-menu {
+    display: none;
+    flex: none;
+    align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    margin-right: 2px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.ex-menu:hover { color: var(--text); border-color: var(--border-hi); }
+
+/* The scrim behind the drawer — inert until the width query gives it a body. */
+.ex-tree-scrim { display: none; }
 
 /* --- main ------------------------------------------------------------------------------------------ */
 
@@ -1025,6 +1055,57 @@ select.ex-input { cursor: pointer; }
 .ex-set-note { font-size: 13px; color: var(--text-dim); }
 .ex-set-note.is-ok { color: var(--green); }
 .ex-set-note.is-err { color: var(--red); }
+
+/* The Advanced fold — the shell's one place to keep rare or mechanism-heavy controls out of sight. A quiet
+   native <details>, restyled to the shell's hand: a muted summary that brightens on hover, its own hairline
+   above, and a marker that turns as it opens. Deliberately understated — the boldness is spent elsewhere. */
+.ex-adv { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.ex-adv > .ex-adv-sum {
+    list-style: none; cursor: pointer; user-select: none;
+    font-size: 13px; color: var(--text-dim);
+    display: inline-flex; align-items: center; gap: 7px;
+}
+.ex-adv > .ex-adv-sum::-webkit-details-marker { display: none; }
+.ex-adv > .ex-adv-sum::before {
+    content: ''; width: 0; height: 0; flex: none;
+    border-left: 4px solid currentColor;
+    border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+    transition: transform .12s ease;
+}
+.ex-adv[open] > .ex-adv-sum::before { transform: rotate(90deg); }
+.ex-adv > .ex-adv-sum:hover { color: var(--text-muted); }
+.ex-adv > .ex-adv-sum:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-1); }
+.ex-adv > *:not(.ex-adv-sum) { margin-top: 13px; }
+
+/* Two inputs on one row — the version endpoint and the property it reads. Stacks on a narrow pane. */
+.ex-field-pair { display: flex; gap: 8px; }
+.ex-field-pair > .ex-input:first-child { flex: 2 1 0; min-width: 0; }
+.ex-field-pair > .ex-input:last-child { flex: 1 1 0; min-width: 0; }
+
+/* Allowed-groups chips: the groups let through a signed-in route. Each removable; an add row below with its
+   own suggestions. The empty chip is muted — it states the default (anyone signed in) rather than looking
+   like a set group. */
+.ex-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ex-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 5px 3px 9px; font-family: var(--mono); font-size: 13px;
+    color: var(--text); background: var(--bg-card);
+    border: 1px solid var(--border-hi); border-radius: 9999px;
+}
+.ex-chip.is-empty {
+    padding: 3px 10px; color: var(--text-dim); background: none;
+    border-style: dashed; font-family: inherit;
+}
+.ex-chip-x {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0; border: none; border-radius: 50%;
+    background: none; color: var(--text-dim); cursor: pointer;
+}
+.ex-chip-x .ex-ico { width: 10px; height: 10px; }
+.ex-chip-x:hover { color: var(--red); background: rgba(244, 135, 113, .12); }
+.ex-chip-add { display: flex; gap: 8px; }
+.ex-chip-add .ex-input { flex: 1 1 auto; }
+.ex-chip-add .ex-btn { flex: none; }
 /* A machine's job subheading, and its last-run status line — a dot and a phrase, the fleet's own four colours. */
 .ex-sub { font-family: var(--mono); font-size: 14px; color: var(--text); margin: 16px 0 6px; }
 .ex-runline { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-muted); }
@@ -1047,10 +1128,60 @@ select.ex-input { cursor: pointer; }
 }
 
 @media (max-width: 760px) {
+    .ex-menu { display: inline-flex; }
+
+    /* The chrome loses its words but not its actions: the address bar keeps the room, the two buttons fall
+       back to their glyphs. */
+    .ex-addressbar { margin: 0 6px; }
+    .ex-topbtn-lbl { display: none; }
+    .ex-topbtn { padding: 0 9px; }
+    .ex-kbd-lbl, .ex-kbd-chip { display: none; }
+    .ex-kbd-ico { display: block; }
+    .ex-kbd { padding: 0 9px; }
+
+    /* The tree stops being a column and becomes a drawer that slides over the pane. The pane takes the full
+       width; the tree is lifted out of the grid, parked off the left edge, and brought in only when the app
+       is in .tree-open. Selecting anything (go() in the shell) drops .tree-open, so the drawer closes the
+       moment you have navigated — the same reflex a phone's own file apps have. */
     .ex-main { grid-template-columns: minmax(0, 1fr); }
-    .ex-tree { display: none; }
-    .ex-lhead, .ex-lrow { grid-template-columns: 24px minmax(0, 1fr) 80px; }
+    .ex-tree {
+        position: fixed;
+        top: 48px; left: 0; bottom: 0;
+        width: min(84vw, 300px);
+        z-index: 60;
+        box-shadow: 6px 0 32px rgba(0, 0, 0, .5);
+        transform: translateX(-100%);
+        transition: transform .22s ease, background .5s ease, border-color .5s ease;
+    }
+    .ex-app.tree-open .ex-tree { transform: translateX(0); }
+
+    .ex-tree-scrim {
+        display: block;
+        position: fixed;
+        inset: 48px 0 0 0;
+        z-index: 55;
+        background: rgba(0, 0, 0, .5);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .22s ease;
+    }
+    .ex-app.tree-open .ex-tree-scrim { opacity: 1; pointer-events: auto; }
+
+    /* The pane's header wraps rather than shoving its actions off the edge, and reclaims a little side room. */
+    .ex-pane-head { flex-wrap: wrap; padding: 10px 12px; }
+    .ex-pane-body { padding: 14px 12px 40px; }
+    .ex-lhead, .ex-lrow { grid-template-columns: 24px minmax(0, 1fr) 80px; padding: 5px 8px; }
     .ex-lhead span:last-child, .ex-lrow .ex-lmeta:last-child { display: none; }
+    /* 16px keeps iOS from zooming the layout the instant a field takes focus — the search field, and every
+       form input (Settings, Add machine, credentials). */
+    .ex-pal input, .ex-input { font-size: 16px; }
+    /* Key/value detail stacks: a 128px label column starves a mono address on a phone, so the value gets its
+       own line under its label instead. */
+    .ex-kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .ex-kv dt { margin-top: 9px; }
+    .ex-kv dt:first-child { margin-top: 0; }
+    /* The version endpoint + property stack rather than share a cramped row. */
+    .ex-field-pair { flex-direction: column; }
     /* The rail wraps: Now over the track, the reading drops to its own line under both. */
     .ex-rail { flex-wrap: wrap; gap: 10px 12px; }
     .ex-rail-track { flex: 1 1 100%; order: 3; }
