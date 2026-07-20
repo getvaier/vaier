@@ -97,16 +97,24 @@ sudo usermod -aG docker $USER   # then log out and back in
 
 Confirm with `docker ps` (no `sudo`) before continuing. If it errors with permission denied, the new group membership hasn't taken effect — fully close the SSH session and reconnect.
 
-### 2. Download the compose file
+### 2. Rig the machine
+
+One command fetches the runtime files Vaier needs — the compose file **and** the assets it bind-mounts (the offline page, sign-in templates, Dex theme) — and scaffolds a `.env`. **No git clone**, no history, runtime files only:
 
 ```bash
 mkdir -p vaier && cd vaier
-curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/getvaier/vaier/main/install.sh | bash
 ```
+
+> **Why a script and not a lone `curl` of `docker-compose.yml`?** The stack bind-mounts several committed files (e.g. `offline/default.conf`). If they're missing, Docker silently creates them as empty *directories* and the first single-file mount fails at container start. The installer places every one of them so `docker compose up` comes up clean.
+
+Prefer to read it first? Download `install.sh`, inspect it, then `bash install.sh`. To pin a release instead of `main`, set `VAIER_REF=v1.2.3` before running.
 
 ### 3. Pick a DNS mode
 
 Vaier supports two modes — choose one based on where your domain lives. The mode is **inferred at boot from the presence of AWS credentials**: include them, you get Route53 automation; omit them, you get manual DNS. There is no separate switch.
+
+Step 2 scaffolded a `.env` template; the command below **replaces** it with your real values (or edit the template in place if you prefer).
 
 #### Option A: Route53 (automated)
 
