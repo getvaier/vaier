@@ -7,9 +7,11 @@ import net.vaier.application.BrowseFilesUseCase.MachineDirectory;
 import net.vaier.application.DeleteFileUseCase;
 import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.Selection;
 import net.vaier.domain.SourcePaths;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -17,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -47,6 +50,7 @@ public class ExplorerRestController {
     private final ListMachineArchivesUseCase listMachineArchivesUseCase;
     private final DownloadFileUseCase downloadFileUseCase;
     private final DeleteFileUseCase deleteFileUseCase;
+    private final ObjectMapper objectMapper;
 
     /**
      * Browse one directory on one machine. With {@code at} naming an archive, the same directory is read
@@ -91,6 +95,49 @@ public class ExplorerRestController {
     }
 
     /**
+     * Download a whole fleet-wide selection as one zip — the Explorer selection bar's "download everything"
+     * (#321). The {@code selection} is a JSON array of coordinates ({@code machine}, {@code path}, and an
+     * optional {@code at} naming an archive), each a file or directory; the use case resolves, stats and
+     * streams them all into one {@code application/zip}. It is a <b>POST form parameter</b>, not a JSON body,
+     * because the browser triggers the download by submitting a hidden form, which streams the zip straight
+     * to disk with no in-browser buffering. As with a single directory download, a zip's size is not known
+     * ahead of time, so no {@code Content-Length} is set. A malformed selection is a {@code 400}.
+     */
+    @PostMapping("/machines/files/download-zip")
+    public ResponseEntity<StreamingResponseBody> downloadZip(@RequestParam("selection") String selection) {
+        List<Selection.Coordinate> coordinates = parseSelection(selection);
+        log.info("Downloading a {}-coordinate selection as one zip", coordinates.size());
+        Download download = downloadFileUseCase.openForDownload(coordinates);
+        StreamingResponseBody body = download.writer()::accept;
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + sanitiseFilename(download.filename()) + "\"")
+            .contentType(MediaType.parseMediaType(download.contentType()));
+        if (download.sizeBytes() >= 0) {
+            response = response.contentLength(download.sizeBytes());
+        }
+        return response.body(body);
+    }
+
+    /**
+     * Parse the {@code selection} JSON array into domain coordinates. The strings come straight from the
+     * browser, so a malformed array is a {@code 400} (an {@link IllegalArgumentException} via
+     * {@link GlobalExceptionHandler}), never a {@code 500}. Each path stays verbatim — the domain, not the
+     * controller, decides what a browsable path is.
+     */
+    private List<Selection.Coordinate> parseSelection(String selection) {
+        SelectionItem[] items;
+        try {
+            items = objectMapper.readValue(selection, SelectionItem[].class);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalArgumentException("Malformed selection: expected a JSON array of coordinates");
+        }
+        return java.util.Arrays.stream(items)
+            .map(item -> new Selection.Coordinate(item.machine(), item.path(), item.at()))
+            .toList();
+    }
+
+    /**
      * A filename safe to place inside a {@code Content-Disposition} header: no quotes, backslashes or CR/LF,
      * so a crafted filename cannot break out of the quoted value or inject a header.
      */
@@ -124,6 +171,15 @@ public class ExplorerRestController {
         log.debug("Listing archives for machine {}", LogSafe.forLog(machine));
         return ResponseEntity.ok(listMachineArchivesUseCase.listMachineArchives(machine).stream()
             .map(ArchiveResponse::from).toList());
+    }
+
+    /**
+     * One picked coordinate in a {@code download-zip} selection: the {@code machine}, the {@code path} (the
+     * machine's own true coordinate, handed to the domain verbatim), and an optional {@code at} — {@code null}
+     * or absent for the live filesystem, or an archive id for the past. Jackson binds each element of the
+     * {@code selection} JSON array to one of these.
+     */
+    record SelectionItem(String machine, String path, String at) {
     }
 
     /**

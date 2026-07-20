@@ -49,6 +49,9 @@ class ExplorerRestControllerTest {
     @Mock ListMachineArchivesUseCase listMachineArchivesUseCase;
     @Mock DownloadFileUseCase downloadFileUseCase;
     @Mock DeleteFileUseCase deleteFileUseCase;
+    // A real ObjectMapper (spied so @InjectMocks wires it): the selection JSON must be parsed for real.
+    @org.mockito.Spy com.fasterxml.jackson.databind.ObjectMapper objectMapper =
+        new com.fasterxml.jackson.databind.ObjectMapper();
 
     @InjectMocks ExplorerRestController controller;
 
@@ -290,6 +293,93 @@ class ExplorerRestControllerTest {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         response.getBody().writeTo(out);
         assertThat(out.toByteArray()).isEqualTo(zipBytes);
+    }
+
+    // --- selection zip: download a whole fleet-wide selection as one zip -------------------------------
+
+    @Test
+    void downloadZip_parsesTheSelectionJson_intoCoordinates_andPassesThemToTheUseCase() throws Exception {
+        when(downloadFileUseCase.openForDownload(any()))
+            .thenReturn(new Download("apalveien5.zip", -1, "application/zip", out -> {
+            }));
+
+        String selection = "[{\"machine\":\"apalveien5\",\"path\":\"/home/x\",\"at\":null},"
+            + "{\"machine\":\"apalveien5\",\"path\":\"/etc/hosts\",\"at\":\"ab12\"}]";
+        controller.downloadZip(selection);
+
+        // The JSON array becomes the selection's coordinates, in order, with `at` carried (null and an id).
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<net.vaier.domain.Selection.Coordinate>> captor =
+            org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(downloadFileUseCase).openForDownload(captor.capture());
+        assertThat(captor.getValue()).containsExactly(
+            new net.vaier.domain.Selection.Coordinate("apalveien5", "/home/x", null),
+            new net.vaier.domain.Selection.Coordinate("apalveien5", "/etc/hosts", "ab12"));
+    }
+
+    @Test
+    void downloadZip_streamsTheZip_asAnAttachment_withTheUseCasesFilename_andNoContentLength() throws Exception {
+        byte[] zipBytes = {4, 5, 6};
+        when(downloadFileUseCase.openForDownload(any()))
+            .thenReturn(new Download("apalveien5.zip", -1, "application/zip", out -> {
+                try {
+                    out.write(zipBytes);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }));
+
+        ResponseEntity<StreamingResponseBody> response =
+            controller.downloadZip("[{\"machine\":\"apalveien5\",\"path\":\"/home/x\"}]");
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.valueOf("application/zip"));
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+            .isEqualTo("attachment; filename=\"apalveien5.zip\"");
+        // A zip's size is not known ahead of time, so no Content-Length is set (mirrors the directory download).
+        assertThat(response.getHeaders().getContentLength()).isEqualTo(-1);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        response.getBody().writeTo(out);
+        assertThat(out.toByteArray()).isEqualTo(zipBytes);
+    }
+
+    @Test
+    void downloadZip_spanningMachines_carriesTheGenericSelectionFilename() {
+        when(downloadFileUseCase.openForDownload(any()))
+            .thenReturn(new Download("vaier-selection.zip", -1, "application/zip", out -> {
+            }));
+
+        ResponseEntity<StreamingResponseBody> response = controller.downloadZip(
+            "[{\"machine\":\"apalveien5\",\"path\":\"/etc\"},{\"machine\":\"colina27\",\"path\":\"/etc\"}]");
+
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION))
+            .isEqualTo("attachment; filename=\"vaier-selection.zip\"");
+    }
+
+    @Test
+    void downloadZip_isPostedAsAFormParameter_soTheBrowserCanStreamItStraightToDisk() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        when(downloadFileUseCase.openForDownload(any()))
+            .thenReturn(new Download("apalveien5.zip", -1, "application/zip", out -> {
+            }));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/machines/files/download-zip")
+                .param("selection", "[{\"machine\":\"apalveien5\",\"path\":\"/home/x\"}]"))
+            .andExpect(status().isOk());
+
+        verify(downloadFileUseCase).openForDownload(any());
+    }
+
+    @Test
+    void downloadZip_aMalformedSelection_isABadRequest() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/machines/files/download-zip")
+                .param("selection", "not json at all"))
+            .andExpect(status().isBadRequest());
     }
 
     // --- slice 5: delete (present-only, destructive) ---------------------------------------------------

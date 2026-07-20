@@ -11,6 +11,7 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
+import net.vaier.domain.Selection;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
@@ -524,6 +525,128 @@ class ExplorerServiceTest {
         Download download = service.openForDownload("apalveien5", "/home/geir", "ab12");
 
         assertThat(unzip(download)).containsOnly(entry("notes.txt", "old"));
+    }
+
+    // --- selection zip: download a fleet-wide selection of coordinates as one zip ----------------------
+
+    private static Selection.Coordinate coordinate(String machine, String path, String at) {
+        return new Selection.Coordinate(machine, path, at);
+    }
+
+    /** Stub a file coordinate: it stats as a file, and its download writes {@code content} into the stream. */
+    private void fileAt(String path, String content) {
+        when(forBrowsingRemoteFiles.stat(any(), eq(path)))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(false, content.length()));
+        doAnswer(inv -> {
+            ((java.io.OutputStream) inv.getArgument(2)).write(content.getBytes());
+            return null;
+        }).when(forBrowsingRemoteFiles).download(any(), eq(path), any());
+    }
+
+    @Test
+    void openForDownload_ofASingleFileSelection_zipsItByBasename() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        fileAt("/home/geir/notes.txt", "top-lvl");
+
+        Download download = service.openForDownload(List.of(coordinate("apalveien5", "/home/geir/notes.txt", null)));
+
+        assertThat(download.contentType()).isEqualTo("application/zip");
+        assertThat(download.sizeBytes()).isEqualTo(-1);
+        assertThat(unzip(download)).containsOnly(entry("notes.txt", "top-lvl"));
+    }
+
+    @Test
+    void openForDownload_ofASingleDirectorySelection_zipsItsSubtreeUnderItsBasename() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        when(forBrowsingRemoteFiles.stat(any(), eq("/home/geir")))
+            .thenReturn(new ForBrowsingRemoteFiles.RemoteStat(true, 4096));
+        walksTree("/home/geir", v -> {
+            v.file("notes.txt", stream("top-lvl"));
+            v.file("docs/readme.md", stream("nested"));
+        });
+
+        Download download = service.openForDownload(List.of(coordinate("apalveien5", "/home/geir", null)));
+
+        // A directory coordinate's whole subtree sits under its basename — unlike a single-directory download,
+        // where the folder's own name is dropped, here it must be kept so the selection stays unambiguous.
+        assertThat(unzip(download)).containsOnly(
+            entry("geir/notes.txt", "top-lvl"),
+            entry("geir/docs/readme.md", "nested"));
+    }
+
+    @Test
+    void openForDownload_ofSeveralItemsOnOneMachine_areTopLevelEntriesByBasename() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        fileAt("/home/geir/notes.txt", "notes");
+        fileAt("/etc/hosts", "hosts");
+
+        Download download = service.openForDownload(List.of(
+            coordinate("apalveien5", "/home/geir/notes.txt", null),
+            coordinate("apalveien5", "/etc/hosts", null)));
+
+        assertThat(download.filename()).isEqualTo("apalveien5.zip");
+        assertThat(unzip(download)).containsOnly(
+            entry("notes.txt", "notes"),
+            entry("hosts", "hosts"));
+    }
+
+    @Test
+    void openForDownload_spanningMachines_prefixesEveryEntryByItsMachine() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        machineResolves("colina27", "SHA256:pinned2");
+        fileAt("/etc/hosts", "hosts");
+
+        Download download = service.openForDownload(List.of(
+            coordinate("apalveien5", "/etc/hosts", null),
+            coordinate("colina27", "/etc/hosts", null)));
+
+        // Two machines' /etc/hosts do not collide: each lives under its own machine folder.
+        assertThat(download.filename()).isEqualTo("vaier-selection.zip");
+        assertThat(unzip(download)).containsOnly(
+            entry("apalveien5/hosts", "hosts"),
+            entry("colina27/hosts", "hosts"));
+    }
+
+    @Test
+    void openForDownload_basenameCollisionOnOneMachine_deDupsWithASuffix() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        fileAt("/a/config.yml", "first");
+        fileAt("/b/config.yml", "second");
+
+        Download download = service.openForDownload(List.of(
+            coordinate("apalveien5", "/a/config.yml", null),
+            coordinate("apalveien5", "/b/config.yml", null)));
+
+        // Neither is silently overwritten — the second colliding basename gets a " (2)" suffix.
+        assertThat(unzip(download)).containsOnly(
+            entry("config.yml", "first"),
+            entry("config.yml (2)", "second"));
+    }
+
+    @Test
+    void openForDownload_ofASelection_acceptsAnArchiveCoordinate_readUnderTheMountpoint() throws Exception {
+        machineResolves("apalveien5", "SHA256:pinned");
+        archiveMountsAt("apalveien5", "ab12", MOUNTPOINT);
+        fileAt(MOUNTPOINT + "/home/geir/notes.txt", "old");
+
+        // A download is a read, so a coordinate's `at` may name an archive — resolved under the mountpoint,
+        // exactly as a single download's past is.
+        Download download = service.openForDownload(List.of(
+            coordinate("apalveien5", "/home/geir/notes.txt", "ab12")));
+
+        assertThat(unzip(download)).containsOnly(entry("notes.txt", "old"));
+    }
+
+    @Test
+    void openForDownload_ofASelection_namesTheZipByMachineOrSelection_withoutOpeningAnyConnection() {
+        // The filename is the selection's decision — machine names alone — so it is known before a single
+        // coordinate is resolved, stat'd or streamed. No port is touched here.
+        assertThat(service.openForDownload(List.of(
+            coordinate("apalveien5", "/a", null),
+            coordinate("apalveien5", "/b", null))).filename()).isEqualTo("apalveien5.zip");
+        assertThat(service.openForDownload(List.of(
+            coordinate("apalveien5", "/a", null),
+            coordinate("colina27", "/b", null))).filename()).isEqualTo("vaier-selection.zip");
     }
 
     /** Drives the mocked single-connection tree walk: the {@code emit} lambda feeds entries to the visitor. */

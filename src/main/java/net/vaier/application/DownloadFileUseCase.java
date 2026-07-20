@@ -1,6 +1,9 @@
 package net.vaier.application;
 
+import net.vaier.domain.Selection;
+
 import java.io.OutputStream;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -25,6 +28,21 @@ public interface DownloadFileUseCase {
      * @throws net.vaier.domain.NotFoundException when the machine, or the path, is not there
      */
     Download openForDownload(String machineName, String path, String at);
+
+    /**
+     * Prepare a whole fleet-wide {@link Selection} of coordinates for download as one {@code application/zip}
+     * — the "download the whole selection as one zip" destination for the Explorer's selection bar. The
+     * selection may span machines and points in time; each coordinate is resolved, stat'd and streamed into
+     * one shared zip (a file as one entry, a directory as its whole walked subtree). The arrangement — the
+     * filename, the per-coordinate entry names, machine-prefixing and collision de-duping — is the
+     * {@link Selection}'s decision; this only orchestrates the streaming.
+     *
+     * <p>A coordinate whose file the SSH user cannot read, or that has vanished, is skipped — never a
+     * half-written entry — exactly as a single directory walk skips an unreadable file.
+     *
+     * @param coordinates the picked files and directories, in selection order — at least one
+     */
+    Download openForDownload(List<Selection.Coordinate> coordinates);
 
     /**
      * Something ready to stream: its {@code filename} (the basename for a file, or {@code <dirname>.zip}

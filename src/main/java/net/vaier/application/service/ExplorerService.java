@@ -8,6 +8,9 @@ import net.vaier.application.DownloadFileUseCase;
 import net.vaier.application.ResolveFileCoordinateUseCase;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.MountedArchive;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PermissionDeniedException;
+import net.vaier.domain.Selection;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SourcePaths;
 import net.vaier.domain.SshTarget;
@@ -202,38 +205,112 @@ public class ExplorerService
     }
 
     /**
-     * Walk {@code rootPath} on {@code target} and stream it into a zip written to {@code out} — flat memory,
-     * one file at a time straight into the zip, never buffering the archive whole. The walk itself, and every
-     * file read within it, runs over a <b>single</b> SFTP connection ({@link ForBrowsingRemoteFiles#walkTree})
-     * — a per-file reconnect over the VPN is what once timed the download out mid-stream into a corrupt zip.
-     *
-     * <p>The service owns the zip; the adapter never learns what one is. The walk hands each file's bytes and
-     * each empty directory to the visitor, named relative to the zip's root (forward slashes, so the zip
-     * unpacks the same way on every OS); the visitor turns them into zip entries. A file the SSH user cannot
-     * read, or that vanished mid-walk, is skipped by the walk before its stream is ever opened — so an
-     * unreadable file simply does not appear in the archive, and no half-written entry can corrupt it. An
-     * empty directory becomes a zip directory entry of its own, the only way a zip can carry a folder with
-     * nothing in it.
+     * Open a whole {@link Selection} for download as one zip — the selection bar's "download everything as
+     * one zip". The {@link Selection} owns the arrangement (the filename, each coordinate's top-level entry
+     * name, machine-prefixing and collision de-duping); the service resolves, stats, walks and streams each
+     * placement into one shared zip when the writer is invoked, so memory stays flat and no connection is
+     * opened until streaming. A zip's byte count is not known ahead of time, so the size is {@code -1}.
      */
-    private void streamZip(SshTarget target, String rootPath, OutputStream out) {
-        try (ZipOutputStream zip = new ZipOutputStream(out)) {
-            forBrowsingRemoteFiles.walkTree(target, rootPath, new ForBrowsingRemoteFiles.RemoteTreeVisitor() {
-                @Override
-                public void directory(String relativePath) throws IOException {
-                    zip.putNextEntry(new ZipEntry(relativePath + "/"));
-                    zip.closeEntry();
-                }
+    @Override
+    public Download openForDownload(List<Selection.Coordinate> coordinates) {
+        Selection selection = new Selection(coordinates);
+        List<Selection.Placement> placements = selection.placements();
+        String zipFilename = selection.downloadFilename();
+        log.debug("Opening a {}-coordinate selection for a zip download ({})", placements.size(), zipFilename);
+        return new Download(zipFilename, -1, ZIP, out -> streamSelectionZip(placements, out));
+    }
 
-                @Override
-                public void file(String relativePath, InputStream content) throws IOException {
-                    zip.putNextEntry(new ZipEntry(relativePath));
-                    content.transferTo(zip);
-                    zip.closeEntry();
-                }
-            });
+    /**
+     * Stream every placement of a selection into one shared zip on {@code out} — one at a time, flat memory,
+     * a file as its own entry and a directory as its whole walked subtree ({@link #walkInto}). Each
+     * placement's own SFTP work (resolve, stat, and any tree walk) runs when its turn comes. A coordinate
+     * whose file the SSH user cannot read, or that has vanished, is skipped before its entry is opened — the
+     * same "never a half entry" guarantee the tree walk gives per file — so a gone file simply does not
+     * appear, and cannot corrupt the archive.
+     */
+    private void streamSelectionZip(List<Selection.Placement> placements, OutputStream out) {
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            for (Selection.Placement placement : placements) {
+                addPlacement(zip, placement);
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** Resolve, stat and stream one placement into {@code zip}; a vanished or unreadable coordinate is skipped. */
+    private void addPlacement(ZipOutputStream zip, Selection.Placement placement) throws IOException {
+        Selection.Coordinate coordinate = placement.coordinate();
+        ResolvedFileCoordinate resolved;
+        RemoteStat stat;
+        try {
+            resolved = resolve(coordinate.machine(), coordinate.path(), coordinate.at());
+            stat = forBrowsingRemoteFiles.stat(resolved.target(), resolved.path());
+        } catch (NotFoundException | PermissionDeniedException e) {
+            log.debug("Skipping {} on {} in the selection zip: {}",
+                coordinate.path(), coordinate.machine(), e.getMessage());
+            return;
+        }
+        if (stat.directory()) {
+            walkInto(zip, resolved.target(), resolved.path(), placement.entryPrefix());
+        } else {
+            zip.putNextEntry(new ZipEntry(placement.entryPrefix()));
+            forBrowsingRemoteFiles.download(resolved.target(), resolved.path(), zip);
+            zip.closeEntry();
+        }
+    }
+
+    /**
+     * A directory, zipped on the way to the browser. The zip filename is the directory's own basename — the
+     * requested path's, not the (possibly jail- or mount-mapped) coordinate SFTP was actually asked for — or,
+     * when the requested path is a root with no basename of its own ({@code /}), the machine's name stands in
+     * for it. The size is not known ahead of time: a zip's byte count is not the sum of the files it holds,
+     * so {@code Content-Length} must not be guessed at and is reported as {@code -1}.
+     */
+    private void streamZip(SshTarget target, String rootPath, OutputStream out) {
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            walkInto(zip, target, rootPath, "");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Walk {@code rootPath} on {@code target} into the shared {@code zip}, every entry named under
+     * {@code prefix} — flat memory, one file at a time straight into the zip, never buffering the archive
+     * whole. The walk itself, and every file read within it, runs over a <b>single</b> SFTP connection
+     * ({@link ForBrowsingRemoteFiles#walkTree}) — a per-file reconnect over the VPN is what once timed the
+     * download out mid-stream into a corrupt zip.
+     *
+     * <p>The service owns the zip; the adapter never learns what one is. The walk hands each file's bytes and
+     * each empty directory to the visitor, named relative to the walk's root (forward slashes, so the zip
+     * unpacks the same way on every OS); the visitor prefixes and turns them into zip entries. A single
+     * directory download passes an empty {@code prefix} (entries are top-level); a selection passes the
+     * coordinate's own top-level name, so a whole tree lands under it. A file the SSH user cannot read, or
+     * that vanished mid-walk, is skipped by the walk before its stream is ever opened — so an unreadable file
+     * simply does not appear in the archive, and no half-written entry can corrupt it. An empty directory
+     * becomes a zip directory entry of its own, the only way a zip can carry a folder with nothing in it.
+     */
+    private void walkInto(ZipOutputStream zip, SshTarget target, String rootPath, String prefix) {
+        forBrowsingRemoteFiles.walkTree(target, rootPath, new ForBrowsingRemoteFiles.RemoteTreeVisitor() {
+            @Override
+            public void directory(String relativePath) throws IOException {
+                zip.putNextEntry(new ZipEntry(entryName(prefix, relativePath) + "/"));
+                zip.closeEntry();
+            }
+
+            @Override
+            public void file(String relativePath, InputStream content) throws IOException {
+                zip.putNextEntry(new ZipEntry(entryName(prefix, relativePath)));
+                content.transferTo(zip);
+                zip.closeEntry();
+            }
+        });
+    }
+
+    /** An entry's name inside the zip: its walk-relative path, placed under {@code prefix} when there is one. */
+    private static String entryName(String prefix, String relativePath) {
+        return prefix.isEmpty() ? relativePath : prefix + "/" + relativePath;
     }
 
     /**
