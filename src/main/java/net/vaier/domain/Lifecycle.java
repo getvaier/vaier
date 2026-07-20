@@ -3,14 +3,15 @@ package net.vaier.domain;
 import java.util.List;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.domain.DnsRecord.DnsRecordType;
 import net.vaier.domain.port.ForPersistingDnsRecords;
 import net.vaier.domain.port.ForResolvingPublicHost;
 import net.vaier.domain.port.ForResolvingPublicHost.PublicHost;
 
 /**
- * Startup bootstrap for Vaier's own infrastructure. The only step is ensuring the
- * {@code vaier.<domain>} console DNS record exists, pointing at this server.
+ * Startup bootstrap for Vaier's own infrastructure. Ensures the mandatory infra DNS records exist:
+ * the {@code vaier.<domain>} console record pointing at this server, plus the {@code oauth2.<domain>}
+ * and {@code dex.<domain>} auth-stack CNAMEs the sign-in stack needs to come up. Each is created only
+ * when missing — existing records are never disturbed.
  */
 @Slf4j
 public class Lifecycle {
@@ -18,18 +19,15 @@ public class Lifecycle {
     private final ForPersistingDnsRecords forPersistingDnsRecords;
     private final ForResolvingPublicHost publicHostResolver;
     private final String vaierDomain;
-    private final String vaierSubdomain;
 
     public Lifecycle(
         ForPersistingDnsRecords forPersistingDnsRecords,
         ForResolvingPublicHost publicHostResolver,
-        String vaierDomain,
-        String vaierSubdomain
+        String vaierDomain
     ) {
         this.forPersistingDnsRecords = forPersistingDnsRecords;
         this.publicHostResolver = publicHostResolver;
         this.vaierDomain = vaierDomain;
-        this.vaierSubdomain = vaierSubdomain;
     }
 
     public void start() {
@@ -47,19 +45,31 @@ public class Lifecycle {
 
         log.info("DNS zone found: " + dnsZone.name());
 
-        String vaierHost = vaierSubdomain + "." + vaierDomain;
-
+        VaierHostnames hostnames = new VaierHostnames(vaierDomain);
         List<DnsRecord> records = forPersistingDnsRecords.getDnsRecords(dnsZone);
 
-        Optional<DnsRecord> vaierRecord = records.stream()
-            .filter(record -> record.name().equals(vaierHost))
-            .findFirst();
-
-        if (vaierRecord.isPresent()) {
-            log.info("DNS record found: " + vaierRecord.get().name());
+        // The vaier console record targets this server's resolved public address (A or CNAME).
+        String vaierHost = hostnames.vaierServerFqdn();
+        if (recordExists(records, vaierHost)) {
+            log.info("DNS record found: " + vaierHost);
         } else {
             ensureVaierRecord(vaierHost, dnsZone);
         }
+
+        // oauth2-proxy and Dex are CNAMEs to the vaier host — a domain-owned decision. Their target is
+        // static, so they are ensured whether or not the public address could be resolved above.
+        for (DnsRecord infraRecord : hostnames.authInfrastructureCnames()) {
+            if (recordExists(records, infraRecord.name())) {
+                log.info("DNS record found: " + infraRecord.name());
+            } else {
+                forPersistingDnsRecords.addDnsRecord(infraRecord, dnsZone);
+                log.info("Added {} {} record → {}", infraRecord.name(), infraRecord.type(), infraRecord.values());
+            }
+        }
+    }
+
+    private boolean recordExists(List<DnsRecord> records, String name) {
+        return records.stream().anyMatch(record -> record.name().equals(name));
     }
 
     private boolean ensureVaierRecord(String vaierHost, DnsZone dnsZone) {

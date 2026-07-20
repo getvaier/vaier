@@ -25,7 +25,7 @@ class LifecycleTest {
     @Mock ForResolvingPublicHost publicHostResolver;
 
     private Lifecycle lifecycle() {
-        return new Lifecycle(forPersistingDnsRecords, publicHostResolver, "test.example.com", "vaier");
+        return new Lifecycle(forPersistingDnsRecords, publicHostResolver, "test.example.com");
     }
 
     @Test
@@ -70,7 +70,7 @@ class LifecycleTest {
         ForPersistingDnsRecords manualAdapter = spy(
             new net.vaier.adapter.driven.ManualDnsAdapter(configResolver));
 
-        Lifecycle lifecycle = new Lifecycle(manualAdapter, publicHostResolver, "test.example.com", "vaier");
+        Lifecycle lifecycle = new Lifecycle(manualAdapter, publicHostResolver, "test.example.com");
 
         assertThatCode(lifecycle::start).doesNotThrowAnyException();
 
@@ -81,7 +81,7 @@ class LifecycleTest {
     }
 
     @Test
-    void initDns_doesNotThrow_whenVaierRecordMissingAndResolverEmpty() {
+    void initDns_stillEnsuresOauth2AndDexCnames_whenResolverEmpty_butSkipsVaier() {
         DnsZone zone = new DnsZone("test.example.com");
         when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
         when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of());
@@ -89,7 +89,59 @@ class LifecycleTest {
 
         assertThatCode(() -> lifecycle().start()).doesNotThrowAnyException();
 
+        ArgumentCaptor<DnsRecord> captor = ArgumentCaptor.forClass(DnsRecord.class);
+        verify(forPersistingDnsRecords, times(2)).addDnsRecord(captor.capture(), eq(zone));
+        List<DnsRecord> added = captor.getAllValues();
+        // the vaier record needs the (unavailable) public host, so it is not created
+        assertThat(added).noneMatch(r -> r.name().equals("vaier.test.example.com"));
+        // oauth2 and dex point at the static vaier host, so they are created regardless
+        assertThat(added).anyMatch(r -> r.name().equals("oauth2.test.example.com")
+            && r.type() == DnsRecordType.CNAME
+            && r.values().equals(List.of("vaier.test.example.com")));
+        assertThat(added).anyMatch(r -> r.name().equals("dex.test.example.com")
+            && r.type() == DnsRecordType.CNAME
+            && r.values().equals(List.of("vaier.test.example.com")));
+    }
+
+    @Test
+    void initDns_createsAllThreeInfraRecords_whenMissingAndResolverReturnsHostname() {
+        DnsZone zone = new DnsZone("test.example.com");
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(List.of());
+        when(publicHostResolver.resolve())
+            .thenReturn(Optional.of(new PublicHost("ec2-1-2-3-4.compute.amazonaws.com", DnsRecordType.CNAME)));
+
+        lifecycle().start();
+
+        ArgumentCaptor<DnsRecord> captor = ArgumentCaptor.forClass(DnsRecord.class);
+        verify(forPersistingDnsRecords, times(3)).addDnsRecord(captor.capture(), eq(zone));
+        List<DnsRecord> added = captor.getAllValues();
+        assertThat(added).anyMatch(r -> r.name().equals("vaier.test.example.com")
+            && r.type() == DnsRecordType.CNAME
+            && r.values().equals(List.of("ec2-1-2-3-4.compute.amazonaws.com")));
+        assertThat(added).anyMatch(r -> r.name().equals("oauth2.test.example.com")
+            && r.type() == DnsRecordType.CNAME
+            && r.values().equals(List.of("vaier.test.example.com")));
+        assertThat(added).anyMatch(r -> r.name().equals("dex.test.example.com")
+            && r.type() == DnsRecordType.CNAME
+            && r.values().equals(List.of("vaier.test.example.com")));
+    }
+
+    @Test
+    void initDns_createsNothing_whenAllThreeInfraRecordsAlreadyPresent() {
+        DnsZone zone = new DnsZone("test.example.com");
+        List<DnsRecord> existing = List.of(
+            new DnsRecord("vaier.test.example.com", DnsRecordType.CNAME, 300L, List.of("existing.example.com")),
+            new DnsRecord("oauth2.test.example.com", DnsRecordType.CNAME, 300L, List.of("vaier.test.example.com")),
+            new DnsRecord("dex.test.example.com", DnsRecordType.CNAME, 300L, List.of("vaier.test.example.com"))
+        );
+        when(forPersistingDnsRecords.getDnsZones()).thenReturn(List.of(zone));
+        when(forPersistingDnsRecords.getDnsRecords(zone)).thenReturn(existing);
+
+        lifecycle().start();
+
         verify(forPersistingDnsRecords, never()).addDnsRecord(any(), any());
+        verify(publicHostResolver, never()).resolve();
     }
 
     @Test

@@ -22,6 +22,12 @@ class VaierHostnamesTest {
     }
 
     @Test
+    void dexHost_prependsTheDexSubdomain() {
+        assertThat(new VaierHostnames("example.com").dexHost())
+            .isEqualTo("dex.example.com");
+    }
+
+    @Test
     void oauth2SignOutUrl_clearsTheDomainWideCookieAndRedirectsBack() {
         assertThat(new VaierHostnames("example.com").oauth2SignOutUrl("https://vaier.example.com/"))
             .isEqualTo("https://oauth2.example.com/oauth2/sign_out?rd=https%3A%2F%2Fvaier.example.com%2F");
@@ -30,11 +36,25 @@ class VaierHostnamesTest {
     // --- mandatoryDnsRecords (#229) ---
 
     @Test
-    void mandatoryDnsRecords_containsOnlyTheVaierCnamePointingAtTheVaierServer() {
+    void mandatoryDnsRecords_coversTheVaierConsoleAndTheOauth2AndDexInfraHosts() {
         List<DnsRecord> records = new VaierHostnames("example.com").mandatoryDnsRecords();
 
         assertThat(records).extracting(DnsRecord::name)
-            .containsExactly("vaier.example.com");
+            .containsExactlyInAnyOrder("vaier.example.com", "oauth2.example.com", "dex.example.com");
+        // every mandatory record is a CNAME to the vaier console host, on the short infra TTL
+        assertThat(records).allSatisfy(r -> {
+            assertThat(r.type()).isEqualTo(DnsRecordType.CNAME);
+            assertThat(r.ttl()).isEqualTo(300L);
+            assertThat(r.values()).containsExactly("vaier.example.com");
+        });
+    }
+
+    @Test
+    void authInfrastructureCnames_areOauth2AndDexPointingAtTheVaierServer() {
+        List<DnsRecord> records = new VaierHostnames("example.com").authInfrastructureCnames();
+
+        assertThat(records).extracting(DnsRecord::name)
+            .containsExactlyInAnyOrder("oauth2.example.com", "dex.example.com");
         assertThat(records).allSatisfy(r -> {
             assertThat(r.type()).isEqualTo(DnsRecordType.CNAME);
             assertThat(r.ttl()).isEqualTo(300L);

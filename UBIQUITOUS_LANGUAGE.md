@@ -184,8 +184,8 @@ Avoid: "vhost", "site", "auth provider".
 
 | Term | Definition |
 |------|------------|
-| **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the `vaier.<domain>` DNS record exists. In manual DNS mode this step is a silent no-op since the operator owns that record. |
-| **First-run** | The first `docker compose up -d` on a host. Triggers the `geoip-init`, `vaier-init`, `oauth2-proxy-init`, and `dex-init` one-shot containers, seeds the **configured administrator** into the access store, and (in Route53 mode) the auto-create of `vaier.<domain>`. |
+| **Lifecycle** | `domain.Lifecycle`. The boot sequence: ensure the mandatory infrastructure DNS records exist — `vaier.<domain>` (the console, pointing at this server) plus the `oauth2.<domain>` and `dex.<domain>` auth-stack CNAMEs — creating only the missing ones. In manual DNS mode this step is a silent no-op since the operator owns those records. |
+| **First-run** | The first `docker compose up -d` on a host. Triggers the `geoip-init`, `vaier-init`, `oauth2-proxy-init`, and `dex-init` one-shot containers, seeds the **configured administrator** into the access store, and (in Route53 mode) the auto-create of the mandatory infrastructure records — `vaier.<domain>` plus the `oauth2.<domain>` and `dex.<domain>` auth-stack CNAMEs. |
 | **Docker socket proxy** | The `tecnativa/docker-socket-proxy` sidecar (`docker-proxy` container) that holds the real `/var/run/docker.sock` and exposes a restricted HTTP API on `tcp://docker-proxy:2375` over `vaier-network`. Vaier and Traefik talk to it instead of mounting the host socket. Allowlist: `CONTAINERS, EVENTS, EXEC, IMAGES, PING, POST, ALLOW_RESTARTS`. Default-deny on `/containers/create`, `/containers/{id}/start`, image pulls, swarm/network/volume management. |
 | **vaier-init** | One-shot busybox container that `chown`s the bind-mounted config dirs to UID 1000 on every start, so the non-root Vaier process can read and write its own state. |
 | **SMTP notifier** | The Jakarta Mail-based outbound mail integration. Powers Vaier's admin alert emails. Settings and the password live in `vaier-config.yml`. |

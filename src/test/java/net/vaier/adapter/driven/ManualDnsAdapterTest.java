@@ -40,7 +40,7 @@ class ManualDnsAdapterTest {
         List<DnsRecord> records = adapter.getDnsRecords(new DnsZone("example.com"));
 
         assertThat(records).extracting(DnsRecord::name)
-            .containsExactly("vaier.example.com");
+            .containsExactlyInAnyOrder("vaier.example.com", "oauth2.example.com", "dex.example.com");
         assertThat(records).allMatch(r -> r.type() == DnsRecordType.CNAME);
     }
 
@@ -80,8 +80,8 @@ class ManualDnsAdapterTest {
             new DnsRecord("vaier.example.com", DnsRecordType.A, 300L, List.of("1.2.3.4")),
             new DnsZone("example.com")
         );
-        // No throw, no state change
-        assertThat(adapter.getDnsRecords(new DnsZone("example.com"))).hasSize(1);
+        // No throw, no state change — the three mandatory infra records still surface
+        assertThat(adapter.getDnsRecords(new DnsZone("example.com"))).hasSize(3);
     }
 
     @Test

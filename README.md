@@ -135,7 +135,7 @@ VAIER_ADMIN_EMAIL=you@gmail.com
 VAIER_TZ=Europe/Oslo
 ```
 
-The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`. Vaier auto-creates `vaier.yourdomain.com` on first boot, and a CNAME per published service after that.
+The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`. On first boot Vaier auto-creates the three infrastructure records the auth stack needs — `vaier.yourdomain.com` (the console, pointing at this server) plus `oauth2.yourdomain.com` and `dex.yourdomain.com` (CNAMEs to the console host, where oauth2-proxy and the Dex broker are served) — and a CNAME per published service after that. Existing records are never disturbed, so you only ever create per-service records by hand.
 
 #### Option B: Manual DNS (no AWS)
 

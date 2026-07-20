@@ -2,7 +2,6 @@ package net.vaier.application.service;
 
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
-import net.vaier.config.ServiceNames;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.domain.Lifecycle;
 import net.vaier.domain.port.ForInitialisingVpnRouting;
@@ -56,8 +55,7 @@ public class LifecycleService {
         new Lifecycle(
             forPersistingDnsRecords,
             publicHostResolver,
-            configResolver.getDomain(),
-            ServiceNames.VAIER
+            configResolver.getDomain()
         ).start();
 
         forInitialisingVpnRouting.setupVpnRouting();
