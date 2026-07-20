@@ -693,6 +693,18 @@ from previously-deployed stacks, and the `ServiceNames.AUTHELIA`/`REDIS`/`AUTH`/
 survive to feed that cleanup and the defensive `VaierServerCatalogue` infra-exclusion. No Authelia runtime, no
 Authelia config written, and no dead Authelia Java classes remain.
 
+**Delivered (fresh-install console sign-in fix, TDD-first):** ✅ — the Vaier console's own compose-label
+routers (`vaier`, `vaier-identity`) reference the social auth middlewares (`oauth2-signin`, `oauth2-authn`,
+`vaier-authz`) via `@file` unconditionally, but on a fresh install with no published service those middlewares
+were never written to the generated Traefik config, so Traefik disabled the console routers and the operator
+could not sign in (Google login completed, then every authenticated route 503'd to the offline page). The
+startup hook `TraefikReverseProxyAdapter.backfillSocialMiddlewaresOnStartup` — which early-returned when
+`oauth2-authn` was absent — was renamed to `ensureConsoleAuthMiddlewaresOnStartup` and now ensures the three
+middlewares and the `oauth2-proxy-svc` service exist on every startup (creating the `http` section if absent),
+regardless of whether any social service is published. Idempotent (it rewrites the same deterministic
+definitions, so it still self-heals older configs onto newly-forwarded headers) and tightly scoped — it never
+touches published-service routers/services or other config.
+
 **Delivered (per-service access rules — any-of allowed groups, TDD-first):** ✅ (part of #305)
 - Generalised per-service gating from a single required group to an **access rule**: the *any-of* list of
   **allowed groups** an identity may satisfy to reach one service. Empty rule ⇒ any approved user; **admin**

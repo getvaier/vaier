@@ -839,7 +839,7 @@ class TraefikReverseProxyAdapterTest {
             """;
         Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
 
-        adapter.backfillSocialMiddlewaresOnStartup();
+        adapter.ensureConsoleAuthMiddlewaresOnStartup();
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).contains("X-Auth-Request-Name");
@@ -885,7 +885,7 @@ class TraefikReverseProxyAdapterTest {
             """;
         Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
 
-        adapter.backfillSocialMiddlewaresOnStartup();
+        adapter.ensureConsoleAuthMiddlewaresOnStartup();
 
         var middlewares = (java.util.Map<String, Object>) http().get("middlewares");
         var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
@@ -894,13 +894,68 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
-    void backfillSocialMiddlewares_isNoOpWhenNoSocialRouteExists() throws IOException {
+    @SuppressWarnings("unchecked")
+    void ensureConsoleAuthMiddlewares_freshInstall_createsSocialMiddlewaresAndOauth2ProxyService()
+            throws IOException {
+        // Fresh install: an empty remote-apps.yml, no published service, no http section at all.
+        // The console's own compose-label routers (`vaier`, `vaier-identity`) always reference the
+        // three social middlewares via @file, so they must be created on startup regardless.
+        adapter.ensureConsoleAuthMiddlewaresOnStartup();
+
+        var middlewares = (java.util.Map<String, Object>) http().get("middlewares");
+        var services = (java.util.Map<String, Object>) http().get("services");
+
+        // oauth2-signin: on 401, serve oauth2-proxy's sign-in page
+        var signin = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-signin")).get("errors");
+        assertThat((List<String>) signin.get("status")).containsExactly("401");
+        assertThat(signin.get("service")).isEqualTo("oauth2-proxy-svc");
+        assertThat(signin.get("query")).isEqualTo("/oauth2/sign_in?rd={url}");
+
+        // oauth2-authn: Google forward-auth with the full X-Auth-Request-* header set
+        var authn = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-authn")).get("forwardAuth");
+        assertThat(authn.get("address")).isEqualTo("http://oauth2-proxy:4180/oauth2/auth");
+        assertThat((List<String>) authn.get("authResponseHeaders"))
+            .containsExactly("X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Name",
+                    "X-Auth-Request-Connector", "X-Auth-Request-Connector-Uid");
+
+        // vaier-authz: Vaier /authz/verify forward-auth with the Remote-* header set
+        var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
+        assertThat(authz.get("address")).isEqualTo("http://vaier:8080/authz/verify");
+        assertThat((List<String>) authz.get("authResponseHeaders"))
+            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups", "Remote-Name");
+
+        // oauth2-proxy-svc: the shared file-service the sign-in errors middleware points at
+        var svc = (java.util.Map<String, Object>) services.get("oauth2-proxy-svc");
+        var servers = (List<java.util.Map<String, Object>>)
+            ((java.util.Map<String, Object>) svc.get("loadBalancer")).get("servers");
+        assertThat(servers.get(0).get("url")).isEqualTo("http://oauth2-proxy:4180");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void ensureConsoleAuthMiddlewares_isIdempotent_leavesSingleDefinitionAndKeepsPublishedRoute()
+            throws IOException {
+        // A published public service already exists; the console middlewares are also already present.
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
+        adapter.ensureConsoleAuthMiddlewaresOnStartup();
+        adapter.ensureConsoleAuthMiddlewaresOnStartup();
 
-        adapter.backfillSocialMiddlewaresOnStartup();
+        var http = http();
+        var routers = (java.util.Map<String, Object>) http.get("routers");
+        var services = (java.util.Map<String, Object>) http.get("services");
+        var middlewares = (java.util.Map<String, Object>) http.get("middlewares");
 
+        // The three middlewares + oauth2-proxy-svc exist exactly once each
+        assertThat(middlewares).containsKeys("oauth2-signin", "oauth2-authn", "vaier-authz");
+        assertThat(services).containsKey("oauth2-proxy-svc");
+
+        // The pre-existing published route and its backend are untouched
+        assertThat(routers).containsKey("app-example-com-router");
+        assertThat(services).containsKey("app-example-com-service");
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        assertThat(content).doesNotContain("oauth2-authn");
+        assertThat(content).contains("http://10.13.13.2:8080");
+        // No duplicated definitions in the serialized YAML
+        assertThat(content.split("vaier-authz:", -1).length - 1).isEqualTo(1);
     }
 
     @Test
