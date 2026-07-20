@@ -105,13 +105,16 @@ public record Machine(
      * and defaults SSH-access on (it is a server). {@code sshAccessOverride} is the operator's pinned
      * value from the Vaier config, or null to use the default. Its type reuses {@link MachineType#UBUNTU_SERVER}
      * rather than a dedicated enum value so it never disturbs peer/LAN routing logic — Vaier never
-     * generates WireGuard config from a {@code Machine} projection. Every peer/LAN-only field is null.
+     * generates WireGuard config from a {@code Machine} projection. It {@code runsDocker} — the box is
+     * itself the Docker engine hosting the whole compose stack — so the Explorer grows a {@code containers}
+     * entry for it; the port is null because Vaier reaches that engine over the local socket, not a TCP port.
+     * Every peer/LAN-only field is null.
      */
     public static Machine vaierServer(Boolean sshAccessOverride) {
         return new Machine(
             LanAnchor.VAIER_SERVER_NAME, MachineType.UBUNTU_SERVER,
             null, null, null, null, null, null, null,
-            null, null, false, null, DeviceCategory.SERVER, sshAccessOverride);
+            null, null, true, null, DeviceCategory.SERVER, sshAccessOverride);
     }
 
     /**

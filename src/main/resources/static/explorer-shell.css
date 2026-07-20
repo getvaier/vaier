@@ -97,15 +97,6 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-kbd-ico { display: none; }
 .ex-kbd-chip { color: var(--text-dim); }
 
-/* Add machine — the one create action prominent in the chrome, next to search. */
-.ex-topbtn {
-    flex: none; display: inline-flex; align-items: center; gap: 4px;
-    height: 28px; padding: 0 11px;
-    background: none; border: 1px solid var(--accent); border-radius: var(--radius-1);
-    color: var(--accent); font-family: var(--mono); font-size: 12px; cursor: pointer;
-}
-.ex-topbtn:hover { background: var(--accent); color: var(--bg); }
-
 /* The drawer toggle. It only exists on a phone (revealed in the width query below); on a wide screen the
    tree is a permanent column and there is nothing to open. */
 .ex-menu {
@@ -213,12 +204,20 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-/* An identifier is an address, not a word. */
-.ex-lbl.is-id { font-family: var(--mono); font-size: 14px; }
-.ex-lbl.is-word { font-size: 14px; }
+/* One font for the whole rail. The tree is navigation, not a terminal: an address and a word sit side by
+   side as siblings under a machine (files, shell, containers, disk), so they read as one list rather than
+   two typefaces. Identifiers keep their mono home in the Inspector title, where a path IS the content. */
+.ex-lbl { font-size: 14px; }
 
 /* The domain's four-state MachineStatus, in four colours — the same four the fleet page uses. UNKNOWN is
    grey on purpose: it means no probe has run, and a green dot there would be a claim Vaier cannot make. */
+/* A machine's capability glyphs (Docker, relay), riding just before its liveness dot. Dim by default so they
+   read as quiet metadata, not controls; they lift to full colour with the row on hover/selection. */
+.ex-caps { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.ex-cap { display: inline-flex; color: var(--text-dim); }
+.ex-cap-ico { width: 13px; height: 13px; }
+.ex-row:hover .ex-cap, .ex-row.is-sel .ex-cap { color: var(--text-muted); }
+
 .ex-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .ex-dot.is-up { background: var(--green); box-shadow: 0 0 6px rgba(78, 201, 176, .5); }
 .ex-dot.is-degraded { background: var(--yellow); }   /* on the network, but its Docker scrape is failing */
@@ -1130,11 +1129,9 @@ select.ex-input { cursor: pointer; }
 @media (max-width: 760px) {
     .ex-menu { display: inline-flex; }
 
-    /* The chrome loses its words but not its actions: the address bar keeps the room, the two buttons fall
-       back to their glyphs. */
+    /* The chrome loses its words but not its actions: the address bar keeps the room, search falls back to
+       its glyph. */
     .ex-addressbar { margin: 0 6px; }
-    .ex-topbtn-lbl { display: none; }
-    .ex-topbtn { padding: 0 9px; }
     .ex-kbd-lbl, .ex-kbd-chip { display: none; }
     .ex-kbd-ico { display: block; }
     .ex-kbd { padding: 0 9px; }

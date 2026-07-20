@@ -44,6 +44,11 @@
         shield:  '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M5.7 8l1.6 1.7L10.4 6"/>',
         shieldhalf: '<path d="M8 1.7l5.1 1.9v3.9c0 3.2-2.1 5.4-5.1 6.5-3-1.1-5.1-3.3-5.1-6.5V3.6z"/><path d="M3 8.3h10"/>',
         map:     '<path d="M8 1.7c-2.5 0-4.4 1.9-4.4 4.3 0 3.1 4.4 8.3 4.4 8.3s4.4-5.2 4.4-8.3c0-2.4-1.9-4.3-4.4-4.3z"/><circle cx="8" cy="6" r="1.6"/>',
+        // Capability glyphs — a machine's powers, riding just after its name in the rail. Line-art in the same
+        // weight as everything else here, cropped small: stacked containers over a whale's waterline for Docker,
+        // a hub fanning out to two dots for a relay.
+        docker:  '<rect x="2.9" y="6.8" width="2.4" height="2.4"/><rect x="5.8" y="6.8" width="2.4" height="2.4"/><rect x="8.7" y="6.8" width="2.4" height="2.4"/><rect x="5.8" y="4.1" width="2.4" height="2.4"/><path d="M1.8 10.4c1 1.7 2.9 2.4 5.4 2.4 3.3 0 5.4-1.5 6.2-2.9"/>',
+        relay:   '<circle cx="3.8" cy="8" r="1.5"/><circle cx="12.2" cy="4" r="1.5"/><circle cx="12.2" cy="12" r="1.5"/><path d="M5.2 7.3l5.6-2.7M5.2 8.7l5.6 2.7"/>',
         // Device forms, matched to the machine icons the Infrastructure page used, so a machine
         // wears the same shape in the tree as on its card — just smaller. Keyed by device category, lowercased.
         server:  '<rect x="2.5" y="2.5" width="11" height="4" rx=".8"/><rect x="2.5" y="9" width="11" height="4" rx=".8"/><circle cx="4.6" cy="4.5" r=".55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r=".55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/>',
@@ -609,6 +614,28 @@
         return el;
     }
 
+    // A machine's capabilities, as small glyphs riding just before its liveness dot — the two the operator scans
+    // the fleet for. Docker (it hosts containers) reads off the machine; relay (it routes a LAN behind it, so
+    // other machines are reachable only through it) reads off its peer. A machine that is neither gets an empty
+    // strip, so names still line up. Icon-only; the capability rides along as the glyph's hover title.
+    function machineCaps(name) {
+        const m = S.machines.find((x) => x.name === name);
+        const peer = S.peers.get(name);
+        const caps = document.createElement('span');
+        caps.className = 'ex-caps';
+        if (peer && peer.isRelay) caps.appendChild(capIcon('relay', 'Relay — routes a LAN behind it'));
+        if (m && m.runsDocker) caps.appendChild(capIcon('docker', 'Runs Docker'));
+        return caps;
+    }
+
+    function capIcon(kind, title) {
+        const s = document.createElement('span');
+        s.className = 'ex-cap';
+        s.title = title;
+        s.innerHTML = svg(kind, 'ex-cap-ico');
+        return s;
+    }
+
     // --- the tree ---------------------------------------------------------------------------------------
 
     function renderTree() {
@@ -668,7 +695,10 @@
             row.title = (entry && entry.error) || 'This directory could not be read.';
         }
 
-        if (kind === 'machine') row.appendChild(dot(path[1]));
+        if (kind === 'machine') {
+            row.appendChild(machineCaps(path[1]));
+            row.appendChild(dot(path[1]));
+        }
         // A container row wears its update mark in the rail, so an operator scanning the fleet sees the one
         // that needs them without opening anything. The verdict is the backend's; updateMark decides nothing
         // but whether there is something worth drawing.
@@ -843,11 +873,16 @@
         body.className = 'ex-pane-body';
 
         body.appendChild(section('Machines'));
+        // Adding a machine is a fleet-level act — it belongs on the fleet, not floating in the topbar over every
+        // path you happen to be standing in. So the button lives here, at the top of the machine list.
+        const addBar = el('div', 'ex-lactions is-static');
+        addBar.appendChild(selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine()));
+        body.appendChild(addBar);
         const grid = document.createElement('div');
         grid.className = 'ex-grid';
         if (!S.machines.length) {
-            body.appendChild(note('No machines yet. Add one with the Add machine button and it will appear here.',
-                false));
+            body.appendChild(note('No machines yet. Add one with the Add machine button above and it will appear '
+                + 'here.', false));
         } else {
             sortedMachines().forEach((m) => {
                 const address = tunnelAddress(m);
@@ -4805,7 +4840,6 @@
     // --- wiring -----------------------------------------------------------------------------------------
 
     $('exPalBtn').onclick = openPalette;
-    $('exAddBtn').onclick = () => addMachine();
 
     // The tree drawer (phone only — on a wide screen the tree is always in view and this class does nothing).
     // go() drops .tree-open on every navigation, so selecting a machine closes the drawer behind you.

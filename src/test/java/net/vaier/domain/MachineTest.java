@@ -185,6 +185,14 @@ class MachineTest {
     }
 
     @Test
+    void vaierServer_runsDocker() {
+        // The Vaier server host is itself a Docker engine — it runs the whole compose stack (WireGuard,
+        // Traefik, oauth2-proxy, Vaier). So its Machine projection must say it runs Docker, or the Explorer
+        // tree never grows a `containers` entry for it and its own containers stay invisible.
+        assertThat(Machine.vaierServer(null).runsDocker()).isTrue();
+    }
+
+    @Test
     void vaierServer_honoursExplicitOverride() {
         assertThat(Machine.vaierServer(false).effectiveSshAccess()).isFalse();
         assertThat(Machine.vaierServer(true).effectiveSshAccess()).isTrue();

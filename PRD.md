@@ -1518,6 +1518,25 @@ Three things this buys that a set of pages structurally cannot:
   bus — unrelated to the deleted page — and is unchanged.) This closes the slice-C "the Infrastructure bridge
   stays" caveat and the "Publish from the tree" / "Retiring the Infrastructure bridge" backlog items below. Part
   of epic [#323](https://github.com/getvaier/vaier/issues/323).
+- [x] **Capability glyphs, the Vaier server's containers, and a fleet-level Add machine ✅.** Four follow-ons
+  after the Infrastructure port:
+  - The **Vaier server** machine now reports **`runsDocker`** (`Machine.vaierServer`) — the box is itself the
+    Docker engine hosting the whole compose stack — so the Explorer grows a **`containers`** entry for it and
+    lists its own containers (the tree previously showed none, even though the update-available sweep and
+    `DiscoverVaierServerContainersUseCase` already covered them, which was a quiet gap between the README claim
+    and the tree). Its port stays null: Vaier reaches that engine over the local socket, not a TCP port.
+  - Each machine row draws small **capability glyphs** just before its **status dot** — a Docker glyph when it
+    runs Docker, a relay glyph when it is a **relay peer** — ported from the retired Infrastructure page's
+    machine cards, so the **capability strip** is back, now per-row in the tree rather than a card header. A
+    machine that is neither gets an empty strip so names still line up; the glyphs read as dim metadata that
+    lift with the row on hover/selection.
+  - **Add machine** moved from the Explorer topbar to the **fleet root's** Inspector (the fleet page), since
+    adding a machine is a fleet-level act rather than something floating over whatever path you happen to be
+    standing on — matching the "creation is a persistent affordance … of the fleet" decision below.
+  - Tree labels are now **one proportional font**: identifiers no longer render monospace, so a machine's
+    siblings (`files`, `shell`, `containers`, `disk`) read as one list instead of two typefaces. Monospace
+    stays in the Inspector title, where a path is the content.
+  Part of epic [#323](https://github.com/getvaier/vaier/issues/323).
 - [ ] **E — The rest.** DNS, access (Users), Concepts. `admin.html` and the last iframes are deleted, and the
   bridge with them.
 
