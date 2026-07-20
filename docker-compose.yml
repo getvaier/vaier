@@ -209,6 +209,12 @@ services:
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
+      # Every Vaier router is websecure-only, so a schemeless hostname (which browsers request as
+      # http://) would hit no router and get Traefik's default 404. Globally redirect web->websecure.
+      # Traefik serves the ACME HTTP-01 challenge below at higher priority than this redirect, so
+      # Let's Encrypt issuance is unaffected.
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}

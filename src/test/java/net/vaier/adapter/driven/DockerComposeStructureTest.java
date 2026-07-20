@@ -256,6 +256,29 @@ class DockerComposeStructureTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void httpEntrypointRedirectsToHttps_soBareHostnameVisitsDoNotHitABare404() throws Exception {
+        // Every Vaier router is bound to the `websecure` (:443) entrypoint only. A browser given a
+        // schemeless hostname (`vaier.example.com`) requests `http://` on :80 — which matches no
+        // router and gets Traefik's default "404 page not found". The `web` entrypoint must globally
+        // redirect to `websecure`. This coexists with the Let's Encrypt HTTP-01 challenge that also
+        // lives on `web`: Traefik serves the ACME challenge at higher priority than the redirect.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> traefik = (Map<String, Object>) services.get("traefik");
+        List<String> command = (List<String>) traefik.get("command");
+
+        assertThat(command)
+            .as("http://<host> must 308 to https, not fall through to Traefik's default 404")
+            .contains("--entrypoints.web.http.redirections.entrypoint.to=websecure")
+            .contains("--entrypoints.web.http.redirections.entrypoint.scheme=https");
+
+        // The ACME HTTP-01 challenge must still run on `web` — the redirect doesn't replace it.
+        assertThat(command).contains("--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void wireguardMasquerade_usesInterfaceNameAgnosticRuleForVpnEgress() throws Exception {
         // The linuxserver/wireguard wg0.conf PostUp masquerades only on `-o eth+`. On a
         // Vaier server whose primary NIC is not named eth* (e.g. AWS EC2's ens5, or when
