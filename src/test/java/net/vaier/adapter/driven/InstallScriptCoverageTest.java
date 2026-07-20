@@ -92,6 +92,22 @@ class InstallScriptCoverageTest {
     }
 
     @Test
+    void installScriptGeneratesTheAuthSharedSecrets_soAFreshEnvDoesNotCrashLoopDex() throws Exception {
+        // The Dex<->oauth2-proxy shared secret and the oauth2-proxy cookie secret are NOT operator-
+        // authored, and nothing in the compose stack generates them. A .env without
+        // VAIER_DEX_CLIENT_SECRET renders an empty Dex static-client secret and Dex crash-loops
+        // ("Secret ... is required for client vaier-oauth2"). install.sh must generate both into .env.
+        String script = Files.readString(Path.of("install.sh"));
+        assertThat(script).as("install.sh must ensure the Dex<->oauth2-proxy shared secret")
+            .contains("ensure_secret VAIER_DEX_CLIENT_SECRET");
+        assertThat(script).as("install.sh must ensure the oauth2-proxy cookie secret")
+            .contains("ensure_secret VAIER_OAUTH2_COOKIE_SECRET");
+        assertThat(script.contains("openssl rand") || script.contains("/dev/urandom"))
+            .as("install.sh must generate the secrets from a random source, not a fixed placeholder")
+            .isTrue();
+    }
+
+    @Test
     void committedAssetTreesAreActuallyFetched() throws Exception {
         List<String> fetched = installScriptRuntimePaths();
         // The three trees that broke a curl-only install: nginx offline page, oauth2 templates, Dex theme.

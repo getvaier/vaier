@@ -114,14 +114,13 @@ Prefer to read it first? Download `install.sh`, inspect it, then `bash install.s
 
 Vaier supports two modes — choose one based on where your domain lives. The mode is **inferred at boot from the presence of AWS credentials**: include them, you get Route53 automation; omit them, you get manual DNS. There is no separate switch.
 
-Step 2 scaffolded a `.env` template; the command below **replaces** it with your real values (or edit the template in place if you prefer).
+Step 2 already created `.env` — with the two shared secrets (`VAIER_DEX_CLIENT_SECRET`, `VAIER_OAUTH2_COOKIE_SECRET`) generated for you. **Open that `.env` and fill in your values; don't recreate the file** — a fresh `cat > .env` wipes those generated secrets, and an empty `VAIER_DEX_CLIENT_SECRET` makes Dex refuse to start.
 
 #### Option A: Route53 (automated)
 
-If your domain is on AWS Route53 and you want Vaier to manage DNS for you, include the AWS credentials in `.env`:
+If your domain is on AWS Route53 and you want Vaier to manage DNS for you, set these keys in `.env` (**including** the two AWS lines):
 
-```bash
-cat > .env <<'EOF'
+```ini
 VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
 VAIER_AWS_KEY=AKIA...
@@ -134,18 +133,15 @@ VAIER_OIDC_GITHUB_CLIENT_SECRET=...
 VAIER_ADMIN_EMAIL=you@gmail.com
 # The zone Vaier reads local time in — the nightly backup hour means this zone, not UTC. Defaults to UTC.
 VAIER_TZ=Europe/Oslo
-EOF
-chmod 600 .env
 ```
 
 The AWS credentials need Route53 permissions on the hosted zone for `yourdomain.com`. Vaier auto-creates `vaier.yourdomain.com` on first boot, and a CNAME per published service after that.
 
 #### Option B: Manual DNS (no AWS)
 
-If your domain isn't on Route53, or you'd rather Vaier never touched AWS, simply leave the AWS variables out:
+If your domain isn't on Route53, or you'd rather Vaier never touched AWS, set the same keys but **omit** the two AWS lines:
 
-```bash
-cat > .env <<'EOF'
+```ini
 VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
 # Social sign-in — how you and your users authenticate (see step 3b)
@@ -154,8 +150,6 @@ VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
 VAIER_OIDC_GITHUB_CLIENT_ID=...
 VAIER_OIDC_GITHUB_CLIENT_SECRET=...
 VAIER_ADMIN_EMAIL=you@gmail.com
-EOF
-chmod 600 .env
 ```
 
 You then maintain DNS records yourself in whatever provider you use. **Before first boot**, create these two records:
@@ -184,7 +178,12 @@ Both providers hand the user back to **Dex** (not oauth2-proxy), so register the
 - **Google** — create an OAuth 2.0 Web application client in the [Google Cloud console](https://console.cloud.google.com/apis/credentials), set its authorized redirect URI to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET`.
 - **GitHub** — register an OAuth App in [GitHub developer settings](https://github.com/settings/developers), set its authorization callback URL to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GITHUB_CLIENT_ID` / `VAIER_OIDC_GITHUB_CLIENT_SECRET`. Any GitHub account may sign in — Vaier's pending → admin-approval gate decides who's actually let in.
 
-Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin. The oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`) and the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`) are generated automatically — you don't author them.
+Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin. The oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`) and the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`) are **generated for you by `install.sh`** into `.env` (step 2) — you don't author them. If you ever hand-write `.env` without them, generate them yourself, or Dex won't start:
+
+```bash
+printf 'VAIER_DEX_CLIENT_SECRET=%s\nVAIER_OAUTH2_COOKIE_SECRET=%s\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" >> .env
+```
 
 ### 4. Start the stack
 

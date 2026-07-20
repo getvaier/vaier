@@ -110,11 +110,27 @@ EOF
   chmod 600 .env
 fi
 
+# The Dex<->oauth2-proxy shared secret and the oauth2-proxy cookie secret are NOT operator-authored,
+# and nothing in the compose stack generates them: a .env missing VAIER_DEX_CLIENT_SECRET renders an
+# empty Dex static-client secret and Dex crash-loops ("Secret ... is required for client vaier-oauth2").
+# Generate any that are absent, in place — so both a fresh scaffold and a pre-existing .env end up
+# complete. Only ever appends a missing key; never touches a value the operator already set.
+gen_hex() { openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+gen_b64() { openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '\n'; }
+ensure_secret() {   # $1=var name  $2=generator function
+  grep -qE "^$1=.+" .env 2>/dev/null && return 0
+  printf '%s=%s\n' "$1" "$("$2")" >> .env
+  say "Generated $1"
+}
+ensure_secret VAIER_DEX_CLIENT_SECRET gen_hex
+ensure_secret VAIER_OAUTH2_COOKIE_SECRET gen_b64
+
 cat <<EOF
 
 $(say "Done.")
 Next:
   1. Edit .env       — set your domain, admin email, and OAuth client ids/secrets.
+                       (the two shared secrets above are already generated for you.)
   2. Point DNS       — vaier.<domain>, oauth2.<domain>, dex.<domain> at this server.
   3. Start the stack — docker compose up -d
 EOF

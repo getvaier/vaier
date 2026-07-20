@@ -519,7 +519,9 @@ services:
   #
   # Set the upstream OAuth credentials in .env: VAIER_OIDC_GOOGLE_CLIENT_ID / *_SECRET and
   # VAIER_OIDC_GITHUB_CLIENT_ID / *_SECRET. VAIER_DEX_CLIENT_SECRET (the oauth2-proxy<->Dex shared
-  # secret) and VAIER_OAUTH2_COOKIE_SECRET are auto-generated into .env (not operator-authored).
+  # secret) and VAIER_OAUTH2_COOKIE_SECRET are not operator-authored — install.sh generates them into
+  # .env (see its ensure_secret step). If either is missing, its ${..:-} default is EMPTY, and an empty
+  # Dex static-client secret makes Dex refuse to start ("Secret ... is required for client vaier-oauth2").
   #
   # oauth2-proxy-init renders oauth2-proxy's alpha config into the shared ./oauth2/config volume so
   # the repo ships a generic, secret-free compose: (1) the oauth2-proxy<->Dex shared secret is
