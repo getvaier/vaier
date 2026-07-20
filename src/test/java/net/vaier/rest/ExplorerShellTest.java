@@ -82,53 +82,62 @@ class ExplorerShellTest {
         assertThat(admin).doesNotContain("src='explorer.html'");
     }
 
-    // --- 3. the dock moved in ---------------------------------------------------------------------------
+    // --- 3. one shell model: pop-out windows, no embedded dock ------------------------------------------
 
     @Test
-    void theTerminalDock_livesInTheShellItself() throws IOException {
-        // The whole reason admin.html iframes its sections is that the dock must survive navigation. In the
-        // shell there is nothing to navigate away from: the dock is a row of the page, mounted directly.
+    void theExplorer_hasNoEmbeddedDock_shellsAreWindowsOnly() throws IOException {
+        // The Explorer opens a machine's shell in its own pop-out window (terminal-window.js), the single shell
+        // model. The old embedded dock is gone from here entirely — its script, its mount points, and its
+        // wiring — so there are never two shell systems to confuse. (terminal-dock.js itself stays for admin.html.)
         String shell = read("explorer.html");
-        assertThat(shell).contains("terminal-dock.js");
-        assertThat(shell).contains("id=\"terminalPanes\"");   // the dock's mount points, unchanged
-        assertThat(shell).contains("id=\"terminalEmpty\"");
-        assertThat(shell).contains("id=\"terminalKeys\"");
+        assertThat(shell).doesNotContain("terminal-dock.js");
+        assertThat(shell).doesNotContain("id=\"terminalPanel\"");
+        assertThat(shell).doesNotContain("id=\"terminalPanes\"");
         assertThat(shell).doesNotContain("<iframe src=\"terminal");
+        String js = read("explorer-shell.js");
+        assertThat(js).doesNotContain("TerminalDock");        // no dock wiring left in the Explorer
+        assertThat(js).doesNotContain("watchDock");
     }
 
     @Test
-    void aShellEntryOnAMachine_opensItInItsOwnWindow() throws IOException {
-        // "shell" is an entry under a machine, and selecting it opens that machine's terminal in its own
-        // browser window now — the default, since a window is bigger, resizes freely, and you can have several
-        // at once. The Explorer no longer opens the bottom dock for a shell (the dock stays for admin.html).
+    void aMachinesSshAccessSection_opensTheShellInItsOwnWindow() throws IOException {
+        // The shell is no longer a tree entry — it opens from a machine's SSH-access section, beside the
+        // credential it uses (a terminal is the most direct thing SSH access is for). It opens in its own
+        // browser window; the Explorer has no bottom dock.
         String js = read("explorer-shell.js");
         assertThat(js).contains("function openShellWindow(");
         assertThat(js).contains("terminal.html?machine=");
-        assertThat(js).contains("'shell'");
         assertThat(js).doesNotContain("TerminalDock.open(");
+        // Opened from the SSH-access section's own button.
+        assertThat(js).contains("selVerb('shell', 'Open shell'");
+        // The shell is not a navigable tree kind any more: no 'shell' child, no renderShell pane.
+        assertThat(js).doesNotContain("kind: 'shell'");
+        assertThat(js).doesNotContain("function renderShell(");
+        // The primary shell window always reattaches to the machine's one stable session (deterministic, never
+        // a scavenged orphan) — VaierPanes.primary carries that id in the window's URL.
+        assertThat(js).contains("VaierPanes.primary");
     }
 
     @Test
     void aRepaint_neverSpawnsAShell() throws IOException {
-        // A shell window opens only from an explicit action — navigating to a shell entry (go), or a button the
-        // operator clicks (Open shell window, Duplicate). It must never be opened at the top level of a render
-        // function, or every repaint (a machine coming online, a stats push) would open a window on its own.
+        // A shell window opens only from an explicit click — the Open shell button in a machine's SSH-access
+        // section. It must never be opened from go() or at the top level of a render function, or every repaint
+        // (a machine coming online, a stats push) would open a window on its own.
         String js = read("explorer-shell.js");
         assertThat(js).contains("function openShellWindow(");
 
         int go = js.indexOf("function go(path) {");
         assertThat(go).isPositive();
         String goBody = js.substring(go, js.indexOf("\n    }", go));
-        assertThat(goBody).as("navigating to a shell entry opens its window").contains("openShellWindow(");
+        assertThat(goBody).as("navigating never opens a shell — that is an explicit click now")
+            .doesNotContain("openShellWindow(");
 
-        // In the render path it is only ever wired to a click handler, never called as the pane renders.
-        int rs = js.indexOf("function renderShell(");
-        assertThat(rs).isPositive();
-        String rsBody = js.substring(rs, js.indexOf("\n    }", rs));
-        for (String line : rsBody.split("\n")) {
-            if (line.contains("openShellWindow(")) {
-                assertThat(line).as("renderShell reaches openShellWindow only through a handler: %s", line)
-                    .contains("onclick");
+        // Every call to openShellWindow (other than its definition) is a click handler, never an imperative call
+        // made as a pane renders.
+        for (String line : js.split("\n")) {
+            if (line.contains("openShellWindow(") && !line.contains("function openShellWindow(")) {
+                assertThat(line).as("openShellWindow reached only through a handler: %s", line)
+                    .contains("=> openShellWindow(");
             }
         }
     }
@@ -213,17 +222,30 @@ class ExplorerShellTest {
     @Test
     void theSectionsNotYetPorted_areBridgedIntoTheTreeAndMarkedTransitional() throws IOException {
         String js = read("explorer-shell.js");
-        // Settings is native now (a top-level global, no longer an iframe), so settings.html is gone from the
-        // shell. Infrastructure is native too — machines, services, the map, editing, publishing and the LAN
-        // scan are all real entries now, so vpn-peers.html is deleted and no longer bridged. Backups stays a
-        // transitional bridge; Users and Concepts are top-level globals that still bridge their pages.
-        for (String page : List.of("backups.html", "users.html", "concepts.html")) {
+        // Only two Vaier-wide globals are still framed: Users and Concepts. Settings is native (no settings.html),
+        // Infrastructure is native (no vpn-peers.html), and Backups is native now too — the last fleet-level
+        // bridge is gone, so backups.html is deleted and no longer framed.
+        for (String page : List.of("users.html", "concepts.html")) {
             assertThat(js).as("bridge to %s", page).contains(page);
         }
         assertThat(js).doesNotContain("settings.html");   // ported to a native entry, not framed
         assertThat(js).doesNotContain("vpn-peers.html");  // Infrastructure is native — the bridge is gone
-        // A bridge nobody labelled is a bridge nobody deletes.
-        assertThat(js).containsIgnoringCase("transitional");
+        assertThat(js).doesNotContain("backups.html");    // Backups is native — the bridge is gone (#323)
+    }
+
+    // --- 8b. the backup server's operations are native, not on a deleted page ---------------------------
+
+    @Test
+    void theBackupServerOperations_areNativeInTheShell_notFramed() throws IOException {
+        String js = read("explorer-shell.js");
+        // The three ops that used to live only on backups.html — provision the server (awaiting the settle the
+        // backend pushes, never polled), authorize a host, download the setup script — are native on the backup
+        // server's own entry now. Their endpoints and the provision-settled stream event prove it.
+        assertThat(js).contains("/provision");
+        assertThat(js).contains("provision-settled");
+        assertThat(js).contains("/authorize/");
+        assertThat(js).contains("/setup.sh");
+        assertThat(js).contains("Server operations");
     }
 
     // --- 9. the latent height bug (#321) ---------------------------------------------------------------
@@ -421,10 +443,10 @@ class ExplorerShellTest {
 
     @Test
     void aMachineGrowsOnlyTheEntriesVaierCanActuallyReach() throws IOException {
-        // The tree must be honest about a machine rather than uniform. A machine with no SSH has no files,
-        // no shell and no disk; a machine that runs no Docker must not grow an empty `containers` entry that
-        // opens onto nothing. /machines already carries both facts (sshAccess, runsDocker) — the tree asks
-        // them, it does not guess.
+        // The tree must be honest about a machine rather than uniform. A machine with no SSH has no files and no
+        // disk; a machine that runs no Docker must not grow an empty `containers` entry that opens onto nothing.
+        // /machines already carries both facts (sshAccess, runsDocker) — the tree asks them, it does not guess.
+        // (The shell is not a tree entry — it opens from the machine's SSH-access section — so it is absent here.)
         String js = read("explorer-shell.js");
         int from = js.indexOf("if (kind === 'machine') {");
         assertThat(from).isPositive();
@@ -432,8 +454,8 @@ class ExplorerShellTest {
 
         assertThat(body).contains("sshAccess");
         assertThat(body).contains("runsDocker");
-        assertThat(body).contains("'files'").contains("'shell'").contains("'containers'")
-            .contains("'services'").contains("'disk'");
+        assertThat(body).contains("'files'").contains("'containers'").contains("'services'").contains("'disk'");
+        assertThat(body).doesNotContain("'shell'");   // moved to the SSH-access section
     }
 
     @Test

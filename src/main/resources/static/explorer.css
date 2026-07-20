@@ -1,5 +1,5 @@
 /* Explorer — one file tree spanning the fleet. Page-scoped layout only: every colour, radius and control
-   reuses the tokens and primitives in styles.css, exactly as backups.css does. Prefix: ex-. */
+   reuses the tokens and primitives in styles.css. Prefix: ex-. */
 
 /* The page fills whatever it is given: it carries no topbar of its own, and inside admin.html's iframe 100vh
    is already the frame's height (the topbar sits outside it). This used to subtract a topbar of its own —

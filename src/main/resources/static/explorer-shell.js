@@ -5,9 +5,9 @@
 // every other, so it is the only place a tree spanning the fleet can exist. This is that tree, and the pane
 // beside it is a renderer chosen by what the selected entry *is*. Nothing else is navigation.
 //
-// Slice A builds the shell and moves the terminal dock into it. Machines, files and shells are real entries;
-// the sections not yet ported are bridged (see BRIDGES below) so nothing an operator relies on disappears
-// while the rest of the tree grows.
+// Slice A builds the shell and moves the terminal dock into it. Machines, files, shells and backups are real
+// entries now; only two Vaier-wide globals (Users, Concepts) are still framed whole (see renderGlobalBridge),
+// until they too are ported.
 (function () {
     'use strict';
 
@@ -71,23 +71,10 @@
             + 'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + ICON[name] + '</svg>';
     }
 
-    // --- the bridge: TRANSITIONAL, and deleted a slice at a time ---------------------------------------
-    //
-    // Backups, Users and Concepts are not part of the tree yet. Rather than leave them unreachable from the
-    // shell — or, worse, ship the shell as a second place the operator has to give up on and go back to
-    // admin.html — each appears as an entry whose Inspector is the existing page, framed whole. This is
-    // scaffolding, not architecture: later slices replace these entries with real ones, and each one that
-    // lands deletes its line here. Infrastructure was the largest, and it is gone — machines, services, the
-    // map, editing, publishing and the LAN scan are native entries now. When the last bridge is gone, this
-    // array, the iframe, and admin.html itself go with it.
-    const BRIDGES = [
-        { name: 'backups',        label: 'Backups',        icon: 'archive', page: 'backups.html',
-          note: 'Jobs, runs and archives' },
-    ];
-
     // Vaier-wide entries that are NOT of the fleet — they belong to Vaier, not to any machine — so they sit at
     // the top level of the tree, outside `fleet`. Settings is native now; Users and Concepts still bridge their
-    // pages until they are ported (a later slice). This is why the tree is a forest, not one root.
+    // pages (framed whole, via renderGlobalBridge) until they are ported. This is why the tree is a forest, not
+    // one root. Fleet-level bridges are all gone: Infrastructure and Backups are native entries now (#323).
     const GLOBALS = [
         { name: 'settings', label: 'Settings', icon: 'gear',  native: true },
         { name: 'users',    label: 'Users',    icon: 'users', page: 'users.html' },
@@ -139,13 +126,16 @@
         archives: new Map(),             // machine name -> { state, list, error }: its archives, the rail's stops
         clipboard: [],                   // held file coordinates {machine, path, at, name, directory, size} — the Clipboard
         transfers: new Map(),            // id -> a live/settled Transfer, streamed in over the transfers SSE topic
-        sel: new Set(),                  // paths ticked in the current directory listing (multi-select)
+        sel: [],                         // the fleet-wide selection: {machine, path, at, name, directory, size, backedUp}
+                                         //   coordinates ticked anywhere, kept as you navigate so you can gather
+                                         //   from many folders and machines before acting on them all at once
         backupServer: null,              // GET /backup-servers — the fleet's one backup server, or null when none is designated
         backupRepos: [],                 // GET /backup-repositories — the repositories that live on it
         repoArchives: new Map(),         // repo name -> { state, list, error }: the archives in a repository, read when looked at
         backupJobs: [],                  // GET /backup-jobs — the jobs, each backing one machine up to a repository
         jobRuns: new Map(),              // job name -> { state, run }: its last run, read on view and on the run-settled push
         preparing: new Set(),            // machine names Vaier is readying to back up (first back-up), cleared on prepare-client-settled
+        provisionWatch: null,            // { serverName, bodyEl } while a provision dialog awaits its provision-settled push
         settings: { state: 'idle', config: null, version: '', edition: '' },   // the native Settings entry, read on view
         palSel: 0,
     };
@@ -184,9 +174,8 @@
         }
         if (path.length === 2) {
             if (path[1] === 'map') return 'map';
-            return BRIDGES.some((b) => b.name === path[1]) ? 'bridge' : 'machine';
+            return 'machine';
         }
-        if (path[2] === 'shell') return 'shell';
         if (path[2] === 'backup') return path.length === 3 ? 'backup' : 'repo';
         if (path[2] === 'disk') return 'disk';
         if (path[2] === 'containers') return path.length === 3 ? 'containers' : 'container';
@@ -196,7 +185,6 @@
     }
 
     const machineOf = (path) => S.machines.find((m) => m.name === path[1]) || null;
-    const bridgeOf = (path) => BRIDGES.find((b) => b.name === path[1]) || null;
 
     // Machines are ordered the way the Infrastructure page orders them, so the two never disagree: the Vaier
     // server first, then the servers, then the clients, each group alphabetical. Server-ness is the machine's
@@ -265,8 +253,7 @@
         const kind = kindOf(path);
         if (kind === 'fleet') {
             return [{ name: 'map', kind: 'map', label: 'Map' }]
-                .concat(sortedMachines().map((m) => ({ name: m.name, kind: 'machine' })))
-                .concat(BRIDGES.map((b) => ({ name: b.name, kind: 'bridge', label: b.label })));
+                .concat(sortedMachines().map((m) => ({ name: m.name, kind: 'machine' })));
         }
         if (kind === 'machine') {
             const m = machineOf(path);
@@ -276,7 +263,7 @@
             // `containers` entry that opens onto nothing. /machines already carries both facts — the tree
             // asks them rather than assuming every machine is the same machine.
             const kids = [];
-            if (m.sshAccess) kids.push({ name: 'files', kind: 'files' }, { name: 'shell', kind: 'shell' });
+            if (m.sshAccess) kids.push({ name: 'files', kind: 'files' });   // the shell is opened from the machine’s SSH-access section, not a tree entry
             if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
             // A machine grows a `services` entry when it publishes something, has a container port that could be
             // published, or is a server (so a non-container service on it — a printer's page, a LAN app — can
@@ -537,7 +524,7 @@
     }
 
     const ICON_FOR = { fleet: 'fleet', machine: 'machine', files: 'dir', dir: 'dir', file: 'file',
-                       shell: 'shell', containers: 'box', container: 'box', services: 'route',
+                       containers: 'box', container: 'box', services: 'route',
                        service: 'route', disk: 'disk', backup: 'archive', repo: 'box', map: 'map' };
 
     // A machine wears its device's shape — server, NAS, printer — the same icon its Infrastructure card uses,
@@ -550,7 +537,6 @@
     }
 
     const iconFor = (kind, name) => {
-        if (kind === 'bridge') return (BRIDGES.find((b) => b.name === name) || {}).icon || 'file';
         if (kind === 'settings' || kind === 'gbridge') return (GLOBALS.find((g) => g.name === name) || {}).icon || 'file';
         if (kind === 'machine') return machineIcon(name);
         return ICON_FOR[kind] || 'file';
@@ -851,8 +837,6 @@
         if (kind === 'settings') return renderSettings(pane);
         if (kind === 'gbridge') return renderGlobalBridge(pane);
         if (kind === 'machine') return renderMachine(pane);
-        if (kind === 'bridge') return renderBridge(pane);
-        if (kind === 'shell') return renderShell(pane);
         if (kind === 'containers') return renderContainers(pane);
         if (kind === 'container') return renderContainer(pane);
         if (kind === 'services') return renderServices(pane);
@@ -941,14 +925,6 @@
                 }
             }
         }
-
-        body.appendChild(section('Not in the tree yet'));
-        const rest = document.createElement('div');
-        rest.className = 'ex-grid';
-        BRIDGES.forEach((b) => {
-            rest.appendChild(card(b.icon, b.label, false, b.note, () => go(['fleet', b.name])));
-        });
-        body.appendChild(rest);
 
         pane.appendChild(body);
     }
@@ -1083,16 +1059,33 @@
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
-        body.appendChild(kv([
-            ['Tunnel address', tunnelAddress(m)],
-            ['LAN', m.lanCidr || m.lanAddress],
-            ['Endpoint', m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : ''],
-            ['Latest handshake', peer ? peer.latestHandshake : ''],
-            ['Transfer', m.transferRx || m.transferTx
-                ? (m.transferTx || '0') + ' up / ' + (m.transferRx || '0') + ' down' : ''],
-            ['Docker', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No'],
-            ['Device category', m.deviceCategory],
-        ]));
+        // A LAN server is not on the WireGuard mesh — it sits on a relay's LAN and Vaier reaches it through that
+        // relay — so the tunnel facts (tunnel address, endpoint, handshake, transfer) simply do not exist for it.
+        // Showing them as blanks would be a claim it has a tunnel that is merely down. Instead it gets the facts
+        // it does have: where it lives on the LAN, and when Vaier last reached it. A WireGuard peer gets the mesh
+        // facts. `latestHandshake` (peer) and `lastSeen` (LAN server) are both Unix epoch seconds, rendered human.
+        const isLan = m.type === 'LAN_SERVER';
+        const isVaierServer = m.name === VAIER_SERVER;
+        const rows = [];
+        if (isVaierServer) {
+            // The hub is not a peer of itself: it has no tunnel address, endpoint, handshake or transfer — those
+            // are all empty, and four dashes are noise, not information. It gets only what is true of it.
+            rows.push(['Role', 'The fleet’s hub — WireGuard server, reverse proxy and DNS']);
+        } else if (isLan) {
+            const lan = S.lan.get(m.name);
+            rows.push(['LAN address', m.lanAddress || m.lanCidr]);
+            rows.push(['Last seen', lan ? agoFromEpochSeconds(lan.lastSeen) : '']);
+        } else {
+            rows.push(['Tunnel address', tunnelAddress(m)]);
+            if (m.lanCidr || m.lanAddress) rows.push(['LAN', m.lanCidr || m.lanAddress]);
+            rows.push(['Endpoint', m.endpointIp ? m.endpointIp + ':' + (m.endpointPort || '') : '']);
+            rows.push(['Latest handshake', peer ? agoFromEpochSeconds(peer.latestHandshake) : '']);
+            rows.push(['Transfer', m.transferRx || m.transferTx
+                ? (m.transferTx || '0') + ' up / ' + (m.transferRx || '0') + ' down' : '']);
+        }
+        rows.push(['Docker', m.runsDocker ? (m.dockerPort ? 'Yes — port ' + m.dockerPort : 'Yes') : 'No']);
+        rows.push(['Device category', m.deviceCategory]);
+        body.appendChild(kv(rows));
 
         body.appendChild(section('Inside this machine'));
         const inside = childrenOf(S.path);
@@ -1106,14 +1099,13 @@
             grid.className = 'ex-grid';
             const NOTE = {
                 files:      'Browse over SFTP',
-                shell:      'A terminal on this machine',
                 containers: containersOn(m.name).length + ' seen by Vaier',
                 services:   servicesOn(m.name).length + ' published from here',
                 disk:       'Its filesystems, and how full they are',
                 backup:     'The fleet backs up here',
             };
             inside.forEach((kid) => {
-                grid.appendChild(card(iconFor(kid.kind, kid.name), kid.name, kid.kind !== 'shell',
+                grid.appendChild(card(iconFor(kid.kind, kid.name), kid.name, true,
                     NOTE[kid.name], () => go(['fleet', m.name, kid.name])));
             });
             body.appendChild(grid);
@@ -1133,11 +1125,11 @@
             body.appendChild(act);
         }
 
-        // SSH is what opens this machine's files, shell, disk and backups — so it is two things, shown together:
-        // whether Vaier may open a session at all (the access flag), and the login it uses when it does (the
-        // credential). Offered on any machine Vaier would SSH (a server or a LAN server), never on a phone or
-        // laptop client. Turning access off hides the files/shell/disk entries above — the tree stops claiming a
-        // reach it no longer has.
+        // SSH is what opens this machine's files, shell, disk and backups — so this section carries three things:
+        // whether Vaier may open a session at all (the access flag), the login it uses when it does (the
+        // credential), and the shell itself, opened right here (a terminal is the most direct thing SSH is for).
+        // Offered on any machine Vaier would SSH (a server or a LAN server), never on a phone or laptop client.
+        // Turning access off hides the files and disk entries in the tree — it stops claiming a reach it lost.
         if (m.type !== 'MOBILE_CLIENT' && m.type !== 'WINDOWS_CLIENT') {
             body.appendChild(section('SSH access'));
             const access = el('label', 'ex-check-row');
@@ -1148,10 +1140,16 @@
             body.appendChild(access);
             if (m.sshAccess) {
                 const cred = el('div', 'ex-lactions is-static');
+                // The shell lives here now, beside the credential it uses — opening a terminal is the most direct
+                // thing SSH access is for, so it sits with it rather than as a separate entry in the tree.
+                cred.appendChild(selVerb('shell', 'Open shell', 'ex-btn is-accent', () => openShellWindow(m.name)));
                 cred.appendChild(selVerb('gear', 'SSH credential', 'ex-btn', () => credentialDialog(m.name)));
                 body.appendChild(cred);
+                body.appendChild(note('The shell opens in its own window and runs on ' + m.name + ' itself, so it '
+                    + 'survives closing the window — and even a Vaier restart. Reopening reattaches you right where '
+                    + 'you left off; Exit shell (inside the window) is the one that stops it.', false));
             } else {
-                body.appendChild(note('Off — Vaier holds no session to this machine, so it has no files, shell '
+                body.appendChild(note('Off — Vaier holds no session to this machine, so it has no shell, files '
                     + 'or disk reading here. Turn it on to give it an SSH credential.', false));
             }
         }
@@ -2662,7 +2660,7 @@
         ]));
 
         // The repositories that live here — each an entry of its own (open it for its path, archives and the
-        // Edit/Delete of it). This is where a repository is made now, not on the Backups page.
+        // Edit/Delete of it). This is where a repository is made now.
         body.appendChild(section('Repositories'));
         const repos = reposOn(s);
         if (!repos.length) {
@@ -2685,21 +2683,182 @@
         repoActs.appendChild(selVerb('box', 'New repository', 'ex-btn', () => newRepository(s)));
         body.appendChild(repoActs);
 
-        // Actions: identity only. The operations that poll for an outcome live on the Backups bridge.
+        // Server operations — the three that once lived on the Backups bridge, native now (#323). A managed
+        // server's next move is to Provision it (so it leads); a registered one is only trusted, but every op
+        // stays available on both. Provision awaits an outcome the backend pushes on the backups stream — the
+        // shell never polls (see provisionBackupServer / watchBackups).
+        body.appendChild(section('Server operations'));
+        const ops = el('div', 'ex-lactions is-static');
+        ops.appendChild(selVerb('refresh', 'Provision',
+            s.managed ? 'ex-btn is-accent' : 'ex-btn', () => provisionBackupServer(s)));
+        ops.appendChild(selVerb('shield', 'Authorize a host', 'ex-btn', () => authorizeHostDialog(s)));
+        ops.appendChild(selVerb('download', 'Setup script', 'ex-btn', () => downloadBackupSetup(s.name)));
+        body.appendChild(ops);
+
+        // Actions: identity only.
         body.appendChild(section('Designation'));
         const acts = el('div', 'ex-lactions is-static');
         acts.appendChild(selVerb('gear', 'Edit coordinates', 'ex-btn', () => editBackupServer(s)));
         acts.appendChild(selVerb('trash', 'Remove designation', 'ex-btn is-danger', () => removeBackupServer(s)));
         body.appendChild(acts);
+    }
 
-        const bridge = el('div', 'ex-note');
-        bridge.appendChild(document.createTextNode('Provision the server and authorize clients on the '));
-        const link = el('a', 'ex-link');
-        link.href = '/backups.html';
-        link.textContent = 'Backups page';
-        bridge.appendChild(link);
-        bridge.appendChild(document.createTextNode('.'));
-        body.appendChild(bridge);
+    // --- Backup server operations (ported from the retired Backups page, #323) --------------------------
+    // Provision, authorize a host, and download the setup script — the ops that stayed on the bridge because
+    // provisioning awaits an outcome, and the shell never polls. Provisioning runs detached on the host; a
+    // backend sweep pushes `provision-settled` on the backups stream, which watchBackups routes back to the
+    // open dialog. Everything else here is a plain request/response.
+
+    // The setup script is a one-shot host bootstrap that holds no secret — a direct browser download.
+    function downloadBackupSetup(name) {
+        const a = document.createElement('a');
+        a.href = '/backup-servers/' + encodeURIComponent(name) + '/setup.sh';
+        a.download = name + '-setup.sh';
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Downloading the setup script for ' + name + '.');
+    }
+
+    // The running/succeeded/failed word, coloured like the rest of the shell's inline status notes.
+    function provisionStatus(state) {
+        const cls = state === 'SUCCESS' ? 'ex-set-note is-ok'
+            : state === 'FAILED' ? 'ex-set-note is-err' : 'ex-set-note';
+        const row = el('div', cls);
+        row.textContent = state === 'SUCCESS' ? 'Succeeded' : state === 'FAILED' ? 'Failed' : 'Running…';
+        return row;
+    }
+
+    function provisionBackupServer(s) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog is-wide');
+        const h = el('div', 'ex-dialog-title'); h.textContent = 'Provision · ' + s.name;
+        const bodyEl = el('div', 'ex-dialog-body'); bodyEl.textContent = 'Starting…';
+        const actions = el('div', 'ex-dialog-actions');
+        const done = el('button', 'ex-btn'); done.textContent = 'Close';
+        actions.appendChild(done);
+        dialog.append(h, bodyEl, actions);
+        scrim.appendChild(dialog); document.body.appendChild(scrim);
+        const close = () => {
+            scrim.remove(); document.removeEventListener('keydown', onKey);
+            if (S.provisionWatch && S.provisionWatch.bodyEl === bodyEl) S.provisionWatch = null;
+        };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        done.onclick = close;
+        scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
+
+        fetch('/backup-servers/' + encodeURIComponent(s.name) + '/provision', { method: 'POST' })
+            .then(async (r) => {
+                const result = await r.json().catch(() => ({}));
+                if (!r.ok) { bodyEl.textContent = result.message || 'Could not start provisioning.'; return; }
+                if (result.scriptOnly) { renderProvisionScriptOnly(bodyEl, s, result); return; }
+                if (result.started) {
+                    // Detached on the host; the backend watches it and pushes provision-settled. No polling.
+                    bodyEl.textContent = '';
+                    bodyEl.appendChild(provisionStatus('RUNNING'));
+                    bodyEl.appendChild(note('Provisioning started — pulling the borg-server image and starting it. '
+                        + 'This updates itself when it finishes; you can close it and carry on.', false));
+                    S.provisionWatch = { serverName: s.name, bodyEl: bodyEl };
+                    return;
+                }
+                bodyEl.textContent = '';
+                bodyEl.appendChild(provisionStatus(result.provisioned ? 'SUCCESS' : 'FAILED'));
+                if (result.message) bodyEl.appendChild(note(result.message, !result.provisioned));
+            })
+            .catch(() => { bodyEl.textContent = 'Could not reach Vaier to start provisioning.'; });
+    }
+
+    // Vaier couldn't drive Docker over SSH: either it staged the script on the host (show the one command to
+    // run) or it couldn't (offer the download). Directive guidance, not an error — the same fork the bridge drew.
+    function renderProvisionScriptOnly(bodyEl, s, result) {
+        bodyEl.textContent = '';
+        if (result.stagedScriptPath) {
+            const cmd = 'sudo bash ' + result.stagedScriptPath;
+            bodyEl.appendChild(note('Vaier can’t drive Docker over SSH on ' + s.machineName + ', so it placed the '
+                + 'setup script on the host. Run this on ' + s.machineName + ' to finish:', false));
+            const code = el('div', 'ex-config'); code.textContent = cmd;
+            bodyEl.appendChild(code);
+            const copy = el('button', 'ex-btn'); copy.textContent = 'Copy command';
+            copy.onclick = () => {
+                if (navigator.clipboard) navigator.clipboard.writeText(cmd).then(() => toast('Copied.'));
+                else toast(cmd);
+            };
+            bodyEl.appendChild(copy);
+            return;
+        }
+        bodyEl.appendChild(note('Vaier can’t drive Docker over SSH on ' + s.machineName + ' and couldn’t stage the '
+            + 'script there. Download setup.sh, copy it to the host, and run it with sudo.'
+            + (result.message ? ' ' + result.message : ''), false));
+        const dl = el('button', 'ex-btn is-accent'); dl.textContent = 'Download setup.sh';
+        dl.onclick = () => downloadBackupSetup(s.name);
+        bodyEl.appendChild(dl);
+    }
+
+    // Trust a machine's SSH host key on the backup server, so its backups can reach it. A no-op (already
+    // trusted) reads as reassurance, not an error, and a second line reports whether the server's own key
+    // could be pinned back on the client (no trust-on-first-use), the same two verdicts the bridge showed.
+    function authorizeHostDialog(s) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog');
+        const h = el('div', 'ex-dialog-title'); h.textContent = 'Authorize a host · ' + s.name;
+        const bodyEl = el('div', 'ex-dialog-body');
+        bodyEl.appendChild(note('Trust a machine’s SSH key on this backup server so its backups can reach it.', false));
+        const names = sortedMachines().map((m) => m.name);
+        const sel = el('select', 'ex-input');
+        const ph = el('option'); ph.value = ''; ph.disabled = true; ph.selected = true;
+        ph.textContent = names.length ? 'Select a machine' : 'No machines yet';
+        sel.appendChild(ph);
+        names.forEach((n) => { const o = el('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+        const result = el('div', 'ex-authresult');
+        bodyEl.append(sel, result);
+        const actions = el('div', 'ex-dialog-actions');
+        const cancel = el('button', 'ex-btn'); cancel.textContent = 'Close';
+        const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Authorize';
+        actions.append(cancel, ok);
+        dialog.append(h, bodyEl, actions);
+        scrim.appendChild(dialog); document.body.appendChild(scrim);
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        cancel.onclick = close;
+        scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
+
+        ok.onclick = async () => {
+            const machineName = sel.value;
+            if (!machineName) { toast('Choose a machine to authorize.'); return; }
+            ok.disabled = true;
+            result.textContent = 'Trusting the host key…';
+            try {
+                const r = await fetch('/backup-servers/' + encodeURIComponent(s.name)
+                    + '/authorize/' + encodeURIComponent(machineName), { method: 'POST' });
+                const v = await r.json().catch(() => ({}));
+                if (!r.ok) { result.textContent = ''; toast(v.message || ('Could not authorize ' + machineName + '.')); return; }
+                renderAuthorizeResult(result, v, machineName);
+            } catch (e) {
+                result.textContent = ''; toast('Could not reach Vaier to authorize the host.');
+            } finally { ok.disabled = false; }
+        };
+    }
+
+    function renderAuthorizeResult(container, result, machineName) {
+        container.textContent = '';
+        if (!result.authorized) {
+            container.appendChild(checkNote('is-err', '✕ ' + (result.message || ('Could not authorize ' + machineName + '.'))));
+            return;
+        }
+        container.appendChild(checkNote('is-ok', '✓ ' + (result.alreadyTrusted
+            ? machineName + ' was already trusted — no change.'
+            : machineName + ' is now trusted on this server.')));
+        container.appendChild(result.hostKeyPinned
+            ? checkNote('is-ok', '✓ Server host key pinned on ' + machineName + '.')
+            : checkNote('is-warn', '! Host key not pinned — re-run the setup script on the server, then authorize again.'));
+    }
+
+    // A coloured one-line verdict (ex-set-note's palette), used by the authorize result.
+    function checkNote(kind, text) {
+        const row = el('div', 'ex-set-note ' + kind);
+        row.style.marginTop = '8px';
+        row.textContent = text;
+        return row;
     }
 
     // Make a machine the fleet's one backup server. The machine is already the context, so the form asks only
@@ -2873,8 +3032,8 @@
     //
     // A repository is a child of the server it lives on, so it hangs under the `backup` entry as its own
     // coordinate. Its Inspector shows where it sits and what is in it, and lets you edit or forget it — all
-    // single calls, none of which poll, so the whole of repository management lives here rather than on the
-    // Backups page. The archives are read when the repository is looked at (borg list runs on a job's host),
+    // single calls, none of which poll, so the whole of repository management lives here.
+    // The archives are read when the repository is looked at (borg list runs on a job's host),
     // never polled — a nightly archive lands on a reload, not under the cursor.
 
     function renderRepo(pane) {
@@ -3113,8 +3272,7 @@
     }
 
     // A crypto-strong, alphanumeric passphrase — no quotes or shell metacharacters, so it is safe to hand borg
-    // over SSH. Rejection sampling keeps the distribution uniform (no modulo bias). The same generator the
-    // Backups page used before repository creation moved here.
+    // over SSH. Rejection sampling keeps the distribution uniform (no modulo bias).
     function generatePassphrase(length) {
         const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
         const threshold = 256 - (256 % alphabet.length);
@@ -3132,8 +3290,8 @@
     // A job is rendered inline in the `backup` entry of the machine it protects — its target, its schedule,
     // its last run, and the buttons to run it now, edit it, enable it or forget it. Running is the one long
     // operation, and it does not poll: POST starts it, the run shows RUNNING, and the backend pushes
-    // `run-settled` on the backups stream when borg finishes (watchBackups). The Backups page keeps the guided
-    // provisioning that first gets a host ready — installing borg, the root grant — a bridge for now.
+    // `run-settled` on the backups stream when borg finishes (watchBackups). Getting a host ready the first
+    // time — installing borg, the root grant — happens on the backup server's own entry (see Server operations).
 
     const RUN_DOT = { SUCCESS: 'is-up', WARNING: 'is-degraded', FAILED: 'is-down',
                       RUNNING: 'is-idle', UNKNOWN: 'is-idle' };
@@ -3326,8 +3484,33 @@
             S.preparing.delete(d.machineName);
             toast(d.state === 'SUCCESS'
                 ? d.machineName + ' is ready — its backup will run tonight, or now if you like.'
-                : 'Vaier could not finish getting ' + d.machineName + ' ready. Check its readiness on the '
-                  + 'Backups page.');
+                : 'Vaier could not finish getting ' + d.machineName + ' ready — try backing it up again.');
+            loadBackup();
+            render();
+        });
+        // A detached server provisioning has settled on the host. If a provision dialog is still open on that
+        // server, re-read its status once for the log tail and show the outcome; either way, say how it went.
+        events.addEventListener('provision-settled', async (e) => {
+            const d = JSON.parse(e.data);   // { serverName, state }
+            const w = S.provisionWatch;
+            if (!w || w.serverName !== d.serverName) return;
+            S.provisionWatch = null;
+            let status = null;
+            try {
+                const r = await fetch('/backup-servers/' + encodeURIComponent(d.serverName)
+                    + '/provision/status', { cache: 'no-store' });
+                if (r.ok) status = await r.json();
+            } catch (_) { /* fall back to the event's own state */ }
+            const state = (status && status.state) || d.state;
+            w.bodyEl.textContent = '';
+            w.bodyEl.appendChild(provisionStatus(state));
+            if (status && status.logTail) {
+                const pre = el('div', 'ex-config'); pre.textContent = status.logTail;
+                w.bodyEl.appendChild(pre);
+            }
+            toast(state === 'SUCCESS'
+                ? 'Server “' + d.serverName + '” provisioned.'
+                : 'Provisioning “' + d.serverName + '” failed — see the log.');
             loadBackup();
             render();
         });
@@ -3355,53 +3538,19 @@
         // The machine's primary shell window — one per machine, so re-opening focuses the one already there.
         const w = window.open('', 'vaier-shell-' + machine, features);
         if (!w) { toast('Your browser blocked the shell window. Allow pop-ups for Vaier and try again.'); return; }
-        // A fresh window lands on about:blank — point it at the terminal. One that is already there is only
-        // focused, so its live session is never navigated away from.
+        // A fresh window lands on about:blank — point it at the terminal, carrying the machine's *stable* primary
+        // pane id so it reattaches to the same session every time (never a random orphan, and never a surprise
+        // fresh shell). One that is already there is only focused, so its live session is never navigated away.
         let href = '';
         try { href = w.location.href; } catch (e) { href = ''; }
         if (!href || href === 'about:blank') {
-            w.location.href = 'terminal.html?machine=' + encodeURIComponent(machine);
+            const pane = (window.VaierPanes && VaierPanes.primary) ? VaierPanes.primary(machine) : '';
+            w.location.href = 'terminal.html?machine=' + encodeURIComponent(machine)
+                + (pane ? '&pane=' + encodeURIComponent(pane) : '');
         }
         w.focus();
     }
 
-    function renderShell(pane) {
-        const machine = S.path[1];
-        const head = paneHead(machine + ' / shell', true, 'A terminal on this machine');
-        const actions = el('div', 'ex-pane-actions');
-        const win = el('button', 'ex-btn is-accent');
-        win.textContent = 'Open shell window';
-        win.title = 'A full-window terminal on ' + machine + ', in its own window';
-        win.onclick = () => openShellWindow(machine);
-        const dup = el('button', 'ex-btn');
-        dup.textContent = 'Duplicate';
-        dup.title = 'Open another, separate shell on ' + machine + ' in its own window';
-        dup.onclick = () => openShellWindow(machine, true);
-        actions.append(win, dup);
-        head.appendChild(actions);
-        pane.appendChild(head);
-
-        const body = document.createElement('div');
-        body.className = 'ex-pane-body';
-        body.appendChild(note('This machine’s shell opens in its own window — a full-window, resizable terminal '
-            + 'you can place anywhere, and have several of at once. It should have opened just now; if your '
-            + 'browser blocked it, or you closed it, use Open shell window. Need more than one shell on this '
-            + 'machine? Duplicate opens another, separate one beside it. Each window reattaches to its own '
-            + 'session, so reopening never loses your place.', false));
-        pane.appendChild(body);
-    }
-
-    function renderBridge(pane) {
-        const bridge = bridgeOf(S.path);
-        pane.className = 'ex-pane is-bridged';
-        // TRANSITIONAL (#323): the page as it is today, framed whole, until this section becomes real entries
-        // in the tree. Delete with the slice that ports it.
-        const frame = document.createElement('iframe');
-        frame.className = 'ex-bridge';
-        frame.src = bridge.page;
-        frame.title = bridge.label;
-        pane.appendChild(frame);
-    }
 
     // A top-level global that is still bridged (Users, Concepts) — its page, framed whole, until it is ported.
     function renderGlobalBridge(pane) {
@@ -3418,8 +3567,8 @@
     //
     // The one native global. It reads its config on view (like disk/archives — never polled) and saves each
     // section on its own against the `/settings/*` endpoints Vaier already had. The nightly-backup schedule
-    // lives here now, not on the Backups page: it is the fleet-wide "when", the one backup knob that is the
-    // operator's to set — everything else about a backup is Vaier's.
+    // lives here: it is the fleet-wide "when", the one backup knob that is the operator's to set — everything
+    // else about a backup is Vaier's.
 
     async function loadSettings() {
         if (S.settings.state === 'loading') return;
@@ -3611,6 +3760,15 @@
 
     const archiveLabel = (a) => VaierListing.formatTime(a.createdAt) + ' · ' + timeAgo(a.createdAt);
 
+    // A Unix epoch-seconds stamp — how WireGuard reports a peer's latest handshake and how Vaier records a LAN
+    // server's last-seen — rendered as a human "… ago". Zero or missing means never (an empty string, so the kv
+    // shows a dash). timeAgo wants an ISO string, so seconds are lifted to milliseconds first.
+    function agoFromEpochSeconds(epochSeconds) {
+        const secs = Number(epochSeconds);
+        if (!secs || isNaN(secs)) return '';
+        return timeAgo(new Date(secs * 1000).toISOString());
+    }
+
     // The time rail: one stop per archive, laid out newest-nearest-Now so the whole shell reads left-to-past.
     // It is the only surface that sets the past into motion — every stop's click routes through toArchive,
     // and Now through toPresent, so the light and the reads move together and nowhere else. A machine with no
@@ -3704,19 +3862,22 @@
 
         const result = { entries: entry.entries };
 
-        // A toolbar rises when anything is ticked (Gmail's move): the bulk verbs act on the whole selection
-        // at once. Above the listing so it does not shift the rows.
-        const selBar = renderSelectionBar(machine, result.entries);
+        // A toolbar rises when anything is ticked anywhere in the fleet (Gmail's move): the bulk verbs act on the
+        // whole selection at once. Above the listing so it does not shift the rows.
+        const selBar = renderSelectionBar();
         if (selBar) body.insertBefore(selBar, rows);
 
         const lhead = document.createElement('div');
         lhead.className = 'ex-lhead';
-        // Select-all: on when every row is ticked, dashed when only some are.
-        const allOn = result.entries.length > 0 && result.entries.every((e) => S.sel.has(e.path));
-        const someOn = result.entries.some((e) => S.sel.has(e.path));
+        // Select-all is about *this* listing: on when every row here is ticked, dashed when only some are. It
+        // adds or removes only these rows, leaving the rest of the fleet-wide selection untouched.
+        const allOn = result.entries.length > 0 && result.entries.every((e) => isSelected(machine, e.path, S.at));
+        const someOn = result.entries.some((e) => isSelected(machine, e.path, S.at));
         lhead.appendChild(checkbox(allOn, someOn && !allOn, () => {
-            if (allOn) result.entries.forEach((e) => S.sel.delete(e.path));
-            else result.entries.forEach((e) => S.sel.add(e.path));
+            const shouldSelect = !allOn;
+            result.entries.forEach((e) => {
+                if (isSelected(machine, e.path, S.at) !== shouldSelect) toggleSel(machine, e);
+            });
             render();
         }, 'Select all'));
         ['Name', 'Size', 'Modified'].forEach((h) => {
@@ -3729,12 +3890,12 @@
         if (!result.entries.length) return rows.appendChild(note('This folder is empty.', false));
 
         result.entries.forEach((entry) => {
-            const ticked = S.sel.has(entry.path);
+            const ticked = isSelected(machine, entry.path, S.at);
             const row = document.createElement('div');
             row.className = 'ex-lrow' + (ticked ? ' is-ticked' : '');
 
             const check = checkbox(ticked, false, () => {
-                if (S.sel.has(entry.path)) S.sel.delete(entry.path); else S.sel.add(entry.path);
+                toggleSel(machine, entry);
                 render();
             }, (ticked ? 'Deselect ' : 'Select ') + entry.name);
 
@@ -3816,6 +3977,31 @@
     const onClipboard = (machine, path) =>
         S.clipboard.some((c) => c.machine === machine && c.path === path && (c.at || '') === (S.at || ''));
 
+    // --- the selection: the same coordinate identity the Clipboard uses, but fleet-wide and persistent -------
+    // A ticked item is a whole coordinate (machine, path, archive), keyed exactly like a Clipboard item, so the
+    // selection can hold files from many folders and machines at once and survive every navigation. `toggleSel`
+    // captures the row's own display facts at tick time, so the bar can name and act on items whose listing is
+    // no longer on screen.
+    const isSelected = (machine, path, at) =>
+        S.sel.some((s) => clipId(s.machine, s.path, s.at) === clipId(machine, path, at));
+    function toggleSel(machine, entry) {
+        const id = clipId(machine, entry.path, S.at);
+        const had = S.sel.some((s) => clipId(s.machine, s.path, s.at) === id);
+        S.sel = had
+            ? S.sel.filter((s) => clipId(s.machine, s.path, s.at) !== id)
+            : S.sel.concat([{ machine: machine, path: entry.path, at: S.at, name: entry.name,
+                              directory: entry.directory, size: entry.size, backedUp: !!entry.backedUp }]);
+    }
+    // A machine is back-up-eligible for the selection bar unless it is the backup server itself (the store, not
+    // a thing that is stored). Present-only items only — you protect the live tree, not an archived shape of it.
+    const backupEligible = (machine) => !S.backupServer || machine !== S.backupServer.machineName;
+    // Group selected items by their machine, preserving first-seen order — how the per-machine verbs fan out.
+    function groupByMachine(items) {
+        const groups = new Map();
+        items.forEach((s) => { if (!groups.has(s.machine)) groups.set(s.machine, []); groups.get(s.machine).push(s); });
+        return groups;
+    }
+
     // Copy toggles: a second click on an entry already held takes it back off, so the same button both puts a
     // thing on the Clipboard and reconsiders it, and its lit state always tells the truth.
     function clipCopy(machine, entry) {
@@ -3834,10 +4020,13 @@
 
     // A download is a paste whose destination is the browser: Vaier streams the file's bytes straight through.
     // The coordinate travels as the same (path, at) the listing carries, so a file from an archive downloads
-    // its past self. A hidden anchor click is how a browser is handed a stream to save.
-    function download(machine, entry) {
+    // its past self. A hidden anchor click is how a browser is handed a stream to save. `at` defaults to the
+    // archive currently being viewed (a per-row download), but a selected item passes its own — the archive it
+    // was ticked in — so a one-item download from the selection reads the right past even after navigating away.
+    function download(machine, entry, at) {
+        at = arguments.length >= 3 ? at : S.at;
         const params = new URLSearchParams({ path: entry.path });
-        if (S.at) params.set('at', S.at);
+        if (at) params.set('at', at);
         const a = document.createElement('a');
         a.href = '/machines/' + encodeURIComponent(machine) + '/files/download?' + params.toString();
         // A folder arrives as a zip; the server sets the real filename, this is just the browser's hint.
@@ -3890,36 +4079,43 @@
         return wrap;
     }
 
-    // The selection toolbar — one set of verbs over everything ticked. Copy adds them all to the Clipboard;
-    // Download sends each (a folder as its zip); Delete takes them all through one typed gate. Present-only
-    // for Delete, same as the per-row verb.
-    function renderSelectionBar(machine, entries) {
-        const chosen = entries.filter((e) => S.sel.has(e.path));
-        if (!chosen.length) return null;
+    // The selection toolbar — one set of verbs over everything ticked across the whole fleet. Copy adds it all to
+    // the Clipboard; Download hands the browser one zip of the lot (a single item downloads as itself); Back up,
+    // Stop backing up and Delete each fan out per machine over the live items. The bar names how many machines
+    // are in play when it is more than one, so "6 selected" is never mistaken for six files in one place.
+    function renderSelectionBar() {
+        const sel = S.sel;
+        if (!sel.length) return null;
+
+        // Present-only items are the ones a write can touch — an archived (past) coordinate is read-only.
+        const live = sel.filter((s) => !s.at);
+        const machines = new Set(sel.map((s) => s.machine));
+        const backupItems = live.filter((s) => backupEligible(s.machine));
+        const unbackupItems = backupItems.filter((s) => s.backedUp);
 
         const bar = el('div', 'ex-selbar');
         const count = el('div', 'ex-selbar-txt');
-        count.textContent = chosen.length + (chosen.length === 1 ? ' selected' : ' selected');
+        count.textContent = sel.length + ' selected'
+            + (machines.size > 1 ? ' · ' + machines.size + ' machines' : '');
         bar.appendChild(count);
 
         const actions = el('div', 'ex-selbar-actions');
-        actions.appendChild(selVerb('copy', 'Copy', 'ex-btn', () => selCopy(machine, chosen)));
-        actions.appendChild(selVerb('download', 'Download', 'ex-btn', () => selDownload(machine, chosen)));
-        // Back up is the whole idea: pick what matters and protect it. Present-only (you protect the live tree,
-        // not an archived shape of it) and never on the backup server itself (it stores the archives, it is not
-        // a thing that is backed up). Vaier makes the repository, the job and the schedule behind the one click.
-        if (!S.at && (!S.backupServer || machine !== S.backupServer.machineName)) {
-            actions.appendChild(selVerb('shield', 'Back up', 'ex-btn is-accent', () => selBackup(machine, chosen)));
-            if (chosen.some((e) => e.backedUp)) {
-                actions.appendChild(selVerb('cross', 'Stop backing up', 'ex-btn', () => selUnbackup(machine, chosen)));
+        actions.appendChild(selVerb('copy', 'Copy', 'ex-btn', () => selCopy()));
+        actions.appendChild(selVerb('download', 'Download', 'ex-btn', () => selDownload()));
+        // Back up is the whole idea: pick what matters and protect it. Live items only, and never the backup
+        // server itself. Vaier makes the repository, the job and the schedule behind the one click, per machine.
+        if (backupItems.length) {
+            actions.appendChild(selVerb('shield', 'Back up', 'ex-btn is-accent', () => selBackup()));
+            if (unbackupItems.length) {
+                actions.appendChild(selVerb('cross', 'Stop backing up', 'ex-btn', () => selUnbackup()));
             }
         }
-        if (!S.at) actions.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => selDelete(machine, chosen)));
+        if (live.length) actions.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => selDelete()));
         const clear = el('button', 'ex-iconbtn');
         clear.innerHTML = svg('cross', 'ex-ico');
         clear.title = 'Clear selection';
         clear.setAttribute('aria-label', 'Clear selection');
-        clear.onclick = () => { S.sel = new Set(); render(); };
+        clear.onclick = () => { S.sel = []; render(); };
         actions.appendChild(clear);
         bar.appendChild(actions);
         return bar;
@@ -3978,55 +4174,95 @@
         }
     }
 
-    function selCopy(machine, chosen) {
-        chosen.forEach((entry) => {
-            const id = clipId(machine, entry.path, S.at);
+    function selCopy() {
+        const sel = S.sel;
+        sel.forEach((s) => {
+            const id = clipId(s.machine, s.path, s.at);
             if (!S.clipboard.some((c) => clipId(c.machine, c.path, c.at) === id)) {
-                S.clipboard.push({ machine: machine, path: entry.path, at: S.at,
-                                   name: entry.name, directory: entry.directory, size: entry.size });
+                S.clipboard.push({ machine: s.machine, path: s.path, at: s.at,
+                                   name: s.name, directory: s.directory, size: s.size });
             }
         });
-        toast(chosen.length + (chosen.length === 1 ? ' item' : ' items') + ' copied to the Clipboard.');
-        S.sel = new Set();
+        toast(sel.length + (sel.length === 1 ? ' item' : ' items') + ' copied to the Clipboard.');
+        S.sel = [];
         render();
     }
 
-    function selDownload(machine, chosen) {
-        chosen.forEach((entry) => download(machine, entry));   // each in the same click gesture
-        S.sel = new Set();
-        render();
-    }
-
-    // Back the selection up — the one gesture that is the whole feature. The browser sends only the paths; the
-    // backend makes the repository if there is none, makes the job if there is none, and folds the paths in
-    // (a child of something already protected just disappears into it). Then the jobs reload and the shields
-    // appear where the selection was. Vaier holds the complexity; the operator held down a checkbox.
-    async function selBackup(machine, chosen) {
-        const paths = chosen.map((e) => e.path);
-        try {
-            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/backup/paths', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ paths: paths }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                toast(err.message || 'Vaier could not back that up.');
-                return;
-            }
-            const body = await res.json().catch(() => ({}));
-            await loadBackup();   // the job changed — reload so the backup entry is current
-            toast(paths.length + (paths.length === 1 ? ' item is' : ' items are') + ' backed up on ' + machine
-                + ' now, and nightly.');
-            // First back-up on a machine: the backend rings the host to be readied (borg installed, key trusted)
-            // and tells us here. The install runs detached; we watch prepare-client-settled to know it landed.
-            if (body && body.provisioning) startReadying(machine, body.provisioning);
-            S.sel = new Set();
-            // The shields are stamped on the listing by the backend, so re-read this directory to show them.
-            refreshDir(machine, remotePath(S.path));
-        } catch (e) {
-            toast('Vaier could not back that up.');
+    // One item downloads as itself (a file streamed, a folder as its own zip); two or more are handed to the
+    // browser as a single zip built server-side across every machine and archive in the selection (#323). The
+    // multi-item path submits a hidden form so the browser streams the zip straight to disk — no size cap, and
+    // nothing buffered in the tab.
+    function selDownload() {
+        const sel = S.sel;
+        if (!sel.length) return;
+        if (sel.length === 1) {
+            const s = sel[0];
+            download(s.machine, { path: s.path, name: s.name, directory: s.directory }, s.at);
+        } else {
+            submitZipDownload(sel);
+            toast('Preparing a zip of ' + sel.length + ' items — the download will begin shortly.');
         }
+        S.sel = [];
+        render();
+    }
+
+    // Hand the whole selection to the multi-coordinate zip endpoint. A form POST (not an anchor) because the
+    // selection is too big and structured for a URL, and a navigated POST still streams the response to disk.
+    function submitZipDownload(sel) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/machines/files/download-zip';
+        form.style.display = 'none';
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'selection';
+        input.value = JSON.stringify(sel.map((s) => ({ machine: s.machine, path: s.path, at: s.at || null })));
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+    }
+
+    // Re-read the directory on screen, if one is — so the shields (or a deletion) show at once. Items on other
+    // machines in the selection refresh when their listing is next visited; only the visible one needs a nudge.
+    function refreshCurrentDir() {
+        const k = kindOf(S.path);
+        if (k === 'files' || k === 'dir') refreshDir(S.path[1], remotePath(S.path));
+    }
+
+    // Back the selection up — the one gesture that is the whole feature. Live items only, fanned out per machine:
+    // for each, the browser sends only the paths, and the backend makes the repository if there is none, makes
+    // the job if there is none, and folds the paths in (a child of something already protected just disappears
+    // into it). Then the jobs reload and the shields appear where the selection was. Vaier holds the complexity;
+    // the operator held down a checkbox — on as many machines at once as they liked.
+    async function selBackup() {
+        const groups = groupByMachine(S.sel.filter((s) => !s.at && backupEligible(s.machine)));
+        if (!groups.size) return;
+        let done = 0;
+        const failed = [];
+        for (const [machine, items] of groups) {
+            const paths = items.map((i) => i.path);
+            try {
+                const res = await fetch('/machines/' + encodeURIComponent(machine) + '/backup/paths', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: paths }),
+                });
+                if (!res.ok) { failed.push(machine); continue; }
+                const body = await res.json().catch(() => ({}));
+                done += paths.length;
+                // First back-up on a machine: the backend rings the host to be readied (borg installed, key
+                // trusted) and tells us here. The install runs detached; we watch prepare-client-settled.
+                if (body && body.provisioning) startReadying(machine, body.provisioning);
+            } catch (e) { failed.push(machine); }
+        }
+        await loadBackup();   // the jobs changed — reload so the backup entries are current
+        if (done) toast(done + (done === 1 ? ' item is' : ' items are') + ' backed up now, and nightly'
+            + (groups.size > 1 ? ' across ' + groups.size + ' machines.' : '.'));
+        if (failed.length) toast('Vaier could not back up on ' + failed.join(', ') + '.');
+        S.sel = [];
+        refreshCurrentDir();   // the shields are stamped by the backend — re-read to show them
+        render();
     }
 
     // What Vaier does behind the first back-up: ready the host (install borg, trust its key). It's silent by
@@ -4047,51 +4283,68 @@
         }
     }
 
-    // Stop backing the selection up. Removing a folder clears anything under it too; if nothing is left backed
-    // up on the machine, the backend forgets the job entirely (the archives already made are untouched).
-    async function selUnbackup(machine, chosen) {
-        const paths = chosen.map((e) => e.path);
-        try {
-            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/backup/paths', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ paths: paths }),
-            });
-            if (!res.ok && res.status !== 204) {
-                const err = await res.json().catch(() => ({}));
-                toast(err.message || 'Vaier could not stop backing that up.');
-                return;
-            }
-            await loadBackup();
-            toast('Stopped backing up ' + paths.length + (paths.length === 1 ? ' item.' : ' items.'));
-            S.sel = new Set();
-            refreshDir(machine, remotePath(S.path));   // re-read so the shields clear
-        } catch (e) {
-            toast('Vaier could not stop backing that up.');
+    // Stop backing the selection up, per machine. Removing a folder clears anything under it too; if nothing is
+    // left backed up on a machine, the backend forgets that machine's job entirely (archives already made are
+    // untouched). Only ever the live, already-backed-up items.
+    async function selUnbackup() {
+        const groups = groupByMachine(S.sel.filter((s) => !s.at && s.backedUp && backupEligible(s.machine)));
+        if (!groups.size) return;
+        let done = 0;
+        const failed = [];
+        for (const [machine, items] of groups) {
+            const paths = items.map((i) => i.path);
+            try {
+                const res = await fetch('/machines/' + encodeURIComponent(machine) + '/backup/paths', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: paths }),
+                });
+                if (!res.ok && res.status !== 204) { failed.push(machine); continue; }
+                done += paths.length;
+            } catch (e) { failed.push(machine); }
         }
+        await loadBackup();
+        if (done) toast('Stopped backing up ' + done + (done === 1 ? ' item.' : ' items.'));
+        if (failed.length) toast('Vaier could not stop backing up on ' + failed.join(', ') + '.');
+        S.sel = [];
+        refreshCurrentDir();   // re-read so the shields clear
+        render();
     }
 
-    // One gate for the whole batch: name the count, and delete each in turn once the machine name is typed.
-    // A failure on one is reported and the rest still go; the listing is re-read once at the end.
-    async function selDelete(machine, chosen) {
-        const names = chosen.slice(0, 6).map((c) => c.path).join('\n')
-            + (chosen.length > 6 ? '\n…and ' + (chosen.length - 6) + ' more' : '');
-        const ok = await confirmTyped('Delete ' + chosen.length + ' items?',
-            names + '\n\nEverything selected is deleted, folders and all they contain. This cannot be undone. '
-            + 'Type the machine name to confirm.', machine, 'Delete');
+    // One gate for the whole batch. The past cannot be deleted, so only live items go. A single machine keeps the
+    // strong machine-name gate; several require the word "delete" and the body names every machine that will be
+    // touched. A failure on one item is reported and the rest still go; the visible listing is re-read at the end.
+    async function selDelete() {
+        const items = S.sel.filter((s) => !s.at);
+        if (!items.length) return;
+        const groups = groupByMachine(items);
+        const machineNames = [...groups.keys()];
+        const single = machineNames.length === 1;
+        const preview = items.slice(0, 6).map((s) => (single ? '' : s.machine + ':') + s.path).join('\n')
+            + (items.length > 6 ? '\n…and ' + (items.length - 6) + ' more' : '');
+        const ok = await confirmTyped(
+            'Delete ' + items.length + (items.length === 1 ? ' item?' : ' items?'),
+            preview + '\n\nEverything selected is deleted, folders and all they contain'
+            + (single ? '' : ', across ' + machineNames.length + ' machines (' + machineNames.join(', ') + ')')
+            + '. This cannot be undone. Type ' + (single ? 'the machine name' : '“delete”') + ' to confirm.',
+            single ? machineNames[0] : 'delete', 'Delete');
         if (!ok) return;
         let failed = 0;
-        for (const entry of chosen) {
-            try {
-                const res = await fetch('/machines/' + encodeURIComponent(machine)
-                    + '/files?path=' + encodeURIComponent(entry.path), { method: 'DELETE' });
-                if (!res.ok) failed++;
-            } catch (e) { failed++; }
+        for (const [machine, its] of groups) {
+            for (const s of its) {
+                try {
+                    const res = await fetch('/machines/' + encodeURIComponent(machine)
+                        + '/files?path=' + encodeURIComponent(s.path), { method: 'DELETE' });
+                    if (!res.ok) failed++;
+                } catch (e) { failed++; }
+            }
         }
-        toast(failed ? ('Deleted ' + (chosen.length - failed) + ' of ' + chosen.length + '; ' + failed + ' could not be removed.')
-                     : ('Deleted ' + chosen.length + (chosen.length === 1 ? ' item.' : ' items.')));
-        S.sel = new Set();
-        refreshDir(machine, remotePath(S.path));
+        const total = items.length;
+        toast(failed ? ('Deleted ' + (total - failed) + ' of ' + total + '; ' + failed + ' could not be removed.')
+                     : ('Deleted ' + total + (total === 1 ? ' item.' : ' items.')));
+        S.sel = [];
+        refreshCurrentDir();
+        render();
     }
 
     // "Paste here" belongs to a directory in the present, and only there — the invariant is that you can only
@@ -4479,18 +4732,16 @@
         const stillInPast = S.at && path[1] === S.path[1]
             && (kindOf(path) === 'files' || kindOf(path) === 'dir');
         if (!stillInPast) S.at = null;
-        // A tick belongs to the listing it was made in; navigating anywhere clears the multi-selection.
-        if (key(path) !== key(S.path)) S.sel = new Set();
+        // The selection deliberately survives navigation (#323): each ticked item carries its own coordinate
+        // (machine, path, archive), so you can gather files from different folders — and different machines —
+        // before downloading, copying or deleting them together. It is cleared only by acting on it or by the
+        // bar's own Clear, never by moving around.
         // "Checked just now" is only true just now. It is the receipt for an action, not a fact about the
         // fleet, so it does not follow the operator around — left on screen it would quietly become a lie,
         // which is the one thing this feature cannot afford. The verdicts it settled are on the rows already.
         if (key(path) !== key(S.path)) _updateCheck = null;
         S.path = path;
         setTree(false);   // navigating closes the phone drawer; a no-op on a wide screen
-        // Selecting a shell entry opens that machine's terminal in its own window (the default now — bigger and
-        // resizable, several at once). go() is only ever reached by an explicit navigation, so the window opens
-        // inside a user gesture; a repaint never calls it, so it can never spawn a shell on its own.
-        if (kindOf(path) === 'shell') openShellWindow(path[1]);
         render();
     }
 
@@ -4779,17 +5030,6 @@
         events.addEventListener('publish-rolled-back', refresh);
     }
 
-    // --- the dock ------------------------------------------------------------------------------------------
-
-    function watchDock() {
-        if (!window.TerminalDock) return;
-        const panel = $('terminalPanel');
-        TerminalDock.onChange = (open) => {
-            panel.style.display = open > 0 ? 'flex' : 'none';
-            if (open > 0) TerminalDock.refitActive();
-        };
-    }
-
     // --- the operator ---------------------------------------------------------------------------------------
 
     const ICON_LOGOUT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" '
@@ -4875,14 +5115,12 @@
     if (window.visualViewport) {
         const syncViewport = () => {
             document.body.style.height = window.visualViewport.height + 'px';
-            if (window.TerminalDock) TerminalDock.refitActive();
         };
         window.visualViewport.addEventListener('resize', syncViewport);
         window.visualViewport.addEventListener('scroll', syncViewport);
     }
 
     async function init() {
-        watchDock();
         // The services are awaited because the tree cannot be honest without them: a `services` entry exists
         // only on a machine that actually publishes something, and a tree that grew one a moment later would
         // have been lying for that moment.

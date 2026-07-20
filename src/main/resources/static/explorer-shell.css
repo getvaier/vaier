@@ -53,7 +53,7 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-1);
-    font-family: var(--mono);
+    font-family: inherit;   /* one font across the navigation — the tree's own, matching it and the listing */
     font-size: 14px;
     overflow-x: auto;
     scrollbar-width: none;
@@ -403,6 +403,11 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     border-radius: var(--radius-2);
 }
 .ex-pastebar-txt { font-size: 14px; color: var(--text-muted); }
+/* One font across the navigation: the same entry reads identically in the tree, the address bar and the
+   listing — all in the tree's own font (inherited, the app's system sans) — so a file never changes typeface
+   as you move between the three. `inherit` is deliberate: a <button> would otherwise fall back to the browser
+   default, breaking the match. Genuinely-code surfaces (compose files, keys, log tails, coordinate inputs and
+   the Inspector title where a path IS the content) keep their mono home. */
 .ex-lname {
     display: flex; align-items: center; gap: 8px;
     min-width: 0;
@@ -410,7 +415,7 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     background: none;
     border: 0;
     text-align: left;
-    font-family: var(--mono); font-size: 14px;
+    font-family: inherit; font-size: 14px;
     color: var(--text);
 }
 .ex-lname .ex-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -418,7 +423,7 @@ button.ex-lname { cursor: pointer; }
 button.ex-lname:hover .ex-nm { color: var(--accent); text-decoration: underline; }
 button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ex-lmeta {
-    font-family: var(--mono); font-size: 13px;
+    font-family: inherit; font-size: 13px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
 }
@@ -1054,6 +1059,7 @@ select.ex-input { cursor: pointer; }
 .ex-set-note { font-size: 13px; color: var(--text-dim); }
 .ex-set-note.is-ok { color: var(--green); }
 .ex-set-note.is-err { color: var(--red); }
+.ex-set-note.is-warn { color: var(--yellow); }
 
 /* The Advanced fold — the shell's one place to keep rare or mechanism-heavy controls out of sight. A quiet
    native <details>, restyled to the shell's hand: a muted summary that brightens on hover, its own hairline

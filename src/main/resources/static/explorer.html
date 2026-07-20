@@ -15,9 +15,9 @@
 </head>
 <body>
     <!-- The Explorer shell (#323 slice A): one tree spanning the fleet, and the renderer for whatever is
-         selected in it. Unlike every page before it this is not a section inside admin.html's iframe — the
-         iframe only ever existed to keep the terminal dock's SSH sessions alive across tab switches, and here
-         the dock is simply part of the page. -->
+         selected in it. Unlike every page before it this is not a section inside admin.html's iframe. A
+         machine's shell opens in its own pop-out window (terminal-window.js), reattaching to one persistent
+         tmux session per machine — the single shell model, no embedded dock. -->
     <div class="ex-app" data-past="0">
 
         <header class="topbar">
@@ -61,19 +61,8 @@
             <div class="ex-tree-scrim" id="exTreeScrim" aria-hidden="true"></div>
             <main class="ex-pane" id="exPane"></main>
         </div>
-
-        <!-- The terminal dock, mounted directly in the shell. Markup and ids are terminal-dock.js's, byte for
-             byte as admin.html carries them — the dock itself did not have to change to move in here. -->
-        <section class="term-panel" id="terminalPanel" style="display:none">
-            <div class="term-dock-panes" id="terminalPanes">
-                <div class="term-empty" id="terminalEmpty">
-                    No shells open. Open one from a machine's <strong>shell</strong> entry in the tree.
-                </div>
-            </div>
-            <!-- On-screen keys a phone's soft keyboard can't send (Esc, Tab, Ctrl, Alt, arrows). Populated and
-                 wired by terminal-dock.js; shown only on a phone while a shell is open. -->
-            <div class="term-keybar" id="terminalKeys" role="group" aria-label="Terminal keys"></div>
-        </section>
+        <!-- A machine's shell opens in its own pop-out window (terminal-window.js), the single shell model here:
+             one window per machine, reattaching to the same tmux session every time. There is no embedded dock. -->
     </div>
 
     <!-- App-level overlay layer — what the iframe never allowed. The Clipboard tray (held coordinates + live
@@ -97,7 +86,6 @@
     <script src="vendor/leaflet/leaflet.js"></script>
     <script src="vendor/leaflet-markercluster/leaflet.markercluster.js"></script>
     <script src="terminal-panes.js"></script>
-    <script src="terminal-dock.js"></script>
     <script src="explorer-listing.js"></script>
     <script src="explorer-shell.js"></script>
 </body>

@@ -103,9 +103,13 @@
         window.open('terminal.html?machine=' + encodeURIComponent(machine) + '&pane=' + encodeURIComponent(pane),
             'vaier-shell-' + encodeURIComponent(pane), 'popup,width=1024,height=680');
     });
+    btnDup.title = 'Open a second, separate shell on ' + machine;
     const btnPassword = actionButton('Send password', () => send({ type: 'send-password' }));
-    const btnEnd = actionButton('End shell', endShell);
+    const btnEnd = actionButton('Exit shell', endShell);
     btnEnd.classList.add('tw-danger');
+    // The one distinction people miss: closing the window keeps the shell alive to reattach; Exit stops it.
+    btnEnd.title = 'Stop this shell for good on ' + machine + '. Just closing the window keeps it running — and '
+        + 'it even survives a Vaier restart — so reopening reattaches right where you left off.';
     $('twActions').append(btnDup, btnPassword, btnEnd);
     refreshActions();
 
@@ -239,7 +243,7 @@
         }
     }
 
-    // Ending the shell is the operator saying "kill this session" — send the frame that tears down tmux, so it
+    // Exiting the shell is the operator saying "kill this session" — send the frame that tears down tmux, so it
     // is not left running on the host, then forget the id and close the window.
     function endShell() {
         state.ended = true;
@@ -249,7 +253,7 @@
         if (state.ws) try { state.ws.onclose = null; state.ws.close(); } catch (e) { /* ignore */ }
         window.close();
         // If the browser refuses to close a window it did not script-open, leave a clear end state behind.
-        setStatus('Shell ended — you can close this window.');
+        setStatus('Shell exited — you can close this window.');
         term.dispose();
     }
 

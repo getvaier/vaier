@@ -18,6 +18,10 @@
     // The dock shipped with this key; keep it so shells open before pop-out existed still reattach.
     const OWNED = 'vaier.terminal.panes';
     const LIVE = 'vaier.terminal.live';
+    // A machine's one *primary* shell — the session "Open shell window" always returns to. Stored so it is the
+    // same id every time, on this browser, across reloads and redeploys: a machine's shell should be one place
+    // you go back to, never a fresh shell one time and an old one the next.
+    const PRIMARY = 'vaier.terminal.primary';
     // Longer than the beat interval (5s) with room for a backgrounded tab that beats late, short enough that a
     // closed window's session is reattachable within a few seconds.
     const STALE_MS = 15000;
@@ -39,19 +43,30 @@
         return t != null && (Date.now() - t) < STALE_MS;
     }
 
-    // A pane id to open `machine` with: reuse the first owned id that no live document holds and that this
-    // document is not already showing (so its session is reattached, not doubled onto itself), else mint and
-    // register a fresh one. `onScreenIds` are the ids this document already has open for the machine.
-    function claim(machine, onScreenIds) {
+    // A pane id to open a *new* shell on `machine`: always a fresh session, registered so the browser keeps it.
+    // Opening a shell is deliberately deterministic — it never scavenges "some stale owned id" to reattach to.
+    // That scavenging was the source of the "sometimes fresh, sometimes not" surprise: whether you landed in a
+    // new shell or an old one depended only on whether an orphaned id happened to be lying around. Reattaching
+    // now happens solely through an *explicit* id — a machine's stable {@link primary}, or a pane id carried in
+    // a window's own URL across a reload or a pop-out — never by chance. (`onScreenIds` is accepted for callers'
+    // sake and no longer consulted.)
+    function claim(machine, onScreenIds) {   // eslint-disable-line no-unused-vars
         const store = read(OWNED);
-        const owned = store[machine] || [];
-        const onScreen = new Set(onScreenIds || []);
-        const reusable = owned.find((pid) => !onScreen.has(pid) && !isLive(pid));
-        if (reusable) return reusable;
         const fresh = newId();
-        store[machine] = owned.concat(fresh);
+        store[machine] = (store[machine] || []).concat(fresh);
         write(OWNED, store);
         return fresh;
+    }
+
+    // The machine's stable primary pane id — minted once and remembered, so "Open shell window" reattaches to
+    // the very same session every time instead of claiming whatever orphan was around. Kept in OWNED too, so it
+    // is heartbeat-tracked and reattachable like any other session.
+    function primary(machine) {
+        const store = read(PRIMARY);
+        let pid = store[machine];
+        if (!pid) { pid = newId(); store[machine] = pid; write(PRIMARY, store); }
+        adopt(machine, pid);
+        return pid;
     }
 
     // Ensure the store owns this (machine, paneId). Used when a window is opened on an id handed to it in its
@@ -68,11 +83,15 @@
         const owned = (store[machine] || []).filter((pid) => pid !== paneId);
         if (owned.length) store[machine] = owned; else delete store[machine];
         write(OWNED, store);
+        // If the primary session itself was ended, forget it — the next "Open shell window" should mint a fresh
+        // primary rather than try to return to a session the operator deliberately closed.
+        const prim = read(PRIMARY);
+        if (prim[machine] === paneId) { delete prim[machine]; write(PRIMARY, prim); }
         stopBeat(paneId);
     }
 
     function beat(paneId) { const l = read(LIVE); l[paneId] = Date.now(); write(LIVE, l); }
     function stopBeat(paneId) { const l = read(LIVE); if (l[paneId] != null) { delete l[paneId]; write(LIVE, l); } }
 
-    window.VaierPanes = { claim, adopt, release, beat, stopBeat, newId };
+    window.VaierPanes = { claim, primary, adopt, release, beat, stopBeat, newId };
 })();
