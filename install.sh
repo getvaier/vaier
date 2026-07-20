@@ -43,6 +43,21 @@ elif ! docker compose version >/dev/null 2>&1; then
   warn "docker compose v2 not found. Vaier needs Compose v2.23+ (bundled with current Docker)."
 fi
 
+# A premature `docker compose up` (before these files existed) makes dockerd create the bind-mount
+# source dirs as root, so a later run as an unprivileged user can't write into them. Catch that here
+# with a precise fix, rather than letting tar fail with a misleading "check your network".
+blocked=()
+for d in . offline oauth2 dex; do
+  if [ -e "$d" ] && [ ! -w "$d" ]; then blocked+=("$d"); fi
+done
+if [ "${#blocked[@]}" -gt 0 ]; then
+  die "these paths aren't writable — most likely root-owned leftovers from an earlier 'docker compose up':
+     ${blocked[*]}
+   Clean them and retry (keeps your .env):
+     docker compose down 2>/dev/null; sudo rm -rf ${blocked[*]}
+   then re-run this installer."
+fi
+
 say "Fetching Vaier runtime files (${REPO}@${REF}) — no git history."
 # Extract only the runtime members from the tarball. The archive's top dir is vaier-<ref>; the
 # leading */ glob absorbs it (tar's wildcards match '/'), and --strip-components=1 removes it so the
@@ -54,7 +69,8 @@ done
 
 curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${REF}" \
   | tar -xz --strip-components=1 --wildcards "${tar_members[@]}" \
-  || die "Failed to fetch runtime files. Check the ref (VAIER_REF) and your network."
+  || die "Failed to fetch runtime files — check the ref (VAIER_REF='${REF}'), your network, and that no
+   target dir is root-owned from an earlier 'docker compose up' (see the writability check above)."
 
 # Sanity-check the single-file mount that fails loudest when missing.
 [ -f offline/default.conf ] || die "offline/default.conf did not download — aborting before a broken 'up'."
