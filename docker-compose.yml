@@ -256,7 +256,20 @@ services:
       - wireguard
       - docker-proxy
     networks:
-      - vaier-network
+      vaier-network:
+        # Inside the stack, the infra hostnames must resolve to Traefik itself — not out to the public IP.
+        # A fresh install creates the vaier/oauth2/dex Route53 records only after Vaier boots, so a container
+        # that looks one up too early gets NXDOMAIN and poisons its resolver's NEGATIVE cache (Route53's SOA
+        # negative TTL is ~15 min). That is what stranded oauth2-proxy's OIDC discovery against dex.<domain>
+        # in a crash loop long after the record existed. These aliases make Docker's embedded DNS answer
+        # vaier/oauth2/dex.<domain> from its own registry (straight to Traefik over the bridge) before it ever
+        # forwards externally — no public DNS, no negative cache — and Traefik then terminates TLS with the
+        # real cert and routes on to the backend. The internal-resolution complement to the entrypoint's
+        # public-DNS ACME wait above.
+        aliases:
+          - vaier.${VAIER_DOMAIN}
+          - oauth2.${VAIER_DOMAIN}
+          - dex.${VAIER_DOMAIN}
 
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.4.2

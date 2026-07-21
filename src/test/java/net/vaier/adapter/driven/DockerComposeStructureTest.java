@@ -351,4 +351,34 @@ class DockerComposeStructureTest {
             .containsKey("VAIER_DOMAIN");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void traefikCarriesInternalAliasesForInfraHostnames_soServiceToServiceCallsSkipPublicDnsAndItsNegativeCache() throws Exception {
+        // oauth2-proxy (and Vaier) run OIDC discovery against https://dex.<domain> BY ITS PUBLIC NAME — the
+        // issuer must match, so an internal http://dex:5556 shortcut is not an option. On a fresh install the
+        // Route53 records don't exist until Vaier boots, so a container that resolves dex.<domain> too early
+        // gets NXDOMAIN and poisons its resolver's NEGATIVE cache (Route53 SOA negative TTL ~15 min) — which
+        // crash-looped oauth2-proxy on "no such host" long after the record existed. Aliasing each infra
+        // hostname onto Traefik makes Docker's embedded DNS answer them from its own registry (straight to
+        // Traefik) before ever forwarding externally: no public DNS, no negative cache. Traefik then
+        // terminates TLS with the real cert and routes on. This is the internal-resolution complement to the
+        // entrypoint's public-DNS ACME wait.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> traefik = (Map<String, Object>) services.get("traefik");
+
+        Object networks = traefik.get("networks");
+        assertThat(networks)
+            .as("traefik must join vaier-network in long form so it can carry aliases")
+            .isInstanceOf(Map.class);
+        Map<String, Object> vaierNet = (Map<String, Object>) ((Map<String, Object>) networks).get("vaier-network");
+        assertThat(vaierNet).as("traefik must still be on vaier-network").isNotNull();
+
+        List<String> aliases = (List<String>) vaierNet.get("aliases");
+        assertThat(aliases)
+            .as("the three infra hostnames must resolve to Traefik from inside the stack")
+            .contains("vaier.${VAIER_DOMAIN}", "oauth2.${VAIER_DOMAIN}", "dex.${VAIER_DOMAIN}");
+    }
+
 }
