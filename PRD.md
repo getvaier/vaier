@@ -386,6 +386,7 @@ The in-app wizard at `/setup.html` was deprecated on 2026-04-23 (a tester walkin
 
 - **Auto-creates `vaier.<domain>` on first boot.** Vaier resolves the server's public address in order: `VAIER_PUBLIC_HOST` (CNAME target) → `VAIER_PUBLIC_IP` (A target) → EC2 IMDSv2 `public-hostname` (CNAME). If none resolve and the record is already missing, Vaier logs a clear instruction and exits the lifecycle step without crash-looping — the rest of the stack stays up so the operator can fix .env and restart.
 - **First-boot auth is now zero-touch via oauth2-proxy** — `oauth2-proxy-init` renders oauth2-proxy's config into `./oauth2/config` before oauth2-proxy starts, and the access store seeds the **configured administrator** (`VAIER_ADMIN_EMAIL`), so the operator signs in with Google on first boot. _(Superseded: the former `authelia-init`/`redis-init` one-shots that seeded a placeholder Authelia config were removed when Authelia and Redis left the stack.)_
+- **Fresh-install ACME race guard.** In Route53 mode Vaier creates the `vaier`/`oauth2`/`dex` infrastructure records at boot, but Traefik is started by the same `docker compose up` — so Traefik's first Let's Encrypt request would beat those records into existence, LE's validator would get NXDOMAIN, and Traefik's retry burst would trip LE's "5 failed authorizations per hostname per hour" limit (an hour stranded on Traefik's self-signed default cert, browsers showing `ERR_CERT_AUTHORITY_INVALID`). The fix lives in **Traefik's own entrypoint**: before it `exec`s traefik — and thus before any ACME — it holds until all three infra hostnames resolve on a **public** resolver (`1.1.1.1`/`8.8.8.8`, what LE queries, not the container's split-horizon/VPC view). It deliberately is **not** a separate gate service Traefik `depends_on`: `vaier` `depends_on` `traefik: service_started`, which fires the instant this container starts, so Vaier creates the records *while* the entrypoint waits — a completion-gated sidecar would instead deadlock. It **fails open** after ~5 min so genuinely broken DNS never leaves the box permanently proxy-less; Traefik's own ACME retry then takes over. Needs `VAIER_DOMAIN` in Traefik's environment to build the hostnames it waits on. A `DockerComposeStructureTest` case pins the wait (all three hostnames, a public resolver, ordered before `exec traefik`, fail-open on timeout).
 
 ### 6.12 Docker socket hardening ✅ (closes [#147](https://github.com/getvaier/vaier/issues/147))
 
@@ -1115,6 +1116,17 @@ job**'s source paths against the tree and would have reported a backed-up direct
   cannot deduce it. Omitting `path` asks *where does this machine's tree begin?*, since a chrooted machine
   cannot be asked about `/` at all. A path above the root (`/volume2` on the NAS) is a `400` carrying its own
   sentence — **never an empty directory**, and never the jail's contents under another path's name.
+- **Two SSH-side browse failures now map to actionable responses instead of a generic `500`** — same "never
+  answer 'I can't reach that' with 'nothing there'" principle as the SFTP-root work. `GlobalExceptionHandler`
+  gains two typed handlers: a machine with **no stored SSH credential** (`domain.NoHostCredentialException`,
+  which now also carries the machine name) → **`424 Failed Dependency`** `ApiError(code=NO_CREDENTIAL)`, the
+  machine name in `detail` so the browser can offer the fix for that exact machine and the message says what to
+  do ("No SSH credential is stored for … — add one to browse its files"); a stored credential the **host
+  rejects** (`domain.SshAuthException`) → **`502 Bad Gateway`** `ApiError(code=SSH_AUTH_FAILED)`, like an
+  unreadable disk (§6.20, `DiskUnreadableException` → 502) and never a generic `500`. The raw auth message can
+  carry the SSH `user@host`, so it is logged server-side but **never returned** — the operator is told to check
+  the credential Vaier holds instead. `ApiError` gains a three-arg `of(code, message, detail)` factory to carry
+  the machine name.
 
 **Notes / open risks:**
 - **`borg mount` is verified ✅** — confirmed end-to-end on the Vaier server (mount + list + read over SFTP with

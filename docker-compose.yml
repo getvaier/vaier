@@ -183,6 +183,9 @@ services:
     mem_limit: 192m
     cap_add:
       - NET_ADMIN
+    environment:
+      # Used only by the entrypoint's DNS-propagation wait below to build the infra hostnames it holds on.
+      VAIER_DOMAIN: ${VAIER_DOMAIN:-}
     entrypoint:
       - /bin/sh
       - -c
@@ -195,6 +198,28 @@ services:
           cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
           [ -n "$$cidr" ] && ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
         done
+        # Fresh-install ACME race guard. In auto-DNS mode Vaier creates the vaier/oauth2/dex Route53
+        # records at boot, but this container starts alongside it — and if we launch traefik now, its first
+        # Let's Encrypt request beats the records into existence, LE returns NXDOMAIN, and the retry burst
+        # trips LE's "5 failed authorizations per host per hour" limit (an hour on the self-signed default
+        # cert). So hold here until all three infra names resolve on a PUBLIC resolver (what LE queries —
+        # not this container's split-horizon/VPC resolver) BEFORE any ACME. `vaier` depends_on
+        # `traefik: service_started`, which already fired when this container started, so Vaier is free to
+        # create the records WHILE we wait — no deadlock. Fail-open after ~5 min so a genuinely broken DNS
+        # never leaves the box without a reverse proxy forever; traefik's own ACME retry then takes over.
+        if [ -n "$$VAIER_DOMAIN" ]; then
+          deadline=$$(( $$(date +%s) + 300 ))
+          for h in vaier oauth2 dex; do
+            until nslookup "$$h.$$VAIER_DOMAIN" 1.1.1.1 >/dev/null 2>&1 || nslookup "$$h.$$VAIER_DOMAIN" 8.8.8.8 >/dev/null 2>&1; do
+              if [ "$$(date +%s)" -ge "$$deadline" ]; then
+                echo "traefik: DNS wait timed out for $$h.$$VAIER_DOMAIN — proceeding to ACME anyway (fail-open)"
+                break
+              fi
+              echo "traefik: waiting for $$h.$$VAIER_DOMAIN to resolve before asking Let's Encrypt..."
+              sleep 5
+            done
+          done
+        fi
         exec traefik "$$0" "$$@"
     command:
       - --log.level=INFO

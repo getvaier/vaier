@@ -9,6 +9,7 @@ import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.CannotDeleteSftpRootException;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.PermissionDeniedException;
@@ -154,6 +155,24 @@ class ExplorerRestControllerTest {
             .andExpect(jsonPath("$.code").value("PATH_OUTSIDE_SFTP_ROOT"))
             .andExpect(jsonPath("$.message").value(
                 "/volume2 is not reachable over SFTP; this machine's SFTP service is rooted at /volume1."));
+    }
+
+    @Test
+    void get_forAMachineWithNoStoredCredential_saysSoActionably_notAGeneric500() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new GlobalExceptionHandler()).build();
+        // Vaier reads even its own filesystem over SSH-to-self, so the Vaier server needs a stored credential
+        // like any machine. With none, the browse must not dead-end on a generic 500 "unknown error" — it must
+        // say exactly what to do, and name the machine so the browser can offer the fix for it.
+        when(browseFilesUseCase.listDirectory(any(), any(), any()))
+            .thenThrow(new NoHostCredentialException("Vaier server"));
+
+        mockMvc.perform(get("/machines/Vaier server/files"))
+            .andExpect(status().isFailedDependency())
+            .andExpect(jsonPath("$.code").value("NO_CREDENTIAL"))
+            .andExpect(jsonPath("$.detail").value("Vaier server"))
+            .andExpect(jsonPath("$.message").value(
+                "No SSH credential is stored for \"Vaier server\". Add one to browse its files."));
     }
 
     @Test

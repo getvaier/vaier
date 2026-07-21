@@ -301,4 +301,54 @@ class DockerComposeStructureTest {
             .contains("! -o wg0 -j MASQUERADE");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void traefikEntrypoint_waitsForInfraDnsToResolvePublicly_beforeExecSoTheFirstAcmeAttemptDoesNotBurnLeQuota() throws Exception {
+        // Fresh-install race. In auto-DNS mode Vaier creates the vaier/oauth2/dex Route53 records at boot,
+        // but Traefik — started by the SAME `up` — would ask Let's Encrypt for certs before those names
+        // resolve. LE's validator then gets NXDOMAIN, and Traefik's tight retry burst trips LE's "5 failed
+        // authorizations per hostname per hour" limit: issuance locks out for an hour and the stack sits on
+        // Traefik's self-signed default cert (browsers show ERR_CERT_AUTHORITY_INVALID).
+        //
+        // The fix lives in Traefik's OWN entrypoint: it holds until the three infra names resolve on a
+        // PUBLIC resolver (the class LE queries — not the container's split-horizon/VPC view) BEFORE it
+        // execs traefik, and thus before any ACME. It deliberately is NOT a separate gate service that
+        // traefik depends_on: `vaier` depends_on `traefik: service_started`, which fires the instant this
+        // container starts — so Vaier creates the records WHILE the entrypoint waits here. A completion-
+        // gated sidecar would instead deadlock (vaier waits for traefik waits for the gate waits for the
+        // records vaier never got to create). Fail-open on a timeout so broken DNS never leaves the box
+        // without a reverse proxy forever.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> services = (Map<String, Object>) compose.get("services");
+        Map<String, Object> traefik = (Map<String, Object>) services.get("traefik");
+
+        List<String> entrypoint = (List<String>) traefik.get("entrypoint");
+        String script = String.join("\n", entrypoint);
+
+        // Waits on all three infra hostnames, built from the base domain...
+        assertThat(script)
+            .as("entrypoint must wait on the three infra hostnames")
+            .contains("vaier oauth2 dex");
+        // ...against a PUBLIC resolver, so the wait matches Let's Encrypt's view, not the split-horizon VPC one.
+        assertThat(script)
+            .as("must query a public resolver, not the container's local/VPC resolver LE never sees")
+            .contains("1.1.1.1");
+        // ...and the wait must run BEFORE `exec traefik` — otherwise ACME still fires against dead DNS.
+        assertThat(script.indexOf("1.1.1.1"))
+            .as("the DNS wait must precede `exec traefik`, or Traefik asks ACME before the wait")
+            .isGreaterThanOrEqualTo(0)
+            .isLessThan(script.indexOf("exec traefik"));
+        // ...and fail-open so a genuinely broken DNS never leaves the box permanently proxy-less.
+        assertThat(script.toLowerCase())
+            .as("the wait must fail-open on a timeout")
+            .contains("timed out");
+
+        // The entrypoint needs the base domain to build the hostnames it waits on.
+        Map<String, Object> env = (Map<String, Object>) traefik.get("environment");
+        assertThat(env)
+            .as("traefik needs VAIER_DOMAIN in its environment to build the infra hostnames")
+            .containsKey("VAIER_DOMAIN");
+    }
+
 }

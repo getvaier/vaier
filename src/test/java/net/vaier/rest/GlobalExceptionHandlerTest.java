@@ -2,6 +2,8 @@ package net.vaier.rest;
 
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
+import net.vaier.domain.NoHostCredentialException;
+import net.vaier.domain.SshAuthException;
 import net.vaier.application.AddDnsRecordUseCase;
 import net.vaier.application.AddDnsZoneUseCase;
 import net.vaier.application.DeleteDnsRecordUseCase;
@@ -164,6 +166,36 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(409);
         assertThat(response.getBody().code()).isEqualTo("CONFLICT");
         assertThat(response.getBody().message()).isEqualTo("name taken");
+    }
+
+    @Test
+    void noHostCredentialException_mappedTo424_withMachineNameAndActionableMessage() {
+        // A machine with no stored SSH credential is something the operator must configure, not a Vaier fault:
+        // 424 Failed Dependency reads as "this needs a credential that isn't there yet". The machine name rides
+        // in `detail` so the browser can offer the fix for that exact machine, and the message says what to do.
+        ResponseEntity<ApiError> response = new GlobalExceptionHandler()
+                .handleNoHostCredential(new NoHostCredentialException("Vaier server"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(424);
+        assertThat(response.getBody().code()).isEqualTo("NO_CREDENTIAL");
+        assertThat(response.getBody().detail()).isEqualTo("Vaier server");
+        assertThat(response.getBody().message()).isEqualTo(
+                "No SSH credential is stored for \"Vaier server\". Add one to browse its files.");
+    }
+
+    @Test
+    void sshAuthException_mappedTo502_withASafeCheckTheCredentialMessage_notThe500Generic() {
+        // A stored credential the host rejects is the far side refusing the login — 502, like an unreadable disk,
+        // never a generic 500. The raw message can carry the username and host, so it must NOT leak; the operator
+        // is told to check the credential instead.
+        ResponseEntity<ApiError> response = new GlobalExceptionHandler()
+                .handleSshAuth(new SshAuthException("Authentication failed for geir@10.13.13.6"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(502);
+        assertThat(response.getBody().code()).isEqualTo("SSH_AUTH_FAILED");
+        assertThat(response.getBody().message()).isEqualTo(
+                "The SSH credential Vaier holds was rejected — check it.");
+        assertThat(response.getBody().message()).doesNotContain("10.13.13.6").doesNotContain("geir");
     }
 
     @Test

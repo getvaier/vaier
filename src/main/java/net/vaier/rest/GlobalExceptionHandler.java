@@ -5,9 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.DiskUnreadableException;
 import net.vaier.domain.LastAdminException;
+import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.PermissionDeniedException;
+import net.vaier.domain.SshAuthException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -80,6 +82,32 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> handleConflict(ConflictException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of("CONFLICT", e.getMessage()));
+    }
+
+    /**
+     * A machine with no stored SSH credential is a configuration gap the operator must close, not a Vaier
+     * fault: {@code 424 Failed Dependency} reads as "this needs a credential that isn't there yet". The
+     * machine name rides in {@code detail} so the browser can offer the fix for that exact machine, and the
+     * message says what to do. Registered explicitly — otherwise it falls through to the generic {@code 500}
+     * and the browse dead-ends on "an unexpected error occurred", telling the operator nothing they can act on.
+     */
+    @ExceptionHandler(NoHostCredentialException.class)
+    public ResponseEntity<ApiError> handleNoHostCredential(NoHostCredentialException e) {
+        String message = "No SSH credential is stored for \"" + e.machineName() + "\". Add one to browse its files.";
+        return ResponseEntity.status(HttpStatus.FAILED_DEPENDENCY)
+                .body(ApiError.of("NO_CREDENTIAL", message, e.machineName()));
+    }
+
+    /**
+     * A stored credential the host rejects is the far side refusing the login — {@code 502}, like an
+     * unreadable disk, never a generic {@code 500}. The raw message can carry the SSH user and host, so it is
+     * logged server-side but never returned; the operator is told to check the credential Vaier holds instead.
+     */
+    @ExceptionHandler(SshAuthException.class)
+    public ResponseEntity<ApiError> handleSshAuth(SshAuthException e) {
+        log.warn("SSH auth rejected by host: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiError.of("SSH_AUTH_FAILED", "The SSH credential Vaier holds was rejected — check it."));
     }
 
     /**
