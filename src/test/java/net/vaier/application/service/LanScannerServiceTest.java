@@ -2,10 +2,12 @@ package net.vaier.application.service;
 
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.ScanStatus;
+import net.vaier.application.ListScannableLansUseCase.ScannableLan;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.NotFoundException;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -18,6 +20,7 @@ import net.vaier.domain.port.ForScanningLan.ScannedHost;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 class LanScannerServiceTest {
@@ -42,6 +46,9 @@ class LanScannerServiceTest {
         public void unignore(String key) { ignoredKeys.remove(key); }
     };
 
+    // The CIDRs the scanner was asked to sweep — so a targeted scan can be shown to touch only one LAN.
+    private final List<String> sweptCidrs = new ArrayList<>();
+
     private PeerConfiguration relay(String id, String lanCidr) {
         return new PeerConfiguration(id, id, "10.13.13.5", "", MachineType.UBUNTU_SERVER, lanCidr, null, null);
     }
@@ -49,7 +56,7 @@ class LanScannerServiceTest {
     private LanScannerService service(List<PeerConfiguration> peers, Map<String, List<ScannedHost>> scans,
                                       Optional<String> serverCidr, List<LanServer> registered,
                                       Executor executor) {
-        ForScanningLan scanner = cidr -> scans.getOrDefault(cidr, List.of());
+        ForScanningLan scanner = cidr -> { sweptCidrs.add(cidr); return scans.getOrDefault(cidr, List.of()); };
         ForGettingPeerConfigurations peerConfigs = new ForGettingPeerConfigurations() {
             public Optional<PeerConfiguration> getPeerConfigByName(String n) { return Optional.empty(); }
             public Optional<PeerConfiguration> getPeerConfigByIp(String ip) { return Optional.empty(); }
@@ -178,6 +185,76 @@ class LanScannerServiceTest {
         assertThat(service.snapshot().machines())
             .extracting(DiscoveredLanMachine::ipAddress, DiscoveredLanMachine::ignored)
             .containsExactly(tuple("192.168.3.111", false));
+    }
+
+    // --- targeted single-LAN scan (pick a LAN first, then scan just it) ---
+
+    @Test
+    void startScanForOneAnchorSweepsOnlyThatAnchorsCidr() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24"), relay("colina27", "192.168.1.0/24")),
+            Map.of("192.168.1.0/24", List.of(new ScannedHost("192.168.1.5", List.of(80), "pool"))),
+            Optional.of("172.31.0.0/16"), List.of(), INLINE);
+
+        service.startScan("colina27");
+
+        // Only Colina's LAN is touched — not the other relay's, not the server LAN.
+        assertThat(sweptCidrs).containsExactly("192.168.1.0/24");
+    }
+
+    @Test
+    void startScanForOneAnchorRefreshesThatLanAndPreservesTheOthers() {
+        Map<String, List<ScannedHost>> scans = new HashMap<>();
+        scans.put("192.168.3.0/24", List.of(new ScannedHost("192.168.3.10", List.of(2375), "docker01")));
+        scans.put("192.168.1.0/24", List.of(new ScannedHost("192.168.1.5", List.of(80), "pool")));
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24"), relay("colina27", "192.168.1.0/24")),
+            scans, Optional.empty(), List.of(), INLINE);
+        service.startScan();   // both LANs populated
+
+        // Colina's LAN changes; a targeted rescan of just Colina must pick that up and leave Apalveien alone.
+        scans.put("192.168.1.0/24", List.of(new ScannedHost("192.168.1.6", List.of(443), "printer")));
+        service.startScan("colina27");
+
+        assertThat(service.snapshot().machines()).extracting(DiscoveredLanMachine::ipAddress)
+            .containsExactlyInAnyOrder("192.168.3.10", "192.168.1.6");
+    }
+
+    @Test
+    void startScanForAnUnknownAnchorIsANotFound() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24")), Map.of(), Optional.empty(), List.of(), INLINE);
+
+        assertThatThrownBy(() -> service.startScan("ghost")).isInstanceOf(NotFoundException.class);
+        assertThat(sweptCidrs).isEmpty();
+    }
+
+    @Test
+    void snapshotForOneAnchorReturnsOnlyThatLansHosts() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24"), relay("colina27", "192.168.1.0/24")),
+            Map.of("192.168.3.0/24", List.of(new ScannedHost("192.168.3.10", List.of(2375), "docker01")),
+                   "192.168.1.0/24", List.of(new ScannedHost("192.168.1.5", List.of(80), "pool"))),
+            Optional.empty(), List.of(), INLINE);
+        service.startScan();
+
+        assertThat(service.snapshot("colina27").machines()).extracting(DiscoveredLanMachine::ipAddress)
+            .containsExactly("192.168.1.5");
+    }
+
+    @Test
+    void scannableLansAreEveryRelayWithACidrThenTheServerLan() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24"), relay("nolan", null),
+                    relay("colina27", "192.168.1.0/24")),
+            Map.of(), Optional.of("172.31.0.0/16"), List.of(), INLINE);
+
+        assertThat(service.scannableLans())
+            .extracting(ScannableLan::anchor, ScannableLan::cidr)
+            .containsExactly(
+                tuple("apalveien5", "192.168.3.0/24"),
+                tuple("colina27", "192.168.1.0/24"),
+                tuple(LanAnchor.VAIER_SERVER_NAME, "172.31.0.0/16"));
     }
 
     @Test

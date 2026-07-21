@@ -15,6 +15,13 @@ public interface GetDiscoveredLanMachinesUseCase {
 
     LanScanSnapshot snapshot();
 
+    /**
+     * The snapshot scoped to a single LAN: same status and last-completed time, but only the hosts
+     * discovered on the LAN identified by {@code anchorKey}. Lets the picker show one LAN's
+     * candidates without the browser re-deriving membership.
+     */
+    LanScanSnapshot snapshot(String anchorKey);
+
     /** Whether a scan is in flight. */
     enum ScanStatus { IDLE, SCANNING }
 

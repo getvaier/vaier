@@ -118,6 +118,29 @@ class DiscoveredLanMachineTest {
         assertThat(profile.chosenName("   ")).isEqualTo("synology-nas");
     }
 
+    // --- SSH availability (only offer the credential when the host actually listens on 22) ---
+
+    @Test
+    void sshAvailableWhenPort22IsOpen() {
+        assertThat(machine("192.168.3.50", "nas", List.of(22, 2375)).sshAvailable()).isTrue();
+    }
+
+    @Test
+    void sshUnavailableWhenPort22IsAbsent() {
+        assertThat(machine("192.168.3.20", "printer", List.of(9100)).sshAvailable()).isFalse();
+        assertThat(machine("192.168.3.21", "silent", List.of()).sshAvailable()).isFalse();
+    }
+
+    // --- per-LAN membership (targeted single-LAN scan) ---
+
+    @Test
+    void isOnLanMatchesItsOwnRelayAnchorOnly() {
+        DiscoveredLanMachine m = machine("192.168.3.10", "a", List.of(80)); // anchored at apalveien5
+
+        assertThat(m.isOnLan("apalveien5")).isTrue();
+        assertThat(m.isOnLan("colina27")).isFalse();
+    }
+
     @Test
     void withIgnoredCopiesTheMachineSettingTheFlagFromTheSet() {
         DiscoveredLanMachine m = machine("192.168.3.10", "a", List.of(80));

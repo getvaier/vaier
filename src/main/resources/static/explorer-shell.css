@@ -991,6 +991,79 @@ button.ex-brepo-name {
 button.ex-brepo-name.is-link:hover { color: var(--accent); text-decoration: underline; }
 button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ex-brepo-info { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+/* --- add a machine: the fork, discover + adopt (one-call adoption, slice 3) ------------------------ */
+
+/* A quiet button — the by-address fallback that steps out of discovery's way but never disappears. */
+.ex-btn.is-quiet { border-color: transparent; background: none; color: var(--text-dim); }
+.ex-btn.is-quiet:hover { color: var(--accent); border-color: transparent; background: none; }
+
+/* The fork: two choices, the one question Vaier can't infer. */
+.ex-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ex-choice {
+    text-align: left; padding: 16px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: var(--radius-2);
+    background: var(--bg-card); transition: border-color .12s, background .12s;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.ex-choice:hover { border-color: var(--accent); background: var(--bg-hover); }
+.ex-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ex-choice-glyph {
+    width: 38px; height: 38px; flex: none; display: grid; place-items: center;
+    border-radius: var(--radius-1); background: var(--bg-hover); color: var(--accent);
+}
+.ex-choice-svg { width: 22px; height: 22px; }
+.ex-choice h4 { margin: 0; font-family: var(--display); font-size: 14px; font-weight: 600; color: var(--text); }
+.ex-choice p { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+@media (max-width: 560px) { .ex-choice-grid { grid-template-columns: 1fr; } }
+
+/* Discover: the last-scan line and the rescan control; then the site filters, said as "via <name>". */
+.ex-scanmeta {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 12px;
+}
+.ex-scanmeta-ago { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+.ex-scanmeta-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex: none;
+    background: var(--green); box-shadow: 0 0 6px var(--green);
+}
+.ex-scanmeta-dot.is-live { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+/* Pick a LAN first: one tappable row per scannable network, so a scan is always aimed at a single LAN. */
+.ex-lanpick { display: flex; flex-direction: column; margin-bottom: 4px; }
+.ex-lanpick-row {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    padding: 11px 4px; border: 0; border-bottom: 1px solid var(--border);
+    background: none; font: inherit; cursor: pointer; color: inherit;
+}
+.ex-lanpick-row:last-child { border-bottom: none; }
+.ex-lanpick-row:hover { background: var(--bg-hover); }
+.ex-lanpick-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ex-lanpick-go { flex: none; display: flex; color: var(--text-dim); }
+.ex-lanpick-row:hover .ex-lanpick-go { color: var(--accent); }
+
+/* Adopt: the "Detected by Vaier" readout — everything the scan already knows, none of it typed. */
+.ex-detected {
+    border: 1px solid var(--border); border-radius: var(--radius-1);
+    background: rgba(78, 201, 176, .04); padding: 12px 13px; margin-bottom: 4px;
+}
+.ex-detected-head {
+    display: flex; align-items: center; gap: 7px; margin-bottom: 10px;
+    font-family: var(--display); font-size: .68rem; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--green);
+}
+.ex-detected-check {
+    width: 15px; height: 15px; flex: none; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(78, 201, 176, .15); color: var(--green); font-size: 10px;
+}
+.ex-drow { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 13px; }
+.ex-drow-k { color: var(--text-muted); }
+.ex-drow-v { font-family: var(--mono); color: var(--text); text-align: right; }
+.ex-drow-v.is-accent { color: var(--accent); }
+
+/* Adopt: the SSH test row inside the disclosure — the green check lands on an authenticated reply. */
+.ex-testrow { display: flex; align-items: center; gap: 12px; }
+.ex-testok { display: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--green); }
+.ex-testok.is-on { display: inline-flex; }
+
 /* The new-machine config, shown once: a wider dialog, the config as scrollable mono, the QR on white. */
 .ex-dialog.is-wide { width: 620px; }
 .ex-config {

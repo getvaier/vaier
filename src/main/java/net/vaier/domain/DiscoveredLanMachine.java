@@ -40,6 +40,20 @@ public record DiscoveredLanMachine(
     }
 
     /**
+     * Whether this host answered on the SSH port (22). Only then can Vaier hold an SSH login for it,
+     * so the adopt flow offers the credential fields only when this is true — a host that does not
+     * speak SSH is adopted without one. The decision is the domain's, not a raw port check in the UI.
+     */
+    public boolean sshAvailable() {
+        return openPorts != null && openPorts.contains(22);
+    }
+
+    /** True when this host sits on the LAN identified by {@code anchorKey} (its {@link #relayAnchor}). */
+    public boolean isOnLan(String anchorKey) {
+        return relayAnchor.equals(anchorKey);
+    }
+
+    /**
      * The registration profile for <em>adopting</em> this discovered host as a {@link LanServer} —
      * every field a one-call adoption needs, derived here so neither the service nor the controller
      * re-derives any of it. The address is the LAN server's address; the Docker settings come from

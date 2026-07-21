@@ -319,6 +319,12 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ScanLanUseCase scanLanUseCase;
 
     @MockBean
+    protected net.vaier.application.ScanLanAnchorUseCase scanLanAnchorUseCase;
+
+    @MockBean
+    protected net.vaier.application.ListScannableLansUseCase listScannableLansUseCase;
+
+    @MockBean
     protected GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
 
     @MockBean

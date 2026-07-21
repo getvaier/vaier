@@ -5,6 +5,9 @@ import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.ScanStatus;
 import net.vaier.application.IgnoreLanMachineUseCase;
+import net.vaier.application.ListScannableLansUseCase;
+import net.vaier.application.ListScannableLansUseCase.ScannableLan;
+import net.vaier.application.ScanLanAnchorUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.application.VerifySshCredentialUseCase;
@@ -47,6 +50,8 @@ import static org.mockito.Mockito.when;
 class LanScannerRestControllerTest {
 
     @Mock ScanLanUseCase scanLanUseCase;
+    @Mock ScanLanAnchorUseCase scanLanAnchorUseCase;
+    @Mock ListScannableLansUseCase listScannableLansUseCase;
     @Mock GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
     @Mock IgnoreLanMachineUseCase ignoreLanMachineUseCase;
     @Mock UnignoreLanMachineUseCase unignoreLanMachineUseCase;
@@ -56,11 +61,32 @@ class LanScannerRestControllerTest {
     @InjectMocks LanScannerRestController controller;
 
     @Test
-    void postTriggersAScanAndReturns202() {
-        ResponseEntity<Void> response = controller.startScan();
+    void postWithNoAnchorTriggersAFullScanAndReturns202() {
+        ResponseEntity<Void> response = controller.startScan(null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(202);
         verify(scanLanUseCase).startScan();
+    }
+
+    @Test
+    void postWithAnAnchorTriggersATargetedScanAndReturns202() {
+        ResponseEntity<Void> response = controller.startScan("colina27");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        verify(scanLanAnchorUseCase).startScan("colina27");
+    }
+
+    @Test
+    void getLansReturnsTheScannableLans() {
+        when(listScannableLansUseCase.scannableLans()).thenReturn(List.of(
+            new ScannableLan("apalveien5", "Apalveien 5", "192.168.3.0/24"),
+            new ScannableLan("Vaier server", "Vaier server", "172.31.0.0/16")));
+
+        var body = controller.getLans().getBody();
+
+        assertThat(body).containsExactly(
+            new LanScannerRestController.ScannableLanDto("apalveien5", "Apalveien 5", "192.168.3.0/24"),
+            new LanScannerRestController.ScannableLanDto("Vaier server", "Vaier server", "172.31.0.0/16"));
     }
 
     @Test
@@ -78,7 +104,21 @@ class LanScannerRestControllerTest {
         assertThat(response.getBody().lastScanCompleted()).isEqualTo("2026-06-04T12:00:00Z");
         assertThat(response.getBody().machines()).containsExactly(new DiscoveredMachineDto(
             "192.168.3.10", "docker01", List.of(2375, 22), "DOCKER_HOST", "apalveien5", "SERVER",
-            false, "apalveien5|192.168.3.10"));
+            true, false, "apalveien5|192.168.3.10"));
+    }
+
+    @Test
+    void getCarriesSshAvailableFromWhetherPort22IsOpen() {
+        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
+            ScanStatus.IDLE,
+            List.of(new DiscoveredLanMachine("192.168.3.10", "docker01", List.of(2375, 22), "apalveien5"),
+                    new DiscoveredLanMachine("192.168.3.20", "printer", List.of(9100), "apalveien5")),
+            Instant.parse("2026-06-04T12:00:00Z")));
+
+        var machines = controller.getSnapshot().getBody().machines();
+
+        assertThat(machines.get(0).sshAvailable()).isTrue();   // 22 open
+        assertThat(machines.get(1).sshAvailable()).isFalse();  // 22 absent
     }
 
     @Test

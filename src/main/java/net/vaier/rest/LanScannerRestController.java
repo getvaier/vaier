@@ -6,6 +6,8 @@ import net.vaier.application.AdoptDiscoveredMachineUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.IgnoreLanMachineUseCase;
+import net.vaier.application.ListScannableLansUseCase;
+import net.vaier.application.ScanLanAnchorUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.application.VerifySshCredentialUseCase;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -43,6 +46,8 @@ import java.util.List;
 public class LanScannerRestController {
 
     private final ScanLanUseCase scanLan;
+    private final ScanLanAnchorUseCase scanLanAnchor;
+    private final ListScannableLansUseCase listScannableLans;
     private final GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines;
     private final IgnoreLanMachineUseCase ignoreLanMachine;
     private final UnignoreLanMachineUseCase unignoreLanMachine;
@@ -50,12 +55,16 @@ public class LanScannerRestController {
     private final VerifySshCredentialUseCase verifySshCredential;
 
     public LanScannerRestController(ScanLanUseCase scanLan,
+                                    ScanLanAnchorUseCase scanLanAnchor,
+                                    ListScannableLansUseCase listScannableLans,
                                     GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines,
                                     IgnoreLanMachineUseCase ignoreLanMachine,
                                     UnignoreLanMachineUseCase unignoreLanMachine,
                                     AdoptDiscoveredMachineUseCase adoptDiscoveredMachine,
                                     VerifySshCredentialUseCase verifySshCredential) {
         this.scanLan = scanLan;
+        this.scanLanAnchor = scanLanAnchor;
+        this.listScannableLans = listScannableLans;
         this.getDiscoveredLanMachines = getDiscoveredLanMachines;
         this.ignoreLanMachine = ignoreLanMachine;
         this.unignoreLanMachine = unignoreLanMachine;
@@ -64,10 +73,27 @@ public class LanScannerRestController {
     }
 
     @PostMapping
-    @Operation(summary = "Start an asynchronous scan of the relay LANs")
-    public ResponseEntity<Void> startScan() {
-        scanLan.startScan();
+    @Operation(summary = "Scan a LAN — one picked LAN (anchor set) or, with no anchor, every LAN")
+    public ResponseEntity<Void> startScan(
+            @RequestParam(value = "anchor", required = false) String anchor) {
+        // The operator picks a LAN first, so the common path targets one anchor; an absent anchor
+        // keeps the fleet-wide sweep the Machines page's "Rescan" still uses. An unknown anchor is a
+        // 404 from the domain (via GlobalExceptionHandler) — never a silent empty scan.
+        if (anchor == null || anchor.isBlank()) {
+            scanLan.startScan();
+        } else {
+            scanLanAnchor.startScan(anchor);
+        }
         return ResponseEntity.accepted().build();
+    }
+
+    @GetMapping("/lans")
+    @Operation(summary = "The LANs an operator can pick to scan (each relay's LAN, plus the server LAN)")
+    public ResponseEntity<List<ScannableLanDto>> getLans() {
+        List<ScannableLanDto> lans = listScannableLans.scannableLans().stream()
+            .map(ScannableLanDto::from)
+            .toList();
+        return ResponseEntity.ok(lans);
     }
 
     @GetMapping
@@ -127,6 +153,16 @@ public class LanScannerRestController {
     /** The scan snapshot the Machines page renders: status, when it last finished, and the hosts. */
     public record LanScanResponse(String status, String lastScanCompleted,
                                   List<DiscoveredMachineDto> machines) {}
+
+    /**
+     * One LAN the operator can pick to scan: the stable {@code anchor} to scan and filter by, the
+     * "via {@code <name>}" display label, and the {@code cidr} that will be swept.
+     */
+    public record ScannableLanDto(String anchor, String name, String cidr) {
+        static ScannableLanDto from(ListScannableLansUseCase.ScannableLan l) {
+            return new ScannableLanDto(l.anchor(), l.name(), l.cidr());
+        }
+    }
 
     /** Body for ignore/unignore: the discovered host's stable {@code ignoreKey}. */
     public record IgnoreRequest(String key) {}
@@ -210,17 +246,18 @@ public class LanScannerRestController {
      * What the launchpad/machines page renders per discovered host. {@code deviceCategory} is the
      * derived (never persisted) icon hint: {@code DeviceCategory.detect(hostname, null, role)} —
      * hostname keyword first, then the guessed role, then GENERIC. Lets the UI show a device icon
-     * per scanned host. {@code ignored} lets the UI group dismissed hosts and {@code ignoreKey} is
-     * the stable key it posts back to ignore/unignore.
+     * per scanned host. {@code sshAvailable} (port 22 open) tells the adopt sheet whether to offer
+     * the SSH-credential fields at all. {@code ignored} lets the UI group dismissed hosts and {@code
+     * ignoreKey} is the stable key it posts back to ignore/unignore.
      */
     public record DiscoveredMachineDto(String ipAddress, String hostname, List<Integer> openPorts,
                                        String role, String relayAnchor, String deviceCategory,
-                                       boolean ignored, String ignoreKey) {
+                                       boolean sshAvailable, boolean ignored, String ignoreKey) {
         static DiscoveredMachineDto from(DiscoveredLanMachine m) {
             return new DiscoveredMachineDto(m.ipAddress(), m.hostname(), m.openPorts(),
                 m.guessedRole().name(), m.relayAnchor(),
                 net.vaier.domain.DeviceCategory.detect(m.hostname(), null, m.guessedRole()).name(),
-                m.ignored(), m.ignoreKey());
+                m.sshAvailable(), m.ignored(), m.ignoreKey());
         }
     }
 }

@@ -114,6 +114,7 @@
         lan: new Map(),                  // machine name -> its LAN server (the domain's MachineStatus)
         serverLocation: null,            // GET /vpn/peers/server-location — the Vaier server's geo (Frankfurt), for the map
         lanScan: null,                   // GET /lan-scan — the discovered-machines snapshot { status, machines, lastScanCompleted }, or { gated } on Community
+        lanScanLans: null,               // GET /lan-scan/lans — the LANs an operator can pick to scan [{ anchor, name, cidr }]
         dirs: new Map(),                 // dirKey -> one directory's read: its state, its children, its reader
         services: [],                    // GET /published-services/discover — the whole fleet's routes
         publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
@@ -901,7 +902,7 @@
             if (active.length) {
                 const list = el('div', 'ex-disc');
                 active.forEach((d) => list.appendChild(discoveredRow(d, [
-                    selVerb('server', 'Register', 'ex-btn is-accent', () => registerDiscovered(d)),
+                    selVerb('server', 'Add', 'ex-btn is-accent', () => addMachineFork('adopt', d)),
                     selVerb('cross', 'Ignore', 'ex-btn', () => ignoreDiscovered(d)),
                 ])));
                 body.appendChild(list);
@@ -1390,11 +1391,424 @@
     // the download endpoints are one-shot. Removing deletes the peer (or a LAN-server registration) behind the
     // typed-name gate. LAN servers are usually found by the scan, so the add form offers the peer kinds.
 
-    function addMachine() {
-        machineForm().then((body) => {
-            if (!body) return;
-            if (body.kind === 'lan') createLanServer(body); else createPeer(body);
-        });
+    // Adding a machine is one flow with one fork Vaier can't infer: a new peer (Vaier hands it a config) or a
+    // server already on one of your networks (Vaier scans, finds it, and adopts it). The peer branch hands off
+    // to the existing peer form unchanged; the LAN-server branch discovers and adopts. Everything else — the
+    // address, the kind, the Docker port, the site it sits behind — Vaier already knows, so it is never typed.
+    function addMachine() { addMachineFork('fork', null); }
+
+    // The peer branch of the fork: the existing peer-create form, unchanged. (Its own intent reframe is a later
+    // slice; here it is only wired to the fork.)
+    function addPeer() {
+        peerForm().then((body) => { if (body) createPeer(body); });
+    }
+
+    // One modal, internal screens — the fork Vaier can't infer, then (LAN-server branch) discover + adopt, with
+    // a quiet by-address fallback for Community instances and empty scans. Optionally opens straight on a screen
+    // (the fleet's "Discovered on the LAN" list jumps in at 'adopt' for a chosen candidate). Cached-first and
+    // push-driven: candidates show instantly from the last scan, and a finished scan repaints the list over the
+    // lan-scan-updated stream the shell already holds — never a timer, never a poll.
+    function addMachineFork(initialScreen, initialCandidate) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog is-wide');
+        const titleEl = el('div', 'ex-dialog-title');
+        const content = el('div');                 // repainted per screen
+        dialog.append(titleEl, content);
+        scrim.appendChild(dialog);
+        document.body.appendChild(scrim);
+
+        let cand = initialCandidate || null;        // the candidate being adopted
+        let pickedLan = null;                       // the LAN chosen on pickLan: { anchor, name, cidr }
+
+        const close = () => {
+            _lanScanModalRefresh = null;
+            scrim.remove();
+            document.removeEventListener('keydown', onKey);
+        };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
+
+        const field = (label, hint, control) => {
+            const f = el('div', 'ex-field');
+            const l = el('label'); l.textContent = label; f.append(l, control);
+            if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
+            return f;
+        };
+        const choiceCard = (iconName, heading, desc) => {
+            const b = el('button', 'ex-choice');
+            const g = el('div', 'ex-choice-glyph'); g.innerHTML = svg(iconName, 'ex-choice-svg');
+            const h = el('h4'); h.textContent = heading;
+            const p = el('p'); p.textContent = desc;
+            b.append(g, h, p);
+            return b;
+        };
+        const actionsRow = () => el('div', 'ex-dialog-actions');
+
+        // The screen router. The refresh hook is armed only on the two screens that read live scan state —
+        // the LAN picker (counts) and the discover list — so a scan settling elsewhere never repaints under
+        // the operator.
+        function screen(id) {
+            _lanScanModalRefresh = (id === 'discover') ? paintDiscover
+                : (id === 'pickLan') ? paintPickLan : null;
+            if (id === 'fork') paintFork();
+            else if (id === 'pickLan') paintPickLan();
+            else if (id === 'discover') paintDiscover();
+            else if (id === 'adopt') paintAdopt();
+            else if (id === 'byaddress') paintByAddress();
+        }
+
+        // The LAN a candidate sits on, for jumping into discover from an adopt opened directly off the fleet
+        // page. Prefer the real scannable-LAN entry (it carries the CIDR); synthesise one from the anchor
+        // otherwise so Back still works before the LAN list has loaded.
+        function lanForAnchor(anchor) {
+            return (S.lanScanLans || []).find((l) => l.anchor === anchor)
+                || { anchor: anchor, name: relayName(anchor) || anchor, cidr: null };
+        }
+
+        // ---- fork: the one question Vaier can't infer ---------------------------------------------------
+        function paintFork() {
+            titleEl.textContent = 'Add a machine';
+            content.innerHTML = '';
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'Vaier fills in everything it can. Answer the one thing it can’t infer: a new peer '
+                + 'that connects through the VPN, or a server already on one of your networks?';
+            const grid = el('div', 'ex-choice-grid');
+            const peer = choiceCard('relay', 'A peer',
+                'A new box or device that connects through Vaier’s VPN. Gets a tunnel address, keys and a config '
+                + 'to install.');
+            peer.onclick = () => { close(); addPeer(); };
+            const lan = choiceCard('server', 'A LAN server',
+                'A machine already running on one of your networks. Vaier scans, finds it, and adopts it.');
+            lan.onclick = () => { screen(S.lanScan && S.lanScan.gated ? 'byaddress' : 'pickLan'); };
+            grid.append(peer, lan);
+            content.append(sub, section('What are you adding?'), grid);
+            // Read the snapshot now so the gated check (Community) and the cached candidates are ready the
+            // moment they pick the LAN-server branch — never a wait on the next screen.
+            if (S.lanScan === null) loadLanScan();
+        }
+
+        // ---- pickLan: choose which LAN to scan first (small page, targeted scan) ------------------------
+        // The operator always picks a LAN before Vaier sweeps it, so no screen ever renders every LAN's finds
+        // at once and no scan fans out over the whole fleet. Each row is one "via <name>" network with its
+        // CIDR and, from the cached snapshot, how many candidates it holds and when it was last scanned.
+        function paintPickLan() {
+            titleEl.textContent = 'Add a LAN server';
+            content.innerHTML = '';
+            if (S.lanScan && S.lanScan.gated) { screen('byaddress'); return; }
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'Pick the network to look on. Vaier scans that one LAN — quicker than sweeping them '
+                + 'all — and shows what it finds.';
+            content.appendChild(sub);
+
+            if (S.lanScanLans === null) {
+                loadLanScanLans();
+                content.appendChild(note('Reading your networks…', false));
+                content.appendChild(pickFoot());
+                return;
+            }
+            const lans = S.lanScanLans || [];
+            const snap = S.lanScan;
+            if (lans.length) {
+                const list = el('div', 'ex-lanpick');
+                lans.forEach((lan) => {
+                    const count = (snap && snap.machines)
+                        ? snap.machines.filter((d) => d.relayAnchor === lan.anchor && !d.ignored).length : 0;
+                    list.appendChild(lanPickRow(lan, count, snap));
+                });
+                content.appendChild(list);
+            } else {
+                content.appendChild(note('No networks to scan yet — add a relay peer with a LAN behind it, or '
+                    + 'add a server by its address.', false));
+            }
+            content.appendChild(pickFoot());
+        }
+
+        // One LAN row on the picker: "via <name>", the CIDR, the cached find-count and last-scanned time.
+        function lanPickRow(lan, count, snap) {
+            const row = el('button', 'ex-lanpick-row');
+            const ic = el('span', 'ex-disc-icon'); ic.innerHTML = svg('route', 'ex-disc-svg');
+            const info = el('div', 'ex-disc-info');
+            const line = el('div', 'ex-disc-line');
+            const nm = el('span', 'ex-disc-name'); nm.textContent = 'via ' + lan.name;
+            line.appendChild(nm);
+            const meta = el('span', 'ex-disc-meta');
+            const bits = [];
+            if (lan.cidr) bits.push(lan.cidr);
+            bits.push(count === 1 ? '1 found' : count + ' found');
+            bits.push(snap && snap.lastScanCompleted ? 'scanned ' + timeAgo(snap.lastScanCompleted) : 'not scanned yet');
+            meta.textContent = bits.join(' · ');
+            info.append(line, meta);
+            const go = el('span', 'ex-lanpick-go'); go.innerHTML = svg('chev', 'ex-disc-svg');
+            row.append(ic, info, go);
+            row.onclick = () => { pickedLan = lan; screen('discover'); };
+            return row;
+        }
+
+        // The LAN picker's foot: a way back to the fork, and the quiet by-address fallback.
+        function pickFoot() {
+            const foot = actionsRow();
+            foot.style.justifyContent = 'space-between';
+            const left = el('div', 'ex-lactions is-static');
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = () => screen('fork');
+            left.appendChild(back);
+            const byAddr = el('button', 'ex-btn is-quiet'); byAddr.textContent = 'Add by address instead';
+            byAddr.onclick = () => screen('byaddress');
+            foot.append(left, byAddr);
+            return foot;
+        }
+
+        // ---- discover: one LAN's cached candidates, live over SSE -------------------------------------
+        // Scoped to the LAN picked on the previous screen: only its finds render (a small list that paints
+        // instantly from cache) and Rescan sweeps only that LAN. Repaints in place over the lan-scan-updated
+        // stream — never a timer, never a poll.
+        function paintDiscover() {
+            if (!pickedLan) { screen('pickLan'); return; }
+            titleEl.textContent = 'Add a LAN server — via ' + pickedLan.name;
+            content.innerHTML = '';
+            const snap = S.lanScan;
+            if (snap === null) {
+                loadLanScan();
+                content.appendChild(note('Looking for machines on ' + pickedLan.name + '…', false));
+                content.appendChild(discoverFoot());
+                return;
+            }
+            if (snap.gated) { screen('byaddress'); return; }
+
+            const scanning = snap.status === 'SCANNING';
+            const found = (snap.machines || [])
+                .filter((d) => d.relayAnchor === pickedLan.anchor && !d.ignored);
+
+            const meta = el('div', 'ex-scanmeta');
+            const ago = el('span', 'ex-scanmeta-ago');
+            ago.appendChild(el('span', 'ex-scanmeta-dot' + (scanning ? ' is-live' : '')));
+            const agoTxt = el('span');
+            agoTxt.textContent = scanning ? 'Scanning ' + pickedLan.name + '…'
+                : (snap.lastScanCompleted ? 'Last scan ' + timeAgo(snap.lastScanCompleted) : 'Not scanned yet');
+            ago.appendChild(agoTxt);
+            const rescan = selVerb('refresh', scanning ? 'Scanning…' : 'Rescan this LAN', 'ex-btn',
+                () => { scanLan(pickedLan.anchor); paintDiscover(); });
+            if (scanning) rescan.disabled = true;
+            meta.append(ago, rescan);
+            content.appendChild(meta);
+
+            if (pickedLan.cidr) {
+                const where = el('div', 'ex-hint'); where.textContent = 'via ' + pickedLan.name + ' · ' + pickedLan.cidr;
+                content.appendChild(where);
+            }
+
+            if (found.length) {
+                const list = el('div', 'ex-disc');
+                found.sort((a, b) => discoveredRank(a) - discoveredRank(b)
+                    || ipOrder(a.ipAddress).localeCompare(ipOrder(b.ipAddress)));
+                found.forEach((d) => list.appendChild(discoveredRow(d, [
+                    selVerb('server', 'Add', 'ex-btn is-accent', () => { cand = d; screen('adopt'); }),
+                ])));
+                content.appendChild(list);
+            } else {
+                content.appendChild(note(scanning
+                    ? 'Looking across ' + pickedLan.name + ' — this can take a minute.'
+                    : 'No unregistered machines found on this LAN. Rescan to look again.', false));
+            }
+            content.appendChild(discoverFoot());
+        }
+
+        // The discover screen's foot: back to the LAN picker, and the quiet by-address fallback.
+        function discoverFoot() {
+            const foot = actionsRow();
+            foot.style.justifyContent = 'space-between';
+            const left = el('div', 'ex-lactions is-static');
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = () => screen('pickLan');
+            left.appendChild(back);
+            const byAddr = el('button', 'ex-btn is-quiet'); byAddr.textContent = 'Add by address instead';
+            byAddr.onclick = () => screen('byaddress');
+            foot.append(left, byAddr);
+            return foot;
+        }
+
+        // ---- adopt: one editable name, everything else Vaier already probed -----------------------------
+        function paintAdopt() {
+            const d = cand;
+            // Opened straight from the fleet's "Discovered on the LAN" list (no LAN picked), so seed the LAN
+            // this candidate sits on — Back then returns to that LAN's discover list, not a dead end.
+            if (!pickedLan && d) pickedLan = lanForAnchor(d.relayAnchor);
+            const suggested = registerName(d);
+            titleEl.textContent = 'Add — ' + suggested;
+            content.innerHTML = '';
+
+            const name = el('input', 'ex-input'); name.type = 'text'; name.value = suggested;
+            name.autocomplete = 'off'; name.spellcheck = false;
+            content.appendChild(field('Name', 'The only thing Vaier can’t infer — what to call it.', name));
+
+            // The read-only readout of what the scan already knows. None of it is typed.
+            const det = el('div', 'ex-detected');
+            const head = el('div', 'ex-detected-head');
+            head.appendChild(el('span', 'ex-detected-check')).textContent = '✓';
+            const ht = el('span'); ht.textContent = 'Detected by Vaier — no need to enter'; head.appendChild(ht);
+            det.appendChild(head);
+            const drow = (k, v, accent) => {
+                const r = el('div', 'ex-drow');
+                const kk = el('span', 'ex-drow-k'); kk.textContent = k;
+                const vv = el('span', 'ex-drow-v' + (accent ? ' is-accent' : '')); vv.textContent = v;
+                r.append(kk, vv); return r;
+            };
+            det.appendChild(drow('Kind', discoveredLabel(d)));
+            det.appendChild(drow('LAN address', d.ipAddress));
+            const via = relayName(d.relayAnchor);
+            if (via) det.appendChild(drow('Reached via', via));
+            const dockerPort = (d.openPorts || []).find((p) => p === 2375 || p === 2376);
+            if (dockerPort) det.appendChild(drow('Docker API', ':' + dockerPort + ' open', true));
+            const relayMachine = via ? S.machines.find((x) => x.name === via) : null;
+            if (relayMachine && relayMachine.lanCidr) det.appendChild(drow('Cross-site route', relayMachine.lanCidr));
+            content.appendChild(det);
+
+            // Optional SSH access — the same login the web terminal, disk watch and backups ride on. Offered
+            // only when the host actually answered on port 22 (Vaier probed it): a machine that doesn't speak
+            // SSH is adopted without a credential, so the fields never appear for it. Tested live against the
+            // host before it is stored, so a wrong password is caught here, not later in the dark.
+            let draft = () => null;
+            let credentialFilled = () => false;
+            if (d.sshAvailable) {
+                const disc = disclosure('Add SSH access — for the web terminal, disk watch & backups');
+                const username = el('input', 'ex-input'); username.type = 'text'; username.autocomplete = 'off';
+                username.spellcheck = false; username.placeholder = 'e.g. admin';
+                const method = el('select', 'ex-input');
+                [['PASSWORD', 'Password'], ['PRIVATE_KEY', 'Private key']].forEach(([v, t]) => {
+                    const o = el('option'); o.value = v; o.textContent = t; method.appendChild(o);
+                });
+                const password = el('input', 'ex-input'); password.type = 'password'; password.autocomplete = 'new-password';
+                const keyArea = el('textarea', 'ex-input ex-cred-key'); keyArea.rows = 4;
+                keyArea.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----'; keyArea.spellcheck = false;
+                const passphrase = el('input', 'ex-input'); passphrase.type = 'password'; passphrase.autocomplete = 'new-password';
+                const pwF = field('Password', null, password);
+                const keyF = field('Private key (PEM)', null, keyArea);
+                const passF = field('Key passphrase', 'Optional.', passphrase);
+                const syncMethod = () => {
+                    const isKey = method.value === 'PRIVATE_KEY';
+                    pwF.style.display = isKey ? 'none' : '';
+                    keyF.style.display = isKey ? '' : 'none';
+                    passF.style.display = isKey ? '' : 'none';
+                };
+                method.onchange = syncMethod;
+                const testRow = el('div', 'ex-testrow');
+                const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Test connection';
+                const testOk = el('span', 'ex-testok'); testOk.textContent = '✓ Reached & authenticated';
+                testRow.append(testBtn, testOk);
+                disc.append(field('User', null, username), field('Auth', null, method), pwF, keyF, passF, testRow);
+                syncMethod();
+                content.appendChild(disc);
+
+                draft = () => ({ username: username.value.trim(), authMethod: method.value,
+                    secret: (method.value === 'PRIVATE_KEY' ? keyArea.value : password.value),
+                    passphrase: passphrase.value || null });
+                credentialFilled = () => disc.open && username.value.trim() && draft().secret.trim();
+
+                testBtn.onclick = async () => {
+                    if (!username.value.trim() || !draft().secret.trim()) { toast('Enter a username and the secret to test.'); return; }
+                    testOk.classList.remove('is-on');
+                    testBtn.disabled = true; const was = testBtn.textContent; testBtn.textContent = 'Testing…';
+                    try {
+                        const r = await fetch('/lan-scan/' + encodeURIComponent(d.ipAddress) + '/ssh-credential/test', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft()) });
+                        if (!r.ok) { toast('Vaier could not test that login.'); return; }
+                        const v = await r.json();
+                        if (v.authenticated) { testOk.classList.add('is-on'); }
+                        else if (v.reachable) { toast('Reached ' + d.ipAddress + ', but that login was refused.'); }
+                        else { toast('Vaier could not reach ' + d.ipAddress + ' over SSH.'); }
+                    } catch (e) { toast('Vaier could not test that login.'); }
+                    finally { testBtn.disabled = false; testBtn.textContent = was; }
+                };
+            }
+
+            const actions = actionsRow();
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = () => screen('discover');
+            const add = el('button', 'ex-btn is-accent'); add.textContent = 'Add machine';
+            add.onclick = () => doAdopt(name.value.trim(), credentialFilled() ? draft() : null);
+            const sync = () => { add.disabled = name.value.trim() === ''; };
+            name.oninput = sync; sync();
+            actions.append(back, add);
+            content.appendChild(actions);
+            name.focus(); name.select();
+        }
+
+        async function doAdopt(nameOverride, credential) {
+            const bodyObj = { nameOverride: nameOverride || null };
+            if (credential) bodyObj.credential = credential;
+            try {
+                const res = await fetch('/lan-scan/' + encodeURIComponent(cand.ipAddress) + '/adopt', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyObj) });
+                if (res.status === 402) { toast('Adopting a discovered machine is an Enterprise feature.'); return; }
+                if (!res.ok) { const e = await res.json().catch(() => ({})); toast(e.message || 'Vaier could not add that machine.'); return; }
+                const resp = await res.json();
+                close();
+                await loadFleet(); await loadLanScan();
+                const credNote = resp.credentialProvided && !resp.credentialStored
+                    ? ' Its SSH login couldn’t be saved — set one from the machine.' : '';
+                toast(resp.name + ' added.' + credNote);
+                S.open.add(key(['fleet', resp.name]));
+                go(['fleet', resp.name]);
+            } catch (e) { toast('Vaier could not add that machine.'); }
+        }
+
+        // ---- by address: the fallback (Community, and empty/failed scans) ------------------------------
+        // The scan is Enterprise, and it can come back empty, so registering a LAN server by hand never goes
+        // away — it just steps out of the way of discovery. Vaier still only needs where it answers.
+        function paintByAddress() {
+            titleEl.textContent = 'Add a LAN server';
+            content.innerHTML = '';
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'A LAN server is reached through the machine whose network it sits on, so Vaier only '
+                + 'needs where it answers. Give its LAN address and, if it speaks Docker, the port.';
+            content.appendChild(sub);
+
+            const name = el('input', 'ex-input'); name.type = 'text'; name.placeholder = 'e.g. Roon server';
+            name.autocomplete = 'off'; name.spellcheck = false;
+            const lanAddr = el('input', 'ex-input'); lanAddr.type = 'text'; lanAddr.placeholder = 'e.g. 192.168.1.50';
+            lanAddr.autocomplete = 'off'; lanAddr.spellcheck = false;
+            const dockerBox = el('input'); dockerBox.type = 'checkbox';
+            const dockerRow = el('label', 'ex-check-row');
+            const dtxt = el('span'); dtxt.textContent = 'It runs Docker Vaier can read'; dockerRow.append(dockerBox, dtxt);
+            const dockerPort = el('input', 'ex-input'); dockerPort.type = 'number'; dockerPort.min = '1';
+            dockerPort.max = '65535'; dockerPort.value = '2375';
+            const dockerPortField = field('Docker API port', 'The port its Docker engine API listens on.', dockerPort);
+            const cat = catSelect('');
+            const desc = el('input', 'ex-input'); desc.type = 'text'; desc.autocomplete = 'off';
+            const syncDocker = () => { dockerPortField.style.display = dockerBox.checked ? '' : 'none'; };
+            dockerBox.onchange = syncDocker; syncDocker();
+
+            const form = el('div', 'ex-form');
+            form.append(field('Name', null, name),
+                field('LAN address', 'Where this machine answers on its network.', lanAddr),
+                dockerRow, dockerPortField,
+                field('Device category', 'Its shape in the tree and on the map. Optional.', cat),
+                field('Description', 'Optional.', desc));
+            content.appendChild(form);
+
+            const actions = actionsRow();
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = () => screen(S.lanScan && S.lanScan.gated ? 'fork' : 'pickLan');
+            const add = el('button', 'ex-btn is-accent'); add.textContent = 'Add machine';
+            const sync = () => { add.disabled = !(name.value.trim() && lanAddr.value.trim()); };
+            name.oninput = sync; lanAddr.oninput = sync; sync();
+            add.onclick = () => {
+                const runsDocker = dockerBox.checked;
+                const port = parseInt(dockerPort.value, 10);
+                close();
+                createLanServer({ name: name.value.trim(), lanAddress: lanAddr.value.trim(),
+                    runsDocker: runsDocker, dockerPort: runsDocker && port > 0 ? port : null,
+                    deviceCategory: cat.value, description: desc.value.trim() });
+            };
+            actions.append(back, add);
+            content.appendChild(actions);
+            name.focus();
+        }
+
+        if (initialScreen === 'adopt' && cand) screen('adopt');
+        else if (initialScreen === 'discover') screen('discover');
+        else screen('fork');
     }
 
     // Register a LAN server by hand — a machine on a relay's LAN that is not a WireGuard peer of its own (a NAS,
@@ -1498,17 +1912,17 @@
         URL.revokeObjectURL(url);
     }
 
-    // The add-machine form: name, type, and — only for a server — the LAN behind it. Resolves the POST body or
-    // null. The tunnel address and the keys are Vaier's to assign, so they are never asked.
-    function machineForm() {
+    // The peer-create form: name, type, and — only for a server — the LAN behind it. Resolves the POST body or
+    // null. The tunnel address and the keys are Vaier's to assign, so they are never asked. A LAN server is not
+    // a peer and is never created here — it is adopted from the scan (or added by address), through the fork.
+    function peerForm() {
         return new Promise((resolve) => {
             const scrim = el('div', 'ex-scrim is-on');
             const dialog = el('div', 'ex-dialog');
-            const h = el('div', 'ex-dialog-title'); h.textContent = 'Add a machine';
+            const h = el('div', 'ex-dialog-title'); h.textContent = 'Add a peer';
             const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A WireGuard peer gets a tunnel address, keys and a config to install — Vaier '
-                + 'assigns them. A LAN server has no WireGuard of its own; it is reached through its relay, so '
-                + 'Vaier only needs where it answers.';
+            sub.textContent = 'A peer gets a tunnel address, keys and a config to install — Vaier assigns them, '
+                + 'so all it needs from you is a name, the kind of peer, and (for a server) the LAN behind it.';
             const form = el('div', 'ex-form');
 
             const field = (label, hint, control) => {
@@ -1521,70 +1935,40 @@
             name.autocomplete = 'off'; name.spellcheck = false;
             const type = el('select', 'ex-input');
             [['MOBILE_CLIENT', 'Phone / mobile'], ['WINDOWS_CLIENT', 'Windows client'],
-             ['UBUNTU_SERVER', 'Ubuntu server'], ['WINDOWS_SERVER', 'Windows server'],
-             ['LAN_SERVER', 'LAN server (no WireGuard)']].forEach(([v, t]) => {
+             ['UBUNTU_SERVER', 'Ubuntu server'], ['WINDOWS_SERVER', 'Windows server']].forEach(([v, t]) => {
                 const o = el('option'); o.value = v; o.textContent = t; type.appendChild(o);
             });
             const lanCidr = el('input', 'ex-input'); lanCidr.type = 'text';
             lanCidr.placeholder = 'e.g. 192.168.1.0/24'; lanCidr.autocomplete = 'off'; lanCidr.spellcheck = false;
             const lanCidrField = field('LAN behind it', 'The subnet this server routes to, so the fleet can reach it.', lanCidr);
-            // The LAN-server-only fields: where it answers, and whether it speaks Docker.
-            const lanAddr = el('input', 'ex-input'); lanAddr.type = 'text'; lanAddr.placeholder = 'e.g. 192.168.1.50';
-            lanAddr.autocomplete = 'off'; lanAddr.spellcheck = false;
-            const lanAddrField = field('LAN address', 'Where this machine answers on its relay’s network.', lanAddr);
-            const dockerBox = el('input'); dockerBox.type = 'checkbox';
-            const dockerRow = el('label', 'ex-check-row');
-            const dtxt = el('span'); dtxt.textContent = 'It runs Docker Vaier can read';
-            dockerRow.append(dockerBox, dtxt);
-            const dockerPort = el('input', 'ex-input'); dockerPort.type = 'number'; dockerPort.min = '1';
-            dockerPort.max = '65535'; dockerPort.value = '2375'; dockerPort.placeholder = '2375';
-            const dockerPortField = field('Docker API port', 'The port its Docker engine API listens on.', dockerPort);
-            const cat = catSelect('');
-            const catField = field('Device category', 'Its shape in the tree and on the map. Optional.', cat);
             const desc = el('input', 'ex-input'); desc.type = 'text'; desc.autocomplete = 'off';
 
             const isServer = () => SERVER_TYPES.has(type.value) && type.value !== 'LAN_SERVER';
-            const isLan = () => type.value === 'LAN_SERVER';
-            const syncFields = () => {
-                lanCidrField.style.display = isServer() ? '' : 'none';
-                lanAddrField.style.display = isLan() ? '' : 'none';
-                dockerRow.style.display = isLan() ? '' : 'none';
-                dockerPortField.style.display = (isLan() && dockerBox.checked) ? '' : 'none';
-                catField.style.display = isLan() ? '' : 'none';
-                sync();
-            };
-            type.onchange = syncFields; dockerBox.onchange = syncFields;
+            const syncFields = () => { lanCidrField.style.display = isServer() ? '' : 'none'; sync(); };
+            type.onchange = syncFields;
 
-            form.append(field('Name', null, name), field('Type', null, type), lanCidrField, lanAddrField,
-                dockerRow, dockerPortField, catField, field('Description', 'Optional.', desc));
+            form.append(field('Name', null, name), field('Type', null, type), lanCidrField,
+                field('Description', 'Optional.', desc));
 
             const actions = el('div', 'ex-dialog-actions');
             const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
-            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Add machine';
+            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Add peer';
             actions.append(cancel, ok);
             dialog.append(h, sub, form, actions);
             scrim.appendChild(dialog); document.body.appendChild(scrim);
 
             const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
             const onKey = (e) => { if (e.key === 'Escape') close(null); };
-            const armed = () => name.value.trim() !== '' && (!isLan() || lanAddr.value.trim() !== '');
+            const armed = () => name.value.trim() !== '';
             const sync = () => { ok.disabled = !armed(); };
-            name.oninput = sync; lanAddr.oninput = sync;
+            name.oninput = sync;
             scrim.onclick = (e) => { if (e.target === scrim) close(null); };
             cancel.onclick = () => close(null);
             ok.onclick = () => {
                 if (!armed()) return;
-                if (isLan()) {
-                    const runsDocker = dockerBox.checked;
-                    const port = parseInt(dockerPort.value, 10);
-                    close({ kind: 'lan', name: name.value.trim(), lanAddress: lanAddr.value.trim(),
-                        runsDocker: runsDocker, dockerPort: runsDocker && port > 0 ? port : null,
-                        deviceCategory: cat.value, description: desc.value.trim() });
-                } else {
-                    close({ kind: 'peer', name: name.value.trim(), peerType: type.value,
-                        lanCidr: isServer() ? lanCidr.value.trim() : '', lanAddress: '',
-                        description: desc.value.trim() });
-                }
+                close({ kind: 'peer', name: name.value.trim(), peerType: type.value,
+                    lanCidr: isServer() ? lanCidr.value.trim() : '', lanAddress: '',
+                    description: desc.value.trim() });
             };
             document.addEventListener('keydown', onKey);
             syncFields(); name.focus();
@@ -4838,6 +5222,9 @@
     // is refused with 402; the section then simply does not show. Guarded so a re-render can't re-fetch it.
     let _lanScanLoading = false;
     let _showIgnoredLan = false;   // whether the dismissed finds are revealed under the "Show ignored" toggle
+    // Set by the Add-a-machine modal's discover screen while it is open; loadLanScan calls it after a scan
+    // settles so the candidate list repaints over the same stream the shell already holds — never a timer.
+    let _lanScanModalRefresh = null;
     async function loadLanScan() {
         if (_lanScanLoading) return;
         _lanScanLoading = true;
@@ -4848,31 +5235,38 @@
         } catch (e) { S.lanScan = { status: 'IDLE', machines: [] }; }
         _lanScanLoading = false;
         render();
+        if (_lanScanModalRefresh) _lanScanModalRefresh();
     }
 
-    // Kick off a scan. It runs on the backend and settles onto lan-scan-updated (no polling); here we only mark
-    // it running so the button says so, and wait to be told it finished.
-    async function scanLan() {
+    // Kick off a scan. With an anchor it targets that one LAN (the picker's default — small and fast); with
+    // none it sweeps every LAN (the Machines page's fleet-wide Rescan). It runs on the backend and settles
+    // onto lan-scan-updated (no polling); here we only mark it running so the button says so, and wait to be
+    // told it finished.
+    async function scanLan(anchor) {
         try {
-            const res = await fetch('/lan-scan', { method: 'POST' });
+            const url = anchor ? '/lan-scan?anchor=' + encodeURIComponent(anchor) : '/lan-scan';
+            const res = await fetch(url, { method: 'POST' });
             if (res.status === 402) { toast('The LAN scan is an Enterprise feature.'); return; }
+            if (res.status === 404) { toast('Vaier no longer knows that network.'); return; }
             if (!res.ok && res.status !== 202) { toast('Vaier could not start the scan.'); return; }
-            toast('Scanning the LAN…');
+            toast(anchor ? 'Scanning that network…' : 'Scanning the LAN…');
             if (S.lanScan && !S.lanScan.gated) { S.lanScan.status = 'SCANNING'; render(); }
         } catch (e) { toast('Vaier could not start the scan.'); }
     }
 
-    // Register a discovered machine as a LAN server — named for what it is (a real hostname if it has one, else
-    // its guessed kind and last address octet), at its IP, carrying the detected device category; an open Docker
-    // port is noted. Vaier infers which relay it sits behind from the address.
-    function registerDiscovered(d) {
-        const dockerPort = (d.openPorts || []).find((p) => p === 2375 || p === 2376) || null;
-        saveJson('/lan-servers', 'POST', {
-            name: registerName(d), lanAddress: d.ipAddress,
-            runsDocker: dockerPort != null, dockerPort: dockerPort,
-            description: '', deviceCategory: d.deviceCategory,
-        }, 'Registering ' + registerName(d) + '…',
-           async () => { await loadFleet(); await loadLanScan(); }, 'Could not register that machine.');
+    // The LANs an operator can pick to scan — each relay's LAN plus the Vaier-server LAN, resolved server-side
+    // so the browser never reconstructs the server's own CIDR. Read once when the picker opens; a Community
+    // instance is refused with 402 and the picker routes to add-by-address instead.
+    let _lanScanLansLoading = false;
+    async function loadLanScanLans() {
+        if (_lanScanLansLoading) return;
+        _lanScanLansLoading = true;
+        try {
+            const res = await fetch('/lan-scan/lans', { cache: 'no-store' });
+            S.lanScanLans = res.ok ? await res.json() : [];
+        } catch (e) { S.lanScanLans = []; }
+        _lanScanLansLoading = false;
+        if (_lanScanModalRefresh) _lanScanModalRefresh();
     }
 
     // Dismiss a discovered thing so it stops cluttering the list. It survives the next scan (the ignore is
@@ -4971,7 +5365,7 @@
         const meta = el('span', 'ex-disc-meta');
         const bits = [d.ipAddress];
         const relay = relayName(d.relayAnchor);
-        if (relay) bits.push('behind ' + relay);
+        if (relay) bits.push('via ' + relay);
         const hint = portHint(d.openPorts);
         if (hint) bits.push(hint);
         meta.textContent = bits.join(' · ');

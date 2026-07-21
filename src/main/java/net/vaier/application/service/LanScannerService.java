@@ -3,11 +3,14 @@ package net.vaier.application.service;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.IgnoreLanMachineUseCase;
+import net.vaier.application.ListScannableLansUseCase;
+import net.vaier.application.ScanLanAnchorUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.NotFoundException;
 import net.vaier.domain.port.ForForgettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingLanServers;
@@ -43,7 +46,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Service
 @Slf4j
-public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachinesUseCase,
+public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
+    ListScannableLansUseCase, GetDiscoveredLanMachinesUseCase,
     IgnoreLanMachineUseCase, UnignoreLanMachineUseCase,
     ForGettingDiscoveredLanMachines, ForForgettingDiscoveredLanMachines {
 
@@ -113,6 +117,43 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
     }
 
     @Override
+    public void startScan(String anchorKey) {
+        // Resolve the picked LAN to its CIDR up front (a domain decision) so an unknown anchor is a
+        // 404 before any sweep starts, rather than a silently empty result.
+        LanAnchor anchor = LanAnchor.byKey(anchorKey,
+                peerConfigurations.getAllPeerConfigs(), serverLanCidr.resolve())
+            .orElseThrow(() -> new NotFoundException("No scannable LAN named \"" + anchorKey + "\""));
+        if (!scanning.compareAndSet(false, true)) {
+            return; // a scan is already in flight — don't queue another
+        }
+        scanExecutor.execute(() -> {
+            try {
+                Set<String> registered = registeredAddresses(peerConfigurations.getAllPeerConfigs());
+                List<DiscoveredLanMachine> fresh = scanAnchor(anchor, registered);
+                // Replace only this LAN's slice of the snapshot; every other LAN's results stand.
+                List<DiscoveredLanMachine> merged = new ArrayList<>(lastResults.stream()
+                    .filter(m -> !m.isOnLan(anchor.anchorKey()))
+                    .toList());
+                merged.addAll(fresh);
+                lastResults = List.copyOf(merged);
+                lastScanCompleted = Instant.now();
+            } catch (RuntimeException e) {
+                log.warn("Targeted LAN scan failed; keeping previous results: {}", e.getMessage());
+            } finally {
+                scanning.set(false);
+                events.publish(SSE_TOPIC, SSE_EVENT, "");
+            }
+        });
+    }
+
+    @Override
+    public List<ScannableLan> scannableLans() {
+        return LanAnchor.scannable(peerConfigurations.getAllPeerConfigs(), serverLanCidr.resolve()).stream()
+            .map(a -> new ScannableLan(a.anchorKey(), a.name(), a.cidr()))
+            .toList();
+    }
+
+    @Override
     public LanScanSnapshot snapshot() {
         ScanStatus status = scanning.get() ? ScanStatus.SCANNING : ScanStatus.IDLE;
         // Ignore happens between scans (no rescan), so the ignored flag is applied at read time —
@@ -122,6 +163,15 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
             .map(m -> m.withIgnored(ignoredKeys))
             .toList();
         return new LanScanSnapshot(status, flagged, lastScanCompleted);
+    }
+
+    @Override
+    public LanScanSnapshot snapshot(String anchorKey) {
+        LanScanSnapshot all = snapshot();
+        List<DiscoveredLanMachine> scoped = all.machines().stream()
+            .filter(m -> m.isOnLan(anchorKey))
+            .toList();
+        return new LanScanSnapshot(all.status(), scoped, all.lastScanCompleted());
     }
 
     @Override
@@ -156,37 +206,39 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
 
     private List<DiscoveredLanMachine> performScan() {
         List<PeerConfiguration> peers = peerConfigurations.getAllPeerConfigs();
+        Set<String> registered = registeredAddresses(peers);
+        // Each scan is a ~20s relay-side LAN sweep, so the LANs are swept concurrently: wall-time
+        // stays at a single sweep rather than the sum across every relay. Encounter order (relay
+        // peers in config order, then the server LAN) is preserved by the ordered stream. The
+        // enumeration itself is the domain's ({@link LanAnchor#scannable}), shared with the picker.
+        return LanAnchor.scannable(peers, serverLanCidr.resolve()).parallelStream()
+            .flatMap(anchor -> scanAnchor(anchor, registered).stream())
+            .toList();
+    }
 
-        // A host is "already registered" if any machine on the map owns its address — both
-        // registered LAN servers and VPN peers (relays/Ubuntu servers carry a LAN address).
-        Set<String> registeredAddresses = new HashSet<>();
+    /** Sweep one LAN and tag its responsive, not-yet-registered hosts with the anchor's key. */
+    private List<DiscoveredLanMachine> scanAnchor(LanAnchor anchor, Set<String> registered) {
+        return scanner.scan(anchor.cidr()).stream()
+            .map(h -> new DiscoveredLanMachine(h.ipAddress(), h.hostname(), h.openPorts(), anchor.anchorKey()))
+            .filter(m -> !m.isAlreadyRegistered(registered))
+            .toList();
+    }
+
+    /**
+     * The addresses already owned by a registered machine — LAN servers and VPN peers (relays and
+     * Ubuntu servers carry a LAN address) — so a host on the map never resurfaces as a candidate.
+     */
+    private Set<String> registeredAddresses(List<PeerConfiguration> peers) {
+        Set<String> registered = new HashSet<>();
         lanServers.getAll().stream()
             .map(ForGettingLanServers.LanServerView::server)
             .map(LanServer::lanAddress)
             .filter(a -> a != null && !a.isBlank())
-            .forEach(registeredAddresses::add);
+            .forEach(registered::add);
         peers.stream()
             .map(PeerConfiguration::lanAddress)
             .filter(a -> a != null && !a.isBlank())
-            .forEach(registeredAddresses::add);
-
-        List<ScanTarget> targets = new ArrayList<>();
-        for (PeerConfiguration peer : peers) {
-            if (peer.lanCidr() == null || peer.lanCidr().isBlank()) continue;
-            targets.add(new ScanTarget(peer.lanCidr(), peer.id()));
-        }
-        serverLanCidr.resolve()
-            .ifPresent(cidr -> targets.add(new ScanTarget(cidr, LanAnchor.VAIER_SERVER_NAME)));
-
-        // Each scan is a ~20s relay-side LAN sweep, so the LANs are swept concurrently: wall-time
-        // stays at a single sweep rather than the sum across every relay. Encounter order (relay
-        // peers in config order, then the server LAN) is preserved by the ordered stream.
-        return targets.parallelStream()
-            .flatMap(t -> scanner.scan(t.cidr()).stream()
-                .map(h -> new DiscoveredLanMachine(h.ipAddress(), h.hostname(), h.openPorts(), t.anchor())))
-            .filter(m -> !m.isAlreadyRegistered(registeredAddresses))
-            .toList();
+            .forEach(registered::add);
+        return registered;
     }
-
-    private record ScanTarget(String cidr, String anchor) {}
 }
