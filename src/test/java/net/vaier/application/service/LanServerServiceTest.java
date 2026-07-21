@@ -43,6 +43,8 @@ class LanServerServiceTest {
     @Mock private PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     @Mock private net.vaier.domain.port.ForPersistingHostCredentials forPersistingHostCredentials;
     @Mock private net.vaier.domain.port.ForTrackingHostKeys forTrackingHostKeys;
+    @Mock private net.vaier.domain.port.ForGettingDiscoveredLanMachines forGettingDiscoveredLanMachines;
+    @Mock private net.vaier.domain.port.ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines;
 
     @InjectMocks private LanServerService service;
 
@@ -103,6 +105,60 @@ class LanServerServiceTest {
         service.register("nas", "192.168.3.50", true, 2375);
 
         verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
+    }
+
+    // --- adopt (slice 1 of "Add a machine") ---
+
+    @Test
+    void adopt_registersLanServerFromTheDomainDerivedProfileAndForgetsTheCandidate() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forGettingDiscoveredLanMachines.findByIpAddress("192.168.3.50")).thenReturn(Optional.of(
+            new net.vaier.domain.DiscoveredLanMachine("192.168.3.50", "synology-nas",
+                List.of(22, 2375, 5000), "apalveien5")));
+
+        net.vaier.domain.LanServer created = service.adopt("192.168.3.50", null);
+
+        // Registered with every field derived in the domain: name from hostname, docker from the
+        // open 2375, category (NAS) pinned as the override.
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue()).isEqualTo(new LanServer(
+            "synology-nas", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS));
+        // The candidate is dropped from the snapshot so it stops surfacing as a discovered machine.
+        verify(forForgettingDiscoveredLanMachines).forget("192.168.3.50");
+        assertThat(created.name()).isEqualTo("synology-nas");
+        assertThat(created.effectiveDeviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
+    }
+
+    @Test
+    void adopt_usesTheNameOverrideWhenSupplied() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forGettingDiscoveredLanMachines.findByIpAddress("192.168.3.20")).thenReturn(Optional.of(
+            new net.vaier.domain.DiscoveredLanMachine("192.168.3.20", "epson-printer",
+                List.of(9100), "apalveien5")));
+
+        service.adopt("192.168.3.20", "hallway-printer");
+
+        ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(captor.capture());
+        assertThat(captor.getValue()).isEqualTo(new LanServer(
+            "hallway-printer", "192.168.3.20", false, null, null,
+            net.vaier.domain.DeviceCategory.PRINTER));
+    }
+
+    @Test
+    void adopt_unknownCandidate_throwsNotFoundAndPersistsNothing() {
+        when(forGettingDiscoveredLanMachines.findByIpAddress("192.168.3.99"))
+            .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.adopt("192.168.3.99", null))
+            .isInstanceOf(NotFoundException.class);
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forForgettingDiscoveredLanMachines, never()).forget(any());
     }
 
     @Test

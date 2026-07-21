@@ -29,6 +29,17 @@ public enum LanMachineRole {
         return UNKNOWN;
     }
 
+    /**
+     * The open Docker API port (2375 plain, or 2376 TLS) this host answers on — the port a LAN
+     * server would talk Docker over — or {@code null} when neither is open. Reuses the same
+     * {@link #DOCKER_PORTS} list the role guess is built on so the "what is a Docker port" rule
+     * lives in exactly one place; {@code 2375} wins when both are open.
+     */
+    public static Integer dockerPort(List<Integer> openPorts) {
+        if (openPorts == null) return null;
+        return DOCKER_PORTS.stream().filter(openPorts::contains).findFirst().orElse(null);
+    }
+
     private static boolean containsAny(List<Integer> ports, List<Integer> wanted) {
         return wanted.stream().anyMatch(ports::contains);
     }

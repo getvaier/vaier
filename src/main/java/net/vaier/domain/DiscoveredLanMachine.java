@@ -40,6 +40,46 @@ public record DiscoveredLanMachine(
     }
 
     /**
+     * The registration profile for <em>adopting</em> this discovered host as a {@link LanServer} —
+     * every field a one-call adoption needs, derived here so neither the service nor the controller
+     * re-derives any of it. The address is the LAN server's address; the Docker settings come from
+     * the open ports ({@link LanMachineRole#dockerPort}); the device category is the same read-off
+     * the UI shows ({@link DeviceCategory#detect} over hostname then guessed role); the suggested
+     * name is the resolved hostname, falling back to the IP when none was discoverable.
+     */
+    public AdoptionProfile adoptionProfile() {
+        Integer dockerPort = LanMachineRole.dockerPort(openPorts);
+        boolean runsDocker = dockerPort != null;
+        String suggestedName = (hostname == null || hostname.isBlank()) ? ipAddress : hostname.trim();
+        DeviceCategory deviceCategory = DeviceCategory.detect(hostname, null, guessedRole());
+        return new AdoptionProfile(suggestedName, ipAddress, runsDocker, dockerPort, deviceCategory);
+    }
+
+    /**
+     * The domain-derived shape a {@link LanServer} is registered from when a discovered host is
+     * adopted. A value object: the decision of what the adopted machine looks like lives here, not
+     * in the orchestrating service.
+     *
+     * @param suggestedName  the name to register under when the operator supplies no override
+     * @param lanAddress     the LAN server's address (the discovered host's IP)
+     * @param runsDocker     whether an open Docker API port was found
+     * @param dockerPort     the open Docker API port, or {@code null} when {@code runsDocker} is false
+     * @param deviceCategory the auto-detected device category (the icon hint), pinned on adoption
+     */
+    public record AdoptionProfile(String suggestedName, String lanAddress, boolean runsDocker,
+                                  Integer dockerPort, DeviceCategory deviceCategory) {
+
+        /**
+         * The name to register the adopted machine under: the operator's {@code nameOverride} when it
+         * is non-blank (trimmed), otherwise the {@link #suggestedName()}. Keeps the "override wins,
+         * else suggested" choice in the domain rather than the service.
+         */
+        public String chosenName(String nameOverride) {
+            return (nameOverride == null || nameOverride.isBlank()) ? suggestedName : nameOverride.trim();
+        }
+    }
+
+    /**
      * True when a registered machine already owns this host's address — drop it from the
      * candidates. The claimed addresses span every registered machine type: LAN servers and
      * VPN peers (relays and Ubuntu servers carry a LAN address), so a host already on the map

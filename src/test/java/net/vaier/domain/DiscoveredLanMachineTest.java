@@ -72,6 +72,52 @@ class DiscoveredLanMachineTest {
         assertThat(m.isIgnored(List.of())).isFalse();
     }
 
+    // --- adoption profile (slice 1 of "Add a machine") ---
+
+    @Test
+    void adoptionProfileForADockerHostDerivesNameDockerAndCategory() {
+        DiscoveredLanMachine m = machine("192.168.3.50", "synology-nas", List.of(22, 2375, 5000));
+
+        DiscoveredLanMachine.AdoptionProfile profile = m.adoptionProfile();
+
+        assertThat(profile.suggestedName()).isEqualTo("synology-nas");
+        assertThat(profile.lanAddress()).isEqualTo("192.168.3.50");
+        assertThat(profile.runsDocker()).isTrue();
+        assertThat(profile.dockerPort()).isEqualTo(2375);
+        assertThat(profile.deviceCategory()).isEqualTo(DeviceCategory.NAS);
+    }
+
+    @Test
+    void adoptionProfileForANonDockerPrinterHasNoDockerAndPrinterCategory() {
+        DiscoveredLanMachine m = machine("192.168.3.20", "epson-printer", List.of(9100));
+
+        DiscoveredLanMachine.AdoptionProfile profile = m.adoptionProfile();
+
+        assertThat(profile.suggestedName()).isEqualTo("epson-printer");
+        assertThat(profile.lanAddress()).isEqualTo("192.168.3.20");
+        assertThat(profile.runsDocker()).isFalse();
+        assertThat(profile.dockerPort()).isNull();
+        assertThat(profile.deviceCategory()).isEqualTo(DeviceCategory.PRINTER);
+    }
+
+    @Test
+    void adoptionProfileFallsBackToTheIpAddressWhenNoHostnameWasResolved() {
+        DiscoveredLanMachine m = machine("192.168.3.77", null, List.of(80));
+
+        assertThat(m.adoptionProfile().suggestedName()).isEqualTo("192.168.3.77");
+    }
+
+    @Test
+    void chosenNamePrefersANonBlankOverrideOtherwiseTheSuggestedName() {
+        DiscoveredLanMachine.AdoptionProfile profile = machine("192.168.3.50", "synology-nas",
+            List.of(2375)).adoptionProfile();
+
+        assertThat(profile.chosenName("living-room-nas")).isEqualTo("living-room-nas");
+        assertThat(profile.chosenName("  spaced  ")).isEqualTo("spaced");
+        assertThat(profile.chosenName(null)).isEqualTo("synology-nas");
+        assertThat(profile.chosenName("   ")).isEqualTo("synology-nas");
+    }
+
     @Test
     void withIgnoredCopiesTheMachineSettingTheFlagFromTheSet() {
         DiscoveredLanMachine m = machine("192.168.3.10", "a", List.of(80));

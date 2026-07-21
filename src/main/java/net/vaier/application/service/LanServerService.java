@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.AdoptDiscoveredMachineUseCase;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DeleteLanServerUseCase;
 import net.vaier.application.GenerateLanServerSetupScriptUseCase;
@@ -12,6 +13,7 @@ import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.application.UpdateLanServerDeviceCategoryUseCase;
 import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.Machine;
@@ -19,6 +21,8 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.LanServerSetupScript;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.port.ForForgettingDiscoveredLanMachines;
+import net.vaier.domain.port.ForGettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -40,6 +44,7 @@ import java.util.stream.Stream;
 @Slf4j
 public class LanServerService implements
     RegisterLanServerUseCase,
+    AdoptDiscoveredMachineUseCase,
     DeleteLanServerUseCase,
     RenameLanServerUseCase,
     UpdateLanServerDescriptionUseCase,
@@ -57,6 +62,8 @@ public class LanServerService implements
     private final PublishedServicesCacheInvalidator publishedServicesCacheInvalidator;
     private final ForPersistingHostCredentials forPersistingHostCredentials;
     private final ForTrackingHostKeys forTrackingHostKeys;
+    private final ForGettingDiscoveredLanMachines forGettingDiscoveredLanMachines;
+    private final ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines;
 
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
@@ -77,7 +84,12 @@ public class LanServerService implements
                             // service uses; @Lazy keeps it consistent with the cascade dependency above.
                             @Lazy PublishedServicesCacheInvalidator publishedServicesCacheInvalidator,
                             ForPersistingHostCredentials forPersistingHostCredentials,
-                            ForTrackingHostKeys forTrackingHostKeys) {
+                            ForTrackingHostKeys forTrackingHostKeys,
+                            // The LAN-scan snapshot is owned by LanScannerService, which injects this
+                            // service's ForGettingLanServers — so these two adoption ports would close a
+                            // construction cycle. @Lazy is safe: both are touched only at adopt() time.
+                            @Lazy ForGettingDiscoveredLanMachines forGettingDiscoveredLanMachines,
+                            @Lazy ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
@@ -86,6 +98,8 @@ public class LanServerService implements
         this.publishedServicesCacheInvalidator = publishedServicesCacheInvalidator;
         this.forPersistingHostCredentials = forPersistingHostCredentials;
         this.forTrackingHostKeys = forTrackingHostKeys;
+        this.forGettingDiscoveredLanMachines = forGettingDiscoveredLanMachines;
+        this.forForgettingDiscoveredLanMachines = forForgettingDiscoveredLanMachines;
     }
 
     @Override
@@ -102,6 +116,17 @@ public class LanServerService implements
     @Override
     public void register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                          String description, DeviceCategory deviceCategory) {
+        doRegister(name, lanAddress, runsDocker, dockerPort, description, deviceCategory);
+    }
+
+    /**
+     * The shared registration path: validate, guard routability and name-uniqueness, persist, and
+     * drop the published-services cache — returning the persisted {@link LanServer} so callers that
+     * need the created machine (adoption) don't have to read it back. The public {@code register}
+     * use case discards the return; {@link #adopt} keeps it.
+     */
+    private LanServer doRegister(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                                 String description, DeviceCategory deviceCategory) {
         // Normalise inputs up front so the persisted identity matches the (trimmed) uniqueness
         // comparison rule — mirrors LanServer.renamedTo, which also trims. (Trimming only strips
         // surrounding whitespace; it does not guarantee a URL-safe name.)
@@ -125,11 +150,27 @@ public class LanServerService implements
         }
         log.info("Registering LAN server: {} at {} (runsDocker={}, dockerPort={})",
             trimmedName, trimmedAddress, runsDocker, dockerPort);
-        forPersistingLanServers.save(
-            new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description, deviceCategory));
+        LanServer server =
+            new LanServer(trimmedName, trimmedAddress, runsDocker, dockerPort, description, deviceCategory);
+        forPersistingLanServers.save(server);
         // A route already pointing at this address now resolves to a named LAN server; drop the
         // cached published-services view so the new name surfaces (#300).
         publishedServicesCacheInvalidator.invalidatePublishedServicesCache();
+        return server;
+    }
+
+    @Override
+    public LanServer adopt(String ipAddress, String nameOverride) {
+        // Orchestration only: read the candidate from the scan snapshot (driven port), let the domain
+        // derive every registerable field (adoptionProfile / chosenName), register through the shared
+        // path, then forget the candidate (driven port) so it stops surfacing as discovered.
+        DiscoveredLanMachine candidate = forGettingDiscoveredLanMachines.findByIpAddress(ipAddress)
+            .orElseThrow(() -> new NotFoundException("No discovered machine at " + ipAddress));
+        DiscoveredLanMachine.AdoptionProfile profile = candidate.adoptionProfile();
+        LanServer created = doRegister(profile.chosenName(nameOverride), profile.lanAddress(),
+            profile.runsDocker(), profile.dockerPort(), null, profile.deviceCategory());
+        forForgettingDiscoveredLanMachines.forget(ipAddress);
+        return created;
     }
 
     @Override

@@ -2,14 +2,17 @@ package net.vaier.rest;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import net.vaier.application.AdoptDiscoveredMachineUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
+import net.vaier.domain.LanServer;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,15 +40,18 @@ public class LanScannerRestController {
     private final GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines;
     private final IgnoreLanMachineUseCase ignoreLanMachine;
     private final UnignoreLanMachineUseCase unignoreLanMachine;
+    private final AdoptDiscoveredMachineUseCase adoptDiscoveredMachine;
 
     public LanScannerRestController(ScanLanUseCase scanLan,
                                     GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines,
                                     IgnoreLanMachineUseCase ignoreLanMachine,
-                                    UnignoreLanMachineUseCase unignoreLanMachine) {
+                                    UnignoreLanMachineUseCase unignoreLanMachine,
+                                    AdoptDiscoveredMachineUseCase adoptDiscoveredMachine) {
         this.scanLan = scanLan;
         this.getDiscoveredLanMachines = getDiscoveredLanMachines;
         this.ignoreLanMachine = ignoreLanMachine;
         this.unignoreLanMachine = unignoreLanMachine;
+        this.adoptDiscoveredMachine = adoptDiscoveredMachine;
     }
 
     @PostMapping
@@ -65,6 +71,17 @@ public class LanScannerRestController {
         String completed = snapshot.lastScanCompleted() == null
             ? null : snapshot.lastScanCompleted().toString();
         return ResponseEntity.ok(new LanScanResponse(snapshot.status().name(), completed, machines));
+    }
+
+    @PostMapping("/{id}/adopt")
+    @Operation(summary = "Adopt a discovered machine as a registered LAN server")
+    public ResponseEntity<AdoptResponse> adopt(@PathVariable("id") String id,
+                                               @RequestBody(required = false) AdoptRequest request) {
+        // Thin: the LAN address (the discovered host's IP) identifies the candidate; every other
+        // registered field is derived in the domain. Only the optional name override rides in the body.
+        String nameOverride = request == null ? null : request.nameOverride();
+        LanServer created = adoptDiscoveredMachine.adopt(id, nameOverride);
+        return ResponseEntity.ok(AdoptResponse.from(created));
     }
 
     @PostMapping("/ignore")
@@ -87,6 +104,28 @@ public class LanScannerRestController {
 
     /** Body for ignore/unignore: the discovered host's stable {@code ignoreKey}. */
     public record IgnoreRequest(String key) {}
+
+    /**
+     * Body for adopt: an optional {@code nameOverride}. When blank/absent the domain-suggested name
+     * (the discovered host's hostname, else its IP) is used. The candidate is identified by the
+     * {@code {id}} path segment (its LAN IP address), not the body.
+     */
+    public record AdoptRequest(String nameOverride) {}
+
+    /**
+     * The registered LAN server produced by adoption — the same LAN-server vocabulary the
+     * {@code /lan-servers} view uses (name, LAN address, Docker settings, device category). The
+     * runtime fields (reachability/status) are not known at adoption time and are omitted; the
+     * Machines page reads them from the LAN-servers list once the machine is registered.
+     */
+    public record AdoptResponse(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                                String description, String deviceCategory,
+                                boolean deviceCategoryOverridden) {
+        static AdoptResponse from(LanServer s) {
+            return new AdoptResponse(s.name(), s.lanAddress(), s.runsDocker(), s.dockerPort(),
+                s.description(), s.effectiveDeviceCategory().name(), s.deviceCategoryOverridden());
+        }
+    }
 
     /**
      * What the launchpad/machines page renders per discovered host. {@code deviceCategory} is the

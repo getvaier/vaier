@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.AdoptDiscoveredMachineUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase.ScanStatus;
@@ -7,6 +8,10 @@ import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
+import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.LanServer;
+import net.vaier.rest.LanScannerRestController.AdoptRequest;
+import net.vaier.rest.LanScannerRestController.AdoptResponse;
 import net.vaier.rest.LanScannerRestController.DiscoveredMachineDto;
 import net.vaier.rest.LanScannerRestController.IgnoreRequest;
 import net.vaier.rest.LanScannerRestController.LanScanResponse;
@@ -31,6 +36,7 @@ class LanScannerRestControllerTest {
     @Mock GetDiscoveredLanMachinesUseCase getDiscoveredLanMachinesUseCase;
     @Mock IgnoreLanMachineUseCase ignoreLanMachineUseCase;
     @Mock UnignoreLanMachineUseCase unignoreLanMachineUseCase;
+    @Mock AdoptDiscoveredMachineUseCase adoptDiscoveredMachineUseCase;
 
     @InjectMocks LanScannerRestController controller;
 
@@ -125,6 +131,36 @@ class LanScannerRestControllerTest {
         var machine = controller.getSnapshot().getBody().machines().get(0);
 
         assertThat(machine.deviceCategory()).isEqualTo("GENERIC");
+    }
+
+    @Test
+    void adoptDelegatesTheIpAndNameOverrideAndReturnsTheCreatedMachine() {
+        when(adoptDiscoveredMachineUseCase.adopt("192.168.3.50", "living-room-nas")).thenReturn(
+            new LanServer("living-room-nas", "192.168.3.50", true, 2375, null, DeviceCategory.NAS));
+
+        ResponseEntity<AdoptResponse> response =
+            controller.adopt("192.168.3.50", new AdoptRequest("living-room-nas"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(adoptDiscoveredMachineUseCase).adopt("192.168.3.50", "living-room-nas");
+        AdoptResponse body = response.getBody();
+        assertThat(body.name()).isEqualTo("living-room-nas");
+        assertThat(body.lanAddress()).isEqualTo("192.168.3.50");
+        assertThat(body.runsDocker()).isTrue();
+        assertThat(body.dockerPort()).isEqualTo(2375);
+        assertThat(body.deviceCategory()).isEqualTo("NAS");
+    }
+
+    @Test
+    void adoptWithNoBodyPassesANullNameOverride() {
+        when(adoptDiscoveredMachineUseCase.adopt("192.168.3.20", null)).thenReturn(
+            new LanServer("epson-printer", "192.168.3.20", false, null, null, DeviceCategory.PRINTER));
+
+        ResponseEntity<AdoptResponse> response = controller.adopt("192.168.3.20", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(adoptDiscoveredMachineUseCase).adopt("192.168.3.20", null);
+        assertThat(response.getBody().name()).isEqualTo("epson-printer");
     }
 
     @Test

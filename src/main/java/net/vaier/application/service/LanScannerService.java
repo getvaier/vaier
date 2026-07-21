@@ -8,6 +8,8 @@ import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.port.ForForgettingDiscoveredLanMachines;
+import net.vaier.domain.port.ForGettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -22,6 +24,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -41,7 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 @Slf4j
 public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachinesUseCase,
-    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase {
+    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase,
+    ForGettingDiscoveredLanMachines, ForForgettingDiscoveredLanMachines {
 
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-scan-updated";
@@ -118,6 +122,26 @@ public class LanScannerService implements ScanLanUseCase, GetDiscoveredLanMachin
             .map(m -> m.withIgnored(ignoredKeys))
             .toList();
         return new LanScanSnapshot(status, flagged, lastScanCompleted);
+    }
+
+    @Override
+    public Optional<DiscoveredLanMachine> findByIpAddress(String ipAddress) {
+        // Read-side of the adoption port: the LAN-server domain looks the candidate up here so it
+        // never depends on this scanner's inbound use case. First match wins if an address somehow
+        // appears on two relay LANs.
+        return lastResults.stream()
+            .filter(m -> m.ipAddress().equals(ipAddress))
+            .findFirst();
+    }
+
+    @Override
+    public void forget(String ipAddress) {
+        // Write-side of the adoption port: drop the adopted host from the snapshot so it stops
+        // surfacing as a candidate immediately, rather than waiting for the next sweep to filter it
+        // out as already-registered.
+        lastResults = lastResults.stream()
+            .filter(m -> !m.ipAddress().equals(ipAddress))
+            .toList();
     }
 
     @Override

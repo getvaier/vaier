@@ -327,6 +327,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected UnignoreLanMachineUseCase unignoreLanMachineUseCase;
 
+    @MockBean
+    protected AdoptDiscoveredMachineUseCase adoptDiscoveredMachineUseCase;
+
     // --- Fleet backup (Enterprise) CRUD use cases ---
     @MockBean
     protected SaveBackupRepositoryUseCase saveBackupRepositoryUseCase;
