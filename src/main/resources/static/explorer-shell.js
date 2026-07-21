@@ -1397,12 +1397,6 @@
     // address, the kind, the Docker port, the site it sits behind — Vaier already knows, so it is never typed.
     function addMachine() { addMachineFork('fork', null); }
 
-    // The peer branch of the fork: the existing peer-create form, unchanged. (Its own intent reframe is a later
-    // slice; here it is only wired to the fork.)
-    function addPeer() {
-        peerForm().then((body) => { if (body) createPeer(body); });
-    }
-
     // One modal, internal screens — the fork Vaier can't infer, then (LAN-server branch) discover + adopt, with
     // a quiet by-address fallback for Community instances and empty scans. Optionally opens straight on a screen
     // (the fleet's "Discovered on the LAN" list jumps in at 'adopt' for a chosen candidate). Cached-first and
@@ -1419,6 +1413,9 @@
 
         let cand = initialCandidate || null;        // the candidate being adopted
         let pickedLan = null;                       // the LAN chosen on pickLan: { anchor, name, cidr }
+        let peerIntent = null;                      // the peer branch's intent: 'SERVER' | 'PERSONAL_DEVICE'
+        let peerWindows = false;                    // whether the peer runs Windows — the OS second step's answer
+        let peerCreated = null;                     // the create response, held for the handoff screen
 
         const close = () => {
             _lanScanModalRefresh = null;
@@ -1456,6 +1453,10 @@
             else if (id === 'discover') paintDiscover();
             else if (id === 'adopt') paintAdopt();
             else if (id === 'byaddress') paintByAddress();
+            else if (id === 'peerWhat') paintPeerWhat();
+            else if (id === 'peerOs') paintPeerOs();
+            else if (id === 'peerName') paintPeerName();
+            else if (id === 'peerHandoff') paintPeerHandoff();
         }
 
         // The LAN a candidate sits on, for jumping into discover from an adopt opened directly off the fleet
@@ -1477,7 +1478,7 @@
             const peer = choiceCard('relay', 'A peer',
                 'A new box or device that connects through Vaier’s VPN. Gets a tunnel address, keys and a config '
                 + 'to install.');
-            peer.onclick = () => { close(); addPeer(); };
+            peer.onclick = () => screen('peerWhat');
             const lan = choiceCard('server', 'A LAN server',
                 'A machine already running on one of your networks. Vaier scans, finds it, and adopts it.');
             lan.onclick = () => { screen(S.lanScan && S.lanScan.gated ? 'byaddress' : 'pickLan'); };
@@ -1806,8 +1807,284 @@
             name.focus();
         }
 
+        // ---- peer branch: intent first, an explicit OS second, then name, then handoff ------------------
+        // A brand-new peer is on no network yet, so Vaier can't probe it. It asks only intent — what the
+        // machine is for, and its OS — and generates everything else. The intent -> MachineType mapping is
+        // the domain's (MachineIntent, resolved server-side from intent + windows); the browser never
+        // decides the routing type. The LAN a server routes is set later from the machine, so the operator
+        // types only the name here.
+
+        // A lone Back control at the foot of a peer screen.
+        function peerFoot(onBack) {
+            const foot = actionsRow();
+            foot.style.justifyContent = 'flex-start';
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = onBack;
+            foot.appendChild(back);
+            return foot;
+        }
+
+        // ---- peer · what is this? the intent fork ------------------------------------------------------
+        function paintPeerWhat() {
+            titleEl.textContent = 'Add a peer';
+            content.innerHTML = '';
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'A peer connects through Vaier’s VPN — Vaier assigns its tunnel address and keys. '
+                + 'Answer what it is for, and it generates the rest.';
+            const grid = el('div', 'ex-choice-grid');
+            const server = choiceCard('server', 'A server',
+                'Runs around the clock and can host services. Gets a split-tunnel peer that can route its LAN.');
+            server.onclick = () => { peerIntent = 'SERVER'; screen('peerOs'); };
+            const device = choiceCard('laptop', 'A personal device',
+                'A phone, laptop or desktop that just needs to reach the fleet. Gets a full-tunnel client.');
+            device.onclick = () => { peerIntent = 'PERSONAL_DEVICE'; screen('peerOs'); };
+            grid.append(server, device);
+            content.append(sub, section('What is this?'), grid, peerFoot(() => screen('fork')));
+        }
+
+        // ---- peer · OS second step — always shown, never inferred --------------------------------------
+        function paintPeerOs() {
+            if (!peerIntent) { screen('peerWhat'); return; }
+            const isServer = peerIntent === 'SERVER';
+            titleEl.textContent = 'Add a peer';
+            content.innerHTML = '';
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = isServer
+                ? 'The operating system sets how the peer comes up — a no-root container command on Ubuntu, '
+                  + 'or the WireGuard app on Windows.'
+                : 'The kind of device sets how Vaier hands off — a QR to scan, or a config for the '
+                  + 'WireGuard app.';
+            const grid = el('div', 'ex-choice-grid');
+            let a, b;
+            if (isServer) {
+                a = choiceCard('server', 'Ubuntu',
+                    'Comes up with a single no-root command — Vaier runs the tunnel in a container.');
+                a.onclick = () => { peerWindows = false; screen('peerName'); };
+                b = choiceCard('desktop', 'Windows',
+                    'Comes up with WireGuard for Windows and the config Vaier generates.');
+                b.onclick = () => { peerWindows = true; screen('peerName'); };
+            } else {
+                a = choiceCard('phone', 'Phone / Mac / Linux',
+                    'Scan a QR in the WireGuard app, or import the config.');
+                a.onclick = () => { peerWindows = false; screen('peerName'); };
+                b = choiceCard('desktop', 'Windows PC',
+                    'Import the config into the WireGuard app for Windows.');
+                b.onclick = () => { peerWindows = true; screen('peerName'); };
+            }
+            grid.append(a, b);
+            content.append(sub, section(isServer ? 'Which OS?' : 'Which device?'), grid,
+                peerFoot(() => screen('peerWhat')));
+        }
+
+        // ---- peer · name — the one thing Vaier can't generate ------------------------------------------
+        function paintPeerName() {
+            if (!peerIntent) { screen('peerWhat'); return; }
+            titleEl.textContent = 'Add a peer';
+            content.innerHTML = '';
+
+            const name = el('input', 'ex-input'); name.type = 'text';
+            name.placeholder = peerIntent === 'SERVER' ? 'e.g. Roon server' : 'e.g. Geir’s phone';
+            name.autocomplete = 'off'; name.spellcheck = false;
+            content.appendChild(field('Name', 'The only thing Vaier can’t generate — what to call it.', name));
+
+            const det = el('div', 'ex-detected');
+            const head = el('div', 'ex-detected-head');
+            head.appendChild(el('span', 'ex-detected-check')).textContent = '✓';
+            const ht = el('span'); ht.textContent = 'Vaier will generate'; head.appendChild(ht);
+            det.appendChild(head);
+            const drow = (k, v, accent) => {
+                const r = el('div', 'ex-drow');
+                const kk = el('span', 'ex-drow-k'); kk.textContent = k;
+                const vv = el('span', 'ex-drow-v' + (accent ? ' is-accent' : '')); vv.textContent = v;
+                r.append(kk, vv); return r;
+            };
+            det.appendChild(drow('Tunnel IP', 'the next free address', true));
+            det.appendChild(drow('Keys + preshared key', 'on save'));
+            content.appendChild(det);
+
+            const actions = actionsRow();
+            const back = el('button', 'ex-btn'); back.textContent = 'Back';
+            back.onclick = () => screen('peerOs');
+            const add = el('button', 'ex-btn is-accent'); add.textContent = 'Generate config';
+            add.onclick = () => submitPeer(name.value.trim(), add);
+            const sync = () => { add.disabled = name.value.trim() === ''; };
+            name.oninput = sync; sync();
+            name.onkeydown = (e) => { if (e.key === 'Enter' && name.value.trim()) submitPeer(name.value.trim(), add); };
+            actions.append(back, add);
+            content.appendChild(actions);
+            name.focus();
+        }
+
+        // The create call, in-modal: POST with intent + windows so the intent -> MachineType decision stays
+        // the domain's (resolved server-side), then render the handoff into this same modal. lanCidr is left
+        // empty — a server's routed LAN is set later from its machine page, so the operator types only a name.
+        async function submitPeer(name, addBtn) {
+            if (!name) return;
+            addBtn.disabled = true; const was = addBtn.textContent; addBtn.textContent = 'Generating…';
+            try {
+                const res = await fetch('/vpn/peers', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name, intent: peerIntent, windows: peerWindows,
+                        lanCidr: '', lanAddress: '', description: '' }),
+                });
+                if (!res.ok) {
+                    const e = await res.json().catch(() => ({}));
+                    toast(e.message || 'Vaier could not add that machine.');
+                    addBtn.disabled = false; addBtn.textContent = was; return;
+                }
+                peerCreated = await res.json();
+                await loadFleet();
+                toast(peerCreated.name + ' added.');
+                screen('peerHandoff');
+            } catch (e) {
+                toast('Vaier could not add that machine.');
+                addBtn.disabled = false; addBtn.textContent = was;
+            }
+        }
+
+        // ---- peer · handoff — the config, shown once, and the way to get it onto the box ----------------
+        // Four variants off the same one-shot create response (#202): the Ubuntu server gets the no-sudo
+        // recipe (its setup script is shown here to transfer, never fetched with a token); the others get
+        // the config, the QR (mobile), and short WireGuard-app instructions. No new endpoint is involved.
+        function paintPeerHandoff() {
+            const p = peerCreated;
+            if (!p) { screen('peerWhat'); return; }
+            titleEl.textContent = p.name + ' — get it on the air';
+            content.innerHTML = '';
+
+            const isServer = peerIntent === 'SERVER';
+            const sub = el('div', 'ex-dialog-body');
+            sub.textContent = 'Save this now: for security the config is shown once. Install it on ' + p.name
+                + ' to bring it onto the VPN.';
+            content.appendChild(sub);
+
+            if (isServer && !peerWindows) content.appendChild(peerHandoffUbuntu(p));
+            else if (isServer) content.appendChild(peerHandoffWindows(p, 'server'));
+            else if (!peerWindows) content.appendChild(peerHandoffMobile(p));
+            else content.appendChild(peerHandoffWindows(p, 'client'));
+
+            const wait = el('div', 'ex-waiting');
+            wait.appendChild(el('span', 'ex-scanmeta-dot is-live'));
+            const wt = el('span');
+            wt.textContent = 'Waiting for ' + p.name + '’s first handshake — it turns green here on its own.';
+            wait.appendChild(wt);
+            content.appendChild(wait);
+
+            const actions = actionsRow();
+            const done = el('button', 'ex-btn is-accent'); done.textContent = 'Done';
+            done.onclick = () => { close(); S.open.add(key(['fleet', p.name])); go(['fleet', p.name]); };
+            actions.appendChild(done);
+            content.appendChild(actions);
+        }
+
+        // The config text + its downloads, shared by every handoff variant. Everything comes from the inline
+        // create response, so the one-shot GET budget is never touched.
+        function peerConfigBlock(p, opts) {
+            const wrap = el('div');
+            if (opts.showConfig && p.configFile) {
+                const pre = el('pre', 'ex-config'); pre.textContent = p.configFile;
+                wrap.appendChild(pre);
+            }
+            const row = el('div', 'ex-set-actions');
+            if (p.configFile) {
+                const dl = el('button', 'ex-btn is-accent'); dl.textContent = 'Download .conf';
+                dl.onclick = () => downloadText(p.name + '.conf', p.configFile);
+                row.appendChild(dl);
+            }
+            if (opts.compose && p.dockerCompose) {
+                const dc = el('button', 'ex-btn'); dc.textContent = 'Download docker-compose.yml';
+                dc.onclick = () => downloadText('docker-compose.yml', p.dockerCompose);
+                row.appendChild(dc);
+            }
+            if (opts.setup && p.setupScript) {
+                const sc = el('button', 'ex-btn'); sc.textContent = 'Download vaier-up.sh';
+                sc.onclick = () => downloadText('vaier-up.sh', p.setupScript);
+                row.appendChild(sc);
+            }
+            wrap.appendChild(row);
+            if (opts.qr && p.qrCodePngBase64) {
+                const img = el('img', 'ex-qr');
+                img.src = 'data:image/png;base64,' + p.qrCodePngBase64;
+                img.alt = 'WireGuard config QR code';
+                wrap.appendChild(img);
+            }
+            return wrap;
+        }
+
+        // One numbered recipe step: appended text and inline elements (never innerHTML, since the name is
+        // operator-typed), with an optional command line under it.
+        function recipeStep(parts, cmdText) {
+            const li = el('li');
+            const rt = el('div', 'ex-recipe-t');
+            parts.forEach((part) => rt.appendChild(typeof part === 'string'
+                ? document.createTextNode(part) : part));
+            if (cmdText) { const c = el('code', 'ex-cmd'); c.textContent = cmdText; rt.appendChild(c); }
+            li.appendChild(rt);
+            return li;
+        }
+        const strong = (t) => { const e = el('b'); e.textContent = t; return e; };
+
+        // Ubuntu server: the no-sudo recipe. The setup script is shown once for the operator to transfer —
+        // save-the-file, deliberately NOT a curl-with-token line (no anonymous endpoint).
+        function peerHandoffUbuntu(p) {
+            const wrap = el('div');
+            const sect = section('Get ' + p.name + ' on the air');
+            const badge = el('span', 'ex-nosudo'); badge.textContent = '✓ no sudo';
+            sect.appendChild(badge);
+            wrap.appendChild(sect);
+
+            const ol = el('ol', 'ex-recipe');
+            ol.appendChild(recipeStep([strong('Log in'), ' to the box as yourself.'], 'ssh you@' + p.id));
+            ol.appendChild(recipeStep([strong('Save the setup script'), ' below onto the box as ',
+                strong('vaier-up.sh'), '.']));
+            ol.appendChild(recipeStep([strong('Run it.'), ' Writes the config and starts WireGuard in a '
+                + 'container — Docker only, no root.'], 'sh vaier-up.sh'));
+            ol.appendChild(recipeStep([strong('That’s it.'), ' ' + p.name
+                + ' turns green here on its first handshake.']));
+            wrap.appendChild(ol);
+
+            if (p.setupScript) {
+                const pre = el('pre', 'ex-config'); pre.textContent = p.setupScript;
+                wrap.appendChild(pre);
+            }
+            wrap.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true, qr: false }));
+            return wrap;
+        }
+
+        // Windows server or Windows PC: the config file plus short WireGuard-for-Windows steps. The server
+        // also gets its docker-compose.
+        function peerHandoffWindows(p, role) {
+            const wrap = el('div');
+            wrap.appendChild(section('Set up ' + p.name + ' on Windows'));
+            const list = el('ol', 'ex-instr');
+            ['Install WireGuard for Windows on the ' + (role === 'server' ? 'box' : 'PC') + '.',
+             'Download the config below, then in WireGuard choose Add Tunnel → Import from file.',
+             'Activate the tunnel. ' + p.name + ' turns green here on its first handshake.']
+                .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
+            wrap.appendChild(list);
+            wrap.appendChild(peerConfigBlock(p,
+                { showConfig: true, compose: role === 'server', setup: false, qr: false }));
+            return wrap;
+        }
+
+        // Phone / Mac / Linux: the QR to scan, the config to import.
+        function peerHandoffMobile(p) {
+            const wrap = el('div');
+            wrap.appendChild(section('Scan it into WireGuard'));
+            const list = el('ol', 'ex-instr');
+            ['Open the WireGuard app on the device.',
+             'Tap Add → Scan from QR code and point it at the code below.',
+             'Toggle the tunnel on. It turns green here on its first handshake.']
+                .forEach((t) => { const li = el('li'); li.textContent = t; list.appendChild(li); });
+            wrap.appendChild(list);
+            wrap.appendChild(peerConfigBlock(p, { showConfig: false, compose: false, setup: false, qr: true }));
+            const alt = el('div', 'ex-hint');
+            alt.textContent = 'On a Mac or Linux box, import the .conf into WireGuard instead of scanning.';
+            wrap.appendChild(alt);
+            return wrap;
+        }
+
         if (initialScreen === 'adopt' && cand) screen('adopt');
-        else if (initialScreen === 'discover') screen('discover');
         else screen('fork');
     }
 
@@ -1836,26 +2113,6 @@
             toast(body.name + ' added.');
             S.open.add(key(['fleet', body.name]));
             go(['fleet', body.name]);
-        } catch (e) {
-            toast('Vaier could not add that machine.');
-        }
-    }
-
-    async function createPeer(body) {
-        try {
-            const res = await fetch('/vpn/peers', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                toast(err.message || 'Vaier could not add that machine.');
-                return;
-            }
-            const created = await res.json();
-            await loadFleet();
-            toast(created.name + ' added.');
-            createResult(created);   // its config, shown once — download it now
         } catch (e) {
             toast('Vaier could not add that machine.');
         }
@@ -1910,69 +2167,6 @@
         const a = document.createElement('a');
         a.href = url; a.download = filename; a.click();
         URL.revokeObjectURL(url);
-    }
-
-    // The peer-create form: name, type, and — only for a server — the LAN behind it. Resolves the POST body or
-    // null. The tunnel address and the keys are Vaier's to assign, so they are never asked. A LAN server is not
-    // a peer and is never created here — it is adopted from the scan (or added by address), through the fork.
-    function peerForm() {
-        return new Promise((resolve) => {
-            const scrim = el('div', 'ex-scrim is-on');
-            const dialog = el('div', 'ex-dialog');
-            const h = el('div', 'ex-dialog-title'); h.textContent = 'Add a peer';
-            const sub = el('div', 'ex-dialog-body');
-            sub.textContent = 'A peer gets a tunnel address, keys and a config to install — Vaier assigns them, '
-                + 'so all it needs from you is a name, the kind of peer, and (for a server) the LAN behind it.';
-            const form = el('div', 'ex-form');
-
-            const field = (label, hint, control) => {
-                const f = el('div', 'ex-field');
-                const l = el('label'); l.textContent = label; f.append(l, control);
-                if (hint) { const hn = el('div', 'ex-hint'); hn.textContent = hint; f.appendChild(hn); }
-                return f;
-            };
-            const name = el('input', 'ex-input'); name.type = 'text'; name.placeholder = 'e.g. Roon server';
-            name.autocomplete = 'off'; name.spellcheck = false;
-            const type = el('select', 'ex-input');
-            [['MOBILE_CLIENT', 'Phone / mobile'], ['WINDOWS_CLIENT', 'Windows client'],
-             ['UBUNTU_SERVER', 'Ubuntu server'], ['WINDOWS_SERVER', 'Windows server']].forEach(([v, t]) => {
-                const o = el('option'); o.value = v; o.textContent = t; type.appendChild(o);
-            });
-            const lanCidr = el('input', 'ex-input'); lanCidr.type = 'text';
-            lanCidr.placeholder = 'e.g. 192.168.1.0/24'; lanCidr.autocomplete = 'off'; lanCidr.spellcheck = false;
-            const lanCidrField = field('LAN behind it', 'The subnet this server routes to, so the fleet can reach it.', lanCidr);
-            const desc = el('input', 'ex-input'); desc.type = 'text'; desc.autocomplete = 'off';
-
-            const isServer = () => SERVER_TYPES.has(type.value) && type.value !== 'LAN_SERVER';
-            const syncFields = () => { lanCidrField.style.display = isServer() ? '' : 'none'; sync(); };
-            type.onchange = syncFields;
-
-            form.append(field('Name', null, name), field('Type', null, type), lanCidrField,
-                field('Description', 'Optional.', desc));
-
-            const actions = el('div', 'ex-dialog-actions');
-            const cancel = el('button', 'ex-btn'); cancel.textContent = 'Cancel';
-            const ok = el('button', 'ex-btn is-accent'); ok.textContent = 'Add peer';
-            actions.append(cancel, ok);
-            dialog.append(h, sub, form, actions);
-            scrim.appendChild(dialog); document.body.appendChild(scrim);
-
-            const close = (r) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(r); };
-            const onKey = (e) => { if (e.key === 'Escape') close(null); };
-            const armed = () => name.value.trim() !== '';
-            const sync = () => { ok.disabled = !armed(); };
-            name.oninput = sync;
-            scrim.onclick = (e) => { if (e.target === scrim) close(null); };
-            cancel.onclick = () => close(null);
-            ok.onclick = () => {
-                if (!armed()) return;
-                close({ kind: 'peer', name: name.value.trim(), peerType: type.value,
-                    lanCidr: isServer() ? lanCidr.value.trim() : '', lanAddress: '',
-                    description: desc.value.trim() });
-            };
-            document.addEventListener('keydown', onKey);
-            syncFields(); name.focus();
-        });
     }
 
     // The config a new peer needs, shown once. The config text (with a download), the QR for a phone, and the

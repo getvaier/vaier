@@ -19,6 +19,7 @@ import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.config.ServiceNames;
+import net.vaier.domain.MachineIntent;
 import net.vaier.domain.MachineType;
 
 import lombok.RequiredArgsConstructor;
@@ -124,9 +125,16 @@ public class VpnPeerRestController {
     public ResponseEntity<CreatePeerResponse> createPeer(@RequestBody CreatePeerRequest request) {
         log.info("Creating new VPN peer: {}", LogSafe.forLog(request.name()));
 
+        // The intent -> MachineType mapping is a domain decision; when the intent-first flow supplies
+        // it, delegate to MachineIntent and hand the resolved type to the unchanged use case. Absent an
+        // intent, the legacy explicit peerType path is preserved unchanged.
+        MachineType peerType = request.intent() != null
+                ? request.intent().toMachineType(Boolean.TRUE.equals(request.windows()))
+                : request.peerType();
+
         CreatePeerUseCase.CreatedPeerUco createdPeer = createPeerUseCase.createPeer(
                 request.name(),
-                request.peerType(),
+                peerType,
                 request.lanCidr(),
                 request.lanAddress(),
                 request.description()
@@ -483,12 +491,21 @@ public class VpnPeerRestController {
             boolean sshAccess
     ) {}
 
+    /**
+     * The intent-first "add a machine" flow sends {@code intent} + {@code windows} instead of a raw
+     * {@code peerType}: the operator says what a machine is <em>for</em> and whether it runs Windows,
+     * and the intent -> {@link MachineType} decision is the domain's ({@link MachineIntent}).
+     * The legacy {@code peerType} field is still honoured when no {@code intent} is given, so existing
+     * callers keep working; {@code intent} takes precedence when both are present.
+     */
     public record CreatePeerRequest(
             String name,
             MachineType peerType,
             String lanCidr,
             String lanAddress,
-            String description
+            String description,
+            MachineIntent intent,
+            Boolean windows
     ) {}
 
     public record CreatePeerResponse(

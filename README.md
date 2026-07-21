@@ -205,14 +205,23 @@ For optional environment variables, secret-file hardening, the Google OAuth deta
 
 ## Adding a VPN peer
 
-Create peers from the Vaier UI. The peer type determines WireGuard defaults and which download options are shown:
+Add a peer from the **Explorer** — **Add a machine → A peer**. Vaier asks only *intent*, in plain terms, and generates everything else (tunnel address, keys, config); you never pick a raw routing type. Four small in-modal steps:
 
-| Peer type | Typical use | Default routing | Downloads |
-|-----------|-------------|-----------------|-----------|
-| Mobile client | Phone/tablet internet access via VPN | All traffic | QR code, `.conf` |
-| Windows client | Laptop internet access via VPN | All traffic | `.conf` |
-| Ubuntu server with Docker | Self-hosted services on a Linux host | VPN subnet only | docker-compose, setup script |
-| Windows server with Docker | Self-hosted services on a Windows Docker host | VPN subnet only | docker-compose |
+1. **What is this?** — **A server** (runs around the clock, can host services — a split-tunnel peer that can route its LAN) or **A personal device** (a phone, laptop or desktop that just needs to reach the fleet — a full-tunnel client).
+2. **Which OS / device?** — a server asks **Ubuntu** or **Windows**; a personal device asks **Phone / Mac / Linux** or **Windows PC**. Windows is the only detail that changes the routing type within an intent.
+3. **Name** — the one thing Vaier can't generate.
+4. **Handoff** — the config, shown once, with the steps to get it onto the machine.
+
+Your answers resolve to one of the four peer types, and each has its own handoff:
+
+| What / OS | Peer type | Default routing | Handoff |
+|-----------|-----------|-----------------|---------|
+| A server / Ubuntu | Ubuntu server | VPN subnet only | **No-sudo recipe** — log in as yourself, save the shown `vaier-up.sh` onto the box, run `sh vaier-up.sh` (writes the config and starts WireGuard in a container — Docker only, no root); plus docker-compose and setup-script downloads |
+| A server / Windows | Windows server | VPN subnet only | `.conf` + docker-compose + brief WireGuard-for-Windows import steps |
+| A personal device / Phone · Mac · Linux | Mobile client | All traffic | QR code + `.conf` |
+| A personal device / Windows PC | Windows client | All traffic | `.conf` + WireGuard-app import steps |
+
+The handoff is shown **once**, in the same modal, and each variant shows a live "waiting for first handshake — turns green on its own" indicator. A server's routed LAN isn't asked here — set it later from the machine's pane once the peer is up.
 
 Each machine — VPN peer or LAN server — can carry an optional **description**, a free-text note (e.g. "Home media server (NUC, Ubuntu 22.04)") set on the Add Machine form and editable from the machine's **Edit details** dialog in the **Explorer**. It shows as a muted subtitle under the machine name so its purpose is obvious at a glance.
 

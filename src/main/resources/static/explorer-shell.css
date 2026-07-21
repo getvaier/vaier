@@ -1073,6 +1073,38 @@ button.ex-brepo-name:focus-visible { outline: 2px solid var(--accent); outline-o
     color: var(--text-muted);
 }
 .ex-qr { display: block; width: 196px; height: 196px; margin: 6px auto 14px; background: #fff; padding: 8px; border-radius: var(--radius-1); }
+
+/* Peer handoff: the no-sudo recipe for an Ubuntu server, and the plain per-platform steps for the rest.
+   The recipe is the one bold moment of the peer flow — numbered, no-root, the setup script transferred by
+   hand rather than pulled with a token. Everything around it stays in the shell's quiet register. */
+.ex-recipe { list-style: none; margin: 8px 0 12px; padding: 0; counter-reset: ex-step; display: grid; gap: 12px; }
+.ex-recipe li { display: grid; grid-template-columns: 24px 1fr; gap: 12px; align-items: start; }
+.ex-recipe li::before {
+    counter-increment: ex-step; content: counter(ex-step);
+    width: 23px; height: 23px; border-radius: 50%;
+    background: rgba(217, 160, 91, .14); color: var(--accent);
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    display: grid; place-items: center; margin-top: 1px;
+}
+.ex-recipe-t { font-size: 13.5px; color: var(--text); min-width: 0; line-height: 1.55; }
+.ex-recipe-t b { font-weight: 600; color: var(--text); }
+.ex-cmd {
+    display: block; margin-top: 7px;
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-1);
+    padding: 7px 9px; overflow-x: auto; white-space: nowrap;
+}
+.ex-nosudo {
+    display: inline-flex; align-items: center; gap: 5px; vertical-align: middle;
+    margin-left: 9px; font-family: var(--display); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .04em; color: var(--green);
+    border: 1px solid rgba(78, 201, 176, .3); background: rgba(78, 201, 176, .08);
+    padding: 1px 8px; border-radius: 9999px; text-transform: none;
+}
+/* Per-platform steps for the non-Ubuntu handoffs — plainer than the recipe, matching the shell's restraint. */
+.ex-instr { margin: 8px 0 12px; padding-left: 20px; display: grid; gap: 7px; }
+.ex-instr li { font-size: 13.5px; color: var(--text-muted); line-height: 1.55; padding-left: 4px; }
+.ex-waiting { display: flex; align-items: center; gap: 9px; margin-top: 12px; font-size: 12.5px; color: var(--text-muted); }
 /* The fleet map fills the inspector; Leaflet paints inside it. */
 .ex-map-body { padding: 0; }
 .ex-map { width: 100%; height: 72vh; min-height: 360px; border-radius: var(--radius-1); overflow: hidden; }

@@ -226,7 +226,7 @@ class VpnPeerRestControllerTest {
         when(createPeerUseCase.createPeer("nas", null, null, null, "Home media server"))
                 .thenReturn(created);
         var request = new VpnPeerRestController.CreatePeerRequest(
-                "nas", null, null, null, "Home media server");
+                "nas", null, null, null, "Home media server", null, null);
 
         var response = controller.createPeer(request);
 
@@ -241,12 +241,46 @@ class VpnPeerRestControllerTest {
         when(createPeerUseCase.createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server"))
                 .thenReturn(created);
         var request = new VpnPeerRestController.CreatePeerRequest(
-                "nas", MachineType.UBUNTU_SERVER, null, null, "Home media server");
+                "nas", MachineType.UBUNTU_SERVER, null, null, "Home media server", null, null);
 
         var response = controller.createPeer(request);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         verify(createPeerUseCase).createPeer("nas", MachineType.UBUNTU_SERVER, null, null, "Home media server");
+    }
+
+    @Test
+    void createPeer_resolvesPeerTypeFromIntentWhenPresent() {
+        // The intent-first flow sends what a machine is for (SERVER / PERSONAL_DEVICE) plus a
+        // Windows flag; the intent -> MachineType decision is the domain's (MachineIntent), and the
+        // controller delegates to it before calling the unchanged use case.
+        var created = new CreatePeerUseCase.CreatedPeerUco(
+                "laptop", "laptop", "10.13.13.9", "pub", "priv", "[Interface]", MachineType.WINDOWS_CLIENT);
+        when(createPeerUseCase.createPeer("laptop", MachineType.WINDOWS_CLIENT, null, null, null))
+                .thenReturn(created);
+        var request = new VpnPeerRestController.CreatePeerRequest(
+                "laptop", null, null, null, null,
+                net.vaier.domain.MachineIntent.PERSONAL_DEVICE, true);
+
+        var response = controller.createPeer(request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        verify(createPeerUseCase).createPeer("laptop", MachineType.WINDOWS_CLIENT, null, null, null);
+    }
+
+    @Test
+    void createPeer_intentTakesPrecedenceAndTreatsAbsentWindowsFlagAsFalse() {
+        var created = new CreatePeerUseCase.CreatedPeerUco(
+                "nuc", "nuc", "10.13.13.8", "pub", "priv", "[Interface]", MachineType.UBUNTU_SERVER);
+        when(createPeerUseCase.createPeer("nuc", MachineType.UBUNTU_SERVER, null, null, null))
+                .thenReturn(created);
+        var request = new VpnPeerRestController.CreatePeerRequest(
+                "nuc", null, null, null, null,
+                net.vaier.domain.MachineIntent.SERVER, null);
+
+        controller.createPeer(request);
+
+        verify(createPeerUseCase).createPeer("nuc", MachineType.UBUNTU_SERVER, null, null, null);
     }
 
     // --- reissue (#247) ---
