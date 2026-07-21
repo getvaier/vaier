@@ -271,8 +271,9 @@ class MinaSftpAdapterTest {
         adapter.list(target(port), remote(""));
 
         // Every SFTP client, session and SshClient the adapter opened must be closed again — a browse that
-        // leaks a session would pin an SSH connection per directory the operator clicks.
-        assertThat(server.getActiveSessions()).isEmpty();
+        // leaks a session would pin an SSH connection per directory the operator clicks. Wait out the
+        // server-side teardown (see assertServerHasNoActiveSessions) rather than racing it.
+        assertServerHasNoActiveSessions();
     }
 
     // --- slice 2: the byte-moving primitives (stat / download / mkdirs / copyFile) ---------------------
@@ -361,7 +362,8 @@ class MinaSftpAdapterTest {
             target(srcPort), remote("d.txt"), b -> { });
 
         // Both the source read-stream and the destination write-stream, and both their sessions, are closed.
-        assertThat(server.getActiveSessions()).isEmpty();
+        // Wait out the async server-side teardown rather than racing it (see assertServerHasNoActiveSessions).
+        assertServerHasNoActiveSessions();
     }
 
     // --- slice 5: deleting a file or a directory tree --------------------------------------------------
