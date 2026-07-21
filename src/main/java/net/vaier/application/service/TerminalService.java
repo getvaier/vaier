@@ -11,12 +11,15 @@ import net.vaier.application.OpenTerminalSessionUseCase.OpenedTerminal;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.application.SaveHostCredentialUseCase;
 import net.vaier.application.SendHostPasswordUseCase;
+import net.vaier.application.VerifySshCredentialUseCase;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.CommandResult;
 import net.vaier.domain.HostCredential;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.PasswordPrompt;
 import net.vaier.domain.PersistentShell;
+import net.vaier.domain.SshCredentialDraft;
+import net.vaier.domain.SshCredentialVerification;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForOpeningSshSessions;
 import net.vaier.domain.port.ForOpeningSshSessions.SshOutputListener;
@@ -25,6 +28,7 @@ import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForRunningSshCommands;
 import net.vaier.domain.port.ForTrackingHostKeys;
+import net.vaier.domain.port.ForVerifyingSshCredentials;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -47,6 +51,7 @@ public class TerminalService implements
     EndTerminalSessionUseCase,
     RunRemoteCommandUseCase,
     SendHostPasswordUseCase,
+    VerifySshCredentialUseCase,
     ClearHostKeyUseCase {
 
     private final ForPersistingHostCredentials forPersistingHostCredentials;
@@ -54,10 +59,18 @@ public class TerminalService implements
     private final ForOpeningSshSessions forOpeningSshSessions;
     private final ForRunningSshCommands forRunningSshCommands;
     private final ForTrackingHostKeys forTrackingHostKeys;
+    private final ForVerifyingSshCredentials forVerifyingSshCredentials;
 
     @Override
     public void saveHostCredential(HostCredential credential) {
         forPersistingHostCredentials.save(credential);
+    }
+
+    @Override
+    public SshCredentialVerification verify(String address, int port, SshCredentialDraft credential) {
+        // Orchestration only: the draft builds the pre-registration target (no pin), and the domain
+        // maps the driven-port probe into the result. Nothing is persisted and nothing is pinned.
+        return SshCredentialVerification.probe(credential.targetAt(address, port), forVerifyingSshCredentials);
     }
 
     @Override

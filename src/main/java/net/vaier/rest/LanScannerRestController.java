@@ -8,8 +8,14 @@ import net.vaier.application.GetDiscoveredLanMachinesUseCase.LanScanSnapshot;
 import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
+import net.vaier.application.VerifySshCredentialUseCase;
+import net.vaier.application.AdoptDiscoveredMachineUseCase.AdoptionOutcome;
+import net.vaier.domain.AuthMethod;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.SshCredentialDraft;
+import net.vaier.domain.SshCredentialVerification;
+import net.vaier.domain.SshTarget;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,17 +47,20 @@ public class LanScannerRestController {
     private final IgnoreLanMachineUseCase ignoreLanMachine;
     private final UnignoreLanMachineUseCase unignoreLanMachine;
     private final AdoptDiscoveredMachineUseCase adoptDiscoveredMachine;
+    private final VerifySshCredentialUseCase verifySshCredential;
 
     public LanScannerRestController(ScanLanUseCase scanLan,
                                     GetDiscoveredLanMachinesUseCase getDiscoveredLanMachines,
                                     IgnoreLanMachineUseCase ignoreLanMachine,
                                     UnignoreLanMachineUseCase unignoreLanMachine,
-                                    AdoptDiscoveredMachineUseCase adoptDiscoveredMachine) {
+                                    AdoptDiscoveredMachineUseCase adoptDiscoveredMachine,
+                                    VerifySshCredentialUseCase verifySshCredential) {
         this.scanLan = scanLan;
         this.getDiscoveredLanMachines = getDiscoveredLanMachines;
         this.ignoreLanMachine = ignoreLanMachine;
         this.unignoreLanMachine = unignoreLanMachine;
         this.adoptDiscoveredMachine = adoptDiscoveredMachine;
+        this.verifySshCredential = verifySshCredential;
     }
 
     @PostMapping
@@ -78,10 +87,27 @@ public class LanScannerRestController {
     public ResponseEntity<AdoptResponse> adopt(@PathVariable("id") String id,
                                                @RequestBody(required = false) AdoptRequest request) {
         // Thin: the LAN address (the discovered host's IP) identifies the candidate; every other
-        // registered field is derived in the domain. Only the optional name override rides in the body.
+        // registered field is derived in the domain. Only the optional name override and an optional
+        // SSH credential ride in the body. With a credential the machine is still always registered —
+        // the credential is verified and stored separably (the outcome carries whether it stuck).
         String nameOverride = request == null ? null : request.nameOverride();
-        LanServer created = adoptDiscoveredMachine.adopt(id, nameOverride);
-        return ResponseEntity.ok(AdoptResponse.from(created));
+        SshCredentialBlock credential = request == null ? null : request.credential();
+        if (credential == null) {
+            return ResponseEntity.ok(AdoptResponse.from(adoptDiscoveredMachine.adopt(id, nameOverride)));
+        }
+        AdoptionOutcome outcome = adoptDiscoveredMachine.adopt(id, nameOverride, credential.toDraft());
+        return ResponseEntity.ok(AdoptResponse.from(outcome));
+    }
+
+    @PostMapping("/{id}/ssh-credential/test")
+    @Operation(summary = "Test an SSH credential against a discovered host before adopting it")
+    public ResponseEntity<SshCredentialTestResponse> testSshCredential(
+            @PathVariable("id") String id, @RequestBody SshCredentialTestRequest request) {
+        // Thin: {id} is the candidate's LAN IP — the address to reach. The result carries no secret,
+        // so it is safe to return as-is; the domain decided whether the credential authenticated.
+        SshCredentialVerification result =
+            verifySshCredential.verify(id, SshTarget.DEFAULT_PORT, request.toDraft());
+        return ResponseEntity.ok(SshCredentialTestResponse.from(result));
     }
 
     @PostMapping("/ignore")
@@ -106,24 +132,77 @@ public class LanScannerRestController {
     public record IgnoreRequest(String key) {}
 
     /**
-     * Body for adopt: an optional {@code nameOverride}. When blank/absent the domain-suggested name
-     * (the discovered host's hostname, else its IP) is used. The candidate is identified by the
-     * {@code {id}} path segment (its LAN IP address), not the body.
+     * Body for adopt: an optional {@code nameOverride} and an optional SSH {@code credential} to attach
+     * during adoption (slice 2). When the name is blank/absent the domain-suggested name (the discovered
+     * host's hostname, else its IP) is used; when the credential is absent the machine is adopted with
+     * no SSH credential. The candidate is identified by the {@code {id}} path segment (its LAN IP
+     * address), not the body.
      */
-    public record AdoptRequest(String nameOverride) {}
+    public record AdoptRequest(String nameOverride, SshCredentialBlock credential) {
+        /** Back-compat / no-credential form: adopt with only an optional name override. */
+        public AdoptRequest(String nameOverride) {
+            this(nameOverride, null);
+        }
+    }
+
+    /**
+     * The SSH credential fields an operator supplies to test or attach during adoption — never keyed to
+     * a machine yet (the machine may not exist). Maps to the domain {@link SshCredentialDraft}; an
+     * invalid {@code authMethod} throws {@code IllegalArgumentException} → 400.
+     */
+    public record SshCredentialBlock(String username, String authMethod, String secret, String passphrase) {
+        SshCredentialDraft toDraft() {
+            return new SshCredentialDraft(username, AuthMethod.valueOf(authMethod), secret, passphrase);
+        }
+    }
+
+    /** Body for the pre-registration credential test — the same fields as {@link SshCredentialBlock}. */
+    public record SshCredentialTestRequest(String username, String authMethod, String secret, String passphrase) {
+        SshCredentialDraft toDraft() {
+            return new SshCredentialDraft(username, AuthMethod.valueOf(authMethod), secret, passphrase);
+        }
+    }
+
+    /**
+     * The redacted result of a pre-registration credential test: whether the host was reachable, whether
+     * the credential authenticated, and the host-key fingerprint it presented (for display only —
+     * nothing is pinned). Carries no secret by construction.
+     */
+    public record SshCredentialTestResponse(boolean reachable, boolean authenticated, String fingerprint) {
+        static SshCredentialTestResponse from(SshCredentialVerification v) {
+            return new SshCredentialTestResponse(v.reachable(), v.authenticated(), v.fingerprint());
+        }
+    }
 
     /**
      * The registered LAN server produced by adoption — the same LAN-server vocabulary the
      * {@code /lan-servers} view uses (name, LAN address, Docker settings, device category). The
      * runtime fields (reachability/status) are not known at adoption time and are omitted; the
      * Machines page reads them from the LAN-servers list once the machine is registered.
+     *
+     * <p>When a credential was attached (slice 2), {@code credentialProvided} is true and the credential
+     * outcome flags report whether it was {@code credentialVerified} server-side and {@code
+     * credentialStored} in the vault, plus the {@code hostKeyFingerprint} the host presented. Never
+     * echoes the secret.
      */
     public record AdoptResponse(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                                 String description, String deviceCategory,
-                                boolean deviceCategoryOverridden) {
+                                boolean deviceCategoryOverridden,
+                                boolean credentialProvided, boolean credentialVerified,
+                                boolean credentialStored, String hostKeyFingerprint) {
         static AdoptResponse from(LanServer s) {
             return new AdoptResponse(s.name(), s.lanAddress(), s.runsDocker(), s.dockerPort(),
-                s.description(), s.effectiveDeviceCategory().name(), s.deviceCategoryOverridden());
+                s.description(), s.effectiveDeviceCategory().name(), s.deviceCategoryOverridden(),
+                false, false, false, null);
+        }
+
+        static AdoptResponse from(AdoptionOutcome outcome) {
+            LanServer s = outcome.server();
+            SshCredentialVerification v = outcome.credentialVerification();
+            return new AdoptResponse(s.name(), s.lanAddress(), s.runsDocker(), s.dockerPort(),
+                s.description(), s.effectiveDeviceCategory().name(), s.deviceCategoryOverridden(),
+                true, v != null && v.authenticated(), outcome.credentialStored(),
+                v == null ? null : v.fingerprint());
         }
     }
 

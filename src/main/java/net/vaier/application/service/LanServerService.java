@@ -21,6 +21,9 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.LanServerSetupScript;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.SshCredentialDraft;
+import net.vaier.domain.SshCredentialVerification;
+import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForForgettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingLanServers;
@@ -31,6 +34,7 @@ import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForTrackingHostKeys;
+import net.vaier.domain.port.ForVerifyingSshCredentials;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -64,6 +68,7 @@ public class LanServerService implements
     private final ForTrackingHostKeys forTrackingHostKeys;
     private final ForGettingDiscoveredLanMachines forGettingDiscoveredLanMachines;
     private final ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines;
+    private final ForVerifyingSshCredentials forVerifyingSshCredentials;
 
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
@@ -89,7 +94,8 @@ public class LanServerService implements
                             // service's ForGettingLanServers — so these two adoption ports would close a
                             // construction cycle. @Lazy is safe: both are touched only at adopt() time.
                             @Lazy ForGettingDiscoveredLanMachines forGettingDiscoveredLanMachines,
-                            @Lazy ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines) {
+                            @Lazy ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines,
+                            ForVerifyingSshCredentials forVerifyingSshCredentials) {
         this.forPersistingLanServers = forPersistingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
@@ -100,6 +106,7 @@ public class LanServerService implements
         this.forTrackingHostKeys = forTrackingHostKeys;
         this.forGettingDiscoveredLanMachines = forGettingDiscoveredLanMachines;
         this.forForgettingDiscoveredLanMachines = forForgettingDiscoveredLanMachines;
+        this.forVerifyingSshCredentials = forVerifyingSshCredentials;
     }
 
     @Override
@@ -161,9 +168,38 @@ public class LanServerService implements
 
     @Override
     public LanServer adopt(String ipAddress, String nameOverride) {
-        // Orchestration only: read the candidate from the scan snapshot (driven port), let the domain
-        // derive every registerable field (adoptionProfile / chosenName), register through the shared
-        // path, then forget the candidate (driven port) so it stops surfacing as discovered.
+        return doAdopt(ipAddress, nameOverride);
+    }
+
+    @Override
+    public AdoptionOutcome adopt(String ipAddress, String nameOverride, SshCredentialDraft credential) {
+        // Register first and independently: a bad credential must never roll back the registration.
+        LanServer created = doAdopt(ipAddress, nameOverride);
+        // Re-verify server-side against the new machine's LAN address (nothing pinned yet — a
+        // freshly adopted machine has no host-key pin). The domain decides "did it authenticate?".
+        SshTarget target = credential.targetAt(created.lanAddress(), SshTarget.DEFAULT_PORT);
+        SshCredentialVerification verification =
+            SshCredentialVerification.probe(target, forVerifyingSshCredentials);
+        // Store only a credential that actually works, keyed to the new machine's name.
+        boolean stored = false;
+        if (verification.authenticated()) {
+            forPersistingHostCredentials.save(credential.forMachine(created.name()));
+            stored = true;
+            log.info("Stored the verified SSH credential for adopted machine {}", forLog(created.name()));
+        } else {
+            log.info("Adopted machine {} but did not store its SSH credential (reachable={}, authenticated={})",
+                forLog(created.name()), verification.reachable(), verification.authenticated());
+        }
+        return new AdoptionOutcome(created, verification, stored);
+    }
+
+    /**
+     * The shared adoption path used by both {@code adopt} overloads: read the candidate from the scan
+     * snapshot (driven port), let the domain derive every registerable field (adoptionProfile /
+     * chosenName), register through the shared registration path, then forget the candidate (driven
+     * port) so it stops surfacing as discovered.
+     */
+    private LanServer doAdopt(String ipAddress, String nameOverride) {
         DiscoveredLanMachine candidate = forGettingDiscoveredLanMachines.findByIpAddress(ipAddress)
             .orElseThrow(() -> new NotFoundException("No discovered machine at " + ipAddress));
         DiscoveredLanMachine.AdoptionProfile profile = candidate.adoptionProfile();

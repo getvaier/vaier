@@ -330,6 +330,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected AdoptDiscoveredMachineUseCase adoptDiscoveredMachineUseCase;
 
+    @MockBean
+    protected net.vaier.application.VerifySshCredentialUseCase verifySshCredentialUseCase;
+
     // --- Fleet backup (Enterprise) CRUD use cases ---
     @MockBean
     protected SaveBackupRepositoryUseCase saveBackupRepositoryUseCase;

@@ -7,16 +7,24 @@ import net.vaier.application.GetDiscoveredLanMachinesUseCase.ScanStatus;
 import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
+import net.vaier.application.VerifySshCredentialUseCase;
+import net.vaier.application.AdoptDiscoveredMachineUseCase.AdoptionOutcome;
+import net.vaier.domain.AuthMethod;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.SshCredentialDraft;
+import net.vaier.domain.SshCredentialVerification;
 import net.vaier.rest.LanScannerRestController.AdoptRequest;
 import net.vaier.rest.LanScannerRestController.AdoptResponse;
 import net.vaier.rest.LanScannerRestController.DiscoveredMachineDto;
 import net.vaier.rest.LanScannerRestController.IgnoreRequest;
 import net.vaier.rest.LanScannerRestController.LanScanResponse;
+import net.vaier.rest.LanScannerRestController.SshCredentialBlock;
+import net.vaier.rest.LanScannerRestController.SshCredentialTestRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -25,7 +33,13 @@ import org.springframework.http.ResponseEntity;
 import java.time.Instant;
 import java.util.List;
 
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +51,7 @@ class LanScannerRestControllerTest {
     @Mock IgnoreLanMachineUseCase ignoreLanMachineUseCase;
     @Mock UnignoreLanMachineUseCase unignoreLanMachineUseCase;
     @Mock AdoptDiscoveredMachineUseCase adoptDiscoveredMachineUseCase;
+    @Mock VerifySshCredentialUseCase verifySshCredentialUseCase;
 
     @InjectMocks LanScannerRestController controller;
 
@@ -161,6 +176,82 @@ class LanScannerRestControllerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         verify(adoptDiscoveredMachineUseCase).adopt("192.168.3.20", null);
         assertThat(response.getBody().name()).isEqualTo("epson-printer");
+    }
+
+    // --- slice 2: pre-registration SSH credential test + adopt with a credential ---
+
+    @Test
+    void testSshCredential_returnsTheRedactedVerificationResult_andNeverEchoesTheSecret() {
+        when(verifySshCredentialUseCase.verify(eq("192.168.3.50"), anyInt(), any()))
+            .thenReturn(new SshCredentialVerification(true, true, "SHA256:abc"));
+
+        ResponseEntity<LanScannerRestController.SshCredentialTestResponse> response =
+            controller.testSshCredential("192.168.3.50",
+                new SshCredentialTestRequest("root", "PASSWORD", "pw", null));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        var body = response.getBody();
+        assertThat(body.reachable()).isTrue();
+        assertThat(body.authenticated()).isTrue();
+        assertThat(body.fingerprint()).isEqualTo("SHA256:abc");
+        // The response shape structurally cannot carry the secret or passphrase.
+        assertThat(Arrays.stream(body.getClass().getRecordComponents()).map(RecordComponent::getName))
+            .doesNotContain("secret", "passphrase");
+        // The draft handed to the use case carried the secret; it just never rides the response.
+        ArgumentCaptor<SshCredentialDraft> draft = ArgumentCaptor.forClass(SshCredentialDraft.class);
+        verify(verifySshCredentialUseCase).verify(eq("192.168.3.50"), anyInt(), draft.capture());
+        assertThat(draft.getValue()).isEqualTo(
+            new SshCredentialDraft("root", AuthMethod.PASSWORD, "pw", null));
+    }
+
+    @Test
+    void adopt_withCredentialBlock_passesTheDraftAndReportsTheCredentialOutcome() {
+        LanServer created = new LanServer("nas", "192.168.3.50", true, 2375, null, DeviceCategory.NAS);
+        when(adoptDiscoveredMachineUseCase.adopt(eq("192.168.3.50"), eq("nas"), any())).thenReturn(
+            new AdoptionOutcome(created, new SshCredentialVerification(true, true, "SHA256:abc"), true));
+
+        ResponseEntity<AdoptResponse> response = controller.adopt("192.168.3.50",
+            new AdoptRequest("nas", new SshCredentialBlock("root", "PASSWORD", "pw", null)));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        ArgumentCaptor<SshCredentialDraft> draft = ArgumentCaptor.forClass(SshCredentialDraft.class);
+        verify(adoptDiscoveredMachineUseCase).adopt(eq("192.168.3.50"), eq("nas"), draft.capture());
+        assertThat(draft.getValue()).isEqualTo(
+            new SshCredentialDraft("root", AuthMethod.PASSWORD, "pw", null));
+        AdoptResponse body = response.getBody();
+        assertThat(body.name()).isEqualTo("nas");
+        assertThat(body.credentialProvided()).isTrue();
+        assertThat(body.credentialVerified()).isTrue();
+        assertThat(body.credentialStored()).isTrue();
+    }
+
+    @Test
+    void adopt_withCredentialRejected_stillReturnsTheMachineButFlagsTheCredentialUnstored() {
+        LanServer created = new LanServer("nas", "192.168.3.50", true, 2375, null, DeviceCategory.NAS);
+        when(adoptDiscoveredMachineUseCase.adopt(eq("192.168.3.50"), eq("nas"), any())).thenReturn(
+            new AdoptionOutcome(created, new SshCredentialVerification(true, false, null), false));
+
+        AdoptResponse body = controller.adopt("192.168.3.50",
+            new AdoptRequest("nas", new SshCredentialBlock("root", "PASSWORD", "wrong", null))).getBody();
+
+        assertThat(body.name()).isEqualTo("nas");
+        assertThat(body.credentialProvided()).isTrue();
+        assertThat(body.credentialVerified()).isFalse();
+        assertThat(body.credentialStored()).isFalse();
+    }
+
+    @Test
+    void adopt_withNoCredentialBlock_usesThePlainAdoptAndReportsNoCredential() {
+        when(adoptDiscoveredMachineUseCase.adopt("192.168.3.50", "nas")).thenReturn(
+            new LanServer("nas", "192.168.3.50", true, 2375, null, DeviceCategory.NAS));
+
+        AdoptResponse body =
+            controller.adopt("192.168.3.50", new AdoptRequest("nas")).getBody();
+
+        verify(adoptDiscoveredMachineUseCase).adopt("192.168.3.50", "nas");
+        assertThat(body.credentialProvided()).isFalse();
+        assertThat(body.credentialVerified()).isFalse();
+        assertThat(body.credentialStored()).isFalse();
     }
 
     @Test

@@ -45,6 +45,7 @@ class LanServerServiceTest {
     @Mock private net.vaier.domain.port.ForTrackingHostKeys forTrackingHostKeys;
     @Mock private net.vaier.domain.port.ForGettingDiscoveredLanMachines forGettingDiscoveredLanMachines;
     @Mock private net.vaier.domain.port.ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines;
+    @Mock private net.vaier.domain.port.ForVerifyingSshCredentials forVerifyingSshCredentials;
 
     @InjectMocks private LanServerService service;
 
@@ -148,6 +149,65 @@ class LanServerServiceTest {
         assertThat(captor.getValue()).isEqualTo(new LanServer(
             "hallway-printer", "192.168.3.20", false, null, null,
             net.vaier.domain.DeviceCategory.PRINTER));
+    }
+
+    // --- adopt with an optional SSH credential (slice 2 of "Add a machine") ---
+
+    @Test
+    void adopt_withVerifiedCredential_registersMachineAndStoresCredentialUnderTheNewName() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forGettingDiscoveredLanMachines.findByIpAddress("192.168.3.50")).thenReturn(Optional.of(
+            new net.vaier.domain.DiscoveredLanMachine("192.168.3.50", "synology-nas",
+                List.of(22, 2375, 5000), "apalveien5")));
+        // Server-side re-verify authenticates against the adopted machine's LAN address.
+        when(forVerifyingSshCredentials.probe(any())).thenReturn("SHA256:abc");
+
+        var draft = new net.vaier.domain.SshCredentialDraft(
+            "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null);
+        var outcome = service.adopt("192.168.3.50", null, draft);
+
+        // The machine is registered exactly as the 2-arg adopt does.
+        verify(forPersistingLanServers).save(new LanServer(
+            "synology-nas", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS));
+        verify(forForgettingDiscoveredLanMachines).forget("192.168.3.50");
+        // The credential is stored keyed to the new machine's derived name, unmanaged.
+        verify(forPersistingHostCredentials).save(new net.vaier.domain.HostCredential(
+            "synology-nas", "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false));
+        // The probe targeted the machine's LAN address, with nothing pinned yet.
+        ArgumentCaptor<net.vaier.domain.SshTarget> target =
+            ArgumentCaptor.forClass(net.vaier.domain.SshTarget.class);
+        verify(forVerifyingSshCredentials).probe(target.capture());
+        assertThat(target.getValue().host()).isEqualTo("192.168.3.50");
+        assertThat(target.getValue().pinnedFingerprint()).isNull();
+        assertThat(outcome.server().name()).isEqualTo("synology-nas");
+        assertThat(outcome.credentialStored()).isTrue();
+        assertThat(outcome.credentialVerification().authenticated()).isTrue();
+    }
+
+    @Test
+    void adopt_withRejectedCredential_stillRegistersMachineButDoesNotStoreItAndFlagsTheOutcome() {
+        // A bad credential must never roll back the registration — the machine is still added.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forGettingDiscoveredLanMachines.findByIpAddress("192.168.3.50")).thenReturn(Optional.of(
+            new net.vaier.domain.DiscoveredLanMachine("192.168.3.50", "synology-nas",
+                List.of(22, 2375), "apalveien5")));
+        when(forVerifyingSshCredentials.probe(any()))
+            .thenThrow(new net.vaier.domain.SshAuthException("rejected"));
+
+        var draft = new net.vaier.domain.SshCredentialDraft(
+            "root", net.vaier.domain.AuthMethod.PASSWORD, "wrong", null);
+        var outcome = service.adopt("192.168.3.50", null, draft);
+
+        verify(forPersistingLanServers).save(any());
+        verify(forForgettingDiscoveredLanMachines).forget("192.168.3.50");
+        verify(forPersistingHostCredentials, never()).save(any());
+        assertThat(outcome.server().name()).isEqualTo("synology-nas");
+        assertThat(outcome.credentialStored()).isFalse();
+        assertThat(outcome.credentialVerification().authenticated()).isFalse();
     }
 
     @Test

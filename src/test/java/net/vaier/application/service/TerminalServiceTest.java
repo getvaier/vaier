@@ -44,6 +44,7 @@ class TerminalServiceTest {
     @Mock ForOpeningSshSessions forOpeningSshSessions;
     @Mock ForRunningSshCommands forRunningSshCommands;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
+    @Mock net.vaier.domain.port.ForVerifyingSshCredentials forVerifyingSshCredentials;
     @Mock SshOutputListener onOutput;
     @Mock SshSession sshSession;
 
@@ -82,6 +83,64 @@ class TerminalServiceTest {
     void deleteHostCredential_deletesViaPort() {
         service.deleteHostCredential("nas");
         verify(forPersistingHostCredentials).deleteByMachine("nas");
+    }
+
+    // --- pre-registration SSH credential verify ("Add a machine" slice 2, Part A) ---
+
+    @Test
+    void verifySshCredential_success_isAuthenticatedWithFingerprint_andPersistsNothing() {
+        // The probe reaches the host and the credential authenticates; the fingerprint is returned for
+        // display only. A pre-registration test must never write to the vault or pin a host key.
+        net.vaier.domain.SshCredentialDraft draft =
+            new net.vaier.domain.SshCredentialDraft("root", AuthMethod.PASSWORD, "pw", null);
+        when(forVerifyingSshCredentials.probe(any())).thenReturn("SHA256:abc");
+
+        net.vaier.domain.SshCredentialVerification result =
+            service.verify("192.168.3.50", 22, draft);
+
+        assertThat(result.reachable()).isTrue();
+        assertThat(result.authenticated()).isTrue();
+        assertThat(result.fingerprint()).isEqualTo("SHA256:abc");
+        // The target carries the address, the draft's login, and no pin (nothing is trusted yet).
+        ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
+        verify(forVerifyingSshCredentials).probe(target.capture());
+        assertThat(target.getValue().host()).isEqualTo("192.168.3.50");
+        assertThat(target.getValue().port()).isEqualTo(22);
+        assertThat(target.getValue().pinnedFingerprint()).isNull();
+        verify(forPersistingHostCredentials, never()).save(any());
+        verify(forTrackingHostKeys, never()).pin(any(), any());
+    }
+
+    @Test
+    void verifySshCredential_wrongSecret_isNotAuthenticated_andPersistsNothing() {
+        net.vaier.domain.SshCredentialDraft draft =
+            new net.vaier.domain.SshCredentialDraft("root", AuthMethod.PASSWORD, "wrong", null);
+        when(forVerifyingSshCredentials.probe(any()))
+            .thenThrow(new net.vaier.domain.SshAuthException("rejected"));
+
+        net.vaier.domain.SshCredentialVerification result =
+            service.verify("192.168.3.50", 22, draft);
+
+        assertThat(result.reachable()).isTrue();
+        assertThat(result.authenticated()).isFalse();
+        verify(forPersistingHostCredentials, never()).save(any());
+        verify(forTrackingHostKeys, never()).pin(any(), any());
+    }
+
+    @Test
+    void verifySshCredential_unreachableHost_isNotReachable_andPersistsNothing() {
+        net.vaier.domain.SshCredentialDraft draft =
+            new net.vaier.domain.SshCredentialDraft("root", AuthMethod.PASSWORD, "pw", null);
+        when(forVerifyingSshCredentials.probe(any()))
+            .thenThrow(new net.vaier.domain.SshConnectException("no route to host"));
+
+        net.vaier.domain.SshCredentialVerification result =
+            service.verify("192.168.3.50", 22, draft);
+
+        assertThat(result.reachable()).isFalse();
+        assertThat(result.authenticated()).isFalse();
+        verify(forPersistingHostCredentials, never()).save(any());
+        verify(forTrackingHostKeys, never()).pin(any(), any());
     }
 
     // --- terminal (slice 2) ---
