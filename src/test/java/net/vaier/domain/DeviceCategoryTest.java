@@ -255,4 +255,16 @@ class DeviceCategoryTest {
             assertThat(c.sshCapableByDefault()).as(c.name()).isFalse();
         }
     }
+
+    @Test
+    void isStorageClass_trueOnlyForServerAndNas() {
+        assertThat(DeviceCategory.SERVER.isStorageClass()).isTrue();
+        assertThat(DeviceCategory.NAS.isStorageClass()).isTrue();
+        for (DeviceCategory c : new DeviceCategory[]{
+                DeviceCategory.DESKTOP, DeviceCategory.LAPTOP, DeviceCategory.PHONE, DeviceCategory.PRINTER,
+                DeviceCategory.ROUTER, DeviceCategory.GATEWAY, DeviceCategory.IOT, DeviceCategory.CAMERA,
+                DeviceCategory.MEDIA, DeviceCategory.GENERIC}) {
+            assertThat(c.isStorageClass()).as(c.name()).isFalse();
+        }
+    }
 }

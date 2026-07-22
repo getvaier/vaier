@@ -1,18 +1,29 @@
 package net.vaier.rest;
 
 import net.vaier.application.ClearHostKeyUseCase;
+import net.vaier.application.GetBackupJobsUseCase;
+import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
+import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetMachineDiskUsageUseCase;
 import net.vaier.application.GetMachineDiskUsageUseCase.MachineFilesystemUco;
+import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.domain.AuthMethod;
+import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.Machine;
+import net.vaier.domain.MachineNudge;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.PublishableService;
+import net.vaier.domain.PublishableService.PublishableSource;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -38,6 +49,10 @@ class MachineRestControllerTest {
     @Mock ClearHostKeyUseCase clearHostKeyUseCase;
     @Mock GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
     @Mock SetDiskWatchUseCase setDiskWatchUseCase;
+    @Mock GetPublishableServicesUseCase getPublishableServicesUseCase;
+    @Mock GetBackupJobsUseCase getBackupJobsUseCase;
+    @Mock GetBackupServersUseCase getBackupServersUseCase;
+    @Mock GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
 
     @InjectMocks MachineRestController controller;
 
@@ -149,6 +164,44 @@ class MachineRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(clearHostKeyUseCase).clearHostKey("nas");
+    }
+
+    // --- progressive-adoption nudges (edge-composed) ---
+    //
+    // The controller (a driving adapter) gathers each signal from an existing *UseCase and hands them to
+    // the pure-domain MachineNudges assembler, which owns the decisions. No service composes across
+    // domains and no service implements a driven port to expose nudges.
+
+    @Test
+    void nudges_composesFromTheGatheredSignals() {
+        // A reachable, storage-class peer, with an exposed service, an SSH credential, nothing backed up,
+        // and no backup server anywhere ⇒ all three nudges fire.
+        String freshHandshake = String.valueOf(System.currentTimeMillis() / 1000);
+        Machine alice = new Machine("alice", MachineType.UBUNTU_SERVER, "pk", "10.13.13.2/32",
+            "1.2.3.4", "51820", freshHandshake, "1", "1", null, null, true, null, DeviceCategory.SERVER, null);
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(alice));
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(null));
+        when(getPublishableServicesUseCase.getPublishableServices()).thenReturn(List.of(
+            new PublishableService(PublishableSource.PEER, "alice", "10.13.13.2", "grafana", 3000, null, false)));
+        when(getHostCredentialUseCase.getHostCredential("alice")).thenReturn(
+            Optional.of(new HostCredentialView("alice", "root", AuthMethod.PASSWORD, true)));
+        when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of());
+        when(getBackupServersUseCase.getBackupServers()).thenReturn(List.of());
+
+        var response = controller.nudges("alice");
+
+        assertThat(response).extracting(MachineRestController.NudgeResponse::kind)
+            .containsExactly(MachineNudge.Kind.PUBLISH.name(), MachineNudge.Kind.BACK_UP.name(),
+                MachineNudge.Kind.DESIGNATE_BACKUP_SERVER.name());
+        assertThat(response.get(0).title()).isNotBlank();
+    }
+
+    @Test
+    void nudges_unknownMachine_404() {
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of());
+
+        assertThatThrownBy(() -> controller.nudges("ghost"))
+            .isInstanceOf(NotFoundException.class);
     }
 
     // --- a machine's filesystems (#323 slice C, fixed by #325) ---

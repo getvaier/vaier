@@ -139,6 +139,19 @@ public enum DeviceCategory {
     }
 
     /**
+     * True for the machine kinds that can host a backup server — a NAS, or a general-purpose
+     * {@link #SERVER}. These are the "storage-class" categories: a machine that plausibly has the disk
+     * capacity and always-on posture to hold the fleet's borg repositories. Seeds the
+     * "designate a backup server" nudge; presentation-derived, like the SSH-access seeds above.
+     */
+    public boolean isStorageClass() {
+        return switch (this) {
+            case SERVER, NAS -> true;
+            default -> false;
+        };
+    }
+
+    /**
      * Parses a stored/override category name (trimmed, case-insensitive), or {@code null} when the
      * value is null or blank (meaning "no override"). Throws {@link IllegalArgumentException} for a
      * non-blank value that is not a valid category — callers surface that as a 400.

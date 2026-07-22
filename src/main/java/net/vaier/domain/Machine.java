@@ -3,6 +3,7 @@ package net.vaier.domain;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 
 import java.util.Collection;
+import java.util.Map;
 
 /**
  * Unified read projection for every machine Vaier manages — both WireGuard peers
@@ -115,6 +116,25 @@ public record Machine(
             LanAnchor.VAIER_SERVER_NAME, MachineType.UBUNTU_SERVER,
             null, null, null, null, null, null, null,
             null, null, true, null, DeviceCategory.SERVER, sshAccessOverride);
+    }
+
+    /**
+     * Whether this machine is reachable right now, from already-cached signals only — no fresh probe.
+     * The {@link LanAnchor#VAIER_SERVER_NAME Vaier server} is always reachable (Vaier runs on it); a
+     * {@link MachineType#LAN_SERVER} is reachable when the cached LAN reachability map reports its
+     * address {@link Reachability#OK}; every other machine is a VPN peer, reachable when its tunnel
+     * handshake is still fresh. Peer freshness reuses {@link VpnClient#isConnected()} rather than
+     * re-deriving the staleness rule here — this machine already carries the peer's runtime fields.
+     */
+    public boolean isReachable(Map<String, Reachability> lanReachability) {
+        if (LanAnchor.VAIER_SERVER_NAME.equals(name)) {
+            return true;
+        }
+        if (type == MachineType.LAN_SERVER) {
+            return lanReachability != null && lanReachability.get(lanAddress) == Reachability.OK;
+        }
+        return new VpnClient(publicKey, allowedIps, endpointIp, endpointPort, latestHandshake,
+            transferRx, transferTx).isConnected();
     }
 
     /**

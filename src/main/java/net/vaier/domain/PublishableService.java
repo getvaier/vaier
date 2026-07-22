@@ -2,6 +2,9 @@ package net.vaier.domain;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Map;
+import java.util.Optional;
+
 /**
  * A discovered service eligible for publishing. Its {@code source} indicates where it was
  * discovered (Vaier server, server peer, or Docker-enabled LAN server). Owns the publishing
@@ -27,6 +30,23 @@ public record PublishableService(
             case PEER         -> peerName + "/" + containerName + ":" + port;
             case LAN_SERVER   -> address  + "/" + containerName + ":" + port;
             case VAIER_SERVER -> containerName + ":" + port;
+        };
+    }
+
+    /**
+     * The name of the machine this discovered service sits on, so the "publish me" nudge can be
+     * attributed per machine. A {@link PublishableSource#PEER peer}'s services belong to the peer
+     * (its name is the machine name); the {@link PublishableSource#VAIER_SERVER Vaier server}'s belong
+     * to {@code vaierServerName}; a {@link PublishableSource#LAN_SERVER LAN server}'s belong to whatever
+     * machine bears its address in {@code lanServerNameByAddress}. Empty when the owner cannot be named
+     * (e.g. a LAN address that maps to no known machine).
+     */
+    public Optional<String> ownerMachineName(String vaierServerName,
+                                             Map<String, String> lanServerNameByAddress) {
+        return switch (source) {
+            case PEER         -> Optional.ofNullable(peerName);
+            case VAIER_SERVER -> Optional.ofNullable(vaierServerName);
+            case LAN_SERVER   -> Optional.ofNullable(lanServerNameByAddress.get(address));
         };
     }
 

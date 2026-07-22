@@ -2,13 +2,22 @@ package net.vaier.rest;
 
 import lombok.RequiredArgsConstructor;
 import net.vaier.application.ClearHostKeyUseCase;
+import net.vaier.application.GetBackupJobsUseCase;
+import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
+import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetMachineDiskUsageUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.domain.BackupFleet;
 import net.vaier.domain.Machine;
+import net.vaier.domain.MachineNudge;
+import net.vaier.domain.MachineNudges;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.Reachability;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +29,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/machines")
@@ -33,6 +44,10 @@ public class MachineRestController {
     private final ClearHostKeyUseCase clearHostKeyUseCase;
     private final GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
     private final SetDiskWatchUseCase setDiskWatchUseCase;
+    private final GetPublishableServicesUseCase getPublishableServicesUseCase;
+    private final GetBackupJobsUseCase getBackupJobsUseCase;
+    private final GetBackupServersUseCase getBackupServersUseCase;
+    private final GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
 
     @GetMapping
     public List<MachineResponse> list() {
@@ -56,6 +71,57 @@ public class MachineRestController {
     }
 
     record VaierServerResponse(String name, boolean sshAccess, boolean hasCredential) {}
+
+    /**
+     * The progressive-adoption nudges Vaier suggests for one machine: evidence-backed, single yes/no
+     * prompts to adopt one more capability — publish its exposed services, back it up, or make it the
+     * fleet's backup server. Each carries its own "why" from already-cached state.
+     *
+     * <p><b>Composed at the driving edge.</b> The controller gathers each signal from an existing
+     * {@code *UseCase} — the machine, its publishable services, whether a credential is stored, whether
+     * anything is backed up, the backup fleet, reachability — and hands them to the pure-domain
+     * {@link MachineNudges} assembler, which owns the decisions. No application service reaches across
+     * domains to collect nudges, and none implements a driven port to expose them. 404 when no machine
+     * bears that name. A non-whitelisted path under {@code /machines}, so it is admin-gated automatically.
+     */
+    @GetMapping("/{machine}/nudges")
+    public List<NudgeResponse> nudges(@PathVariable String machine) {
+        List<Machine> machines = getMachinesUseCase.getAllMachines();
+        Machine target = machines.stream()
+            .filter(m -> m.name().equals(machine))
+            .findFirst()
+            .orElseThrow(() -> new NotFoundException("Machine not found: " + machine));
+
+        String vaierServerName = getVaierServerUseCase.getVaierServerMachine().name();
+        Map<String, String> lanServerNameByAddress = machines.stream()
+            .filter(m -> m.lanAddress() != null)
+            .collect(Collectors.toMap(Machine::lanAddress, Machine::name, (a, b) -> a));
+
+        int publishableCount = (int) getPublishableServicesUseCase.getPublishableServices().stream()
+            .filter(s -> s.ownerMachineName(vaierServerName, lanServerNameByAddress)
+                .map(machine::equals).orElse(false))
+            .count();
+        boolean hasCredential = getHostCredentialUseCase.getHostCredential(machine)
+            .map(v -> v.hasSecret()).orElse(false);
+        boolean alreadyProtected = getBackupJobsUseCase.getBackupJobs().stream()
+            .anyMatch(j -> machine.equals(j.machineName()));
+        BackupFleet fleet = new BackupFleet(getBackupServersUseCase.getBackupServers());
+        Map<String, Reachability> lanReachability = target.lanAddress() == null ? Map.of()
+            : Map.of(target.lanAddress(), getLanServerReachabilityUseCase.getReachability(target.lanAddress()));
+        boolean reachable = target.isReachable(lanReachability);
+
+        return MachineNudges.forMachine(target, publishableCount, reachable, hasCredential,
+                alreadyProtected, fleet).stream()
+            .map(NudgeResponse::from)
+            .toList();
+    }
+
+    /** One nudge flattened for the browser: its kind, operator-facing title, evidence, and action hint. */
+    public record NudgeResponse(String kind, String title, String evidence, String action) {
+        static NudgeResponse from(MachineNudge n) {
+            return new NudgeResponse(n.kind().name(), n.title(), n.evidence(), n.action());
+        }
+    }
 
     /**
      * Sets whether Vaier offers SSH for a machine — the credential control now, the web terminal
