@@ -77,7 +77,11 @@ class LanServerSetupScriptTest {
 
         assertThat(s).contains("/usr/local/sbin/vaier-docker-firewall.sh");
         assertThat(s).contains("/etc/systemd/system/vaier-docker-firewall.service");
-        assertThat(s).contains("allow 192.168.3.121");        // ACCEPT the Docker API from the relay gateway
+        // A dedicated chain, flushed and repopulated each run, so re-running after the host moves to a
+        // different relay replaces the rule cleanly (no stale gateway left behind).
+        assertThat(s).contains("VAIER-DOCKER-API");
+        assertThat(s).contains("iptables -F VAIER-DOCKER-API");
+        assertThat(s).contains("-s 192.168.3.121 -p tcp --dport 2375 -j ACCEPT");  // ACCEPT from the relay gateway
         assertThat(s).contains("--dport 2375 -j DROP");        // drop it from everyone else
         assertThat(s).contains("systemctl enable --now vaier-docker-firewall.service");
         assertThat(s).contains("command -v iptables");         // no-op if iptables is absent

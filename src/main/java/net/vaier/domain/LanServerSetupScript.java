@@ -134,14 +134,14 @@ public final class LanServerSetupScript {
     private static String firewallBlock(int port, String gateway) {
         String fw =
             "#!/bin/sh\n"
-            + "# Managed by Vaier — locks the unauthenticated Docker API to the fleet gateway. Idempotent, re-run safe.\n"
-            + "allow() {\n"
-            + "  iptables -C INPUT -s \"$1\" -p tcp --dport " + port + " -j ACCEPT 2>/dev/null \\\n"
-            + "    || iptables -I INPUT -s \"$1\" -p tcp --dport " + port + " -j ACCEPT\n"
-            + "}\n"
-            + "allow " + gateway + "\n"
-            + "iptables -C INPUT -p tcp --dport " + port + " -j DROP 2>/dev/null \\\n"
-            + "  || iptables -A INPUT -p tcp --dport " + port + " -j DROP\n";
+            + "# Managed by Vaier — locks the unauthenticated Docker API to the fleet gateway. Reconciling and\n"
+            + "# idempotent: a dedicated chain is flushed and repopulated each run, so re-running after the host\n"
+            + "# moves to a different relay/network replaces the rule cleanly, leaving no stale gateway behind.\n"
+            + "iptables -N VAIER-DOCKER-API 2>/dev/null || iptables -F VAIER-DOCKER-API\n"
+            + "iptables -A VAIER-DOCKER-API -s " + gateway + " -p tcp --dport " + port + " -j ACCEPT\n"
+            + "iptables -A VAIER-DOCKER-API -p tcp --dport " + port + " -j DROP\n"
+            + "iptables -C INPUT -p tcp --dport " + port + " -j VAIER-DOCKER-API 2>/dev/null \\\n"
+            + "  || iptables -I INPUT -p tcp --dport " + port + " -j VAIER-DOCKER-API\n";
         return "\n"
             + "echo \"==> Locking the Docker API (tcp " + port + ") to the Vaier fleet gateway " + gateway + "\"\n"
             + "if command -v iptables >/dev/null 2>&1; then\n"
