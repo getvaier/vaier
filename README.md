@@ -217,7 +217,7 @@ Your answers resolve to one of the four peer types, and each has its own handoff
 
 | What / OS | Peer type | Default routing | Handoff |
 |-----------|-----------|-----------------|---------|
-| A server / Ubuntu | Ubuntu server | VPN subnet only | **No-sudo recipe** — log in as yourself, save the shown `vaier-up.sh` onto the box, run `sh vaier-up.sh` (writes the config and starts WireGuard in a container — Docker only, no root); plus docker-compose and setup-script downloads |
+| A server / Ubuntu | Ubuntu server | VPN subnet only | **No-sudo setup link** — log in as yourself, paste one `curl -fsSL '…/vpn/peers/<id>/setup?t=<token>' \| sh` line, and it pulls the config and starts WireGuard in a container (Docker only, no root); the link is single-use and short-lived. Copying the `vaier-up.sh` script by hand stays as a fallback, plus the docker-compose download |
 | A server / Windows | Windows server | VPN subnet only | `.conf` + docker-compose + brief WireGuard-for-Windows import steps |
 | A personal device / Phone · Mac · Linux | Mobile client | All traffic | QR code + `.conf` |
 | A personal device / Windows PC | Windows client | All traffic | `.conf` + WireGuard-app import steps |

@@ -8,6 +8,7 @@ import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.port.ForVendingSetupTokens;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -136,6 +137,9 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
+
+    @MockBean
+    protected ForVendingSetupTokens forVendingSetupTokens;
 
     @MockBean
     protected ForGeolocatingIps forGeolocatingIps;

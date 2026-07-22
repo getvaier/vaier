@@ -18,6 +18,7 @@ import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.port.ForVendingSetupTokens;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.MachineIntent;
 import net.vaier.domain.MachineType;
@@ -52,6 +53,7 @@ public class VpnPeerRestController {
     private final UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
     private final ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     private final ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
+    private final ForVendingSetupTokens forVendingSetupTokens;
     private final ForPublishingEvents forPublishingEvents;
     private final ForSubscribingToEvents forSubscribingToEvents;
     private final GetServerLocationUseCase getServerLocationUseCase;
@@ -196,11 +198,17 @@ public class VpnPeerRestController {
             ? generatePeerSetupScriptUseCase.generateSetupScript(
                 id, defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT).orElse(null)
             : null;
+        // Mint a single-use setup token alongside the script so create AND reissue hand out a fresh
+        // curl-able one-liner (Slice 4b). Only when the peer type actually has a setup script — the
+        // token authorizes exactly the anonymous /vpn/peers/{id}/setup route that serves it.
+        String setupToken = setupScript != null
+            ? forVendingSetupTokens.issue(id).value()
+            : null;
 
         return new CreatePeerResponse(
                 id, name, ipAddress, publicKey, configFile, peerType.name(),
                 artefacts.stream().map(Enum::name).sorted().toList(),
-                qrCodePngBase64, dockerCompose, setupScript);
+                qrCodePngBase64, dockerCompose, setupScript, setupToken);
     }
 
     @PatchMapping("/{peerName}")
@@ -389,6 +397,45 @@ public class VpnPeerRestController {
     }
 
     /**
+     * ANONYMOUS, token-gated setup download (Slice 4b). Reached via a surgical Traefik forward-auth
+     * exemption for this ONE path — a bare box being onboarded has no oauth2 session, so the
+     * single-use {@link net.vaier.domain.SetupToken} is the only authorization, validated here in
+     * Vaier. The token is per-peer, ~15-min TTL, and burned on first use; it also burns the one-shot
+     * config-retrieval budget (#202), so an intercepted-and-spent link leaves the box unable to come
+     * up and the operator regenerates. Serves the script as {@code text/plain} so {@code curl … | sh}
+     * works. NEVER log the token.
+     *
+     * <p>Ordering is deliberate: consume the token FIRST (single-use — a used link is spent even if
+     * the config budget later 410s), then the one-shot gate, then generate. A failed token check
+     * serves nothing.
+     */
+    @GetMapping("/{peerId}/setup")
+    public ResponseEntity<?> downloadTokenizedSetupScript(
+            @PathVariable String peerId,
+            @RequestParam(name = "t", required = false) String token) {
+        log.info("Tokenized setup script requested for peer: {}", LogSafe.forLog(peerId));
+        if (token == null || !forVendingSetupTokens.consume(peerId, token)) {
+            log.warn("Rejected tokenized setup for peer {}: missing, invalid, or already-used token",
+                LogSafe.forLog(peerId));
+            return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED)
+                .contentType(MediaType.TEXT_PLAIN)
+                .body("This setup link is invalid or has already been used. Regenerate it in Vaier.\n");
+        }
+        ResponseEntity<?> gate = checkOneShotGate(peerId);
+        if (gate != null) return gate;
+
+        return generatePeerSetupScriptUseCase.generateSetupScript(
+                    peerId, defaultServerUrl(), ServiceNames.DEFAULT_WG_PORT)
+                .<ResponseEntity<?>>map(script -> ResponseEntity.ok()
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .body(script))
+                .orElseGet(() -> {
+                    log.warn("Peer not found for tokenized setup script: {}", LogSafe.forLog(peerId));
+                    return ResponseEntity.notFound().build();
+                });
+    }
+
+    /**
      * One-shot gate (#202). Atomically marks the peer as viewed; returns a 404 if the peer
      * directory doesn't exist, or a 410 if the marker was already set. Returns null on first
      * successful view — the caller proceeds to serve the artefact.
@@ -518,7 +565,8 @@ public class VpnPeerRestController {
             List<String> availableArtifacts,
             String qrCodePngBase64,
             String dockerCompose,
-            String setupScript
+            String setupScript,
+            String setupToken
     ) {}
 
     public record UpdateLanAddressRequest(

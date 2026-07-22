@@ -2070,14 +2070,44 @@
         }
         const strong = (t) => { const e = el('b'); e.textContent = t; return e; };
 
-        // Ubuntu server: the no-sudo recipe. The setup script is shown once for the operator to transfer —
-        // save-the-file, deliberately NOT a curl-with-token line (no anonymous endpoint).
+        // Ubuntu server: the no-sudo recipe. When a single-use setup token is present (Slice 4b) the
+        // PRIMARY recipe is the curl one-liner — log in as yourself, paste one line, it turns green on its
+        // own; the box pulls its own config over HTTPS from Vaier's token-gated /setup route. Copying the
+        // script by hand stays as a fallback. Without a token (older responses) we keep the save-the-file flow.
         function peerHandoffUbuntu(p) {
             const wrap = el('div');
             const sect = section('Get ' + p.name + ' on the air');
             const badge = el('span', 'ex-nosudo'); badge.textContent = '✓ no sudo';
             sect.appendChild(badge);
             wrap.appendChild(sect);
+
+            if (p.setupToken) {
+                const curl = "curl -fsSL '" + window.location.origin + '/vpn/peers/'
+                    + encodeURIComponent(p.id) + '/setup?t=' + encodeURIComponent(p.setupToken) + "' | sh";
+
+                const ol = el('ol', 'ex-recipe');
+                ol.appendChild(recipeStep([strong('Log in'), ' to the box as yourself — no sudo.'],
+                    'ssh you@' + p.id));
+                ol.appendChild(recipeStep([strong('Paste this line'), ' and run it. It pulls the config and '
+                    + 'starts WireGuard in a container. The link works once.']));
+                wrap.appendChild(ol);
+                wrap.appendChild(copyableCommand(curl));
+                const last = el('ol', 'ex-recipe');
+                last.appendChild(recipeStep([strong('That’s it.'), ' ' + p.name
+                    + ' turns green here on its first handshake.']));
+                wrap.appendChild(last);
+
+                const fb = el('details', 'ex-fallback');
+                const sum = el('summary'); sum.textContent = 'Prefer to copy the script by hand? Download it.';
+                fb.appendChild(sum);
+                if (p.setupScript) {
+                    const pre = el('pre', 'ex-config'); pre.textContent = p.setupScript;
+                    fb.appendChild(pre);
+                }
+                fb.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true, qr: false }));
+                wrap.appendChild(fb);
+                return wrap;
+            }
 
             const ol = el('ol', 'ex-recipe');
             ol.appendChild(recipeStep([strong('Log in'), ' to the box as yourself.'], 'ssh you@' + p.id));
@@ -2094,6 +2124,18 @@
                 wrap.appendChild(pre);
             }
             wrap.appendChild(peerConfigBlock(p, { showConfig: false, compose: true, setup: true, qr: false }));
+            return wrap;
+        }
+
+        // A command in a copy-friendly block: the text shown verbatim plus the existing copy affordance.
+        function copyableCommand(cmd) {
+            const wrap = el('div');
+            const pre = el('pre', 'ex-config'); pre.textContent = cmd; wrap.appendChild(pre);
+            const row = el('div', 'ex-set-actions');
+            const copy = el('button', 'ex-btn is-accent'); copy.textContent = 'Copy command';
+            copy.onclick = () => navigator.clipboard.writeText(cmd)
+                .then(() => toast('Command copied.')).catch(() => toast('Could not copy the command.'));
+            row.appendChild(copy); wrap.appendChild(row);
             return wrap;
         }
 

@@ -19,13 +19,16 @@ import net.vaier.application.RenamePeerUseCase;
 import net.vaier.application.UpdateLanCidrUseCase;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.SetupToken;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
+import net.vaier.domain.port.ForVendingSetupTokens;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
@@ -55,6 +58,7 @@ class VpnPeerRestControllerTest {
     @Mock net.vaier.application.UpdatePeerDeviceCategoryUseCase updatePeerDeviceCategoryUseCase;
     @Mock ForUpdatingPeerConfigurations forUpdatingPeerConfigurations;
     @Mock ForTrackingPeerConfigRetrieval forTrackingPeerConfigRetrieval;
+    @Mock ForVendingSetupTokens forVendingSetupTokens;
     @Mock ForPublishingEvents forPublishingEvents;
     @Mock ForSubscribingToEvents forSubscribingToEvents;
     @Mock GetServerLocationUseCase getServerLocationUseCase;
@@ -298,6 +302,9 @@ class VpnPeerRestControllerTest {
             .thenReturn("compose-yaml");
         when(generatePeerSetupScriptUseCase.generateSetupScript(eq("apalveien5"), any(), any()))
             .thenReturn(Optional.of("setup-sh"));
+        // A setup-script-bearing reissue also hands out a fresh single-use setup token (Slice 4b).
+        when(forVendingSetupTokens.issue("apalveien5"))
+            .thenReturn(new SetupToken("apalveien5", "fresh-token", 0L));
 
         var response = controller.reissuePeer("apalveien5");
 
@@ -306,8 +313,59 @@ class VpnPeerRestControllerTest {
         assertThat(body.configFile()).contains("172.31.16.0/20");
         assertThat(body.dockerCompose()).isEqualTo("compose-yaml");
         assertThat(body.setupScript()).isEqualTo("setup-sh");
+        assertThat(body.setupToken()).isEqualTo("fresh-token");
         assertThat(body.availableArtifacts()).contains("WG_CONFIG", "DOCKER_COMPOSE", "SETUP_SCRIPT");
         verify(forPublishingEvents).publish("vpn-peers", "peers-updated", "");
+    }
+
+    // --- tokenized anonymous setup download (Slice 4b) ---
+
+    @Test
+    void tokenizedSetup_validTokenFirstView_servesScriptAsPlainText() {
+        when(forVendingSetupTokens.consume("apalveien5", "tok")).thenReturn(true);
+        when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("apalveien5")).thenReturn(true);
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(generatePeerSetupScriptUseCase.generateSetupScript(eq("apalveien5"), any(), any()))
+            .thenReturn(Optional.of("setup-sh"));
+
+        var response = controller.downloadTokenizedSetupScript("apalveien5", "tok");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isEqualTo("setup-sh");
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.TEXT_PLAIN);
+    }
+
+    @Test
+    void tokenizedSetup_missingToken_401_andNeverConsumesOrGenerates() {
+        var response = controller.downloadTokenizedSetupScript("apalveien5", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        verify(generatePeerSetupScriptUseCase, never()).generateSetupScript(any(), any(), any());
+        verify(forTrackingPeerConfigRetrieval, never()).markViewedIfNotAlready(any());
+    }
+
+    @Test
+    void tokenizedSetup_invalidToken_401_andNeverGeneratesScript() {
+        when(forVendingSetupTokens.consume("apalveien5", "bad")).thenReturn(false);
+
+        var response = controller.downloadTokenizedSetupScript("apalveien5", "bad");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(401);
+        verify(generatePeerSetupScriptUseCase, never()).generateSetupScript(any(), any(), any());
+        verify(forTrackingPeerConfigRetrieval, never()).markViewedIfNotAlready(any());
+    }
+
+    @Test
+    void tokenizedSetup_validTokenButAlreadyViewed_410_afterBurningTheToken() {
+        when(forVendingSetupTokens.consume("apalveien5", "tok")).thenReturn(true);
+        when(forTrackingPeerConfigRetrieval.markViewedIfNotAlready("apalveien5")).thenReturn(false);
+
+        var response = controller.downloadTokenizedSetupScript("apalveien5", "tok");
+
+        // A used link is spent even when the config budget is already gone: consume happens first.
+        assertThat(response.getStatusCode().value()).isEqualTo(410);
+        verify(forVendingSetupTokens).consume("apalveien5", "tok");
+        verify(generatePeerSetupScriptUseCase, never()).generateSetupScript(any(), any(), any());
     }
 
     @Test

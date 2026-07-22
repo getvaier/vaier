@@ -514,7 +514,11 @@ services:
       # sign-in. Precisely whitelisted: the launchpad page + its static assets (styles.css, icons),
       # the anonymous services feed, and the LAN docker-setup script. Never admin.html or any admin
       # API — those fall through to the Tier 3 catch-all below.
-      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || Path(`/avatar.js`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/launchpad/events`) || Path(`/lan-servers/docker-setup.sh`))
+      # The PathRegexp alternative is the SURGICAL Slice 4b exemption: it serves the per-peer setup
+      # script to a bare box being onboarded, which has no oauth2 session yet. Anchored to a single
+      # id path segment + /setup only — nothing else is exposed. The route is self-guarded by a
+      # single-use, ~15-min, per-peer setup token validated inside Vaier (over HTTPS via websecure).
+      - traefik.http.routers.vaier-public.rule=Host(`vaier.${VAIER_DOMAIN}`) && (Path(`/`) || Path(`/index.html`) || Path(`/launchpad.html`) || Path(`/styles.css`) || Path(`/avatar.js`) || PathPrefix(`/icon`) || Path(`/favicon`) || Path(`/launchpad/services`) || Path(`/launchpad/events`) || Path(`/lan-servers/docker-setup.sh`) || PathRegexp(`^/vpn/peers/[^/]+/setup$`))
       - traefik.http.routers.vaier-public.entrypoints=websecure
       - traefik.http.routers.vaier-public.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-public.priority=200
