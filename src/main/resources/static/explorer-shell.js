@@ -125,6 +125,7 @@
         roots: new Map(),                // (machine, at) -> where a file tree begins (its SFTP root, #326)
         at: null,                        // the archive being browsed, or null for the present — the live filesystem
         archives: new Map(),             // machine name -> { state, list, error }: its archives, the rail's stops
+        nudges: new Map(),               // machine name -> { state, list }: its progressive-adoption nudges (GET /machines/{name}/nudges), read once per machine
         clipboard: [],                   // held file coordinates {machine, path, at, name, directory, size} — the Clipboard
         transfers: new Map(),            // id -> a live/settled Transfer, streamed in over the transfers SSE topic
         sel: [],                         // the fleet-wide selection: {machine, path, at, name, directory, size, backedUp}
@@ -484,6 +485,25 @@
             S.archives.set(machine, { state: 'ready', list: res.ok ? await res.json() : [], error: null });
         } catch (e) {
             S.archives.set(machine, { state: 'ready', list: [], error: null });
+        }
+        render();
+    }
+
+    // A machine's progressive-adoption nudges — the next capabilities Vaier suggests adopting for it
+    // (publish its services, back it up, make it the fleet's backup server). Read once per machine when its
+    // pane opens, then repainted; never polled — a nudge changes when the operator acts, not under the cursor.
+    // The domain decides which apply (GET /machines/{name}/nudges); the shell only renders them and routes the
+    // action, so "should this fire?" is never re-derived in JS. A failure is a quiet empty list: no nudges,
+    // the pane is exactly what it was.
+    async function loadNudges(machine) {
+        const held = S.nudges.get(machine);
+        if (held && (held.state === 'loading' || held.state === 'ready')) return;   // once per machine
+        S.nudges.set(machine, { state: 'loading', list: [] });
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machine) + '/nudges', { cache: 'no-store' });
+            S.nudges.set(machine, { state: 'ready', list: res.ok ? await res.json() : [] });
+        } catch (e) {
+            S.nudges.set(machine, { state: 'ready', list: [] });
         }
         render();
     }
@@ -1112,18 +1132,17 @@
             body.appendChild(grid);
         }
 
-        // Designation lives on the machine now, not on a page apart. Any machine can become the fleet's one
-        // backup server — but only while none is yet: the machine that already is it wears a `backup` entry
-        // above, and every other machine stays quiet, because there is exactly one and moving it means removing
-        // it first. So this offer shows on every machine only in the bootstrapping moment before a server exists.
-        if (!S.backupServer) {
-            body.appendChild(section('Fleet backup'));
-            body.appendChild(note('No machine is the fleet’s backup server yet. Make this one the place the '
-                + 'fleet backs its archives up to.', false));
-            const act = el('div', 'ex-lactions is-static');
-            act.appendChild(selVerb('archive', 'Make this the fleet’s backup server', 'ex-btn',
-                () => designateBackupServer(m)));
-            body.appendChild(act);
+        // What Vaier suggests doing next with this machine — progressive-adoption nudges (§6.15.1): publish its
+        // services, back it up, or (in the bootstrapping moment before any exists) make it the fleet's backup
+        // server. Each is an evidence-backed single action. The *domain* decides which apply
+        // (GET /machines/{name}/nudges) — so the shell no longer hand-rolls "offer a backup server when none
+        // exists yet" here; it renders whatever the domain returns and only routes the action. Read once per
+        // machine, repainted, never polled.
+        const nudges = S.nudges.get(m.name);
+        if (!nudges) loadNudges(m.name);
+        if (nudges && nudges.state === 'ready' && nudges.list.length) {
+            body.appendChild(section('Suggested next steps'));
+            nudges.list.forEach((n) => body.appendChild(nudgeCard(m, n)));
         }
 
         // SSH is what opens this machine's files, shell, disk and backups — so this section carries three things:
@@ -1183,6 +1202,33 @@
             body.appendChild(adv);
         }
         pane.appendChild(body);
+    }
+
+    // Where each nudge's action goes — the one bit that is a UI concern, not a domain one: the domain says a
+    // nudge applies and carries its title + evidence; the shell decides which pane opening lets the operator
+    // act on it. PUBLISH → the machine's services (candidates are there to route); BACK_UP → its file browser,
+    // where folders are ticked and protected; DESIGNATE → the make-the-backup-server form. Keyed by the
+    // domain's nudge kind; an unknown kind falls back to a no-op label so a new kind can never throw here.
+    const NUDGE_ACTION = {
+        PUBLISH:                 (m) => ({ icon: 'route',   label: 'Publish',          run: () => go(['fleet', m.name, 'services']) }),
+        BACK_UP:                 (m) => ({ icon: 'archive', label: 'Choose folders',   run: () => go(['fleet', m.name, 'files']) }),
+        DESIGNATE_BACKUP_SERVER: (m) => ({ icon: 'nas',     label: 'Set it up',        run: () => designateBackupServer(m) }),
+    };
+
+    // One nudge, rendered as a quiet invitation: an accent glyph for its kind, the domain's title and the
+    // evidence behind it ("the why"), and a single outline action button routed by NUDGE_ACTION.
+    function nudgeCard(m, n) {
+        const a = (NUDGE_ACTION[n.kind] || (() => ({ icon: 'gear', label: 'Open', run: () => {} })))(m);
+        const row = el('div', 'ex-nudge');
+        row.innerHTML = svg(a.icon, 'ex-nudge-ico');
+        const text = el('div', 'ex-nudge-text');
+        const title = el('div', 'ex-nudge-title'); title.textContent = n.title;
+        const why = el('div', 'ex-nudge-why'); why.textContent = n.evidence;
+        text.append(title, why);
+        row.appendChild(text);
+        const btn = el('button', 'ex-btn'); btn.textContent = a.label; btn.onclick = a.run;
+        row.appendChild(btn);
+        return row;
     }
 
     // --- editing a machine, and its SSH access ---------------------------------------------------------

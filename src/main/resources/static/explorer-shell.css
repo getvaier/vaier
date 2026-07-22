@@ -583,6 +583,30 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     max-width: 640px;
     transition: border-color .5s ease;
 }
+
+/* Progressive-adoption nudges — quiet, evidence-backed invitations on a machine (the domain decides which
+   apply; the shell only renders them). A thin accent left-edge and accent glyph mark an opportunity — never
+   the warn colour, since a nudge is an offer, not a problem. The action stays a quiet outline button that
+   warms to the accent on hover, so three stacked nudges invite rather than shout. */
+.ex-nudge {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px 14px;
+    max-width: 640px;
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    border-radius: var(--radius-1);
+    background: var(--bg-card);
+}
+.ex-nudge + .ex-nudge { margin-top: 8px; }
+.ex-nudge-ico { flex: 0 0 auto; width: 16px; height: 16px; color: var(--accent); margin-top: 1px; }
+.ex-nudge-text { flex: 1 1 auto; min-width: 0; }
+.ex-nudge-title { color: var(--text); font-weight: 600; }
+.ex-nudge-why { color: var(--text-muted); font-size: 13px; margin-top: 3px; line-height: 1.45; }
+.ex-nudge .ex-btn { flex: 0 0 auto; align-self: center; white-space: nowrap; }
+@media (max-width: 560px) {
+    .ex-nudge { flex-wrap: wrap; }
+    .ex-nudge .ex-btn { margin-left: 28px; }
+}
 .ex-note.is-error { border-color: rgba(244, 135, 113, .35); background: rgba(244, 135, 113, .06); }
 .ex-note.is-warn { border-color: rgba(220, 220, 170, .4); background: rgba(220, 220, 170, .06); }
 .ex-note code { font-family: var(--mono); font-size: 13px; color: var(--accent); }
