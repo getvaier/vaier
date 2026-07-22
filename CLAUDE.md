@@ -53,6 +53,12 @@ When adding a new use case, do NOT create a new `*Service` class unless the use 
 
 Cross-domain orchestration (e.g., `VpnService.deletePeer` cascading into `PublishingService.deleteService` when a peer with published services is removed) must go via the `*UseCase` interface, never a direct class-to-class dependency. This preserves the hex boundary and avoids circular dependencies.
 
+**Cross-domain *reads* are different from cross-domain *writes*, and the old advice here was wrong.** For years this file said "for a cross-domain query, add a driven port" — and that produced a pervasive bug: the domain that *owns* the data implemented the `For*` port itself (`MachineService implements ForGettingMachines`, `ContainerService implements ForDiscoveringPeerContainers`, …). **A `*Service` must never implement a driven `For*` port.** Driven ports are outbound boundaries — only an `*Adapter` in `adapter/driven/` sits on the implementing side. A service implementing one is a service-to-service dependency in a port costume: the coupling the "services never call use cases" rule forbids, just relabeled, and it makes Spring **bean cycles** possible (the cycle is the tell). Provide a cross-domain read one of two ways instead:
+- **Driving-edge composition** (preferred when the consumer is a controller): the controller injects the several `*UseCase`s it needs and hands their results to a **pure-domain assembler** that owns the decision.
+- **A real adapter** (when the consumer is another service or the domain): move the port's implementation into an `*Adapter` in `adapter/driven/` that composes the lower-level ports; the owning service and every other consumer then *inject* the port. The adapter may call domain factories to build the read model — the decisions stay in the domain.
+
+This is stricter than the write-orchestration exception above (which is about *injecting* a `*UseCase` for a genuine cascade, and does not license a service to *implement* a driven port). See `hexagonal-architecture` skill rule 3 and hex-checker rule 9.
+
 ### Key Integrations
 
 - **WireGuard**: File-based config management at `WIREGUARD_CONFIG_PATH`, process execution for peer management

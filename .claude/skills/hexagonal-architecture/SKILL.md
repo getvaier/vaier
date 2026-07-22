@@ -30,6 +30,7 @@ Layers: `domain/` (entities, value objects, port interfaces — no Spring) · `a
 1. **Decisions live in the DOMAIN.** Predicates and business choices ("is this a duplicate?", "does this path count as covered?", "does this machine need provisioning?") belong on entities/value objects — never in a service, a controller, or the frontend.
 2. **The domain owns port calls.** A domain operation that needs infrastructure is a **domain method that receives a driven port and calls it**; the `*Service` only passes the port in and orchestrates.
 3. **Services never call use cases.** A `*Service` implements use cases and calls **driven ports**. It must not inject or call another service's `*UseCase`. A cross-domain query → add a **driven port**, not a use-case dependency.
+   - **…and services never *implement* a driven port either.** A driven (`For*`) port is an outbound boundary — implemented **only** by an `*Adapter`. A `*Service implements ForX` is rule 3 in disguise: another service injects it as if it were infrastructure, so the cross-service coupling is still there, just relabeled — and now Spring can form a **bean cycle** (adapter-backed ports can't; adapters don't depend back on services). The bean cycle is the tell: if you're making a bean "dependency-light to dodge a cycle", you're already in the smell. **Cross-domain read composition is not a service's job.** Do it at the **driving edge** — a controller injects the several `*UseCase`s it needs and hands their results to a **pure-domain assembler** that owns the decision — or push the shared read down to a **real adapter** implementing the `For*` port.
 4. **A side-effect is not a use case.** Don't invent a `*UseCase` for a consequence of a domain operation — trigger it from the domain through a **driven port**.
 5. **Controllers are thin driving adapters.** Request → use case → response. No business decisions, no orchestration-of-consequences.
 6. **Strict layer isolation.** Never import an unrelated use case just to share a constant/utility.
@@ -40,6 +41,7 @@ Layers: `domain/` (entities, value objects, port interfaces — no Spring) · `a
 - Modelling a **side-effect as a driving use case** and orchestrating it in the **controller** (the "auto-provision on first backup" first attempt). Correct: the domain decides and calls a driven port.
 - Putting a **containment/coverage predicate in the frontend JS** instead of the domain, then shipping the flag as data.
 - A `*Service` injecting another `*UseCase` to reach across domains, instead of adding a driven port.
+- A `*Service` **implementing** a driven `For*` port so a peer service can inject it (e.g. `MachineService implements ForGettingMachines`) — a service-to-service dependency wearing a port costume. It surfaced as a **bean cycle** the moment a second domain (nudges) needed the same read. Correct: compose the reads at the driving edge into a domain assembler, or back the port with a real adapter.
 
 ## Enforcement
 
