@@ -109,6 +109,72 @@ class LanServerServiceTest {
         verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
     }
 
+    // --- register with an optional SSH credential (manual add-by-address parity with adopt) ---
+
+    @Test
+    void register_withVerifiedCredential_registersMachineAndStoresCredentialUnderItsName() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forVerifyingSshCredentials.probe(any())).thenReturn("SHA256:abc");
+
+        var draft = new net.vaier.domain.SshCredentialDraft(
+            "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null);
+        var outcome = service.register("roon", "192.168.3.50", true, 2375, "Roon core",
+            net.vaier.domain.DeviceCategory.NAS, draft);
+
+        // The machine is registered exactly as the credential-free register does.
+        verify(forPersistingLanServers).save(new LanServer(
+            "roon", "192.168.3.50", true, 2375, "Roon core", net.vaier.domain.DeviceCategory.NAS));
+        // The credential is stored keyed to the machine's name, unmanaged.
+        verify(forPersistingHostCredentials).save(new net.vaier.domain.HostCredential(
+            "roon", "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false));
+        // The probe targeted the machine's LAN address, with nothing pinned yet.
+        ArgumentCaptor<net.vaier.domain.SshTarget> target =
+            ArgumentCaptor.forClass(net.vaier.domain.SshTarget.class);
+        verify(forVerifyingSshCredentials).probe(target.capture());
+        assertThat(target.getValue().host()).isEqualTo("192.168.3.50");
+        assertThat(target.getValue().pinnedFingerprint()).isNull();
+        assertThat(outcome.server().name()).isEqualTo("roon");
+        assertThat(outcome.credentialStored()).isTrue();
+        assertThat(outcome.credentialVerification().authenticated()).isTrue();
+    }
+
+    @Test
+    void register_withRejectedCredential_stillRegistersButDoesNotStoreItAndFlagsTheOutcome() {
+        // A bad credential must never roll back the registration — the machine is still added.
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+        when(forVerifyingSshCredentials.probe(any()))
+            .thenThrow(new net.vaier.domain.SshAuthException("rejected"));
+
+        var draft = new net.vaier.domain.SshCredentialDraft(
+            "root", net.vaier.domain.AuthMethod.PASSWORD, "wrong", null);
+        var outcome = service.register("roon", "192.168.3.50", true, 2375, null, null, draft);
+
+        verify(forPersistingLanServers).save(any());
+        verify(forPersistingHostCredentials, never()).save(any());
+        assertThat(outcome.server().name()).isEqualTo("roon");
+        assertThat(outcome.credentialStored()).isFalse();
+        assertThat(outcome.credentialVerification().authenticated()).isFalse();
+    }
+
+    @Test
+    void register_withNoCredential_registersAndReportsNoCredentialInTheOutcome() {
+        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
+            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
+        ));
+
+        var outcome = service.register("roon", "192.168.3.50", true, 2375, null, null, null);
+
+        verify(forPersistingLanServers).save(any());
+        verify(forPersistingHostCredentials, never()).save(any());
+        assertThat(outcome.server().name()).isEqualTo("roon");
+        assertThat(outcome.credentialStored()).isFalse();
+        assertThat(outcome.credentialVerification()).isNull();
+    }
+
     // --- adopt (slice 1 of "Add a machine") ---
 
     @Test

@@ -230,6 +230,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected GetLanServersUseCase getLanServersUseCase;
 
     @MockBean
+    protected net.vaier.application.ProbeLanHostUseCase probeLanHostUseCase;
+
+    @MockBean
     protected GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
 
     @MockBean

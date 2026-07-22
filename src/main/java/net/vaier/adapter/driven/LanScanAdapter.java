@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Sweeps a LAN CIDR from inside the Vaier WireGuard container — the one host that already routes to
@@ -54,6 +55,52 @@ public class LanScanAdapter implements ForScanningLan {
             log.warn("LAN scan failed for a relay LAN: {}", e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * The same TCP port sweep aimed at a single address rather than a whole CIDR — the manual "add a
+     * LAN server by address" helper inspects the one host the operator named. Runs the identical probe
+     * (same {@link #PROBE_PORTS}, same {@code /dev/tcp} + ping liveness, same output format) from inside
+     * the WireGuard container so it routes to relay LANs, and reuses {@link #parseScanOutput}. Empty for
+     * a non-IPv4 address, an exec failure, or a host that answered nothing.
+     */
+    @Override
+    public Optional<ScannedHost> scanHost(String ipAddress) {
+        if (ipAddress == null || !Cidr.isIpv4(ipAddress.trim())) {
+            return Optional.empty();
+        }
+        String ip = ipAddress.trim();
+        try {
+            String output = executor.execute(wireguardContainerName, "bash", "-c", probeHostScript(ip));
+            return parseScanOutput(output).stream().findFirst();
+        } catch (RuntimeException e) {
+            log.warn("Single-host LAN probe failed: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Builds the bash probe for one host: try a TCP connect to each probe port (each bounded by
+     * {@code timeout 1} so an unreachable host can't hang the probe), then fall back to a ping for a
+     * liveness-only hit. Emits the same {@code ip|csvOpenPorts|hostname} line the CIDR sweep does, so
+     * {@link #parseScanOutput} parses it identically.
+     */
+    private String probeHostScript(String ip) {
+        String ports = PROBE_PORTS.stream().map(String::valueOf).reduce((a, b) -> a + " " + b).orElse("");
+        return """
+            ip=%s
+            open=""
+            for p in %s; do
+              timeout 1 bash -c "echo > /dev/tcp/$ip/$p" >/dev/null 2>&1 && open="${open:+$open,}$p"
+            done
+            alive=0
+            [ -n "$open" ] && alive=1
+            if [ "$alive" = 0 ]; then ping -c1 -W1 $ip >/dev/null 2>&1 && alive=1; fi
+            if [ "$alive" = 1 ]; then
+              host=$(getent hosts $ip 2>/dev/null | awk '{print $2}')
+              echo "$ip|$open|$host"
+            fi
+            """.formatted(ip, ports);
     }
 
     /** {@code "192.168.3.0/24" → "192.168.3."}; null for an invalid CIDR. */

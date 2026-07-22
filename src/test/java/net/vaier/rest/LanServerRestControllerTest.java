@@ -37,6 +37,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -59,6 +60,7 @@ class LanServerRestControllerTest {
     @Mock ResolveLanAnchorUseCase resolveLanAnchorUseCase;
     @Mock GenerateLanServerSetupScriptUseCase generateLanServerSetupScriptUseCase;
     @Mock ForVendingSetupTokens forVendingSetupTokens;
+    @Mock net.vaier.application.ProbeLanHostUseCase probeLanHostUseCase;
 
     @InjectMocks
     LanServerRestController controller;
@@ -92,7 +94,7 @@ class LanServerRestControllerTest {
     void register_runsDockerTrueWithDockerPort_delegatesToUseCase() {
         var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, 2375, null, null);
 
-        ResponseEntity<Void> response = controller.register(request);
+        var response = controller.register(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(registerLanServerUseCase).register("nas", "192.168.3.50", true, 2375, null, null);
@@ -102,10 +104,89 @@ class LanServerRestControllerTest {
     void register_runsDockerFalseWithoutDockerPort_delegatesToUseCase() {
         var request = new LanServerRestController.RegisterRequest("printer", "192.168.3.20", false, null, null, null);
 
-        ResponseEntity<Void> response = controller.register(request);
+        var response = controller.register(request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(registerLanServerUseCase).register("printer", "192.168.3.20", false, null, null, null);
+    }
+
+    // --- probe (manual add-by-address parity — Community-available, not Enterprise) ---
+
+    @Test
+    void probe_reachable_reportsPortsFlagsCategoryAndRoute() {
+        var host = new net.vaier.domain.DiscoveredLanMachine(
+            "192.168.3.50", "synology-nas", List.of(22, 2375), "apalveien5");
+        when(probeLanHostUseCase.probeHost("192.168.3.50"))
+            .thenReturn(net.vaier.domain.LanHostProbe.reached(host, "Apalveien 5"));
+
+        var resp = controller.probe(new LanServerRestController.ProbeRequest("192.168.3.50"));
+
+        assertThat(resp.reachable()).isTrue();
+        assertThat(resp.openPorts()).containsExactly(22, 2375);
+        assertThat(resp.sshAvailable()).isTrue();
+        assertThat(resp.runsDocker()).isTrue();
+        assertThat(resp.dockerPort()).isEqualTo(2375);
+        assertThat(resp.guessedCategory()).isEqualTo("NAS");
+        assertThat(resp.routedVia()).isEqualTo("Apalveien 5");
+    }
+
+    @Test
+    void probe_notReachable_returnsReachableFalseWithNoFieldsAndNo500() {
+        when(probeLanHostUseCase.probeHost("10.99.99.99"))
+            .thenReturn(net.vaier.domain.LanHostProbe.notReachable());
+
+        var resp = controller.probe(new LanServerRestController.ProbeRequest("10.99.99.99"));
+
+        assertThat(resp.reachable()).isFalse();
+        assertThat(resp.openPorts()).isEmpty();
+        assertThat(resp.sshAvailable()).isFalse();
+        assertThat(resp.runsDocker()).isFalse();
+        assertThat(resp.dockerPort()).isNull();
+        assertThat(resp.guessedCategory()).isNull();
+        assertThat(resp.routedVia()).isNull();
+    }
+
+    // --- register with an optional SSH credential (manual add-by-address parity with adopt) ---
+
+    @Test
+    void register_withVerifiedCredential_reportsCredentialStored() {
+        var created = new LanServer("roon", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS);
+        var verification = new net.vaier.domain.SshCredentialVerification(true, true, "SHA256:abc");
+        when(registerLanServerUseCase.register(eq("roon"), eq("192.168.3.50"), eq(true), eq(2375),
+                org.mockito.ArgumentMatchers.isNull(), eq(net.vaier.domain.DeviceCategory.NAS),
+                org.mockito.ArgumentMatchers.any(net.vaier.domain.SshCredentialDraft.class)))
+            .thenReturn(new RegisterLanServerUseCase.RegistrationOutcome(created, verification, true));
+        var request = new LanServerRestController.RegisterRequest("roon", "192.168.3.50", true, 2375, null, "NAS",
+            new LanServerRestController.CredentialBlock("root", "PASSWORD", "pw", null));
+
+        var response = controller.register(request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        var body = (LanServerRestController.RegisterResponse) response.getBody();
+        assertThat(body.name()).isEqualTo("roon");
+        assertThat(body.credentialProvided()).isTrue();
+        assertThat(body.credentialVerified()).isTrue();
+        assertThat(body.credentialStored()).isTrue();
+        assertThat(body.hostKeyFingerprint()).isEqualTo("SHA256:abc");
+    }
+
+    @Test
+    void register_withRejectedCredential_stillRegistersButReportsNotStored() {
+        var created = new LanServer("roon", "192.168.3.50", true, 2375, null, null);
+        var verification = new net.vaier.domain.SshCredentialVerification(true, false, null);
+        when(registerLanServerUseCase.register(eq("roon"), eq("192.168.3.50"), eq(true), eq(2375),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(net.vaier.domain.SshCredentialDraft.class)))
+            .thenReturn(new RegisterLanServerUseCase.RegistrationOutcome(created, verification, false));
+        var request = new LanServerRestController.RegisterRequest("roon", "192.168.3.50", true, 2375, null, null,
+            new LanServerRestController.CredentialBlock("root", "PASSWORD", "wrong", null));
+
+        var response = controller.register(request);
+
+        var body = (LanServerRestController.RegisterResponse) response.getBody();
+        assertThat(body.credentialProvided()).isTrue();
+        assertThat(body.credentialVerified()).isFalse();
+        assertThat(body.credentialStored()).isFalse();
     }
 
     @Test

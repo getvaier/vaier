@@ -1881,13 +1881,16 @@
 
         // ---- by address: the fallback (Community, and empty/failed scans) ------------------------------
         // The scan is Enterprise, and it can come back empty, so registering a LAN server by hand never goes
-        // away — it just steps out of the way of discovery. Vaier still only needs where it answers.
+        // away — it just steps out of the way of discovery. But once the operator names an address, Vaier can
+        // still probe that one host (POST /lan-servers/probe) and offer the same detected readout + SSH
+        // credential test the adopt flow does. Detection never blocks Add: an unreachable host just leaves the
+        // plain fields to fill in by hand.
         function paintByAddress() {
             titleEl.textContent = 'Add a LAN server';
             content.innerHTML = '';
             const sub = el('div', 'ex-dialog-body');
             sub.textContent = 'A LAN server is reached through the machine whose network it sits on, so Vaier only '
-                + 'needs where it answers. Give its LAN address and, if it speaks Docker, the port.';
+                + 'needs where it answers. Give its LAN address and Vaier will try to detect the rest.';
             content.appendChild(sub);
 
             const name = el('input', 'ex-input'); name.type = 'text'; name.placeholder = 'e.g. Roon server';
@@ -1905,27 +1908,117 @@
             const syncDocker = () => { dockerPortField.style.display = dockerBox.checked ? '' : 'none'; };
             dockerBox.onchange = syncDocker; syncDocker();
 
+            // A quiet line under the address: "Detecting…", "detected — reached via <relay>", or the fall-back note.
+            const detectMsg = el('div', 'ex-hint'); detectMsg.style.display = 'none';
+
             const form = el('div', 'ex-form');
             form.append(field('Name', null, name),
                 field('LAN address', 'Where this machine answers on its network.', lanAddr),
-                dockerRow, dockerPortField,
+                detectMsg, dockerRow, dockerPortField,
                 field('Device category', 'Its shape in the tree and on the map. Optional.', cat),
                 field('Description', 'Optional.', desc));
             content.appendChild(form);
+
+            // The SSH block — the same login the web terminal, disk watch and backups ride on. Built once and
+            // hidden; revealed only when the probe says the host answered on port 22, exactly as adopt does.
+            const disc = disclosure('Add SSH access — for the web terminal, disk watch & backups');
+            disc.style.display = 'none';
+            const username = el('input', 'ex-input'); username.type = 'text'; username.autocomplete = 'off';
+            username.spellcheck = false; username.placeholder = 'e.g. admin';
+            const method = el('select', 'ex-input');
+            [['PASSWORD', 'Password'], ['PRIVATE_KEY', 'Private key']].forEach(([v, t]) => {
+                const o = el('option'); o.value = v; o.textContent = t; method.appendChild(o);
+            });
+            const password = el('input', 'ex-input'); password.type = 'password'; password.autocomplete = 'new-password';
+            const keyArea = el('textarea', 'ex-input ex-cred-key'); keyArea.rows = 4;
+            keyArea.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----'; keyArea.spellcheck = false;
+            const passphrase = el('input', 'ex-input'); passphrase.type = 'password'; passphrase.autocomplete = 'new-password';
+            const pwF = field('Password', null, password);
+            const keyF = field('Private key (PEM)', null, keyArea);
+            const passF = field('Key passphrase', 'Optional.', passphrase);
+            const syncMethod = () => {
+                const isKey = method.value === 'PRIVATE_KEY';
+                pwF.style.display = isKey ? 'none' : '';
+                keyF.style.display = isKey ? '' : 'none';
+                passF.style.display = isKey ? '' : 'none';
+            };
+            method.onchange = syncMethod;
+            const testRow = el('div', 'ex-testrow');
+            const testBtn = el('button', 'ex-btn'); testBtn.textContent = 'Test connection';
+            const testOk = el('span', 'ex-testok'); testOk.textContent = '✓ Reached & authenticated';
+            testRow.append(testBtn, testOk);
+            disc.append(field('User', null, username), field('Auth', null, method), pwF, keyF, passF, testRow);
+            syncMethod();
+            content.appendChild(disc);
+
+            const draft = () => ({ username: username.value.trim(), authMethod: method.value,
+                secret: (method.value === 'PRIVATE_KEY' ? keyArea.value : password.value),
+                passphrase: passphrase.value || null });
+            const credentialFilled = () => disc.style.display !== 'none' && disc.open
+                && username.value.trim() && draft().secret.trim();
+
+            testBtn.onclick = async () => {
+                const addr = lanAddr.value.trim();
+                if (!addr) { toast('Enter the LAN address first.'); return; }
+                if (!username.value.trim() || !draft().secret.trim()) { toast('Enter a username and the secret to test.'); return; }
+                testOk.classList.remove('is-on');
+                testBtn.disabled = true; const was = testBtn.textContent; testBtn.textContent = 'Testing…';
+                try {
+                    const r = await fetch('/lan-scan/' + encodeURIComponent(addr) + '/ssh-credential/test', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft()) });
+                    if (!r.ok) { toast('Vaier could not test that login.'); return; }
+                    const v = await r.json();
+                    if (v.authenticated) { testOk.classList.add('is-on'); }
+                    else if (v.reachable) { toast('Reached ' + addr + ', but that login was refused.'); }
+                    else { toast('Vaier could not reach ' + addr + ' over SSH.'); }
+                } catch (e) { toast('Vaier could not test that login.'); }
+                finally { testBtn.disabled = false; testBtn.textContent = was; }
+            };
+
+            // Probe the typed address once the operator leaves the field. Reachable → prefill Docker + category
+            // and reveal SSH access; not reachable → keep the manual fields with a quiet fall-back note.
+            let lastProbed = null;
+            const detect = async () => {
+                const addr = lanAddr.value.trim();
+                if (!addr || addr === lastProbed) return;
+                lastProbed = addr;
+                detectMsg.style.display = ''; detectMsg.textContent = 'Detecting…';
+                disc.style.display = 'none';
+                try {
+                    const r = await fetch('/lan-servers/probe', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ address: addr }) });
+                    if (lanAddr.value.trim() !== addr) return;   // the operator moved on; ignore a stale result
+                    const p = r.ok ? await r.json() : { reachable: false };
+                    if (p.reachable) {
+                        if (p.runsDocker) { dockerBox.checked = true; syncDocker();
+                            if (p.dockerPort) dockerPort.value = String(p.dockerPort); }
+                        if (p.guessedCategory && p.guessedCategory !== 'GENERIC') cat.value = p.guessedCategory;
+                        if (p.sshAvailable) disc.style.display = '';
+                        detectMsg.textContent = p.routedVia ? 'Detected — reached via ' + p.routedVia : 'Detected.';
+                    } else {
+                        detectMsg.textContent = 'Couldn’t reach it to detect — fill these in and add anyway.';
+                    }
+                } catch (e) {
+                    if (lanAddr.value.trim() === addr) detectMsg.textContent = 'Couldn’t reach it to detect — fill these in and add anyway.';
+                }
+            };
+            lanAddr.onblur = detect;
 
             const actions = actionsRow();
             const back = el('button', 'ex-btn'); back.textContent = 'Back';
             back.onclick = () => screen(S.lanScan && S.lanScan.gated ? 'fork' : 'pickLan');
             const add = el('button', 'ex-btn is-accent'); add.textContent = 'Add machine';
             const sync = () => { add.disabled = !(name.value.trim() && lanAddr.value.trim()); };
-            name.oninput = sync; lanAddr.oninput = sync; sync();
+            name.oninput = sync; lanAddr.oninput = () => { lastProbed = null; sync(); }; sync();
             add.onclick = () => {
                 const runsDocker = dockerBox.checked;
                 const port = parseInt(dockerPort.value, 10);
+                const credential = credentialFilled() ? draft() : null;
                 close();
                 createLanServer({ name: name.value.trim(), lanAddress: lanAddr.value.trim(),
                     runsDocker: runsDocker, dockerPort: runsDocker && port > 0 ? port : null,
-                    deviceCategory: cat.value, description: desc.value.trim() });
+                    deviceCategory: cat.value, description: desc.value.trim(), credential: credential });
             };
             actions.append(back, add);
             content.appendChild(actions);
@@ -2265,7 +2358,8 @@
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: body.name, lanAddress: body.lanAddress, runsDocker: body.runsDocker,
                     dockerPort: body.dockerPort, description: body.description,
-                    deviceCategory: body.deviceCategory || null }),
+                    deviceCategory: body.deviceCategory || null,
+                    credential: body.credential || null }),
             });
             if (res.status === 400) {
                 toast(body.lanAddress + ' isn’t on any relay’s LAN, so the fleet can’t reach it.');
@@ -2276,8 +2370,12 @@
                 toast(err.message || 'Vaier could not add that machine.');
                 return;
             }
+            // With a credential the body reports whether it stuck; the machine is registered either way.
+            const resp = await res.json().catch(() => null);
+            const credNote = resp && resp.credentialProvided && !resp.credentialStored
+                ? ' Its SSH login couldn’t be saved — set one from the machine.' : '';
             await loadFleet();
-            toast(body.name + ' added.');
+            toast(body.name + ' added.' + credNote);
             S.open.add(key(['fleet', body.name]));
             go(['fleet', body.name]);
         } catch (e) {

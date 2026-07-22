@@ -170,6 +170,19 @@ public class LanServerService implements
     }
 
     @Override
+    public RegistrationOutcome register(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
+                                        String description, DeviceCategory deviceCategory,
+                                        SshCredentialDraft credential) {
+        // Register first and independently: a bad credential must never roll back the registration.
+        LanServer created = doRegister(name, lanAddress, runsDocker, dockerPort, description, deviceCategory);
+        if (credential == null) {
+            return new RegistrationOutcome(created, null, false);
+        }
+        SshCredentialVerification verification = verifyAndStoreCredential(created, credential);
+        return new RegistrationOutcome(created, verification, verification.authenticated());
+    }
+
+    @Override
     public LanServer adopt(String ipAddress, String nameOverride) {
         return doAdopt(ipAddress, nameOverride);
     }
@@ -178,22 +191,30 @@ public class LanServerService implements
     public AdoptionOutcome adopt(String ipAddress, String nameOverride, SshCredentialDraft credential) {
         // Register first and independently: a bad credential must never roll back the registration.
         LanServer created = doAdopt(ipAddress, nameOverride);
-        // Re-verify server-side against the new machine's LAN address (nothing pinned yet — a
-        // freshly adopted machine has no host-key pin). The domain decides "did it authenticate?".
+        SshCredentialVerification verification = verifyAndStoreCredential(created, credential);
+        return new AdoptionOutcome(created, verification, verification.authenticated());
+    }
+
+    /**
+     * The shared "verify a supplied credential against a just-registered machine, and store it only if it
+     * authenticates" path — used by both adopting a scanned host and registering by address. Re-verifies
+     * server-side against the machine's LAN address (nothing pinned yet — a freshly registered machine has
+     * no host-key pin); the domain decides "did it authenticate?". A credential is stored keyed to the
+     * machine's name only when it works, so the caller can report a separable outcome (registration always
+     * stands; the credential may or may not have stuck).
+     */
+    private SshCredentialVerification verifyAndStoreCredential(LanServer created, SshCredentialDraft credential) {
         SshTarget target = credential.targetAt(created.lanAddress(), SshTarget.DEFAULT_PORT);
         SshCredentialVerification verification =
             SshCredentialVerification.probe(target, forVerifyingSshCredentials);
-        // Store only a credential that actually works, keyed to the new machine's name.
-        boolean stored = false;
         if (verification.authenticated()) {
             forPersistingHostCredentials.save(credential.forMachine(created.name()));
-            stored = true;
-            log.info("Stored the verified SSH credential for adopted machine {}", forLog(created.name()));
+            log.info("Stored the verified SSH credential for machine {}", forLog(created.name()));
         } else {
-            log.info("Adopted machine {} but did not store its SSH credential (reachable={}, authenticated={})",
+            log.info("Registered machine {} but did not store its SSH credential (reachable={}, authenticated={})",
                 forLog(created.name()), verification.reachable(), verification.authenticated());
         }
-        return new AdoptionOutcome(created, verification, stored);
+        return verification;
     }
 
     /**

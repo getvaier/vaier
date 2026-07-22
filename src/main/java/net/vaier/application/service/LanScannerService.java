@@ -4,11 +4,13 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetDiscoveredLanMachinesUseCase;
 import net.vaier.application.IgnoreLanMachineUseCase;
 import net.vaier.application.ListScannableLansUseCase;
+import net.vaier.application.ProbeLanHostUseCase;
 import net.vaier.application.ScanLanAnchorUseCase;
 import net.vaier.application.ScanLanUseCase;
 import net.vaier.application.UnignoreLanMachineUseCase;
 import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
+import net.vaier.domain.LanHostProbe;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.port.ForGettingLanServers;
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -45,7 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
     ListScannableLansUseCase, GetDiscoveredLanMachinesUseCase,
-    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase {
+    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase, ProbeLanHostUseCase {
 
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-scan-updated";
@@ -178,6 +181,33 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
     @Override
     public void unignore(String ignoreKey) {
         ignoredMachines.unignore(ignoreKey);
+    }
+
+    /**
+     * Probe one operator-typed address for the manual "add a LAN server by address" helper. This is the
+     * home for the probe because it already holds the scan and anchor ports; the operation itself is a
+     * targeted, non-intrusive single-host probe (NOT the Enterprise CIDR sweep), so it stays
+     * Community-available at the controller. Orchestration only: the domain decides what routes to the
+     * address ({@link LanAnchor#resolve}) and derives the read-offs ({@link DiscoveredLanMachine}); the
+     * driven {@link ForScanningLan#scanHost} does the probe. Empty address, no covering anchor, or a
+     * silent no-answer all map to {@link LanHostProbe#notReachable()} — never an error.
+     */
+    @Override
+    public LanHostProbe probeHost(String address) {
+        if (address == null || address.isBlank()) {
+            return LanHostProbe.notReachable();
+        }
+        String trimmed = address.trim();
+        Optional<LanAnchor> anchor = LanAnchor.resolve(trimmed,
+            peerConfigurations.getAllPeerConfigs(), serverLanCidr.resolve().orElse(null));
+        if (anchor.isEmpty()) {
+            return LanHostProbe.notReachable();
+        }
+        return scanner.scanHost(trimmed)
+            .map(h -> LanHostProbe.reached(
+                new DiscoveredLanMachine(h.ipAddress(), h.hostname(), h.openPorts(), anchor.get().anchorKey()),
+                anchor.get().name()))
+            .orElseGet(LanHostProbe::notReachable);
     }
 
     private List<DiscoveredLanMachine> performScan() {

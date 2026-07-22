@@ -1,13 +1,48 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForScanningLan.ScannedHost;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LanScanAdapterTest {
+
+    /** A recording executor that returns canned sweep output regardless of the command. */
+    private static ForExecutingInContainer executorReturning(String output) {
+        return new ForExecutingInContainer() {
+            public String execute(String containerName, String... command) { return output; }
+            public String executeWithInput(String containerName, String input, String... command) { return output; }
+            public void restartWithMasqueradeSidecar(String containerName) { }
+        };
+    }
+
+    @Test
+    void scanHost_returnsTheSingleHostItAnsweredFor() {
+        LanScanAdapter adapter = new LanScanAdapter(
+            executorReturning("192.168.3.50|2375,22|synology-nas\n"), "wireguard");
+
+        Optional<ScannedHost> host = adapter.scanHost("192.168.3.50");
+
+        assertThat(host).contains(new ScannedHost("192.168.3.50", List.of(2375, 22), "synology-nas"));
+    }
+
+    @Test
+    void scanHost_returnsEmptyWhenNothingAnswered() {
+        LanScanAdapter adapter = new LanScanAdapter(executorReturning(""), "wireguard");
+
+        assertThat(adapter.scanHost("192.168.3.99")).isEmpty();
+    }
+
+    @Test
+    void scanHost_rejectsANonIpv4Address() {
+        LanScanAdapter adapter = new LanScanAdapter(executorReturning("anything"), "wireguard");
+
+        assertThat(adapter.scanHost("not-an-ip")).isEmpty();
+    }
 
     @Test
     void parsesPortsAndHostname() {

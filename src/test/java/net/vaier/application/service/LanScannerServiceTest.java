@@ -49,6 +49,9 @@ class LanScannerServiceTest {
     // The CIDRs the scanner was asked to sweep — so a targeted scan can be shown to touch only one LAN.
     private final List<String> sweptCidrs = new ArrayList<>();
 
+    // Canned single-host probe results, keyed by address — so probeHost() tests can drive the scanner.
+    private final Map<String, ScannedHost> hostProbes = new HashMap<>();
+
     private PeerConfiguration relay(String id, String lanCidr) {
         return new PeerConfiguration(id, id, "10.13.13.5", "", MachineType.UBUNTU_SERVER, lanCidr, null, null);
     }
@@ -56,7 +59,15 @@ class LanScannerServiceTest {
     private LanScannerService service(List<PeerConfiguration> peers, Map<String, List<ScannedHost>> scans,
                                       Optional<String> serverCidr, List<LanServer> registered,
                                       Executor executor) {
-        ForScanningLan scanner = cidr -> { sweptCidrs.add(cidr); return scans.getOrDefault(cidr, List.of()); };
+        ForScanningLan scanner = new ForScanningLan() {
+            public List<ScannedHost> scan(String cidr) {
+                sweptCidrs.add(cidr);
+                return scans.getOrDefault(cidr, List.of());
+            }
+            public Optional<ScannedHost> scanHost(String ipAddress) {
+                return Optional.ofNullable(hostProbes.get(ipAddress));
+            }
+        };
         ForGettingPeerConfigurations peerConfigs = new ForGettingPeerConfigurations() {
             public Optional<PeerConfiguration> getPeerConfigByName(String n) { return Optional.empty(); }
             public Optional<PeerConfiguration> getPeerConfigByIp(String ip) { return Optional.empty(); }
@@ -257,6 +268,72 @@ class LanScannerServiceTest {
                 tuple("apalveien5", "192.168.3.0/24"),
                 tuple("colina27", "192.168.1.0/24"),
                 tuple(LanAnchor.VAIER_SERVER_NAME, "172.31.0.0/16"));
+    }
+
+    // --- single-host probe for the manual "add by address" flow ---
+
+    @Test
+    void probeHost_reachable_reportsOpenPortsDerivationsAndTheRelayItRoutedThrough() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24")), Map.of(), Optional.empty(), List.of(), INLINE);
+        hostProbes.put("192.168.3.50", new ScannedHost("192.168.3.50", List.of(22, 2375), "synology-nas"));
+
+        var probe = service.probeHost("192.168.3.50");
+
+        assertThat(probe.reachable()).isTrue();
+        assertThat(probe.routedVia()).isEqualTo("apalveien5");
+        assertThat(probe.host().ipAddress()).isEqualTo("192.168.3.50");
+        assertThat(probe.host().openPorts()).containsExactly(22, 2375);
+        assertThat(probe.host().sshAvailable()).isTrue();
+        // The candidate is tagged with the resolving anchor's key, so its derivations line up with a scan.
+        assertThat(probe.host().relayAnchor()).isEqualTo("apalveien5");
+        assertThat(net.vaier.domain.LanMachineRole.dockerPort(probe.host().openPorts())).isEqualTo(2375);
+    }
+
+    @Test
+    void probeHost_routedThroughTheServerLanWhenTheAddressIsInTheServerCidr() {
+        LanScannerService service = service(
+            List.of(), Map.of(), Optional.of("172.31.0.0/16"), List.of(), INLINE);
+        hostProbes.put("172.31.4.9", new ScannedHost("172.31.4.9", List.of(80), "web"));
+
+        var probe = service.probeHost("172.31.4.9");
+
+        assertThat(probe.reachable()).isTrue();
+        assertThat(probe.routedVia()).isEqualTo(LanAnchor.VAIER_SERVER_NAME);
+    }
+
+    @Test
+    void probeHost_noAnchorCoversTheAddress_isNotReachableAndNeverProbes() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24")), Map.of(), Optional.empty(), List.of(), INLINE);
+        // A host that WOULD answer, but sits on no routed LAN — the probe must not even be attempted.
+        hostProbes.put("10.99.99.99", new ScannedHost("10.99.99.99", List.of(22), "ghost"));
+
+        var probe = service.probeHost("10.99.99.99");
+
+        assertThat(probe.reachable()).isFalse();
+        assertThat(probe.host()).isNull();
+        assertThat(probe.routedVia()).isNull();
+    }
+
+    @Test
+    void probeHost_anchorCoversItButNothingAnswered_isNotReachable() {
+        LanScannerService service = service(
+            List.of(relay("apalveien5", "192.168.3.0/24")), Map.of(), Optional.empty(), List.of(), INLINE);
+        // No canned probe result → the scanner returns empty → not reachable, no 500.
+
+        var probe = service.probeHost("192.168.3.77");
+
+        assertThat(probe.reachable()).isFalse();
+        assertThat(probe.host()).isNull();
+    }
+
+    @Test
+    void probeHost_blankAddress_isNotReachable() {
+        LanScannerService service = service(List.of(), Map.of(), Optional.empty(), List.of(), INLINE);
+
+        assertThat(service.probeHost("  ").reachable()).isFalse();
+        assertThat(service.probeHost(null).reachable()).isFalse();
     }
 
     @Test

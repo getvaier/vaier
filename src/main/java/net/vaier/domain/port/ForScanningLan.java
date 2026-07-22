@@ -1,6 +1,7 @@
 package net.vaier.domain.port;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Driven port that sweeps a LAN CIDR and reports the hosts that respond. The driven side owns the
@@ -15,6 +16,14 @@ public interface ForScanningLan {
 
     /** The hosts in {@code cidr} that answered the probe. */
     List<ScannedHost> scan(String cidr);
+
+    /**
+     * Probe a <em>single</em> address — the same TCP port sweep aimed at one host rather than a whole
+     * CIDR. Used by the manual "add a LAN server by address" helper, which inspects the one host the
+     * operator already named. Empty when the host answered nothing (or was unreachable over the tunnel);
+     * a host that answered on any port — or only to a ping — is returned with whatever ports it opened.
+     */
+    Optional<ScannedHost> scanHost(String ipAddress);
 
     /**
      * A single responsive host.
