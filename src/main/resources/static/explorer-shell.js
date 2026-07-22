@@ -1391,18 +1391,40 @@
         }
     }
 
-    // A LAN host's setup script — served whole and unauthenticated at a per-host URL. Vaier hands over the
-    // curl one-liner to run on the host and a direct download; it holds no secret. (A VPN peer's setup script is
-    // not re-viewable — it is shown once with its config; reissue or regenerate to see it again.)
-    function lanSetupScript(machine) {
-        const url = window.location.origin + '/lan-servers/' + encodeURIComponent(machine) + '/setup.sh';
+    // Mint a single-use, ~15-min setup token for a LAN host, so the curl one-liner authorizes itself on a
+    // bare box with no Vaier session — exactly like a peer's. Returns the token, or null if minting failed.
+    // Mint a single-use setup token for a LAN host, or learn there is nothing to set up. Returns
+    // { needed: true, token } when the host has a setup script, { needed: false } when it has none
+    // (204 — runs no Docker, anchors no LAN), or null on a real failure.
+    async function mintLanSetupToken(machine) {
+        try {
+            const res = await fetch('/lan-servers/' + encodeURIComponent(machine) + '/setup-token',
+                { method: 'POST' });
+            if (res.status === 204) return { needed: false };
+            if (!res.ok) return null;
+            const j = await res.json();
+            return j.token ? { needed: true, token: j.token } : null;
+        } catch (e) { return null; }
+    }
+
+    // A LAN host's setup script. Vaier mints a single-use token and hands over the curl one-liner to run on the
+    // host: the box pulls the script over HTTPS from Vaier's token-gated /setup route. It needs sudo because it
+    // installs Docker. The in-console setup.sh download stays a by-hand fallback. (A VPN peer's setup script is
+    // shown once with its config; reissue or regenerate to see it again.)
+    async function lanSetupScript(machine) {
+        const mint = await mintLanSetupToken(machine);
+        if (!mint) { toast('Vaier could not prepare the setup command for ' + machine + '.'); return; }
+        if (!mint.needed) { toast('Nothing to set up on ' + machine + ' — Vaier manages it as-is.'); return; }
+        const origin = window.location.origin;
+        const runUrl = origin + '/lan-servers/' + encodeURIComponent(machine)
+            + '/setup?t=' + encodeURIComponent(mint.token);
         setupScriptDialog({
             title: 'Set up ' + machine,
             body: 'Idempotent — it adapts to this host: opens the Docker engine API if it runs Docker and '
-                + 'installs routes to the fleet via its relay peer. No secrets, served unauthenticated. Run it '
-                + 'on ' + machine + ' itself.',
-            curl: 'curl -sSL ' + url + ' | sudo bash',
-            downloadUrl: url,
+                + 'installs routes to the fleet via its relay peer. Run it on ' + machine + ' itself — it needs '
+                + 'sudo to install Docker. The link works once.',
+            curl: "curl -fsSL '" + runUrl + "' | sudo sh",
+            downloadUrl: origin + '/lan-servers/' + encodeURIComponent(machine) + '/setup.sh',
         });
     }
 
@@ -1462,6 +1484,7 @@
         let peerIntent = null;                      // the peer branch's intent: 'SERVER' | 'PERSONAL_DEVICE'
         let peerWindows = false;                    // whether the peer runs Windows — the OS second step's answer
         let peerCreated = null;                     // the create response, held for the handoff screen
+        let adopted = null;                         // the adopt result, held for the LAN handoff screen: { name, credNote }
 
         const close = () => {
             _lanScanModalRefresh = null;
@@ -1498,6 +1521,7 @@
             else if (id === 'pickLan') paintPickLan();
             else if (id === 'discover') paintDiscover();
             else if (id === 'adopt') paintAdopt();
+            else if (id === 'lanHandoff') paintLanHandoff();
             else if (id === 'byaddress') paintByAddress();
             else if (id === 'peerWhat') paintPeerWhat();
             else if (id === 'peerOs') paintPeerOs();
@@ -1790,14 +1814,62 @@
                 if (res.status === 402) { toast('Adopting a discovered machine is an Enterprise feature.'); return; }
                 if (!res.ok) { const e = await res.json().catch(() => ({})); toast(e.message || 'Vaier could not add that machine.'); return; }
                 const resp = await res.json();
-                close();
                 await loadFleet(); await loadLanScan();
                 const credNote = resp.credentialProvided && !resp.credentialStored
                     ? ' Its SSH login couldn’t be saved — set one from the machine.' : '';
-                toast(resp.name + ' added.' + credNote);
-                S.open.add(key(['fleet', resp.name]));
-                go(['fleet', resp.name]);
+                adopted = { name: resp.name, credNote: credNote };
+                screen('lanHandoff');
             } catch (e) { toast('Vaier could not add that machine.'); }
+        }
+
+        // ---- LAN handoff — the machine is registered; hand over the command that lets Vaier manage it -----
+        // Parity with the peer handoff: instead of jumping straight to the machine, show the copyable
+        // curl one-liner the operator runs on the host (with sudo — it installs Docker), gated by a fresh
+        // single-use token. The by-hand setup.sh download stays as a fallback. Done closes and navigates.
+        async function paintLanHandoff() {
+            const a = adopted;
+            if (!a) { screen('fork'); return; }
+            titleEl.textContent = a.name + ' — let Vaier manage it';
+            content.innerHTML = '';
+
+            const mint = await mintLanSetupToken(a.name);
+            const sub = el('div', 'ex-dialog-body');
+            if (mint && mint.needed) {
+                sub.textContent = a.name + ' is registered.' + (a.credNote || '') + ' To let Vaier manage its '
+                    + 'containers, run this on ' + a.name + ' — it needs sudo:';
+                content.appendChild(sub);
+
+                const curl = "curl -fsSL '" + window.location.origin + '/lan-servers/'
+                    + encodeURIComponent(a.name) + '/setup?t=' + encodeURIComponent(mint.token) + "' | sudo sh";
+                content.appendChild(copyableCommand(curl));
+
+                const fb = el('details', 'ex-fallback');
+                const summ = el('summary');
+                summ.textContent = 'Prefer to run it by hand? Download the setup script.';
+                fb.appendChild(summ);
+                const dl = el('button', 'ex-btn'); dl.textContent = 'Download setup.sh';
+                dl.onclick = () => { window.location.href = window.location.origin + '/lan-servers/'
+                    + encodeURIComponent(a.name) + '/setup.sh'; };
+                fb.appendChild(dl);
+                content.appendChild(fb);
+            } else if (mint && !mint.needed) {
+                sub.textContent = a.name + ' is registered.' + (a.credNote || '')
+                    + ' Vaier can manage it as-is — nothing to install on the host.';
+                content.appendChild(sub);
+            } else {
+                sub.textContent = a.name + ' is registered.' + (a.credNote || '');
+                content.appendChild(sub);
+                const warn = el('div', 'ex-hint');
+                warn.textContent = 'Vaier could not prepare the setup command. Open ' + a.name
+                    + ' and use its Setup script button.';
+                content.appendChild(warn);
+            }
+
+            const actions = actionsRow();
+            const done = el('button', 'ex-btn is-accent'); done.textContent = 'Done';
+            done.onclick = () => { close(); S.open.add(key(['fleet', a.name])); go(['fleet', a.name]); };
+            actions.appendChild(done);
+            content.appendChild(actions);
         }
 
         // ---- by address: the fallback (Community, and empty/failed scans) ------------------------------

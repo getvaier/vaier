@@ -16,6 +16,8 @@ import net.vaier.application.ResolveLanAnchorUseCase;
 import net.vaier.application.UpdateLanServerDescriptionUseCase;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
+import net.vaier.domain.SetupToken;
+import net.vaier.domain.port.ForVendingSetupTokens;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -34,7 +36,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -54,6 +58,7 @@ class LanServerRestControllerTest {
     @Mock GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     @Mock ResolveLanAnchorUseCase resolveLanAnchorUseCase;
     @Mock GenerateLanServerSetupScriptUseCase generateLanServerSetupScriptUseCase;
+    @Mock ForVendingSetupTokens forVendingSetupTokens;
 
     @InjectMocks
     LanServerRestController controller;
@@ -178,6 +183,80 @@ class LanServerRestControllerTest {
 
         assertThatThrownBy(() -> controller.downloadSetupScript("nuc02"))
             .isInstanceOf(ConflictException.class);
+    }
+
+    // --- {name}/setup-token (mint) + {name}/setup?t= (token-gated serve) ---
+
+    @Test
+    void mintSetupToken_returnsTokenAndTtlInSeconds() {
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
+            .thenReturn(Optional.of("#!/usr/bin/env bash\n"));
+        when(forVendingSetupTokens.issue("nuc02"))
+            .thenReturn(SetupToken.issue("nuc02", "s3cret-value", 0L));
+
+        ResponseEntity<?> response = controller.mintSetupToken("nuc02");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        LanServerRestController.SetupTokenResponse body =
+            (LanServerRestController.SetupTokenResponse) response.getBody();
+        assertThat(body.token()).isEqualTo("s3cret-value");
+        assertThat(body.expiresInSeconds()).isEqualTo(SetupToken.TTL.toSeconds());
+        verify(forVendingSetupTokens).issue("nuc02");
+    }
+
+    @Test
+    void mintSetupToken_noSetupScript_returns204AndMintsNothing() {
+        // A host with nothing to install (no Docker, no LAN to anchor) has no setup script — so there is
+        // no command to hand over, and no token is minted.
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("printer")).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.mintSetupToken("printer");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(forVendingSetupTokens, never()).issue(anyString());
+    }
+
+    @Test
+    void serveTokenizedSetupScript_validToken_returns200TextPlainScript() {
+        when(forVendingSetupTokens.consume("nuc02", "good")).thenReturn(true);
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("nuc02"))
+            .thenReturn(Optional.of("#!/usr/bin/env bash\nip route replace 172.31.16.0/20 via 192.168.3.121\n"));
+
+        ResponseEntity<?> response = controller.serveTokenizedSetupScript("nuc02", "good");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.TEXT_PLAIN);
+        assertThat(response.getBody()).asString().contains("ip route replace 172.31.16.0/20 via 192.168.3.121");
+    }
+
+    @Test
+    void serveTokenizedSetupScript_missingToken_returns401AndServesNothing() {
+        ResponseEntity<?> response = controller.serveTokenizedSetupScript("nuc02", null);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.TEXT_PLAIN);
+        org.mockito.Mockito.verifyNoInteractions(forVendingSetupTokens);
+        org.mockito.Mockito.verifyNoInteractions(generateLanServerSetupScriptUseCase);
+    }
+
+    @Test
+    void serveTokenizedSetupScript_spentOrInvalidToken_returns401AndServesNothing() {
+        when(forVendingSetupTokens.consume("nuc02", "spent")).thenReturn(false);
+
+        ResponseEntity<?> response = controller.serveTokenizedSetupScript("nuc02", "spent");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        org.mockito.Mockito.verifyNoInteractions(generateLanServerSetupScriptUseCase);
+    }
+
+    @Test
+    void serveTokenizedSetupScript_validTokenUnknownMachine_returns404() {
+        when(forVendingSetupTokens.consume("ghost", "good")).thenReturn(true);
+        when(generateLanServerSetupScriptUseCase.generateSetupScript("ghost")).thenReturn(Optional.empty());
+
+        ResponseEntity<?> response = controller.serveTokenizedSetupScript("ghost", "good");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test

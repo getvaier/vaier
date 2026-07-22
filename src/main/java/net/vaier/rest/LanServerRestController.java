@@ -17,6 +17,8 @@ import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.domain.MachineStatus;
 import net.vaier.domain.Reachability;
+import net.vaier.domain.SetupToken;
+import net.vaier.domain.port.ForVendingSetupTokens;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -43,6 +45,7 @@ public class LanServerRestController {
     private final GetLanServerScrapeUseCase getLanServerScrapeUseCase;
     private final ResolveLanAnchorUseCase resolveLanAnchorUseCase;
     private final GenerateLanServerSetupScriptUseCase generateLanServerSetupScriptUseCase;
+    private final ForVendingSetupTokens forVendingSetupTokens;
 
     @GetMapping
     public List<LanServerResponse> list() {
@@ -148,6 +151,59 @@ public class LanServerRestController {
                 .body(script))
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
+
+    /**
+     * Mints a single-use {@link SetupToken} for {@code name} (admin-gated — NOT on the Traefik
+     * whitelist). Its value is embedded in the {@code curl … | sudo sh} one-liner the operator runs
+     * on the LAN host to pull and execute the setup script from the anonymous, token-gated
+     * {@code GET /{name}/setup?t=} route below. Parity with the peer setup flow (Slice 4b), reusing
+     * the same token machinery — the id is simply the LAN server name.
+     */
+    @PostMapping("/{name}/setup-token")
+    public ResponseEntity<?> mintSetupToken(@PathVariable String name) {
+        log.info("Minting setup token for LAN server {}", LogSafe.forLog(name));
+        // A host with nothing to set up (runs no Docker, anchors no LAN) has no setup script, so there is
+        // no command to hand over — 204, and the UI shows "nothing to install" rather than a link that 404s.
+        if (generateLanServerSetupScriptUseCase.generateSetupScript(name).isEmpty()) {
+            return ResponseEntity.noContent().build();
+        }
+        SetupToken minted = forVendingSetupTokens.issue(name);
+        return ResponseEntity.ok(new SetupTokenResponse(minted.value(), SetupToken.TTL.toSeconds()));
+    }
+
+    /**
+     * ANONYMOUS, token-gated serve of the LAN host setup script — reached via a surgical Traefik
+     * forward-auth exemption for this ONE path ({@code /setup}, not {@code /setup.sh}). A bare host
+     * being onboarded has no oauth2 session, exactly like a peer, so the single-use, ~15-min
+     * {@link SetupToken} is the only authorization, validated here in Vaier. The script carries no
+     * WireGuard secret but DOES reveal LAN topology, so it is never served plainly anonymous.
+     *
+     * <p>Consume the token FIRST (single-use — a used link is spent), then generate. There is no
+     * #202 one-shot budget for LAN servers: the single-use token is the sole gate. Served as
+     * {@code text/plain} so {@code curl … | sudo sh} works. NEVER log the token.
+     */
+    @GetMapping(value = "/{name}/setup")
+    public ResponseEntity<?> serveTokenizedSetupScript(
+            @PathVariable String name,
+            @RequestParam(name = "t", required = false) String token) {
+        log.info("Tokenized setup script requested for LAN server {}", LogSafe.forLog(name));
+        if (token == null || !forVendingSetupTokens.consume(name, token)) {
+            log.warn("Rejected tokenized setup for LAN server {}: missing, invalid, or already-used token",
+                LogSafe.forLog(name));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .contentType(MediaType.TEXT_PLAIN)
+                .body("This setup link is invalid or has already been used. Regenerate it in Vaier.\n");
+        }
+        // A relay-without-LAN-address conflict propagates as ConflictException -> 409 ApiError;
+        // an unknown/empty host stays a body-less 404 (GET of an optional artifact).
+        return generateLanServerSetupScriptUseCase.generateSetupScript(name)
+            .<ResponseEntity<?>>map(script -> ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(script))
+            .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    record SetupTokenResponse(String token, long expiresInSeconds) {}
 
     record RegisterRequest(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                            String description, String deviceCategory) {}
