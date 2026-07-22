@@ -1423,7 +1423,7 @@
             body: 'Idempotent — it adapts to this host: opens the Docker engine API if it runs Docker and '
                 + 'installs routes to the fleet via its relay peer. Run it on ' + machine + ' itself — it needs '
                 + 'sudo to install Docker. The link works once.',
-            curl: "curl -fsSL '" + runUrl + "' | sudo sh",
+            curl: "curl -fsSL '" + runUrl + "' | sudo bash",
             downloadUrl: origin + '/lan-servers/' + encodeURIComponent(machine) + '/setup.sh',
         });
     }
@@ -1840,7 +1840,7 @@
                 content.appendChild(sub);
 
                 const curl = "curl -fsSL '" + window.location.origin + '/lan-servers/'
-                    + encodeURIComponent(a.name) + '/setup?t=' + encodeURIComponent(mint.token) + "' | sudo sh";
+                    + encodeURIComponent(a.name) + '/setup?t=' + encodeURIComponent(mint.token) + "' | sudo bash";
                 content.appendChild(copyableCommand(curl));
 
                 const fb = el('details', 'ex-fallback');
@@ -2155,7 +2155,7 @@
 
             if (p.setupToken) {
                 const curl = "curl -fsSL '" + window.location.origin + '/vpn/peers/'
-                    + encodeURIComponent(p.id) + '/setup?t=' + encodeURIComponent(p.setupToken) + "' | sh";
+                    + encodeURIComponent(p.id) + '/setup?t=' + encodeURIComponent(p.setupToken) + "' | bash";
 
                 const ol = el('ol', 'ex-recipe');
                 ol.appendChild(recipeStep([strong('Log in'), ' to the box as yourself — no sudo.'],
