@@ -600,7 +600,14 @@
         if (name === VAIER_SERVER) return 'is-up';
 
         const peer = S.peers.get(name);
-        if (peer) return peer.connected ? 'is-up' : 'is-down';
+        if (peer) {
+            if (peer.connected) return 'is-up';
+            // A pure client (phone / Mac / Linux / Windows PC) being offline is routine, not an error —
+            // it's grey, not red. Only a server-type peer down is notable, the same SERVER_TYPES split the
+            // up/down alert policy uses (a laptop that's asleep should never look like a server that fell over).
+            const m = S.machines.find((x) => x.name === name);
+            return m && !SERVER_TYPES.has(m.type) ? 'is-idle' : 'is-down';
+        }
 
         const server = S.lan.get(name);
         if (server) return STATUS_DOT[server.status] || 'is-idle';
@@ -1183,7 +1190,7 @@
             const edit = el('div', 'ex-lactions is-static');
             edit.appendChild(selVerb('gear', 'Edit details', 'ex-btn', () => editMachine(m)));
             if (m.type === 'LAN_SERVER') {
-                edit.appendChild(selVerb('download', 'Setup script', 'ex-btn', () => lanSetupScript(m.name)));
+                edit.appendChild(selVerb('shell', 'Setup command', 'ex-btn', () => lanSetupScript(m.name)));
             }
             body.appendChild(edit);
 
@@ -1419,10 +1426,10 @@
         const runUrl = origin + '/lan-servers/' + encodeURIComponent(machine)
             + '/setup?t=' + encodeURIComponent(mint.token);
         setupScriptDialog({
-            title: 'Set up ' + machine,
-            body: 'Idempotent — it adapts to this host: opens the Docker engine API if it runs Docker and '
-                + 'installs routes to the fleet via its relay peer. Run it on ' + machine + ' itself — it needs '
-                + 'sudo to install Docker. The link works once.',
+            title: 'Setup command for ' + machine,
+            body: 'Run this on ' + machine + ' itself (it needs sudo) to open its Docker engine API to Vaier '
+                + 'and install routes to the fleet via its relay peer. It’s idempotent — safe to run once at '
+                + 'onboarding or again later, e.g. after rebuilding the host. The link works once.',
             curl: "curl -fsSL '" + runUrl + "' | sudo bash",
             downloadUrl: origin + '/lan-servers/' + encodeURIComponent(machine) + '/setup.sh',
         });
@@ -1436,10 +1443,10 @@
         dialog.append(h, sub);
         const pre = el('pre', 'ex-config'); pre.textContent = opts.curl; dialog.appendChild(pre);
         const row = el('div', 'ex-set-actions');
-        const copy = el('button', 'ex-btn'); copy.textContent = 'Copy command';
+        const copy = el('button', 'ex-btn is-accent'); copy.textContent = 'Copy command';
         copy.onclick = () => navigator.clipboard.writeText(opts.curl)
             .then(() => toast('Command copied.')).catch(() => toast('Could not copy the command.'));
-        const dl = el('button', 'ex-btn is-accent'); dl.textContent = 'Download setup.sh';
+        const dl = el('button', 'ex-btn'); dl.textContent = 'Download setup.sh';
         dl.onclick = () => { window.location.href = opts.downloadUrl; };
         row.append(copy, dl); dialog.appendChild(row);
         const actions = el('div', 'ex-dialog-actions');
@@ -5732,6 +5739,16 @@
 
     function watchFleet() {
         const events = new EventSource('/vpn/peers/events');
+        // SSE does not replay events missed while the stream was down (an idle tab, a network blip, a Vaier
+        // redeploy). EventSource reconnects on its own, but a dot flip or a peer up/down that fired during the
+        // gap would sit stale until a manual refresh. So on every reconnect (onopen after the first), re-sync
+        // the state those events carry — peer liveness and LAN status — and repaint. Not polling: this fires
+        // only on a reconnect edge, not on a timer.
+        let opened = false;
+        events.onopen = () => {
+            if (opened) Promise.all([loadFleet(), loadLanServers()]).then(render);
+            opened = true;
+        };
         // A peer was added, renamed or removed — the tree's own shape changed.
         events.addEventListener('peers-updated', () => loadFleet().then(render));
         // Liveness. The backend polls WireGuard and pushes what it sees; the browser only ever listens, and
@@ -5770,6 +5787,13 @@
         const refresh = () => {
             loadContainers();                       // re-renders when it lands
             loadServices().then(render);
+        };
+        // Same reconnect re-sync as the fleet stream: a redeploy or blip drops this too, and a missed
+        // service/container change would otherwise wait for a manual refresh. Re-sync on reconnect only.
+        let opened = false;
+        events.onopen = () => {
+            if (opened) refresh();
+            opened = true;
         };
         // A route was published, updated, unpublished — or a container behind one changed state
         // (DockerEventListener publishes `container-state-changed` on this same event).
