@@ -62,6 +62,25 @@ class LanServerSetupScriptTest {
         // no route block
         assertThat(s).doesNotContain("ip route replace");
         assertThat(s).doesNotContain("vaier-lan-routes.service");
+        // A docker host with no relay gateway (on the Vaier server's own LAN) — Vaier can't know the source
+        // its scrape arrives from, so it does not lock the API here; the closing note advises it by hand.
+        assertThat(s).doesNotContain("vaier-docker-firewall");
+    }
+
+    @Test
+    void generate_dockerBehindRelay_locksTheApiToTheGatewayAndDropsEveryoneElse() {
+        // The Docker API is unauthenticated, and Vaier's scrape arrives masqueraded to the relay's LAN IP —
+        // so the script locks tcp/2375 to that gateway and drops it from everyone else, persisted as a
+        // systemd oneshot so it re-applies on boot. This is the secure form of the manual advice the script
+        // used to only print.
+        String s = LanServerSetupScript.generate(2375, "192.168.3.121", List.of("10.13.13.0/24"));
+
+        assertThat(s).contains("/usr/local/sbin/vaier-docker-firewall.sh");
+        assertThat(s).contains("/etc/systemd/system/vaier-docker-firewall.service");
+        assertThat(s).contains("allow 192.168.3.121");        // ACCEPT the Docker API from the relay gateway
+        assertThat(s).contains("--dport 2375 -j DROP");        // drop it from everyone else
+        assertThat(s).contains("systemctl enable --now vaier-docker-firewall.service");
+        assertThat(s).contains("command -v iptables");         // no-op if iptables is absent
     }
 
     @Test

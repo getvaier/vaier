@@ -87,6 +87,10 @@ public final class LanServerSetupScript {
     public static String generate(Integer dockerPort, String gateway, List<String> routeCidrs) {
         boolean doDocker = dockerPort != null;
         boolean doRoutes = gateway != null && routeCidrs != null && !routeCidrs.isEmpty();
+        // Lock the (unauthenticated) Docker API only when we know the source Vaier's scrape arrives from —
+        // the relay gateway. A docker host with no relay (on the Vaier server's own LAN) keeps the printed
+        // by-hand advice instead, since its source isn't the gateway.
+        boolean doFirewall = doDocker && gateway != null;
 
         StringBuilder sb = new StringBuilder();
         sb.append("#!/usr/bin/env bash\n");
@@ -102,16 +106,67 @@ public final class LanServerSetupScript {
         sb.append("fi\n");
 
         if (doDocker) sb.append(dockerBlock(dockerPort));
+        if (doFirewall) sb.append(firewallBlock(dockerPort, gateway));
         if (doRoutes) sb.append(routeBlock(gateway, routeCidrs));
 
         sb.append("\necho\n");
         sb.append("echo \"==> Vaier LAN host setup complete.\"\n");
-        if (doDocker) {
+        if (doFirewall) {
+            sb.append("echo \"    Docker API (tcp ").append(dockerPort)
+                .append(") is locked to the Vaier fleet gateway ").append(gateway)
+                .append(" and dropped from everyone else.\"\n");
+        } else if (doDocker) {
             sb.append("echo \"    Docker API is on tcp://0.0.0.0:").append(dockerPort)
                 .append(" — allow inbound TCP ").append(dockerPort)
                 .append(" from the Vaier server only (it is unauthenticated; never expose it to the internet).\"\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * Locks the (unauthenticated) Docker API to the fleet. Vaier's scrape reaches a relay-anchored host
+     * masqueraded to the relay's LAN IP (the {@code gateway}), so we ACCEPT tcp/{@code port} from that
+     * source and DROP it from everyone else — the secure form of the by-hand advice this script used to only
+     * print. Installed as a systemd oneshot ({@code vaier-docker-firewall.service}) so it re-applies on boot;
+     * the rules are idempotent (checked before adding), and the whole block is a no-op when iptables is
+     * absent. The inner script is written through a <em>quoted</em> heredoc so its {@code $1} survives intact.
+     */
+    private static String firewallBlock(int port, String gateway) {
+        String fw =
+            "#!/bin/sh\n"
+            + "# Managed by Vaier — locks the unauthenticated Docker API to the fleet gateway. Idempotent, re-run safe.\n"
+            + "allow() {\n"
+            + "  iptables -C INPUT -s \"$1\" -p tcp --dport " + port + " -j ACCEPT 2>/dev/null \\\n"
+            + "    || iptables -I INPUT -s \"$1\" -p tcp --dport " + port + " -j ACCEPT\n"
+            + "}\n"
+            + "allow " + gateway + "\n"
+            + "iptables -C INPUT -p tcp --dport " + port + " -j DROP 2>/dev/null \\\n"
+            + "  || iptables -A INPUT -p tcp --dport " + port + " -j DROP\n";
+        return "\n"
+            + "echo \"==> Locking the Docker API (tcp " + port + ") to the Vaier fleet gateway " + gateway + "\"\n"
+            + "if command -v iptables >/dev/null 2>&1; then\n"
+            + "    cat > /usr/local/sbin/vaier-docker-firewall.sh <<'VAIER_FW'\n"
+            + fw
+            + "VAIER_FW\n"
+            + "    chmod +x /usr/local/sbin/vaier-docker-firewall.sh\n"
+            + "    cat > /etc/systemd/system/vaier-docker-firewall.service <<'VAIER_SVC'\n"
+            + "[Unit]\n"
+            + "Description=Vaier — lock the Docker API to the fleet gateway\n"
+            + "After=docker.service network-online.target\n"
+            + "Wants=network-online.target\n"
+            + "[Service]\n"
+            + "Type=oneshot\n"
+            + "ExecStart=/usr/local/sbin/vaier-docker-firewall.sh\n"
+            + "RemainAfterExit=yes\n"
+            + "[Install]\n"
+            + "WantedBy=multi-user.target\n"
+            + "VAIER_SVC\n"
+            + "    systemctl daemon-reload\n"
+            + "    systemctl enable --now vaier-docker-firewall.service \\\n"
+            + "        || echo \"    WARNING: firewall service did not start — restrict tcp " + port + " to the fleet by hand.\" >&2\n"
+            + "else\n"
+            + "    echo \"    WARNING: iptables not found — could not lock the Docker API; restrict tcp " + port + " to the Vaier fleet by hand.\" >&2\n"
+            + "fi\n";
     }
 
     /** Docker-engine-API exposure. Port baked into a {@code PORT} shell var; no backslash escaping needed. */
