@@ -36,6 +36,7 @@ import static org.mockito.Mockito.when;
 class LanServerServiceTest {
 
     @Mock private ForPersistingLanServers forPersistingLanServers;
+    @Mock private net.vaier.domain.port.ForGettingLanServers forGettingLanServers;
     @Mock private ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock private ForResolvingServerLanCidr forResolvingServerLanCidr;
     @Mock private ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
@@ -475,61 +476,17 @@ class LanServerServiceTest {
     }
 
     // --- getAll ---
+    // The LAN-server view assembly moved to LanServerViewAdapter (a *Service must not implement a
+    // driven For* port). getAll() now just delegates to the injected ForGettingLanServers; the
+    // view-building coverage lives in LanServerViewAdapterTest.
 
     @Test
-    void getAll_resolvesRelayPeerNameForEachServer() {
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(
-            new LanServer("nas", "192.168.3.50", true, 2375)
-        ));
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
-        ));
+    void getAll_delegatesToForGettingLanServers() {
+        List<LanServerView> expected = List.of(
+            new LanServerView(new LanServer("nas", "192.168.3.50", true, 2375), "apalveien5"));
+        when(forGettingLanServers.getAll()).thenReturn(expected);
 
-        List<LanServerView> views = service.getAll();
-
-        assertThat(views).hasSize(1);
-        assertThat(views.get(0).server()).isEqualTo(new LanServer("nas", "192.168.3.50", true, 2375));
-        assertThat(views.get(0).relayPeerName()).isEqualTo("apalveien5");
-    }
-
-    @Test
-    void getAll_relayWasDeleted_returnsServerWithNullRelayName() {
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(
-            new LanServer("nas", "192.168.3.50", true, 2375)
-        ));
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
-
-        List<LanServerView> views = service.getAll();
-
-        assertThat(views).hasSize(1);
-        assertThat(views.get(0).relayPeerName()).isNull();
-    }
-
-    @Test
-    void getAll_serverAnchoredLanServer_relayNameIsVaierServer() {
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(
-            new LanServer("vpc-box", "172.31.5.20", true, 2375)
-        ));
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
-        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.0.0/16"));
-
-        List<LanServerView> views = service.getAll();
-
-        assertThat(views).hasSize(1);
-        assertThat(views.get(0).relayPeerName()).isEqualTo("Vaier server");
-    }
-
-    @Test
-    void getAll_relayPeerWinsOverServerLanCidrOnOverlap() {
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(
-            new LanServer("nas", "192.168.3.50", true, 2375)
-        ));
-        when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
-            relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
-        ));
-        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("192.168.0.0/16"));
-
-        assertThat(service.getAll().get(0).relayPeerName()).isEqualTo("apalveien5");
+        assertThat(service.getAll()).isSameAs(expected);
     }
 
     // --- rename (#55) ---

@@ -6,6 +6,7 @@ import net.vaier.domain.port.ForDiscoveringLanServerContainers;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.domain.port.ForGettingLanServerScrape;
 import net.vaier.domain.port.ForPublishingEvents;
+import net.vaier.domain.port.ForRecordingLanServerScrape;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
-public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGettingLanServerScrape {
+public class LanServerScrapeService implements GetLanServerScrapeUseCase {
 
     // Same dampening shape as LanServerReachabilityService — the Docker socket on a relayed
     // LAN host is just as flap-prone as a TCP probe (slow response, brief socket restart,
@@ -30,19 +31,29 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGet
 
     private final ForDiscoveringLanServerContainers discoverer;
     private final ForPublishingEvents forPublishingEvents;
-    private final Map<String, LanServerContainers> cache = new ConcurrentHashMap<>();
+    private final ForGettingLanServerScrape scrapeCache;
+    private final ForRecordingLanServerScrape scrapeRecorder;
+    // Debounce state is application-layer orchestration, not infrastructure cache: a candidate
+    // status must hold for REQUIRED_CONSECUTIVE_SCRAPES cycles before the confirmed cache adapter
+    // sees it. Mirrors LanServerReachabilityService, which keeps its debounce here too.
     private final Map<String, String> pendingStatus = new ConcurrentHashMap<>();
     private final Map<String, Integer> pendingCount = new ConcurrentHashMap<>();
 
     public LanServerScrapeService(ForDiscoveringLanServerContainers discoverer,
-                                  ForPublishingEvents forPublishingEvents) {
+                                  ForPublishingEvents forPublishingEvents,
+                                  ForGettingLanServerScrape scrapeCache,
+                                  ForRecordingLanServerScrape scrapeRecorder) {
         this.discoverer = discoverer;
         this.forPublishingEvents = forPublishingEvents;
+        this.scrapeCache = scrapeCache;
+        this.scrapeRecorder = scrapeRecorder;
     }
 
     @Override
     public List<LanServerContainers> getLanServerContainers() {
-        return List.copyOf(cache.values());
+        // The confirmed-results cache lives in InMemoryLanServerScrapeCache now; this use case
+        // just delegates to its read port (service -> driven port).
+        return scrapeCache.getLanServerContainers();
     }
 
     @Override
@@ -52,12 +63,12 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGet
         for (LanServerContainers fresh : discoverer.discoverAllLanServerContainers()) {
             String name = fresh.name();
             seen.add(name);
-            LanServerContainers existing = cache.get(name);
+            LanServerContainers existing = scrapeRecorder.get(name);
             if (existing == null) {
                 // First observation: commit immediately so the page isn't blank for the 90s
                 // window the debounce would otherwise impose. The debounce only kicks in when
                 // the host has a confirmed prior state to flip away from.
-                cache.put(name, fresh);
+                scrapeRecorder.put(name, fresh);
                 pendingStatus.remove(name);
                 pendingCount.remove(name);
                 continue;
@@ -65,7 +76,7 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGet
             if (existing.status().equals(fresh.status())) {
                 // Same status: refresh the entry (containers list may have changed) and clear
                 // any in-flight pending flip for this host.
-                cache.put(name, fresh);
+                scrapeRecorder.put(name, fresh);
                 pendingStatus.remove(name);
                 pendingCount.remove(name);
                 continue;
@@ -73,7 +84,7 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGet
             String candidate = pendingStatus.get(name);
             int count = (fresh.status().equals(candidate) ? pendingCount.getOrDefault(name, 0) : 0) + 1;
             if (count >= REQUIRED_CONSECUTIVE_SCRAPES) {
-                cache.put(name, fresh);
+                scrapeRecorder.put(name, fresh);
                 pendingStatus.remove(name);
                 pendingCount.remove(name);
             } else {
@@ -81,7 +92,7 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGet
                 pendingCount.put(name, count);
             }
         }
-        cache.keySet().retainAll(seen);
+        scrapeRecorder.retainOnly(seen);
         pendingStatus.keySet().retainAll(seen);
         pendingCount.keySet().retainAll(seen);
 
@@ -92,7 +103,7 @@ public class LanServerScrapeService implements GetLanServerScrapeUseCase, ForGet
 
     private Map<String, String> statusSnapshot() {
         Map<String, String> snap = new HashMap<>();
-        cache.forEach((name, c) -> snap.put(name, c.status()));
+        scrapeCache.getLanServerContainers().forEach(c -> snap.put(c.name(), c.status()));
         return snap;
     }
 }

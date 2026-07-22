@@ -81,9 +81,17 @@ class ContainerServiceTest {
     void setUp() {
         tracker = new ImageUpdateTracker();
         clock = new MutableClock();
+        // The cached snapshots + sweep verdicts live in the store adapter, and the live LAN-server
+        // scrape in its own adapter — both real infrastructure fed by the same mocks, so the end-to-end
+        // flows behave exactly as in production. One store instance backs the write side and the three
+        // read ports.
+        var snapshotStore = new net.vaier.adapter.driven.InMemoryContainerSnapshotStore(VAIER_NETWORK, GATEWAY_IP);
+        var lanServerDiscovery =
+            new net.vaier.adapter.driven.LanServerContainerDiscoveryAdapter(forGettingLanServers, forGettingServerInfo);
         service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
-            forResolvingPeerNames, forGettingPeerConfigurations, forGettingLanServers,
-            forResolvingRegistryDigest, forPublishingEvents, tracker, clock, VAIER_NETWORK, GATEWAY_IP);
+            forResolvingPeerNames, forGettingPeerConfigurations,
+            forResolvingRegistryDigest, forPublishingEvents, tracker, clock,
+            snapshotStore, snapshotStore, snapshotStore, snapshotStore, lanServerDiscovery);
     }
 
     // --- Update available (#57) ---

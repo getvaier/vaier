@@ -22,7 +22,6 @@ import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingLanServers.LanServerView;
-import net.vaier.domain.port.ForGettingMachines;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForGettingVpnClients;
@@ -46,7 +45,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase,
     SetMachineSshAccessUseCase, GetMachineDiskUsageUseCase, GetDiskWatchesUseCase,
-    SetDiskWatchUseCase, ForGettingMachines {
+    SetDiskWatchUseCase {
 
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingVpnClients forGettingVpnClients;

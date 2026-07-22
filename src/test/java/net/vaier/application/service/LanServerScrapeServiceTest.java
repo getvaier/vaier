@@ -32,7 +32,10 @@ class LanServerScrapeServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new LanServerScrapeService(discoverer, forPublishingEvents);
+        // The confirmed-scrape cache is real infrastructure (the in-memory store adapter), so the
+        // debounce state flows through it exactly as in production; one instance serves both ports.
+        var cache = new net.vaier.adapter.driven.InMemoryLanServerScrapeCache();
+        service = new LanServerScrapeService(discoverer, forPublishingEvents, cache, cache);
     }
 
     @Test

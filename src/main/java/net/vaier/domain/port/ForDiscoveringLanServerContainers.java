@@ -13,6 +13,12 @@ public interface ForDiscoveringLanServerContainers {
 
     List<LanServerContainers> discoverAllLanServerContainers();
 
+    /**
+     * Discover containers on a single named LAN server. Throws {@link IllegalArgumentException} when
+     * the server is not registered or when its {@code runsDocker} is false.
+     */
+    LanServerContainers discoverLanServerContainersForHost(String name);
+
     record LanServerContainers(
         String name,
         String lanAddress,

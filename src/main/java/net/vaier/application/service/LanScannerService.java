@@ -11,8 +11,6 @@ import net.vaier.domain.DiscoveredLanMachine;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.NotFoundException;
-import net.vaier.domain.port.ForForgettingDiscoveredLanMachines;
-import net.vaier.domain.port.ForGettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingLanServers;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -20,14 +18,13 @@ import net.vaier.domain.port.ForManagingIgnoredLanMachines;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForScanningLan;
+import net.vaier.domain.port.ForStoringDiscoveredLanMachines;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -48,8 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
     ListScannableLansUseCase, GetDiscoveredLanMachinesUseCase,
-    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase,
-    ForGettingDiscoveredLanMachines, ForForgettingDiscoveredLanMachines {
+    IgnoreLanMachineUseCase, UnignoreLanMachineUseCase {
 
     private static final String SSE_TOPIC = "vpn-peers";
     private static final String SSE_EVENT = "lan-scan-updated";
@@ -60,11 +56,10 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
     private final ForGettingLanServers lanServers;
     private final ForManagingIgnoredLanMachines ignoredMachines;
     private final ForPublishingEvents events;
+    private final ForStoringDiscoveredLanMachines snapshotStore;
     private final Executor scanExecutor;
 
     private final AtomicBoolean scanning = new AtomicBoolean(false);
-    private volatile List<DiscoveredLanMachine> lastResults = List.of();
-    private volatile Instant lastScanCompleted;
 
     @Autowired
     public LanScannerService(ForScanningLan scanner,
@@ -72,9 +67,10 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
                              ForResolvingServerLanCidr serverLanCidr,
                              ForGettingLanServers lanServers,
                              ForManagingIgnoredLanMachines ignoredMachines,
-                             ForPublishingEvents events) {
+                             ForPublishingEvents events,
+                             ForStoringDiscoveredLanMachines snapshotStore) {
         // A single-thread executor: scans are serialised and never pile up on the request threads.
-        this(scanner, peerConfigurations, serverLanCidr, lanServers, ignoredMachines, events,
+        this(scanner, peerConfigurations, serverLanCidr, lanServers, ignoredMachines, events, snapshotStore,
             Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "lan-scanner");
                 t.setDaemon(true);
@@ -88,6 +84,7 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
                       ForGettingLanServers lanServers,
                       ForManagingIgnoredLanMachines ignoredMachines,
                       ForPublishingEvents events,
+                      ForStoringDiscoveredLanMachines snapshotStore,
                       Executor scanExecutor) {
         this.scanner = scanner;
         this.peerConfigurations = peerConfigurations;
@@ -95,6 +92,7 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
         this.lanServers = lanServers;
         this.ignoredMachines = ignoredMachines;
         this.events = events;
+        this.snapshotStore = snapshotStore;
         this.scanExecutor = scanExecutor;
     }
 
@@ -105,8 +103,7 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
         }
         scanExecutor.execute(() -> {
             try {
-                lastResults = performScan();
-                lastScanCompleted = Instant.now();
+                snapshotStore.store(performScan());
             } catch (RuntimeException e) {
                 log.warn("LAN scan failed; keeping previous results: {}", e.getMessage());
             } finally {
@@ -131,12 +128,11 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
                 Set<String> registered = registeredAddresses(peerConfigurations.getAllPeerConfigs());
                 List<DiscoveredLanMachine> fresh = scanAnchor(anchor, registered);
                 // Replace only this LAN's slice of the snapshot; every other LAN's results stand.
-                List<DiscoveredLanMachine> merged = new ArrayList<>(lastResults.stream()
+                List<DiscoveredLanMachine> merged = new ArrayList<>(snapshotStore.current().stream()
                     .filter(m -> !m.isOnLan(anchor.anchorKey()))
                     .toList());
                 merged.addAll(fresh);
-                lastResults = List.copyOf(merged);
-                lastScanCompleted = Instant.now();
+                snapshotStore.store(List.copyOf(merged));
             } catch (RuntimeException e) {
                 log.warn("Targeted LAN scan failed; keeping previous results: {}", e.getMessage());
             } finally {
@@ -159,10 +155,10 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
         // Ignore happens between scans (no rescan), so the ignored flag is applied at read time —
         // the domain owns the decision. Ignored hosts stay visible so the UI can offer Unignore.
         Set<String> ignoredKeys = ignoredMachines.getIgnoredKeys();
-        List<DiscoveredLanMachine> flagged = lastResults.stream()
+        List<DiscoveredLanMachine> flagged = snapshotStore.current().stream()
             .map(m -> m.withIgnored(ignoredKeys))
             .toList();
-        return new LanScanSnapshot(status, flagged, lastScanCompleted);
+        return new LanScanSnapshot(status, flagged, snapshotStore.lastScanCompleted());
     }
 
     @Override
@@ -172,26 +168,6 @@ public class LanScannerService implements ScanLanUseCase, ScanLanAnchorUseCase,
             .filter(m -> m.isOnLan(anchorKey))
             .toList();
         return new LanScanSnapshot(all.status(), scoped, all.lastScanCompleted());
-    }
-
-    @Override
-    public Optional<DiscoveredLanMachine> findByIpAddress(String ipAddress) {
-        // Read-side of the adoption port: the LAN-server domain looks the candidate up here so it
-        // never depends on this scanner's inbound use case. First match wins if an address somehow
-        // appears on two relay LANs.
-        return lastResults.stream()
-            .filter(m -> m.ipAddress().equals(ipAddress))
-            .findFirst();
-    }
-
-    @Override
-    public void forget(String ipAddress) {
-        // Write-side of the adoption port: drop the adopted host from the snapshot so it stops
-        // surfacing as a candidate immediately, rather than waiting for the next sweep to filter it
-        // out as already-registered.
-        lastResults = lastResults.stream()
-            .filter(m -> !m.ipAddress().equals(ipAddress))
-            .toList();
     }
 
     @Override

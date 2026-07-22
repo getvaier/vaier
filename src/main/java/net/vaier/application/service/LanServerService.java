@@ -27,6 +27,7 @@ import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForForgettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingDiscoveredLanMachines;
 import net.vaier.domain.port.ForGettingLanServers;
+import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForPersistingHostCredentials;
@@ -54,11 +55,11 @@ public class LanServerService implements
     UpdateLanServerDescriptionUseCase,
     UpdateLanServerDeviceCategoryUseCase,
     GetLanServersUseCase,
-    ForGettingLanServers,
     GenerateLanServerSetupScriptUseCase,
     ResolveLanAnchorUseCase {
 
     private final ForPersistingLanServers forPersistingLanServers;
+    private final ForGettingLanServers forGettingLanServers;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForResolvingServerLanCidr forResolvingServerLanCidr;
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
@@ -74,6 +75,7 @@ public class LanServerService implements
     private String vpnSubnet;
 
     public LanServerService(ForPersistingLanServers forPersistingLanServers,
+                            ForGettingLanServers forGettingLanServers,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
                             ForResolvingServerLanCidr forResolvingServerLanCidr,
                             ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
@@ -97,6 +99,7 @@ public class LanServerService implements
                             @Lazy ForForgettingDiscoveredLanMachines forForgettingDiscoveredLanMachines,
                             ForVerifyingSshCredentials forVerifyingSshCredentials) {
         this.forPersistingLanServers = forPersistingLanServers;
+        this.forGettingLanServers = forGettingLanServers;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forResolvingServerLanCidr = forResolvingServerLanCidr;
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
@@ -298,12 +301,9 @@ public class LanServerService implements
 
     @Override
     public List<LanServerView> getAll() {
-        List<PeerConfiguration> peers = forGettingPeerConfigurations.getAllPeerConfigs();
-        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
-        return forPersistingLanServers.getAll().stream()
-            .map(s -> new LanServerView(s,
-                LanAnchor.resolve(s.lanAddress(), peers, serverLanCidr).map(LanAnchor::name).orElse(null)))
-            .toList();
+        // The view assembly is a pure read over three driven ports and now lives in
+        // LanServerViewAdapter; this use case just delegates to it (service -> driven port).
+        return forGettingLanServers.getAll();
     }
 
     @Override

@@ -65,8 +65,10 @@ class LanScannerServiceTest {
         ForResolvingServerLanCidr serverLanCidr = () -> serverCidr;
         ForGettingLanServers lanServers = () -> registered.stream()
             .map(s -> new LanServerView(s, "x")).toList();
+        // The snapshot store is real infrastructure (an in-memory store adapter) so the scan
+        // results flow through it exactly as they do in production; nothing to stub.
         return new LanScannerService(scanner, peerConfigs, serverLanCidr, lanServers, ignoreStore,
-            recordingEvents, executor);
+            recordingEvents, new net.vaier.adapter.driven.InMemoryDiscoveredLanMachineStore(), executor);
     }
 
     /** Runs the scan task inline so the test stays deterministic. */

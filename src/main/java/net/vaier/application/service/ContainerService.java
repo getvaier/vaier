@@ -7,7 +7,6 @@ import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.PublishableService;
-import net.vaier.domain.PublishableService.PublishableSource;
 import net.vaier.application.CheckForImageUpdatesUseCase;
 import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
@@ -23,14 +22,13 @@ import net.vaier.domain.UpdateCheckFloor;
 import net.vaier.domain.UpdateCheckOutcome;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Server;
-import net.vaier.domain.VaierServerCatalogue;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.WireguardClientImage;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers;
+import net.vaier.domain.port.ForDiscoveringLanServerContainers.LanServerContainers;
 import net.vaier.domain.port.ForDiscoveringPeerContainers;
+import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
-import net.vaier.domain.port.ForGettingLanServers;
-import net.vaier.domain.port.ForGettingLanServers.LanServerView;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVaierServerDockerServices;
@@ -38,7 +36,7 @@ import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingPeerNames;
 import net.vaier.domain.port.ForResolvingRegistryDigest;
-import org.springframework.beans.factory.annotation.Autowired;
+import net.vaier.domain.port.ForStoringContainerSnapshots;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -56,23 +54,24 @@ public class ContainerService implements
     GetVaierServerDockerServicesUseCase,
     RefreshContainerStateUseCase,
     SweepImageUpdatesUseCase,
-    CheckForImageUpdatesUseCase,
-    ForDiscoveringVaierServerContainers,
-    ForDiscoveringPeerContainers,
-    ForDiscoveringLanServerContainers,
-    ForGettingVaierServerDockerServices {
+    CheckForImageUpdatesUseCase {
 
     private final ForGettingServerInfo forGettingServerInfo;
     private final ForGettingVpnClients forGettingVpnClients;
     private final ForResolvingPeerNames forResolvingPeerNames;
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
-    private final ForGettingLanServers forGettingLanServers;
     private final ForResolvingRegistryDigest forResolvingRegistryDigest;
     private final ForPublishingEvents forPublishingEvents;
     private final ImageUpdateTracker imageUpdateTracker;
     private final UpdateCheckFloor updateCheckFloor;
-    private final String vaierNetworkName;
-    private final String dockerGatewayIp;
+    // The cached scrapes + sweep verdicts now live in InMemoryContainerSnapshotStore (a service must
+    // not implement the driven discovery ports); the scrape/sweep use cases here write and read raw
+    // through the store, and consumers read the decorated views through the discovery ports.
+    private final ForStoringContainerSnapshots snapshotStore;
+    private final ForDiscoveringVaierServerContainers vaierServerContainers;
+    private final ForDiscoveringPeerContainers peerContainers;
+    private final ForGettingVaierServerDockerServices vaierServerDockerServices;
+    private final ForDiscoveringLanServerContainers lanServerContainers;
 
     /**
      * Where a settled update-available verdict is pushed. The container payloads already ride this
@@ -84,59 +83,23 @@ public class ContainerService implements
     private static final String SSE_EVENT = "service-updated";
     private static final String SSE_DATA = "image-updates-checked";
 
-    /**
-     * Last peer-container scrape, served by {@link #discoverAll()}. Empty until the first
-     * {@link #refresh()} runs (the state-refresh scheduler triggers it shortly after startup).
-     */
-    private volatile List<PeerContainers> peerContainersSnapshot = List.of();
-
-    /**
-     * Last Vaier-server container scrape, served by {@link #discover()} and
-     * {@link #getUnpublishedVaierServerServices}. Listing and image-inspecting every container
-     * on a busy host is slow enough to be worth keeping off the request thread.
-     */
-    private volatile List<DockerService> vaierServerContainersSnapshot = List.of();
-
-    /**
-     * Last update-available sweep's verdicts, image → verdict, applied to the snapshots as they are served so
-     * the Explorer can badge a container without anyone scraping or asking a registry on a request thread.
-     * Empty until the first sweep runs, which reads as {@link UpdateAvailability#UNKNOWN} — never as up to
-     * date.
-     */
-    private volatile Map<ScopedImage, UpdateAvailability> imageUpdateVerdicts = Map.of();
-
-    @Autowired
     public ContainerService(ForGettingServerInfo forGettingServerInfo,
                             ForGettingVpnClients forGettingVpnClients,
                             ForResolvingPeerNames forResolvingPeerNames,
                             ForGettingPeerConfigurations forGettingPeerConfigurations,
-                            ForGettingLanServers forGettingLanServers,
                             ForResolvingRegistryDigest forResolvingRegistryDigest,
                             ForPublishingEvents forPublishingEvents,
                             ImageUpdateTracker imageUpdateTracker,
-                            Clock clock) {
-        this(forGettingServerInfo, forGettingVpnClients, forResolvingPeerNames, forGettingPeerConfigurations,
-            forGettingLanServers, forResolvingRegistryDigest, forPublishingEvents, imageUpdateTracker, clock,
-            System.getenv().getOrDefault("VAIER_NETWORK_NAME", "vaier-network"),
-            System.getenv().getOrDefault("VAIER_DOCKER_GATEWAY", "172.20.0.1"));
-    }
-
-    ContainerService(ForGettingServerInfo forGettingServerInfo,
-                     ForGettingVpnClients forGettingVpnClients,
-                     ForResolvingPeerNames forResolvingPeerNames,
-                     ForGettingPeerConfigurations forGettingPeerConfigurations,
-                     ForGettingLanServers forGettingLanServers,
-                     ForResolvingRegistryDigest forResolvingRegistryDigest,
-                     ForPublishingEvents forPublishingEvents,
-                     ImageUpdateTracker imageUpdateTracker,
-                     Clock clock,
-                     String vaierNetworkName,
-                     String dockerGatewayIp) {
+                            Clock clock,
+                            ForStoringContainerSnapshots snapshotStore,
+                            ForDiscoveringVaierServerContainers vaierServerContainers,
+                            ForDiscoveringPeerContainers peerContainers,
+                            ForGettingVaierServerDockerServices vaierServerDockerServices,
+                            ForDiscoveringLanServerContainers lanServerContainers) {
         this.forGettingServerInfo = forGettingServerInfo;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerNames = forResolvingPeerNames;
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
-        this.forGettingLanServers = forGettingLanServers;
         this.forResolvingRegistryDigest = forResolvingRegistryDigest;
         this.forPublishingEvents = forPublishingEvents;
         this.imageUpdateTracker = imageUpdateTracker;
@@ -145,36 +108,19 @@ public class ContainerService implements
         // second entry point ever forces a sweep it must share THIS floor (a bean, as the tracker had to
         // become); two floors would each admit a check a minute and quietly double the ceiling.
         this.updateCheckFloor = new UpdateCheckFloor(clock);
-        this.vaierNetworkName = vaierNetworkName;
-        this.dockerGatewayIp = dockerGatewayIp;
+        // The store adapter backs the write side and the three read ports; Spring resolves each of
+        // these interfaces to that single bean (a service depends on ports, never the adapter class).
+        this.snapshotStore = snapshotStore;
+        this.vaierServerContainers = vaierServerContainers;
+        this.peerContainers = peerContainers;
+        this.vaierServerDockerServices = vaierServerDockerServices;
+        this.lanServerContainers = lanServerContainers;
     }
 
     /** Cache read — backed by {@link #refresh()}; the launchpad never scrapes Docker on-thread. */
     @Override
     public List<DockerService> discover() {
-        return withUpdateVerdicts(LanAnchor.VAIER_SERVER_NAME, vaierServerContainersSnapshot);
-    }
-
-    /**
-     * The scrape as the host reported it, carrying the last sweep's update-available verdicts.
-     *
-     * <p>Decorating on the way out rather than on the way in is deliberate: the two run on different clocks —
-     * the container scrape every 30s, the registry sweep once a day — and a scrape must never be able to
-     * silently erase a verdict it knows nothing about. An image the sweep has not judged reads
-     * {@link UpdateAvailability#UNKNOWN}, which is the truth.
-     */
-    private List<DockerService> withUpdateVerdicts(String machine, List<DockerService> containers) {
-        Map<ScopedImage, UpdateAvailability> verdicts = imageUpdateVerdicts;
-        if (verdicts.isEmpty()) {
-            return containers;
-        }
-        // Keyed by ScopedImage so the mark on a container matches the verdict the sweep settled for THAT
-        // machine's copy of the image — the same tag on two machines can read differently. No default here on
-        // purpose: "an unswept image reads unknown" is DockerService's rule, and stating it twice is how the
-        // two would one day disagree. A null verdict is normalised by the domain.
-        return containers.stream()
-            .map(c -> c.withUpdateAvailability(verdicts.get(new ScopedImage(machine, c.image()))))
-            .toList();
+        return vaierServerContainers.discover();
     }
 
     /**
@@ -192,7 +138,7 @@ public class ContainerService implements
     public Map<ScopedImage, UpdateAvailability> sweepImageUpdates() {
         Map<ScopedImage, UpdateAvailability> verdicts =
             ImageUpdateSweep.sweep(everyContainerVaierCanSee(), forResolvingRegistryDigest);
-        imageUpdateVerdicts = verdicts;
+        snapshotStore.storeImageUpdateVerdicts(verdicts);
         return verdicts;
     }
 
@@ -221,10 +167,10 @@ public class ContainerService implements
         }
 
         refresh();
-        Map<ScopedImage, UpdateAvailability> before = imageUpdateVerdicts;
+        Map<ScopedImage, UpdateAvailability> before = snapshotStore.imageUpdateVerdicts();
         Map<ScopedImage, UpdateAvailability> after =
             ImageUpdateSweep.sweepFresh(everyContainerVaierCanSee(), forResolvingRegistryDigest);
-        imageUpdateVerdicts = after;
+        snapshotStore.storeImageUpdateVerdicts(after);
         imageUpdateTracker.clearUpToDate(after);
 
         UpdateCheckOutcome outcome = UpdateCheckOutcome.checked(before, after, admission.lastCheckedAt());
@@ -242,8 +188,8 @@ public class ContainerService implements
      */
     private List<MachineContainers> everyContainerVaierCanSee() {
         List<MachineContainers> machines = new ArrayList<>();
-        machines.add(new MachineContainers(LanAnchor.VAIER_SERVER_NAME, vaierServerContainersSnapshot));
-        peerContainersSnapshot.forEach(peer ->
+        machines.add(new MachineContainers(LanAnchor.VAIER_SERVER_NAME, snapshotStore.vaierServerContainers()));
+        snapshotStore.peerContainers().forEach(peer ->
             machines.add(new MachineContainers(peer.peerName(), peer.containers())));
         return machines;
     }
@@ -260,22 +206,18 @@ public class ContainerService implements
     /** Cache read — the launchpad and {@code /docker-services/peers} never scrape on-thread. */
     @Override
     public List<PeerContainers> discoverAll() {
-        return peerContainersSnapshot.stream()
-            .map(peer -> new PeerContainers(peer.peerName(), peer.vpnIp(), peer.status(),
-                withUpdateVerdicts(peer.peerName(), peer.containers()),
-                peer.wireguardOutdated(), peer.wireguardExpectedImage()))
-            .toList();
+        return peerContainers.discoverAll();
     }
 
     @Override
     public void refresh() {
         try {
-            peerContainersSnapshot = scrapePeerContainers();
+            snapshotStore.storePeerContainers(scrapePeerContainers());
         } catch (Exception e) {
             log.warn("Peer container scrape failed, keeping previous snapshot: {}", e.getMessage());
         }
         try {
-            vaierServerContainersSnapshot = scrapeVaierServerContainers();
+            snapshotStore.storeVaierServerContainers(scrapeVaierServerContainers());
         } catch (Exception e) {
             log.warn("Vaier-server container scrape failed, keeping previous snapshot: {}", e.getMessage());
         }
@@ -322,75 +264,21 @@ public class ContainerService implements
         return results;
     }
 
+    /** Live LAN-server scrape lives in LanServerContainerDiscoveryAdapter; delegate to the port. */
     @Override
     public List<LanServerContainers> discoverAllLanServerContainers() {
-        return forGettingLanServers.getAll().stream()
-            .filter(view -> view.server().runsDocker())
-            .map(this::scrapeLanServer)
-            .toList();
+        return lanServerContainers.discoverAllLanServerContainers();
     }
 
     @Override
     public LanServerContainers discoverLanServerContainersForHost(String name) {
-        LanServerView view = forGettingLanServers.getAll().stream()
-            .filter(v -> v.server().name().equals(name))
-            .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("LAN server not found: " + name));
-        if (!view.server().runsDocker()) {
-            throw new IllegalArgumentException(
-                "LAN server " + name + " does not run Docker");
-        }
-        return scrapeLanServer(view);
-    }
-
-    private LanServerContainers scrapeLanServer(LanServerView view) {
-        var server = view.server();
-        if (view.relayPeerName() == null) {
-            log.debug("Skipping LAN server {} ({}) — not inside any relay peer's lanCidr nor the server LAN CIDR",
-                server.name(), server.lanAddress());
-            return new LanServerContainers(server.name(), server.lanAddress(), server.dockerPort(),
-                null, "UNREACHABLE", List.of());
-        }
-        // relayPeerName is either a relay peer (scrape hops through its tunnel + LAN forwarding)
-        // or LanAnchor.VAIER_SERVER_NAME (scrape goes straight from the Vaier container, since the
-        // address is in the Vaier server's own subnet). The Docker socket target is the same.
-        try {
-            Server target = new Server(server.lanAddress(), server.dockerPort(), false);
-            List<DockerService> containers = forGettingServerInfo.getServicesWithExposedPorts(target);
-            log.info("Discovered {} containers on LAN server {} ({}) via {}",
-                containers.size(), server.name(), server.lanAddress(), view.relayPeerName());
-            return new LanServerContainers(server.name(), server.lanAddress(), server.dockerPort(),
-                view.relayPeerName(), "OK", containers);
-        } catch (Exception e) {
-            log.warn("Failed to query Docker on LAN server {} ({}): {}",
-                server.name(), server.lanAddress(), e.getMessage());
-            return new LanServerContainers(server.name(), server.lanAddress(), server.dockerPort(),
-                view.relayPeerName(), "UNREACHABLE", List.of());
-        }
+        return lanServerContainers.discoverLanServerContainersForHost(name);
     }
 
     @Override
     public List<PublishableService> getUnpublishedVaierServerServices(List<ReverseProxyRoute> existingRoutes) {
-        List<PublishableService> result = new ArrayList<>();
-        vaierServerContainersSnapshot.forEach(container -> {
-            String name = container.containerName();
-            if (VaierServerCatalogue.isExcluded(name)) return;
-
-            container.ports().stream()
-                .filter(p -> "tcp".equals(p.type()))
-                .filter(p -> VaierServerCatalogue.isPublishablePort(name, p.privatePort()))
-                .forEach(p -> container.reachableEndpoint(p, vaierNetworkName, dockerGatewayIp)
-                    .filter(ep -> !ReverseProxyRoute.hasRouteFor(existingRoutes, ep.address(), ep.port()))
-                    .ifPresent(ep -> result.add(new PublishableService(
-                        PublishableSource.VAIER_SERVER,
-                        null,
-                        ep.address(),
-                        container.containerName(),
-                        ep.port(),
-                        VaierServerCatalogue.rootRedirectPath(name),
-                        false
-                    ))));
-        });
-        return result;
+        // The catalogue-driven filtering over the cached Vaier-server snapshot lives in
+        // InMemoryContainerSnapshotStore now; this use case delegates to its read port.
+        return vaierServerDockerServices.getUnpublishedVaierServerServices(existingRoutes);
     }
 }
