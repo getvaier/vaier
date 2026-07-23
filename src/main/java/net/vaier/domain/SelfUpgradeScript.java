@@ -24,8 +24,15 @@ public final class SelfUpgradeScript {
      * Where the script leaves its account of what happened. Vaier is restarting while it runs, so there is no
      * in-memory state to settle against — the outcome has to outlive both the old process and the script, and
      * be waiting on disk when the new one boots.
+     *
+     * <p>Under the SSH user's own home, deliberately, and it is a shell expression rather than a path: a
+     * fixed {@code /var/lib/...} needs root to create, and Vaier does not always have root on the host it
+     * upgrades. It would not have failed loudly either — the upgrade would have run correctly and simply left
+     * no account, so a rollback would have been silent and Settings would have gone on reporting that nothing
+     * had ever been upgraded. (The same trap as {@code /var/lib/vaier-backup} on a non-root host.) Both the
+     * script and the read run as the same SSH user, so both resolve it to the same place.
      */
-    public static final String RESULT_FILE = "/var/lib/vaier-upgrade/last-upgrade";
+    public static final String RESULT_FILE = "$HOME/.vaier-upgrade/last-upgrade";
 
     /** How long to wait for the replacement to answer before deciding it will not. */
     public static final int DEFAULT_HEALTH_TIMEOUT_SECONDS = 120;
@@ -53,7 +60,8 @@ public final class SelfUpgradeScript {
         sb.append("set -uo pipefail\n\n");
 
         sb.append("RUN_ID=").append(quote(runId)).append("\n");
-        sb.append("RESULT=").append(quote(RESULT_FILE)).append("\n");
+        // Double-quoted, not single: $HOME has to expand.
+        sb.append("RESULT=\"").append(RESULT_FILE).append("\"\n");
         sb.append("mkdir -p \"$(dirname \"$RESULT\")\"\n\n");
 
         sb.append("say() { echo \"$RUN_ID $1 $(date -u +%Y-%m-%dT%H:%M:%SZ) ${2:-}\" > \"$RESULT\"; }\n\n");
@@ -164,7 +172,7 @@ public final class SelfUpgradeScript {
 
     /** Read the account the last upgrade left, if any. Absence is not an error — most hosts have none. */
     public static String readResult() {
-        return "cat " + quote(RESULT_FILE) + " 2>/dev/null || true";
+        return "cat \"" + RESULT_FILE + "\" 2>/dev/null || true";
     }
 
     /** Single-quoted for the shell, with any embedded quote closed and re-opened — as {@code BorgCommand} does. */
