@@ -12,7 +12,7 @@ import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.Selection;
-import net.vaier.domain.SourcePaths;
+import net.vaier.domain.ProtectedPaths;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -193,10 +193,10 @@ public class ExplorerRestController {
     record DirectoryResponse(String root, String path, String at, List<FileEntryResponse> entries) {
         static DirectoryResponse from(MachineDirectory directory) {
             // Whether an entry is backed up (or merely contains backed-up content) is the domain's decision —
-            // SourcePaths.covers / enclosesUnder on the machine's protected paths — asked here per entry so the
-            // browser only has to render the flags. In the past the protected set is empty, so every archived
-            // entry is simply unmarked.
-            SourcePaths protectedPaths = directory.protectedPaths();
+            // ProtectedPaths.covers / enclosesUnder on what the machine actually backs up, source paths minus
+            // excludes — asked here per entry so the browser only has to render the flags. In the past the
+            // protection is empty, so every archived entry is simply unmarked.
+            ProtectedPaths protectedPaths = directory.protectedPaths();
             return new DirectoryResponse(directory.root().path(), directory.path(), directory.at(),
                 directory.entries().stream()
                     .map(entry -> FileEntryResponse.from(entry, protectedPaths))
@@ -223,15 +223,16 @@ public class ExplorerRestController {
      * asked for.
      *
      * <p>{@code backedUp} and {@code containsBackedUp} are the server's verdict — via the domain
-     * {@link net.vaier.domain.SourcePaths#covers} / {@link net.vaier.domain.SourcePaths#enclosesUnder} — so the
-     * Explorer can render a full or half shield without re-implementing the containment rule in JS. {@code
-     * backedUp} is true when a job protects this exact path or an ancestor of it; {@code containsBackedUp} is
-     * true only when the entry is <em>not</em> itself backed up but a source path lives somewhere inside it
-     * (the two are mutually exclusive). Both are always {@code false} for an archived (past) listing.
+     * {@link ProtectedPaths#covers} / {@link ProtectedPaths#enclosesUnder} — so the Explorer can render a full
+     * or half shield without re-implementing the containment rule in JS. {@code backedUp} is true when a job
+     * protects this exact path or an ancestor of it <em>and</em> no exclude carves it back out; {@code
+     * containsBackedUp} is true only when the entry is <em>not</em> itself backed up but unexcluded protected
+     * content lives somewhere inside it (the two are mutually exclusive). Both are always {@code false} for an
+     * archived (past) listing.
      */
     record FileEntryResponse(String name, String path, boolean directory, long size, String modifiedAt,
                              boolean backedUp, boolean containsBackedUp) {
-        static FileEntryResponse from(FileEntry entry, SourcePaths protectedPaths) {
+        static FileEntryResponse from(FileEntry entry, ProtectedPaths protectedPaths) {
             boolean backedUp = protectedPaths.covers(entry.path());
             boolean containsBackedUp = !backedUp && protectedPaths.enclosesUnder(entry.path());
             return new FileEntryResponse(entry.name(), entry.path(), entry.directory(),

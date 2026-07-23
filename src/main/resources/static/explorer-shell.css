@@ -8,10 +8,13 @@
    container names, addresses), sans for anything human (prose, labels, empty states). In a namespace UI the
    address is the content. */
 
-/* The past is a different light, not a different badge — when the archive rail lands (slice D), scrubbing
-   back re-lights the shell from these tokens rather than pinning a badge on it. Nothing in slice A sets
-   data-past, so nothing here fires yet; the definitions land now so the rail has somewhere to arrive. */
-[data-past='1'] {
+/* The past is a different light, not a different badge — scrubbing back re-lights the view from these
+   tokens rather than pinning a badge on it. Scoped to the pane on purpose: what you are looking at is
+   historical, but the chrome around it is not. The tree, the topbar and the address bar report the fleet as
+   it stands right now, so re-lighting them told a lie and made the whole app feel like it had changed mode.
+   Custom properties inherit, so defining them here re-lights the pane and everything in it — the rail
+   included — and nothing outside it. */
+[data-past='1'] .ex-pane {
     --bg-panel:     #191510;
     --bg-card:      #201a13;
     --bg-hover:     #2b2318;
@@ -223,7 +226,10 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-dot.is-degraded { background: var(--yellow); }   /* on the network, but its Docker scrape is failing */
 .ex-dot.is-down { background: var(--red); }
 .ex-dot.is-idle { background: var(--text-dim); }
-[data-past='1'] .ex-dot { display: none; }   /* the past has no liveness to report */
+/* An archived view has no liveness to report, so the pane drops its dots. The tree keeps its own: it stands
+   in the present regardless of which archive the pane is showing, and blanking it implied the whole fleet
+   had gone dark. */
+[data-past='1'] .ex-pane .ex-dot { display: none; }
 
 /* A directory whose read failed. It does not pretend to be empty, and it does not spin forever — it says so,
    and the reason (the server's own sentence) is on the row's title and in full in the Inspector. */
@@ -356,6 +362,12 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     transition: opacity .12s ease;
 }
 .ex-lrow:hover .ex-lactions, .ex-lrow:focus-within .ex-lactions { opacity: 1; }
+/* A touch device never hovers, so "dimmed until hovered" would leave the row verbs permanently half-lit and
+   permanently cramped. Where there is no hover they are simply on, at thumb size. */
+@media (hover: none) {
+    .ex-lactions { opacity: 1; gap: 4px; }
+    .ex-lactions .ex-btn, .ex-lactions .ex-iconbtn { padding: 8px 10px; }
+}
 .ex-lrow:hover .ex-lactions { background: linear-gradient(to right, transparent, var(--bg-card) 30%); }
 .ex-iconbtn {
     display: flex; align-items: center; justify-content: center;
@@ -934,7 +946,10 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 /* A confirm dialog, centred over its own scrim (reusing .ex-scrim's backdrop). */
 .ex-dialog {
     width: 440px; max-width: calc(100vw - 32px);
-    max-height: calc(100vh - 40px); overflow-y: auto;
+    /* The scrim seats the dialog 12vh from the top, so its height must leave that offset plus a bottom
+       gap — otherwise a long scan list runs the dialog (and its footer) off the bottom of the screen,
+       out of reach, since the fixed scrim doesn't scroll. */
+    max-height: calc(88vh - 24px); overflow-y: auto;
     padding: 20px;
     background: var(--bg-panel);
     border: 1px solid var(--border-hi);
@@ -1302,7 +1317,12 @@ select.ex-input { cursor: pointer; }
     /* The pane's header wraps rather than shoving its actions off the edge, and reclaims a little side room. */
     .ex-pane-head { flex-wrap: wrap; padding: 10px 12px; }
     .ex-pane-body { padding: 14px 12px 40px; }
+    /* Rows become touch targets. A 5px-padded row is ~30px tall — fine for a pointer, under half what a
+       thumb reliably hits, which is why every phone file browser (iOS Files, Files by Google, Dropbox) sits
+       at 48px or more. The padding does the work so the row grows with its content rather than being pinned
+       to a fixed height. */
     .ex-lhead, .ex-lrow { grid-template-columns: 24px minmax(0, 1fr) 80px; padding: 5px 8px; }
+    .ex-lrow { padding: 12px 8px; }
     .ex-lhead span:last-child, .ex-lrow .ex-lmeta:last-child { display: none; }
     /* 16px keeps iOS from zooming the layout the instant a field takes focus — the search field, and every
        form input (Settings, Add machine, credentials). */
@@ -1318,4 +1338,15 @@ select.ex-input { cursor: pointer; }
     .ex-rail { flex-wrap: wrap; gap: 10px 12px; }
     .ex-rail-track { flex: 1 1 100%; order: 3; }
     .ex-rail-when { max-width: none; flex: 1 1 100%; order: 2; text-align: left; }
+
+    /* The bars above the listing (the selection toolbar, "Paste here") are label-left / buttons-right rows.
+       On a phone the button group cannot shrink past its content, so space-between pushed it off the right
+       edge and the verbs became unreachable — a selection you could make but not act on. They wrap instead:
+       the label takes the first line, the verbs take the next and stay inside the screen. */
+    .ex-selbar, .ex-pastebar { flex-wrap: wrap; gap: 8px 10px; }
+    .ex-selbar-txt, .ex-pastebar-txt { flex: 1 1 100%; }
+    .ex-selbar-actions { flex-wrap: wrap; width: 100%; }
+    /* Touch targets, not pointer targets: the compact 4px selection buttons are below the ~44px a thumb
+       needs, so they take the roomier default padding back on small screens. */
+    .ex-selbar-actions .ex-btn { padding: 8px 12px; }
 }

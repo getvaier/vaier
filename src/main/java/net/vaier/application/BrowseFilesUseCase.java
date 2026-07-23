@@ -1,6 +1,8 @@
 package net.vaier.application;
 
+import net.vaier.domain.Excludes;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SourcePaths;
 
@@ -54,28 +56,37 @@ public interface BrowseFilesUseCase {
      * NAS cannot answer. The {@code at} coordinate travels too, so the browser can tell a listing of the past
      * from one of the present.
      *
-     * <p>{@code protectedPaths} carries the machine's backed-up {@link SourcePaths} so each entry can be marked
-     * as protected — the "is this path backed up?" decision the domain owns ({@link SourcePaths#covers}). It is
-     * only populated for a present listing; the past is left empty, because an old archive's backup shape is
-     * not today's protection.
+     * <p>{@code protectedPaths} carries what the machine actually backs up — its {@link SourcePaths} minus its
+     * {@link net.vaier.domain.Excludes} — so each entry can be marked. The "is this path backed up?" decision is
+     * the domain's ({@link ProtectedPaths#covers}). It is only populated for a present listing; the past is left
+     * empty, because an old archive's backup shape is not today's protection.
      */
     record MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at,
-                            SourcePaths protectedPaths) {
+                            ProtectedPaths protectedPaths) {
 
         /** A present-tense listing (no archive coordinate, nothing marked protected). */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries) {
-            this(root, path, entries, null, SourcePaths.of(List.of()));
+            this(root, path, entries, null, ProtectedPaths.none());
         }
 
         /** A listing at an archive coordinate — the past, where nothing is marked protected. */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries, String at) {
-            this(root, path, entries, at, SourcePaths.of(List.of()));
+            this(root, path, entries, at, ProtectedPaths.none());
         }
 
-        /** A present-tense listing carrying the machine's protected paths, so entries can be marked. */
+        /** A present-tense listing carrying what the machine backs up, so entries can be marked. */
+        public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries,
+                                ProtectedPaths protectedPaths) {
+            this(root, path, entries, null, protectedPaths);
+        }
+
+        /**
+         * A present-tense listing whose protection is source paths only — no exclusions. Kept because plenty of
+         * callers and tests speak in bare {@link SourcePaths}; it says "protected, nothing carved out".
+         */
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries,
                                 SourcePaths protectedPaths) {
-            this(root, path, entries, null, protectedPaths);
+            this(root, path, entries, null, ProtectedPaths.of(protectedPaths, Excludes.none()));
         }
     }
 }

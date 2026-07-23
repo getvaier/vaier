@@ -18,6 +18,7 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.SourcePaths;
+import net.vaier.domain.Unprotection;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
 import net.vaier.domain.port.ForPersistingBackupServers;
@@ -145,13 +146,10 @@ public class BackupService implements
         BackupRepository repository = existing
             .flatMap(job -> repositories.getByName(job.repositoryName()))
             .orElseGet(() -> createRepository(slug, server));
-        List<String> newSourcePaths = existing
-            .map(job -> SourcePaths.of(job.sourcePaths()).protecting(paths))
-            .orElseGet(() -> SourcePaths.of(List.of()).protecting(paths))
-            .paths();
         BackupJob job = existing
-            .map(existingJob -> existingJob.withSourcePaths(newSourcePaths))
-            .orElseGet(() -> new BackupJob(slug, machineName, repository.name(), newSourcePaths, List.of(),
+            .map(existingJob -> existingJob.protecting(paths))
+            .orElseGet(() -> new BackupJob(slug, machineName, repository.name(),
+                SourcePaths.of(List.of()).protecting(paths).paths(), List.of(),
                 7, 4, 6, BackupJob.DEFAULT_COMPRESSION, true, false));
         jobs.save(job);
         ReadyingOutcome readying = job.readyClientHostForFirstBackup(firstBackup, readier).orElse(null);
@@ -159,25 +157,28 @@ public class BackupService implements
     }
 
     /**
-     * The inverse: remove {@code paths} (and any descendant of them) from the machine's job. A machine with
-     * no job is a no-op success (empty). When the removal empties the job's protected paths the job is
-     * deleted — a job must protect at least one path — leaving the repository intact.
+     * The inverse: stop backing {@code paths} up on the machine. The service only orchestrates — it loads the
+     * machine's job, asks the job what "stop backing these up" means ({@link BackupJob#unprotecting}) and
+     * writes the answer: delete when the job's last protected path went (leaving the repository intact), save
+     * when it changed, and touch nothing at all when the request matched nothing.
+     *
+     * <p>Which paths can be dropped from the protected set and which have to become excludes is the job's
+     * decision, not this method's; the {@link Unprotection} it returns is passed straight back so the caller
+     * can tell the operator what really happened rather than assuming it worked.
      */
     @Override
-    public Optional<BackupJob> unprotect(String machineName, List<String> paths) {
+    public Unprotection unprotect(String machineName, List<String> paths) {
         Optional<BackupJob> existing = jobs.getByMachine(machineName).stream().findFirst();
         if (existing.isEmpty()) {
-            return Optional.empty();
+            return Unprotection.nothingMatched(null);
         }
-        BackupJob job = existing.get();
-        SourcePaths remaining = SourcePaths.of(job.sourcePaths()).without(paths);
-        if (remaining.isEmpty()) {
-            jobs.deleteByName(job.name());
-            return Optional.empty();
+        Unprotection outcome = existing.get().unprotecting(paths);
+        if (outcome.jobDeleted()) {
+            jobs.deleteByName(existing.get().name());
+        } else if (outcome.changed()) {
+            jobs.save(outcome.job());
         }
-        BackupJob updated = job.withSourcePaths(remaining.paths());
-        jobs.save(updated);
-        return Optional.of(updated);
+        return outcome;
     }
 
     /** The fleet's single backup server, or a {@code 409}-mapped conflict when none is designated yet. */

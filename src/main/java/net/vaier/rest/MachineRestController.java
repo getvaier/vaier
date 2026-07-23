@@ -13,6 +13,7 @@ import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
 import net.vaier.domain.BackupFleet;
+import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineNudge;
 import net.vaier.domain.MachineNudges;
@@ -49,11 +50,25 @@ public class MachineRestController {
     private final GetBackupServersUseCase getBackupServersUseCase;
     private final GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
 
+    /**
+     * Every machine Vaier knows. Each carries {@code hasCredential} — whether Vaier actually holds an SSH
+     * login for it — composed here at the driving edge from {@link GetHostCredentialUseCase}, exactly as the
+     * Vaier-server and nudges endpoints do. The Explorer gates a machine's Files and Disk entries on it:
+     * those ride on a credential, so the SSH-access toggle alone would grow entries that open onto a "no
+     * login" wall.
+     */
     @GetMapping
     public List<MachineResponse> list() {
         return getMachinesUseCase.getAllMachines().stream()
-            .map(MachineResponse::from)
+            .map(m -> MachineResponse.from(m, hasStoredCredential(m.name())))
             .toList();
+    }
+
+    /** Whether a host SSH credential with a secret is stored for this machine. */
+    private boolean hasStoredCredential(String machine) {
+        return getHostCredentialUseCase.getHostCredential(machine)
+            .map(HostCredentialView::hasSecret)
+            .orElse(false);
     }
 
     /**
@@ -65,9 +80,8 @@ public class MachineRestController {
     @GetMapping("/vaier-server")
     public VaierServerResponse vaierServer() {
         Machine server = getVaierServerUseCase.getVaierServerMachine();
-        boolean hasCredential = getHostCredentialUseCase.getHostCredential(server.name())
-            .map(v -> v.hasSecret()).orElse(false);
-        return new VaierServerResponse(server.name(), server.effectiveSshAccess(), hasCredential);
+        return new VaierServerResponse(server.name(), server.effectiveSshAccess(),
+            hasStoredCredential(server.name()));
     }
 
     record VaierServerResponse(String name, boolean sshAccess, boolean hasCredential) {}
@@ -101,8 +115,7 @@ public class MachineRestController {
             .filter(s -> s.ownerMachineName(vaierServerName, lanServerNameByAddress)
                 .map(machine::equals).orElse(false))
             .count();
-        boolean hasCredential = getHostCredentialUseCase.getHostCredential(machine)
-            .map(v -> v.hasSecret()).orElse(false);
+        boolean hasCredential = hasStoredCredential(machine);
         boolean alreadyProtected = getBackupJobsUseCase.getBackupJobs().stream()
             .anyMatch(j -> machine.equals(j.machineName()));
         BackupFleet fleet = new BackupFleet(getBackupServersUseCase.getBackupServers());
@@ -224,9 +237,10 @@ public class MachineRestController {
         boolean runsDocker,
         Integer dockerPort,
         String deviceCategory,
-        boolean sshAccess
+        boolean sshAccess,
+        boolean hasCredential
     ) {
-        static MachineResponse from(Machine m) {
+        static MachineResponse from(Machine m, boolean hasCredential) {
             return new MachineResponse(
                 m.name(),
                 m.type().name(),
@@ -242,7 +256,8 @@ public class MachineRestController {
                 m.runsDocker(),
                 m.dockerPort(),
                 m.deviceCategory().name(),
-                m.effectiveSshAccess()
+                m.effectiveSshAccess(),
+                hasCredential
             );
         }
     }

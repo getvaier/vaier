@@ -44,7 +44,7 @@ public record SourcePaths(List<String> paths) {
     public SourcePaths without(Collection<String> toRemove) {
         Set<String> removals = new LinkedHashSet<>(cleanLenient(toRemove));
         List<String> remaining = paths.stream()
-            .filter(p -> removals.stream().noneMatch(r -> covers(r, p)))
+            .filter(p -> removals.stream().noneMatch(r -> PathCoverage.covers(r, p)))
             .toList();
         return new SourcePaths(remaining);
     }
@@ -65,7 +65,7 @@ public record SourcePaths(List<String> paths) {
         if (candidate == null) {
             return false;
         }
-        return paths.stream().anyMatch(member -> covers(member, candidate));
+        return paths.stream().anyMatch(member -> PathCoverage.covers(member, candidate));
     }
 
     /**
@@ -79,7 +79,21 @@ public record SourcePaths(List<String> paths) {
         if (candidate == null) {
             return false;
         }
-        return paths.stream().anyMatch(member -> covers(candidate, member) && !member.equals(candidate));
+        return paths.stream().anyMatch(member -> PathCoverage.covers(candidate, member) && !member.equals(candidate));
+    }
+
+    /**
+     * Whether removing {@code path} would actually drop something: some member <em>is</em> {@code path} or
+     * lives beneath it. This is the question behind an honest "stop backing up" — a path that protects
+     * nothing within it removes nothing, and the operator must not be told it did. The mirror of
+     * {@link #covers}, which asks whether an <em>ancestor</em> protects the path.
+     */
+    public boolean protectsWithin(String path) {
+        String candidate = PathCoverage.normalize(path);
+        if (candidate == null) {
+            return false;
+        }
+        return paths.stream().anyMatch(member -> PathCoverage.covers(candidate, member));
     }
 
     /** Cleaned, deduped, and reduced to only the paths not covered by another path in the set. */
@@ -88,21 +102,12 @@ public record SourcePaths(List<String> paths) {
         List<String> result = new ArrayList<>();
         for (String candidate : unique) {
             boolean coveredByAnother = unique.stream()
-                .anyMatch(other -> !other.equals(candidate) && covers(other, candidate));
+                .anyMatch(other -> !other.equals(candidate) && PathCoverage.covers(other, candidate));
             if (!coveredByAnother) {
                 result.add(candidate);
             }
         }
         return result;
-    }
-
-    /** Whether {@code ancestor} equals or is a strict ancestor of {@code path}. */
-    private static boolean covers(String ancestor, String path) {
-        if (ancestor.equals(path)) {
-            return true;
-        }
-        String prefix = ancestor.equals("/") ? "/" : ancestor + "/";
-        return path.startsWith(prefix);
     }
 
     /** Trim, drop blanks, require absolute, strip a trailing slash. */
@@ -135,16 +140,6 @@ public record SourcePaths(List<String> paths) {
 
     /** Trim, return null for blank, strip a single trailing slash (except root). */
     private static String normalizeOne(String path) {
-        if (path == null) {
-            return null;
-        }
-        String trimmed = path.trim();
-        if (trimmed.isEmpty()) {
-            return null;
-        }
-        if (trimmed.length() > 1 && trimmed.endsWith("/")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 1);
-        }
-        return trimmed;
+        return PathCoverage.normalize(path);
     }
 }

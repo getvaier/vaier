@@ -38,6 +38,7 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.BorgVersion;
+import net.vaier.domain.Unprotection;
 import net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome;
 import net.vaier.domain.port.ForSubscribingToEvents;
 import org.springframework.http.HttpHeaders;
@@ -378,22 +379,30 @@ public class BackupRestController {
     }
 
     /**
-     * Stop backing up a selection of paths on a machine. Removing a path also removes any protected path that
-     * is a descendant of it. {@code 404} when the machine is unknown; a machine with no job is a no-op success.
-     * When the last protected path is removed the job is deleted (leaving the repository intact) and the
-     * response is {@code 204 No Content}; otherwise {@code 200} with the updated job.
+     * Stop backing up a selection of paths on a machine. A protected path (and anything under it) leaves the
+     * job's protected set; a path a <em>remaining</em> protected path still covers becomes an exclude, which
+     * is the only way to stop backing up a folder inside a protected ancestor. {@code 404} when the machine is
+     * unknown. When the last protected path goes the job is deleted (leaving the repository intact) and the
+     * response is {@code 204 No Content}; otherwise {@code 200} with the outcome.
+     *
+     * <p>The body says whether anything actually changed, and names the paths that stopped. It has to: a
+     * request matching nothing used to answer {@code 200} with a silently unchanged job, and the browser read
+     * that as "Stopped backing up 1 item." while the folder went on being backed up. The controller does not
+     * work any of that out — {@link net.vaier.domain.Unprotection} is the domain's own account of what it did.
      */
     @DeleteMapping("/machines/{machine}/backup/paths")
-    public ResponseEntity<JobResponse> unprotectPaths(@PathVariable String machine,
-                                                      @RequestBody ProtectPathsRequest request) {
+    public ResponseEntity<UnprotectPathsResponse> unprotectPaths(@PathVariable String machine,
+                                                                 @RequestBody ProtectPathsRequest request) {
         if (!machineExists(machine)) {
-            return ResponseEntity.<JobResponse>notFound().build();
+            return ResponseEntity.<UnprotectPathsResponse>notFound().build();
         }
         log.info("Stopping backup of {} paths on machine {}",
             request.paths() == null ? 0 : request.paths().size(), LogSafe.forLog(machine));
-        return protectMachinePaths.unprotect(machine, request.paths())
-            .map(job -> ResponseEntity.ok(JobResponse.from(job)))
-            .orElseGet(() -> ResponseEntity.<JobResponse>noContent().build());
+        Unprotection outcome = protectMachinePaths.unprotect(machine, request.paths());
+        if (outcome.jobDeleted()) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(UnprotectPathsResponse.from(outcome));
     }
 
     // --- Backup runs ---
@@ -671,6 +680,21 @@ public class BackupRestController {
     record ProvisioningResponse(boolean started, boolean scriptOnly, String stagedScriptPath, String message) {
         static ProvisioningResponse from(ReadyingOutcome r) {
             return new ProvisioningResponse(r.started(), r.scriptOnly(), r.stagedScriptPath(), r.message());
+        }
+    }
+
+    /**
+     * The {@code DELETE /machines/{machine}/backup/paths} response: whether anything actually stopped being
+     * backed up, which of the requested paths did, and the job as it now stands ({@code null} when the machine
+     * has no job at all — the job-was-deleted case answers {@code 204} instead and has no body).
+     *
+     * <p>{@code changed} exists because "the call succeeded" and "your data stopped being backed up" are not
+     * the same statement, and the browser must never turn the first into the second.
+     */
+    record UnprotectPathsResponse(boolean changed, List<String> stopped, JobResponse job) {
+        static UnprotectPathsResponse from(Unprotection outcome) {
+            return new UnprotectPathsResponse(outcome.changed(), outcome.stopped(),
+                outcome.job() == null ? null : JobResponse.from(outcome.job()));
         }
     }
 

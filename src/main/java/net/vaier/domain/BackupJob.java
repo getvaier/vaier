@@ -5,6 +5,7 @@ import net.vaier.domain.port.ForReadyingBackupClients;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -88,6 +89,80 @@ public record BackupJob(
     public BackupJob withSourcePaths(List<String> newSourcePaths) {
         return new BackupJob(name, machineName, repositoryName, newSourcePaths, excludes,
             keepDaily, keepWeekly, keepMonthly, compression, enabled, backupAsRoot);
+    }
+
+    /** A copy of this job protecting {@code newSourcePaths} except for {@code newExcludes}. */
+    private BackupJob withProtection(SourcePaths newSourcePaths, Excludes newExcludes) {
+        return new BackupJob(name, machineName, repositoryName, newSourcePaths.paths(),
+            newExcludes.patterns(), keepDaily, keepWeekly, keepMonthly, compression, enabled, backupAsRoot);
+    }
+
+    /** What this job actually backs up: its protected paths minus the holes its excludes carve out. */
+    public ProtectedPaths protectedPaths() {
+        return ProtectedPaths.of(SourcePaths.of(sourcePaths), Excludes.of(excludes));
+    }
+
+    /**
+     * The job that results from the operator saying "back up these paths": {@code paths} folded into the
+     * protected set (normalized to a minimal cover), and — the part that is easy to forget — every exclusion
+     * that conflicts with them cleared.
+     *
+     * <p>Clearing matters because "stop backing up X" may have recorded X as an exclude. Re-protecting X
+     * without dropping that exclude would leave a folder wearing a shield that borg silently walks past every
+     * night: protected on screen, absent from every archive. The rule is {@link Excludes#clearedFor}'s.
+     */
+    public BackupJob protecting(Collection<String> paths) {
+        SourcePaths protectedPaths = SourcePaths.of(sourcePaths).protecting(paths);
+        return withProtection(protectedPaths, Excludes.of(excludes).clearedFor(paths).prunedTo(protectedPaths));
+    }
+
+    /**
+     * The job that results from the operator saying "stop backing up these paths" — and an honest account of
+     * what that did (see {@link Unprotection}).
+     *
+     * <p>A path relates to the protected set in one of three ways, and each is answered on its own terms:
+     * <ul>
+     *   <li>it <em>is</em> a protected path, or holds some — it and everything under it leave the set;</li>
+     *   <li>it is <em>covered by</em> a protected path that stays — the ancestor cannot be dropped without
+     *       losing everything else beneath it, so the path is recorded as an {@link Excludes exclude}, which
+     *       is exactly what borg honours;</li>
+     *   <li>it is neither — nothing is backed up there, so nothing happens and nothing is claimed.</li>
+     * </ul>
+     *
+     * <p>The middle case is the one that used to fail silently: removing a path no source path equalled simply
+     * matched nothing, the job was saved unchanged, and the operator was told it had stopped. A job left with
+     * no protected paths at all is not saved empty — it is reported {@link Unprotection#jobDeleted() deleted},
+     * and its now-meaningless excludes go with it.
+     */
+    public Unprotection unprotecting(Collection<String> paths) {
+        SourcePaths current = SourcePaths.of(sourcePaths);
+        Excludes currentExcludes = Excludes.of(excludes);
+        List<String> requested = paths == null ? List.of() : List.copyOf(paths);
+        SourcePaths remaining = current.without(requested);
+
+        List<String> stopped = new ArrayList<>();
+        List<String> newExcludes = new ArrayList<>(currentExcludes.patterns());
+        for (String path : requested) {
+            boolean droppedSomeProtectedPath = current.protectsWithin(path);
+            // Still covered after the removal? Then only an exclude can stop it — unless it is already
+            // excluded, in which case this request changes nothing and must not say it did.
+            boolean newlyExcluded = remaining.covers(path) && !currentExcludes.excludes(path);
+            if (newlyExcluded) {
+                newExcludes.add(path);
+            }
+            if (droppedSomeProtectedPath || newlyExcluded) {
+                stopped.add(path);
+            }
+        }
+
+        if (remaining.isEmpty()) {
+            return Unprotection.jobDeleted(stopped);
+        }
+        if (stopped.isEmpty()) {
+            return Unprotection.nothingMatched(this);
+        }
+        return Unprotection.changedTo(
+            withProtection(remaining, Excludes.of(newExcludes).prunedTo(remaining)), stopped);
     }
 
     /**

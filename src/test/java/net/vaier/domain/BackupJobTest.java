@@ -39,6 +39,142 @@ class BackupJobTest {
         return job("colina-home");
     }
 
+    /** A job protecting {@code sources} with {@code excludes} — the two fields this flow maintains. */
+    private BackupJob job(List<String> sources, List<String> excludes) {
+        return new BackupJob("colina-home", "Colina 27", "nas-borg",
+            sources, excludes, 7, 4, 6, "zstd,6", true, false);
+    }
+
+    // --- stop backing up: the protected set and its exclusions, decided here on the job ------------------
+
+    @Test
+    void unprotecting_aPathAStillProtectedAncestorCovers_recordsItAsAnExclude() {
+        // The reported bug. /home stays protected, so the folder cannot be dropped from the source paths —
+        // the only way to actually stop backing it up is an exclude, which is what the field is for.
+        Unprotection result = job(List.of("/home"), List.of())
+            .unprotecting(List.of("/home/openhab/userdata/logs"));
+
+        assertThat(result.changed()).isTrue();
+        assertThat(result.jobDeleted()).isFalse();
+        assertThat(result.job().sourcePaths()).containsExactly("/home");
+        assertThat(result.job().excludes()).containsExactly("/home/openhab/userdata/logs");
+        assertThat(result.stopped()).containsExactly("/home/openhab/userdata/logs");
+    }
+
+    @Test
+    void unprotecting_aStoredSourcePath_dropsItFromTheProtectedSet() {
+        Unprotection result = job(List.of("/home/geir", "/etc/nginx"), List.of())
+            .unprotecting(List.of("/etc/nginx"));
+
+        assertThat(result.changed()).isTrue();
+        assertThat(result.job().sourcePaths()).containsExactly("/home/geir");
+        assertThat(result.job().excludes()).isEmpty();
+    }
+
+    @Test
+    void unprotecting_theLastSourcePath_saysTheJobIsGone() {
+        Unprotection result = job(List.of("/home/geir"), List.of()).unprotecting(List.of("/home/geir"));
+
+        assertThat(result.changed()).isTrue();
+        assertThat(result.jobDeleted()).isTrue();
+        assertThat(result.job()).isNull();
+        assertThat(result.stopped()).containsExactly("/home/geir");
+    }
+
+    @Test
+    void unprotecting_aPathNothingProtects_changesNothing() {
+        // Neither stored nor covered: there is genuinely nothing to stop. The operator must not be told
+        // otherwise, so the job comes back untouched and the outcome says so.
+        BackupJob job = job(List.of("/home"), List.of());
+
+        Unprotection result = job.unprotecting(List.of("/var/log"));
+
+        assertThat(result.changed()).isFalse();
+        assertThat(result.stopped()).isEmpty();
+        assertThat(result.job()).isEqualTo(job);
+    }
+
+    @Test
+    void unprotecting_aPathAlreadyExcluded_changesNothing_andNeverDuplicatesTheExclude() {
+        BackupJob job = job(List.of("/home"), List.of("/home/openhab"));
+
+        Unprotection result = job.unprotecting(List.of("/home/openhab"));
+
+        assertThat(result.changed()).isFalse();
+        assertThat(result.job().excludes()).containsExactly("/home/openhab");
+    }
+
+    @Test
+    void unprotecting_aPathUnderAnExistingExclude_changesNothing_andAddsNoRedundantEntry() {
+        BackupJob job = job(List.of("/home"), List.of("/home/openhab"));
+
+        Unprotection result = job.unprotecting(List.of("/home/openhab/userdata/logs"));
+
+        assertThat(result.changed()).isFalse();
+        assertThat(result.job().excludes()).containsExactly("/home/openhab");
+    }
+
+    @Test
+    void unprotecting_aFolderHoldingAnExclude_swallowsTheNarrowerExclude() {
+        Unprotection result = job(List.of("/home"), List.of("/home/openhab/userdata/logs"))
+            .unprotecting(List.of("/home/openhab"));
+
+        assertThat(result.changed()).isTrue();
+        assertThat(result.job().excludes()).containsExactly("/home/openhab");
+    }
+
+    @Test
+    void unprotecting_aSourcePath_takesItsNowMeaninglessExcludesWithIt() {
+        // Nothing under /home is backed up any more, so an exclude carving a hole inside it is dead weight.
+        Unprotection result = job(List.of("/home", "/etc/nginx"), List.of("/home/openhab"))
+            .unprotecting(List.of("/home"));
+
+        assertThat(result.job().sourcePaths()).containsExactly("/etc/nginx");
+        assertThat(result.job().excludes()).isEmpty();
+    }
+
+    // --- back up again: a stale exclude must never silently swallow a fresh instruction -----------------
+
+    @Test
+    void protecting_aPathThatIsCurrentlyExcluded_dropsTheExclude() {
+        // "Stop backing up X" then "back up X" must leave X really backed up. Without dropping the exclude the
+        // folder would wear a shield and be silently skipped by every run.
+        BackupJob result = job(List.of("/home"), List.of("/home/openhab/userdata/logs"))
+            .protecting(List.of("/home/openhab/userdata/logs"));
+
+        assertThat(result.sourcePaths()).containsExactly("/home");
+        assertThat(result.excludes()).isEmpty();
+        assertThat(result.protectedPaths().covers("/home/openhab/userdata/logs")).isTrue();
+    }
+
+    @Test
+    void protecting_aPathInsideAnExcludedFolder_dropsThatWiderExcludeToo() {
+        // The exclude is an ancestor of what was just explicitly asked for. Vaier cannot exclude and protect
+        // the same bytes, and the newer, explicit instruction wins — backing up more is safe, silently
+        // backing up less is the bug being fixed.
+        BackupJob result = job(List.of("/home"), List.of("/home/openhab"))
+            .protecting(List.of("/home/openhab/userdata"));
+
+        assertThat(result.excludes()).isEmpty();
+        assertThat(result.protectedPaths().covers("/home/openhab/userdata")).isTrue();
+    }
+
+    @Test
+    void protecting_addsANewSourcePath_andLeavesUnrelatedExcludesAlone() {
+        BackupJob result = job(List.of("/home"), List.of("/home/openhab")).protecting(List.of("/etc/nginx"));
+
+        assertThat(result.sourcePaths()).containsExactlyInAnyOrder("/home", "/etc/nginx");
+        assertThat(result.excludes()).containsExactly("/home/openhab");
+    }
+
+    @Test
+    void protectedPaths_readsTheJobsProtectionAsTheExplorerSeesIt() {
+        ProtectedPaths paths = job(List.of("/home"), List.of("/home/openhab")).protectedPaths();
+
+        assertThat(paths.covers("/home/geir")).isTrue();
+        assertThat(paths.covers("/home/openhab")).isFalse();
+    }
+
     private BackupJob disabledJob() {
         return new BackupJob("colina-home", "Colina 27", "nas-borg",
             List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", false, false);

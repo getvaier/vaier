@@ -260,12 +260,14 @@
         if (kind === 'machine') {
             const m = machineOf(path);
             if (!m) return [];
-            // Honest and conditional: a machine grows only the entries Vaier can actually reach on it. No SSH
-            // means no files, no shell and no disk; a machine that runs no Docker must not grow an empty
-            // `containers` entry that opens onto nothing. /machines already carries both facts — the tree
-            // asks them rather than assuming every machine is the same machine.
+            // Honest and conditional: a machine grows only the entries Vaier can actually reach on it. Files
+            // and disk ride on a held SSH credential, so they appear only once one is stored — not merely
+            // because the SSH-access toggle is on, which would grow an entry that opens onto a red "no login"
+            // wall until the operator refreshes. A machine that runs no Docker must not grow an empty
+            // `containers` entry that opens onto nothing. /machines carries both facts — the tree asks them
+            // rather than assuming every machine is the same machine.
             const kids = [];
-            if (m.sshAccess) kids.push({ name: 'files', kind: 'files' });   // the shell is opened from the machine’s SSH-access section, not a tree entry
+            if (m.hasCredential) kids.push({ name: 'files', kind: 'files' });   // the shell is opened from the machine’s SSH-access section, not a tree entry
             if (m.runsDocker) kids.push({ name: 'containers', kind: 'containers' });
             // A machine grows a `services` entry when it publishes something, has a container port that could be
             // published, or is a server (so a non-container service on it — a printer's page, a LAN app — can
@@ -274,7 +276,7 @@
                 || SERVER_TYPES.has(m.type) || m.name === VAIER_SERVER) {
                 kids.push({ name: 'services', kind: 'services' });
             }
-            if (m.sshAccess) kids.push({ name: 'disk', kind: 'disk' });
+            if (m.hasCredential) kids.push({ name: 'disk', kind: 'disk' });
             // A machine grows a `backup` entry when it plays any part in fleet backup: it is the one backup
             // server (name-equality — the backend refuses a second), or a job backs it up. The entry reads both
             // ways; here we only decide whether it exists.
@@ -885,17 +887,12 @@
         body.className = 'ex-pane-body';
 
         body.appendChild(section('Machines'));
-        // Adding a machine is a fleet-level act — it belongs on the fleet, not floating in the topbar over every
-        // path you happen to be standing in. So the button lives here, at the top of the machine list.
-        const addBar = el('div', 'ex-lactions is-static');
-        addBar.appendChild(selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine()));
-        body.appendChild(addBar);
-        const grid = document.createElement('div');
-        grid.className = 'ex-grid';
         if (!S.machines.length) {
-            body.appendChild(note('No machines yet. Add one with the Add machine button above and it will appear '
+            body.appendChild(note('No machines yet. Add one with the Add machine button below and it will appear '
                 + 'here.', false));
         } else {
+            const grid = document.createElement('div');
+            grid.className = 'ex-grid';
             sortedMachines().forEach((m) => {
                 const address = tunnelAddress(m);
                 grid.appendChild(card(machineIcon(m.name), m.name, true,
@@ -904,55 +901,16 @@
             });
             body.appendChild(grid);
         }
+        // Adding a machine is a fleet-level act — it belongs on the fleet, not floating in the topbar over every
+        // path you happen to be standing in. So the button lives here, below the machine list.
+        const addBar = el('div', 'ex-lactions is-static');
+        addBar.appendChild(selVerb('server', 'Add machine', 'ex-btn is-accent', () => addMachine()));
+        body.appendChild(addBar);
 
-        // Discover machines on the relay LANs that aren't in the fleet yet, and register them. Read on view; a
-        // finished scan pushes lan-scan-updated (watchFleet) so this refreshes without polling. Community is
-        // gated out (402) and the section simply does not appear.
-        if (S.lanScan === null) loadLanScan();
-        if (S.lanScan && !S.lanScan.gated) {
-            body.appendChild(section('Discovered on the LAN'));
-            const scanning = S.lanScan.status === 'SCANNING';
-            const found = S.lanScan.machines || [];
-            const bar = el('div', 'ex-lactions is-static');
-            const scanBtn = selVerb('refresh', scanning ? 'Scanning…' : (found.length ? 'Scan again' : 'Scan the LAN'),
-                'ex-btn', () => scanLan());
-            if (scanning) scanBtn.disabled = true;
-            bar.appendChild(scanBtn);
-            body.appendChild(bar);
-            if (scanning) {
-                body.appendChild(note('Looking across the relay LANs — this can take a minute.', false));
-            }
-            const byUse = (a, b) =>
-                discoveredRank(a) - discoveredRank(b) || ipOrder(a.ipAddress).localeCompare(ipOrder(b.ipAddress));
-            const active = found.filter((d) => !d.ignored).sort(byUse);
-            const ignored = found.filter((d) => d.ignored).sort(byUse);
-            if (active.length) {
-                const list = el('div', 'ex-disc');
-                active.forEach((d) => list.appendChild(discoveredRow(d, [
-                    selVerb('server', 'Add', 'ex-btn is-accent', () => addMachineFork('adopt', d)),
-                    selVerb('cross', 'Ignore', 'ex-btn', () => ignoreDiscovered(d)),
-                ])));
-                body.appendChild(list);
-            } else if (!scanning) {
-                body.appendChild(note('No unregistered machines found. Scan to look again.', false));
-            }
-            // The dismissed finds, folded away behind a toggle so a wall of gadgets doesn't crowd the list.
-            if (ignored.length) {
-                const toggle = el('div', 'ex-lactions is-static');
-                toggle.appendChild(selVerb('chev',
-                    (_showIgnoredLan ? 'Hide ignored' : 'Show ignored') + ' (' + ignored.length + ')',
-                    'ex-btn' + (_showIgnoredLan ? ' is-open' : ''),
-                    () => { _showIgnoredLan = !_showIgnoredLan; render(); }));
-                body.appendChild(toggle);
-                if (_showIgnoredLan) {
-                    const list = el('div', 'ex-disc is-ignored');
-                    ignored.forEach((d) => list.appendChild(discoveredRow(d, [
-                        selVerb('check', 'Unignore', 'ex-btn', () => unignoreDiscovered(d)),
-                    ])));
-                    body.appendChild(list);
-                }
-            }
-        }
+        // Discovery lives in the Add-a-machine flow and nowhere else. It used to have a second home here, but
+        // scanning is a step on the way to adding something, not a standing report about the fleet — a fleet
+        // page that lists things which are *not* in the fleet, each with its own Add and Ignore, is a second
+        // entry point competing with the one the button above opens. One road in.
 
         pane.appendChild(body);
     }
@@ -1682,12 +1640,34 @@
                     || ipOrder(a.ipAddress).localeCompare(ipOrder(b.ipAddress)));
                 found.forEach((d) => list.appendChild(discoveredRow(d, [
                     selVerb('server', 'Add', 'ex-btn is-accent', () => { cand = d; screen('adopt'); }),
+                    selVerb('cross', 'Ignore', 'ex-btn', () => ignoreDiscovered(d)),
                 ])));
                 content.appendChild(list);
             } else {
                 content.appendChild(note(scanning
                     ? 'Looking across ' + pickedLan.name + ' — this can take a minute.'
                     : 'No unregistered machines found on this LAN. Rescan to look again.', false));
+            }
+            // Ignoring has to be undoable from the same screen that does it. This list hides ignored finds, so
+            // without a way back a dismissed host would be invisible forever with no UI left to restore it —
+            // which is exactly what happened when discovery had a second home on the fleet page and this was
+            // the only screen left after it went.
+            const ignoredHere = (snap.machines || [])
+                .filter((d) => d.relayAnchor === pickedLan.anchor && d.ignored);
+            if (ignoredHere.length) {
+                const toggle = el('div', 'ex-lactions is-static');
+                toggle.appendChild(selVerb('chev',
+                    (_showIgnoredLan ? 'Hide ignored' : 'Show ignored') + ' (' + ignoredHere.length + ')',
+                    'ex-btn' + (_showIgnoredLan ? ' is-open' : ''),
+                    () => { _showIgnoredLan = !_showIgnoredLan; paintDiscover(); }));
+                content.appendChild(toggle);
+                if (_showIgnoredLan) {
+                    const list = el('div', 'ex-disc is-ignored');
+                    ignoredHere.forEach((d) => list.appendChild(discoveredRow(d, [
+                        selVerb('check', 'Unignore', 'ex-btn', () => unignoreDiscovered(d)),
+                    ])));
+                    content.appendChild(list);
+                }
             }
             content.appendChild(discoverFoot());
         }
@@ -1804,7 +1784,7 @@
             const back = el('button', 'ex-btn'); back.textContent = 'Back';
             back.onclick = () => screen('discover');
             const add = el('button', 'ex-btn is-accent'); add.textContent = 'Add machine';
-            add.onclick = () => doAdopt(name.value.trim(), credentialFilled() ? draft() : null);
+            add.onclick = () => doAdopt(name.value.trim(), credentialFilled() ? draft() : null, add);
             const sync = () => { add.disabled = name.value.trim() === ''; };
             name.oninput = sync; sync();
             actions.append(back, add);
@@ -1812,21 +1792,26 @@
             name.focus(); name.select();
         }
 
-        async function doAdopt(nameOverride, credential) {
+        // Adopt probes and (optionally) SSH-verifies server-side, so it is slow — the button goes busy for the
+        // whole round trip rather than sitting inert, and is only re-enabled if we stay on this screen.
+        async function doAdopt(nameOverride, credential, addBtn) {
             const bodyObj = { nameOverride: nameOverride || null };
             if (credential) bodyObj.credential = credential;
+            const was = addBtn ? addBtn.textContent : null;
+            if (addBtn) { addBtn.disabled = true; addBtn.textContent = 'Adding…'; }
+            const restore = () => { if (addBtn) { addBtn.disabled = false; addBtn.textContent = was; } };
             try {
                 const res = await fetch('/lan-scan/' + encodeURIComponent(cand.ipAddress) + '/adopt', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyObj) });
-                if (res.status === 402) { toast('Adopting a discovered machine is an Enterprise feature.'); return; }
-                if (!res.ok) { const e = await res.json().catch(() => ({})); toast(e.message || 'Vaier could not add that machine.'); return; }
+                if (res.status === 402) { toast('Adopting a discovered machine is an Enterprise feature.'); restore(); return; }
+                if (!res.ok) { const e = await res.json().catch(() => ({})); toast(e.message || 'Vaier could not add that machine.'); restore(); return; }
                 const resp = await res.json();
                 await loadFleet(); await loadLanScan();
                 const credNote = resp.credentialProvided && !resp.credentialStored
                     ? ' Its SSH login couldn’t be saved — set one from the machine.' : '';
                 adopted = { name: resp.name, credNote: credNote };
                 screen('lanHandoff');
-            } catch (e) { toast('Vaier could not add that machine.'); }
+            } catch (e) { toast('Vaier could not add that machine.'); restore(); }
         }
 
         // ---- LAN handoff — the machine is registered; hand over the command that lets Vaier manage it -----
@@ -2011,14 +1996,19 @@
             const add = el('button', 'ex-btn is-accent'); add.textContent = 'Add machine';
             const sync = () => { add.disabled = !(name.value.trim() && lanAddr.value.trim()); };
             name.oninput = sync; lanAddr.oninput = () => { lastProbed = null; sync(); }; sync();
-            add.onclick = () => {
+            add.onclick = async () => {
                 const runsDocker = dockerBox.checked;
                 const port = parseInt(dockerPort.value, 10);
                 const credential = credentialFilled() ? draft() : null;
-                close();
-                createLanServer({ name: name.value.trim(), lanAddress: lanAddr.value.trim(),
+                // Register + SSH-verify is slow, so keep the modal up with a busy button rather than closing
+                // into a blank pane; close only once the machine is in and we're navigating to it.
+                const was = add.textContent;
+                add.disabled = true; back.disabled = true; add.textContent = 'Adding…';
+                const ok = await createLanServer({ name: name.value.trim(), lanAddress: lanAddr.value.trim(),
                     runsDocker: runsDocker, dockerPort: runsDocker && port > 0 ? port : null,
                     deviceCategory: cat.value, description: desc.value.trim(), credential: credential });
+                if (ok) { close(); }
+                else { add.disabled = false; back.disabled = false; add.textContent = was; }
             };
             actions.append(back, add);
             content.appendChild(actions);
@@ -2363,12 +2353,12 @@
             });
             if (res.status === 400) {
                 toast(body.lanAddress + ' isn’t on any relay’s LAN, so the fleet can’t reach it.');
-                return;
+                return false;
             }
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 toast(err.message || 'Vaier could not add that machine.');
-                return;
+                return false;
             }
             // With a credential the body reports whether it stuck; the machine is registered either way.
             const resp = await res.json().catch(() => null);
@@ -2378,8 +2368,10 @@
             toast(body.name + ' added.' + credNote);
             S.open.add(key(['fleet', body.name]));
             go(['fleet', body.name]);
+            return true;
         } catch (e) {
             toast('Vaier could not add that machine.');
+            return false;
         }
     }
 
@@ -2589,7 +2581,7 @@
     function renderContainers(pane) {
         const machine = S.path[1];
         const found = containersOn(machine);
-        pane.appendChild(paneHead(machine + ' / containers', true,
+        pane.appendChild(paneHead('Containers', false,
             found.length + (found.length === 1 ? ' container' : ' containers')));
 
         const body = document.createElement('div');
@@ -2684,7 +2676,7 @@
         const found = servicesOn(machine);
         const open = candidatesOn(machine).filter((c) => !c.ignored);
         const hidden = candidatesOn(machine).filter((c) => c.ignored);
-        pane.appendChild(paneHead(machine + ' / services', true,
+        pane.appendChild(paneHead('Services', false,
             found.length + (found.length === 1 ? ' published service' : ' published services')));
 
         const body = el('div', 'ex-pane-body');
@@ -2710,11 +2702,22 @@
                 selVerb('cross', 'Ignore', 'ex-btn', () => ignoreCandidate(machine, c)),
             ])));
         }
+        // The dismissed ports, folded away behind a toggle — the same reflex as the LAN scan's ignored finds.
+        // You ignored them because you did not want to look at them; a wall of them under everything you do
+        // want to see undoes that. The count stays visible so they are never silently forgotten.
         if (hidden.length) {
             body.appendChild(section('Ignored'));
-            hidden.forEach((c) => body.appendChild(candidateRow(machine, c, [
-                selVerb('check', 'Unignore', 'ex-btn', () => unignoreCandidate(machine, c)),
-            ])));
+            const toggle = el('div', 'ex-lactions is-static');
+            toggle.appendChild(selVerb('chev',
+                (_showIgnoredServices ? 'Hide ignored' : 'Show ignored') + ' (' + hidden.length + ')',
+                'ex-btn' + (_showIgnoredServices ? ' is-open' : ''),
+                () => { _showIgnoredServices = !_showIgnoredServices; render(); }));
+            body.appendChild(toggle);
+            if (_showIgnoredServices) {
+                hidden.forEach((c) => body.appendChild(candidateRow(machine, c, [
+                    selVerb('check', 'Unignore', 'ex-btn', () => unignoreCandidate(machine, c)),
+                ])));
+            }
         }
         // A service that isn't a container Vaier discovered — a LAN app, a device's own web page — is published
         // by hand: name a port on this machine and Vaier makes the route and the DNS record just the same.
@@ -3038,13 +3041,7 @@
         if (!s) return pane.appendChild(note('That service is no longer published from ' + machine + '.',
             true));
 
-        const head = paneHead(s.dnsAddress || serviceName(s), true, machine);
-        const actions = el('div', 'ex-pane-actions');
-        const del = el('button', 'ex-btn is-danger'); del.textContent = 'Unpublish';
-        del.onclick = () => unpublish(s, machine);
-        actions.appendChild(del);
-        head.appendChild(actions);
-        pane.appendChild(head);
+        pane.appendChild(paneHead(s.dnsAddress || serviceName(s), true, machine));
 
         const body = el('div', 'ex-pane-body');
 
@@ -3116,6 +3113,16 @@
             + machine + ', a route through Traefik, and a DNS record at ' + (s.dnsAddress || 'its name')
             + '. Unpublishing removes the route and the DNS record. The container keeps running — the '
             + 'machine that hosts it does not notice.', false));
+
+        // Unpublish sits here, at the foot of the page, directly under the paragraph that says what it does —
+        // not in the pane header. A destructive verb parked in the chrome is one mis-tap from the title while
+        // you are reading the settings above it; down here it is the last thing on the page, next to its own
+        // explanation, and you have to arrive at it deliberately.
+        const danger = el('div', 'ex-lactions is-static');
+        const del = el('button', 'ex-btn is-danger'); del.textContent = 'Unpublish';
+        del.onclick = () => unpublish(s, machine);
+        danger.appendChild(del);
+        body.appendChild(danger);
         pane.appendChild(body);
     }
 
@@ -3132,7 +3139,7 @@
 
     function renderDisk(pane) {
         const machine = S.path[1];
-        pane.appendChild(paneHead(machine + ' / disk', true, 'Filesystems'));
+        pane.appendChild(paneHead('Disk', false, 'Filesystems'));
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
@@ -3482,7 +3489,7 @@
             return pane.appendChild(note('This machine has no part in fleet backup — it is not the backup '
                 + 'server, and no job backs it up.', true));
         }
-        pane.appendChild(paneHead(machine + ' / backup', true,
+        pane.appendChild(paneHead('Backup', false,
             isServer ? 'The fleet’s backup server' : 'How this machine is backed up'));
         const body = el('div', 'ex-pane-body');
         if (isServer) renderServerBackup(body, machine, s);
@@ -4186,6 +4193,24 @@
                 list.appendChild(row);
             });
             body.appendChild(list);
+        }
+
+        // The holes carved out of those paths — each one the operator's own "stop backing this up" on a folder
+        // that sits inside a protected one, made durable. Showing what is protected without showing what was
+        // taken back out of it would overstate what the archives actually hold.
+        const excluded = job.excludes || [];
+        if (excluded.length) {
+            body.appendChild(section('Not backed up'));
+            const holes = el('div', 'ex-brepos');
+            excluded.forEach((ex) => {
+                const row = el('div', 'ex-brepo');
+                const nm = el('button', 'ex-brepo-name is-link');
+                nm.textContent = ex;
+                nm.onclick = () => openTo(['fleet', machine, 'files'].concat(ex.split('/').filter(Boolean)));
+                row.appendChild(nm);
+                holes.appendChild(row);
+            });
+            body.appendChild(holes);
         }
 
         body.appendChild(section('Schedule'));
@@ -5126,8 +5151,13 @@
         }
     }
 
-    // Stop backing the selection up, per machine. Removing a folder clears anything under it too; if nothing is
-    // left backed up on a machine, the backend forgets that machine's job entirely (archives already made are
+    // Stop backing the selection up, per machine. How a folder stops depends on how it was protected: one the
+    // job names outright simply goes (with everything under it), while one that only sits INSIDE a protected
+    // folder cannot be dropped without losing its siblings, so the backend records it as an exclusion instead.
+    // That decision is the backend's, and so is the account of what it did — we count what it says stopped, not
+    // what we sent. A path nothing was backing up stops nothing, and telling an operator their data stopped
+    // being protected when it did not is the one lie a backup tool must never tell. If a machine ends up
+    // protecting nothing at all, the backend forgets that machine's job entirely (archives already made are
     // untouched). Only ever the live, already-backed-up items.
     async function selUnbackup() {
         const groups = groupByMachine(S.sel.filter((s) => !s.at && s.backedUp && backupEligible(s.machine)));
@@ -5143,11 +5173,19 @@
                     body: JSON.stringify({ paths: paths }),
                 });
                 if (!res.ok && res.status !== 204) { failed.push(machine); continue; }
-                done += paths.length;
+                if (res.status === 204) {
+                    // The job itself is gone: nothing is backed up on that machine any more, so everything
+                    // asked for really did stop. This is the one branch where our own count is the true one.
+                    done += paths.length;
+                    continue;
+                }
+                const body = await res.json().catch(() => null);
+                done += body && body.stopped ? body.stopped.length : 0;
             } catch (e) { failed.push(machine); }
         }
         await loadBackup();
         if (done) toast('Stopped backing up ' + done + (done === 1 ? ' item.' : ' items.'));
+        else if (!failed.length) toast('Nothing changed — Vaier was not backing that up.');
         if (failed.length) toast('Vaier could not stop backing up on ' + failed.join(', ') + '.');
         S.sel = [];
         refreshCurrentDir();   // re-read so the shields clear
@@ -5681,6 +5719,7 @@
     // is refused with 402; the section then simply does not show. Guarded so a re-render can't re-fetch it.
     let _lanScanLoading = false;
     let _showIgnoredLan = false;   // whether the dismissed finds are revealed under the "Show ignored" toggle
+    let _showIgnoredServices = false;   // the same, for a machine's ignored publishable ports
     // Set by the Add-a-machine modal's discover screen while it is open; loadLanScan calls it after a scan
     // settles so the candidate list repaints over the same stream the shell already holds — never a timer.
     let _lanScanModalRefresh = null;

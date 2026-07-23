@@ -26,6 +26,7 @@ import net.vaier.domain.PublishableService.PublishableSource;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -36,6 +37,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +58,14 @@ class MachineRestControllerTest {
     @Mock GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
 
     @InjectMocks MachineRestController controller;
+
+    @BeforeEach
+    void defaultNoStoredCredential() {
+        // list() reads a credential per machine; default every lookup to "none stored" so the tests
+        // that don't care about credentials keep asserting only what they set. Tests that do care
+        // override the specific name.
+        lenient().when(getHostCredentialUseCase.getHostCredential(anyString())).thenReturn(Optional.empty());
+    }
 
     @Test
     void list_emptyWhenNothingRegistered() {
@@ -87,6 +98,28 @@ class MachineRestControllerTest {
         assertThat(response.get(1).dockerPort()).isEqualTo(2375);
         assertThat(response.get(0).deviceCategory()).isEqualTo("SERVER");
         assertThat(response.get(1).deviceCategory()).isEqualTo("NAS");
+    }
+
+    @Test
+    void list_reportsHasCredentialPerMachine() {
+        // The Explorer tree gates a machine's Files/Disk entries on Vaier actually holding an SSH
+        // credential for it, not merely the ssh-access toggle — so GET /machines carries hasCredential
+        // per machine: true iff a stored host credential with a secret exists for that name.
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
+            new Machine("nas", MachineType.LAN_SERVER,
+                null, null, null, null, null, null, null,
+                "192.168.3.0/24", "192.168.3.50", true, 2375, DeviceCategory.NAS, null),
+            new Machine("printer", MachineType.LAN_SERVER,
+                null, null, null, null, null, null, null,
+                "192.168.3.0/24", "192.168.3.20", false, null, DeviceCategory.PRINTER, null)
+        ));
+        when(getHostCredentialUseCase.getHostCredential("nas")).thenReturn(
+            Optional.of(new HostCredentialView("nas", "root", AuthMethod.PASSWORD, true)));
+
+        var response = controller.list();
+
+        assertThat(response).extracting("name", "hasCredential")
+            .containsExactly(tuple("nas", true), tuple("printer", false));
     }
 
     @Test

@@ -1258,17 +1258,21 @@ job**'s source paths against the tree and would have reported a backed-up direct
   the containment decisions. Normalization is a *minimal cover* — no path is a descendant of another (an
   ancestor covers its children), exact duplicates collapse, paths are trimmed, blanks ignored, a non-absolute
   path refused (a source path goes verbatim into borg's `create`), a trailing slash stripped. `protecting(paths)`
-  / `without(paths)` return new normalized sets (removing a path also drops any descendant of it). `covers(path)`
+  / `without(paths)` return new normalized sets (removing a path also drops any descendant of it), and
+  `protectsWithin(path)` answers "would removing this drop anything?". `covers(path)`
   is true when the path equals or sits under a source path ("this path is **backed up**") — the same containment
   the minimal cover uses to drop redundant descendants; `enclosesUnder(path)` is true when a source path is a
   *strict* descendant of the given path ("this folder is not itself backed up but **contains backed up**"). Both
-  are the domain's, unit-tested, and computed once server-side — never re-implemented in the browser.
+  are the domain's, unit-tested, and computed once server-side — never re-implemented in the browser. The
+  coverage verdict an entry is marked with is now **`domain.ProtectedPaths`** — source paths *minus*
+  **excluded paths** (see the *stop backing up really stops it* fix below).
 - **The file listing gained two booleans.** `GET /machines/{machine}/files` entries now carry `backedUp`
   (`protectedPaths.covers(entry.path)`) and `containsBackedUp` (`!backedUp && protectedPaths.enclosesUnder(entry.path)`,
   so the two are mutually exclusive — full shield vs half shield). They are **present-only**: a past (archived)
-  listing marks nothing, because an old archive's shape is not today's protection. The read side gets the set
-  through a new driven port **`ForReadingProtectedPaths`** (`protectedPathsFor(machineName)`, implemented by
-  `BackupJobProtectedPathsAdapter` over the backup-job store), so `ExplorerService` depends on it and **not** on
+  listing marks nothing, because an old archive's shape is not today's protection. The read side gets the verdict
+  through a new driven port **`ForReadingProtectedPaths`** (`protectedPathsFor(machineName)` → `ProtectedPaths`,
+  implemented by `BackupJobProtectedPathsAdapter` over the backup-job store — reading each job's source paths
+  **and** its excludes), so `ExplorerService` depends on it and **not** on
   any backup use case — the hex boundary holds, and a machine with no job simply protects the empty set.
 - **`ProtectMachinePathsUseCase` on `BackupService`** (a new narrow use case on the existing backup domain
   service — no new service). `protect(machine, paths)` get-or-creates the machine's repository (name =
@@ -1280,15 +1284,15 @@ job**'s source paths against the tree and would have reported a backed-up direct
   repository is **reused as-is**. Minting a fresh passphrase over a live repository orphans it — the passphrase
   seals the borg repo on the NAS and borg cannot adopt a new one, so every backup then fails to authenticate — and
   a name/slug lookup miss (the legacy-name drop this fix pairs with, §6.19) was exactly the path that clobbered a
-  live secret. `unprotect(machine, paths)` removes them and any descendants, deleting the job (repository kept)
-  when its last path goes. `BackupJob.withSourcePaths` carries every other field through unchanged.
+  live secret. `unprotect(machine, paths)` stops backing them up — see the fix below for how — deleting the job (repository
+  kept) when its last path goes. `BackupJob.withSourcePaths` carries every other field through unchanged.
 - **Endpoints.** `POST /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job (and, on a
   machine's **first** back-up only, a nullable `provisioning` object — see below); `404`
   when the machine is unknown; `409` (`ConflictException` → `ApiError`, *"Designate a backup server before backing
   up machines."*) when no backup server is designated yet, since a repository has nowhere to live without one.
-  `DELETE /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with the updated job, `204` when that removal
-  emptied the job (deleted), and a no-op success when the machine has no job; `404` when the machine is unknown.
-  Both Enterprise-gated with the rest of `BackupRestController`.
+  `DELETE /machines/{machine}/backup/paths` `{"paths":[…]}` → `200` with
+  `{changed, stopped[], job}`, `204` when that removal emptied the job (deleted); `404` when the machine is
+  unknown. Both Enterprise-gated with the rest of `BackupRestController`.
 - **First back-up readies the host ✅** — a machine's **first** back-up now provisions its **backup client**
   automatically, so the operator never runs the guided provisioning wizard by hand. When
   `POST /machines/{machine}/backup/paths` creates a **new** job for a machine that had none, Vaier (1) trusts the
@@ -1301,6 +1305,33 @@ job**'s source paths against the tree and would have reported a backed-up direct
   (implemented by the rest layer's `BackupProvisioner`), so `BackupService` stays clear of the provisioning
   machinery and the hex boundary holds. The POST response gains a **nullable `provisioning`** object
   (`{started, scriptOnly, stagedScriptPath, message}`), populated only on that first back-up.
+- **"Stop backing up" really stops it — and says so honestly ✅** — selecting a folder *inside* a protected
+  path (e.g. `/home/openhab/userdata/logs` under a job protecting `/home`) and clicking **Stop backing up** used
+  to do **nothing at all** while reporting *"Stopped backing up 1 item."*: removal only matched a stored source
+  path or a descendant of one, so a path covered by an ancestor that stays protected matched nothing, the job was
+  saved unchanged, and the `200` read as success. Two decisions, both now in the **domain**:
+  - **`BackupJob.unprotecting(paths)`** answers each path on its own terms — a protected path (and everything
+    under it) leaves the set; a path a *remaining* protected path still covers becomes an **excluded path** on the
+    job (the `excludes` field borg already honours); a path that is neither changes nothing. It returns
+    **`domain.Unprotection`** (`job`, `stopped[]`, `changed()`, `jobDeleted()`) — the honest account of what
+    happened, so a no-op can never be reported as a removal. `BackupService.unprotect` only orchestrates: load,
+    ask the job, then delete / save / touch nothing.
+  - **`BackupJob.protecting(paths)`** clears every exclusion that conflicts with a freshly protected path (one it
+    covers, *or* one that covers it), so *stop backing up X* → *back up X* leaves X genuinely protected instead of
+    shielded on screen and silently skipped by every run.
+  - **`domain.Excludes`** is the new value object for the holes: a *minimal cover* like `SourcePaths` (an
+    exclusion already covered by another collapses, duplicates never accumulate), with `excluding` / `clearedFor`
+    / `prunedTo` / `excludes(path)`. borg fnmatch patterns (`*.tmp`) set in the job editor are carried verbatim
+    and never collapsed or pruned — a pattern is not a path. `domain.PathCoverage` holds the one containment rule
+    `SourcePaths`, `Excludes` and `ProtectedPaths` all share.
+  - **The Explorer's shield was the second half of the bug**: `backedUp` was computed from source paths alone, so
+    an excluded folder would have kept a full shield and the fix would have looked broken. `ForReadingProtectedPaths`
+    now returns **`ProtectedPaths`** (sources minus excludes) and the excluded folder — and everything under it —
+    is marked not backed up.
+  - **Honest end to end**: `DELETE /machines/{machine}/backup/paths` answers `{changed, stopped[], job}` (still
+    `204` when the job itself went), and the Explorer's toast counts what the backend says **stopped**, saying
+    *"Nothing changed — Vaier was not backing that up."* when nothing did. A job's Inspector also lists its
+    excluded paths under **Not backed up**, beside what it protects.
 
 ---
 

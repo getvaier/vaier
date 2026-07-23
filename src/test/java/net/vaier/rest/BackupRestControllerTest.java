@@ -1071,12 +1071,53 @@ class BackupRestControllerTest {
             List.of("/home/geir", "/etc/nginx"), List.of(), 7, 4, 6, "zstd,6", true, false));
         when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
 
-        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("Colina 27",
-            new BackupRestController.ProtectPathsRequest(List.of("/etc/nginx")));
+        ResponseEntity<BackupRestController.UnprotectPathsResponse> response = controller.unprotectPaths(
+            "Colina 27", new BackupRestController.ProtectPathsRequest(List.of("/etc/nginx")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().sourcePaths()).containsExactly("/home/geir");
+        assertThat(response.getBody().changed()).isTrue();
+        assertThat(response.getBody().stopped()).containsExactly("/etc/nginx");
+        assertThat(response.getBody().job().sourcePaths()).containsExactly("/home/geir");
+    }
+
+    @Test
+    void unprotectPathsInsideAStillProtectedFolderReportsTheExcludeItRecorded() {
+        // The reported bug at the endpoint: /home stays protected and the logs folder becomes an exclude. The
+        // response must show the change — the same call used to answer 200 with a completely untouched job.
+        backupServers.save(server());
+        repositories.save(repo());
+        jobs.save(new BackupJob("colina-home", "Colina 27", "nas-borg",
+            List.of("/home"), List.of(), 7, 4, 6, "zstd,6", true, false));
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.UnprotectPathsResponse> response = controller.unprotectPaths(
+            "Colina 27",
+            new BackupRestController.ProtectPathsRequest(List.of("/home/openhab/userdata/logs")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().changed()).isTrue();
+        assertThat(response.getBody().stopped()).containsExactly("/home/openhab/userdata/logs");
+        assertThat(response.getBody().job().sourcePaths()).containsExactly("/home");
+        assertThat(response.getBody().job().excludes()).containsExactly("/home/openhab/userdata/logs");
+    }
+
+    @Test
+    void unprotectPathsThatChangedNothingSaysSo_ratherThanReadingAsARemoval() {
+        // Nothing on the machine protects /var/log. A 200 with an unchanged job used to be indistinguishable
+        // from a successful removal, and the browser reported one. The outcome now says changed: false.
+        backupServers.save(server());
+        repositories.save(repo());
+        jobs.save(job()); // only "/home/geir"
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
+
+        ResponseEntity<BackupRestController.UnprotectPathsResponse> response = controller.unprotectPaths(
+            "Colina 27", new BackupRestController.ProtectPathsRequest(List.of("/var/log")));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().changed()).isFalse();
+        assertThat(response.getBody().stopped()).isEmpty();
+        assertThat(response.getBody().job().sourcePaths()).containsExactly("/home/geir");
     }
 
     @Test
@@ -1086,8 +1127,8 @@ class BackupRestControllerTest {
         jobs.save(job()); // only "/home/geir"
         when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
 
-        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("Colina 27",
-            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+        ResponseEntity<BackupRestController.UnprotectPathsResponse> response = controller.unprotectPaths(
+            "Colina 27", new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(jobs.getByName("colina-home")).isEmpty();
@@ -1096,21 +1137,25 @@ class BackupRestControllerTest {
     }
 
     @Test
-    void unprotectPathsWhenMachineHasNoJobIsANoOpSuccess() {
+    void unprotectPathsWhenMachineHasNoJobChangedNothing_andDoesNotPretendOtherwise() {
+        // Nothing is backed up on this machine at all, so nothing stopped. It is not an error — but it is not
+        // a removal either, so it comes back as an explicit "changed: false" instead of a bare 204.
         when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27")));
 
-        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("Colina 27",
-            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+        ResponseEntity<BackupRestController.UnprotectPathsResponse> response = controller.unprotectPaths(
+            "Colina 27", new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().changed()).isFalse();
+        assertThat(response.getBody().job()).isNull();
     }
 
     @Test
     void unprotectPathsUnknownMachineReturns404() {
         when(getMachines.getAllMachines()).thenReturn(List.of());
 
-        ResponseEntity<BackupRestController.JobResponse> response = controller.unprotectPaths("ghost",
-            new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
+        ResponseEntity<BackupRestController.UnprotectPathsResponse> response = controller.unprotectPaths(
+            "ghost", new BackupRestController.ProtectPathsRequest(List.of("/home/geir")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }

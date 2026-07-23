@@ -15,6 +15,8 @@ import net.vaier.domain.Selection;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
+import net.vaier.domain.Excludes;
+import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.SourcePaths;
 import net.vaier.domain.port.ForMountingArchives;
 import net.vaier.domain.port.ForReadingProtectedPaths;
@@ -109,7 +111,7 @@ class ExplorerServiceTest {
     void listDirectory_carriesTheMachinesProtectedPaths_soEntriesCanBeMarkedBackedUp() {
         machineResolves("apalveien5", "SHA256:pinned");
         when(forReadingProtectedPaths.protectedPathsFor("apalveien5"))
-            .thenReturn(SourcePaths.of(List.of("/home/geir")));
+            .thenReturn(ProtectedPaths.of(SourcePaths.of(List.of("/home/geir")), Excludes.none()));
         remoteAnswers(new DirectoryListing(List.of(
             FileEntry.in("/home/geir", "docs", true, 4096, WHEN)), "SHA256:pinned"));
 

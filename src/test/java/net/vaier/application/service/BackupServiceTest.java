@@ -4,6 +4,7 @@ import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupServer;
+import net.vaier.domain.Unprotection;
 import net.vaier.domain.port.ForPersistingBackupJobs;
 import net.vaier.domain.port.ForPersistingBackupRepositories;
 import net.vaier.domain.port.ForPersistingBackupServers;
@@ -285,15 +286,62 @@ class BackupServiceTest {
         service.saveBackupServer(server());
         service.protect("Colina 27", List.of("/home/geir"));
 
-        Optional<BackupJob> result = service.unprotect("Colina 27", List.of("/home/geir"));
+        Unprotection result = service.unprotect("Colina 27", List.of("/home/geir"));
 
-        assertThat(result).isEmpty();
+        assertThat(result.jobDeleted()).isTrue();
+        assertThat(result.job()).isNull();
         assertThat(jobs.getAll()).isEmpty();
         assertThat(repositories.getByName("Colina-27")).isPresent();
     }
 
     @Test
     void unprotectForAMachineWithNoJobIsANoOp() {
-        assertThat(service.unprotect("Colina 27", List.of("/home/geir"))).isEmpty();
+        Unprotection result = service.unprotect("Colina 27", List.of("/home/geir"));
+
+        assertThat(result.changed()).isFalse();
+        assertThat(result.job()).isNull();
+    }
+
+    @Test
+    void unprotectAPathInsideAStillProtectedFolderExcludesItAndSavesTheJob() {
+        // The reported bug, at the service seam: /home stays protected, so the only way to really stop backing
+        // the logs folder up is an exclude — and the job that comes back must be the one that was stored.
+        service.saveBackupServer(server());
+        service.protect("Colina 27", List.of("/home"));
+
+        Unprotection result = service.unprotect("Colina 27", List.of("/home/openhab/userdata/logs"));
+
+        assertThat(result.changed()).isTrue();
+        assertThat(result.job().sourcePaths()).containsExactly("/home");
+        assertThat(result.job().excludes()).containsExactly("/home/openhab/userdata/logs");
+        assertThat(jobs.getByMachine("Colina 27").getFirst().excludes())
+            .containsExactly("/home/openhab/userdata/logs");
+    }
+
+    @Test
+    void unprotectSomethingNothingProtectsChangesNothing_andDoesNotEvenTouchTheStore() {
+        service.saveBackupServer(server());
+        service.protect("Colina 27", List.of("/home"));
+        BackupJob before = jobs.getByMachine("Colina 27").getFirst();
+
+        Unprotection result = service.unprotect("Colina 27", List.of("/var/log"));
+
+        assertThat(result.changed()).isFalse();
+        assertThat(jobs.getByMachine("Colina 27").getFirst()).isEqualTo(before);
+    }
+
+    @Test
+    void protectingAnExcludedPathAgainDropsTheExcludeSoItIsReallyBackedUp() {
+        // Stop backing up X, then back up X: the folder must end up genuinely protected, not shielded on
+        // screen while every borg run walks past it.
+        service.saveBackupServer(server());
+        service.protect("Colina 27", List.of("/home"));
+        service.unprotect("Colina 27", List.of("/home/openhab/userdata/logs"));
+
+        service.protect("Colina 27", List.of("/home/openhab/userdata/logs"));
+
+        BackupJob job = jobs.getByMachine("Colina 27").getFirst();
+        assertThat(job.excludes()).isEmpty();
+        assertThat(job.protectedPaths().covers("/home/openhab/userdata/logs")).isTrue();
     }
 }

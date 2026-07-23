@@ -443,16 +443,18 @@ class ExplorerShellTest {
 
     @Test
     void aMachineGrowsOnlyTheEntriesVaierCanActuallyReach() throws IOException {
-        // The tree must be honest about a machine rather than uniform. A machine with no SSH has no files and no
-        // disk; a machine that runs no Docker must not grow an empty `containers` entry that opens onto nothing.
-        // /machines already carries both facts (sshAccess, runsDocker) — the tree asks them, it does not guess.
+        // The tree must be honest about a machine rather than uniform. Files and disk ride on a held SSH
+        // credential, so a machine with none grows neither — showing them off the SSH-access toggle alone
+        // would open onto a red "no login" wall until a refresh. A machine that runs no Docker must not grow an
+        // empty `containers` entry that opens onto nothing. /machines carries both facts (hasCredential,
+        // runsDocker) — the tree asks them, it does not guess.
         // (The shell is not a tree entry — it opens from the machine's SSH-access section — so it is absent here.)
         String js = read("explorer-shell.js");
         int from = js.indexOf("if (kind === 'machine') {");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n        }", from));
 
-        assertThat(body).contains("sshAccess");
+        assertThat(body).contains("hasCredential");
         assertThat(body).contains("runsDocker");
         assertThat(body).contains("'files'").contains("'containers'").contains("'services'").contains("'disk'");
         assertThat(body).doesNotContain("'shell'");   // moved to the SSH-access section
@@ -1026,5 +1028,36 @@ class ExplorerShellTest {
         String body = js.substring(from, js.indexOf("\n    }", from));
         assertThat(body).as("go() drops the receipt, as it already drops the selection")
             .contains("_updateCheck = null");
+    }
+
+    @Test
+    void stoppingABackup_reportsWhatReallyStopped_neverWhatTheBrowserAskedFor() throws IOException {
+        // The bug this whole change exists for ended here: the browser counted the paths it SENT, so a request
+        // that removed nothing still said "Stopped backing up 1 item." about a folder borg kept backing up
+        // every night. The count now comes from the backend's own account of what stopped, and a request that
+        // changed nothing says exactly that.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function selUnbackup(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("the count is the backend's, read off the response").contains(".stopped");
+        assertThat(body).as("a no-op is reported as a no-op").contains("Nothing changed");
+        // The only honest use of "everything I asked for" is the 204: the whole job is gone, so it all stopped.
+        assertThat(body.split("paths\\.length", -1).length - 1)
+            .as("the sent-path count survives only in the job-deleted branch").isEqualTo(1);
+        assertThat(body.indexOf("paths.length")).isGreaterThan(body.indexOf("204"));
+    }
+
+    @Test
+    void aJobsExcludedPaths_areShownBesideWhatItProtects() throws IOException {
+        // An exclude is the operator's own "stop backing this up" made durable. Listing the protected paths
+        // while hiding the holes carved out of them would overstate what is in the archives.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderOneJob(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function ", from + 10));
+        assertThat(body).contains("job.excludes");
+        assertThat(body).as("named in the operator's words, not borg's").contains("Not backed up");
     }
 }

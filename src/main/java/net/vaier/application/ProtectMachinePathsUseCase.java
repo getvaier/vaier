@@ -1,10 +1,10 @@
 package net.vaier.application;
 
 import net.vaier.domain.BackupJob;
+import net.vaier.domain.Unprotection;
 import net.vaier.domain.port.ForReadyingBackupClients.ReadyingOutcome;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
  * The just-select-and-back-up flow: turn a selection of paths on a machine into (or out of) a fleet-backup
@@ -26,11 +26,15 @@ public interface ProtectMachinePathsUseCase {
     ProtectionOutcome protect(String machineName, List<String> paths);
 
     /**
-     * Stop protecting {@code paths} on {@code machineName}: remove them (and any descendants) from the
-     * machine's job. Returns the updated job, or empty when the machine has no job or the job's last path
-     * was removed (in which case the job is deleted, leaving the repository intact).
+     * Stop protecting {@code paths} on {@code machineName}, whichever way each path relates to the protected
+     * set: a protected path (and anything under it) leaves the set, while a path a <em>remaining</em>
+     * protected path still covers is recorded as an exclude — the only way to stop backing up a folder inside
+     * a protected ancestor. A path that is neither is left alone.
+     *
+     * <p>Returns the {@link Unprotection} — the honest account of what happened, including the case where
+     * nothing matched and nothing changed. Callers must not report a removal the domain did not make.
      */
-    Optional<BackupJob> unprotect(String machineName, List<String> paths);
+    Unprotection unprotect(String machineName, List<String> paths);
 
     /**
      * The result of a {@link #protect} call: the updated {@code job}, and the {@code readying} outcome of the

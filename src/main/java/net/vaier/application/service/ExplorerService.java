@@ -12,7 +12,7 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.Selection;
 import net.vaier.domain.SftpRoot;
-import net.vaier.domain.SourcePaths;
+import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
@@ -82,10 +82,10 @@ public class ExplorerService
         DirectoryListing listing = forBrowsingRemoteFiles.list(target, root.toJailPath(directory));
         pinOnFirstUse(machineName, target, listing.hostKeyFingerprint());
 
-        // The machine's protected paths travel back with the listing so the browser can mark backed-up
-        // entries. Whether a given entry is covered is the domain's decision (SourcePaths.covers), asked
-        // per entry when the response is rendered — never re-derived in the browser.
-        SourcePaths protectedPaths = forReadingProtectedPaths.protectedPathsFor(machineName);
+        // What the machine backs up travels back with the listing so the browser can mark backed-up entries.
+        // Whether a given entry is covered is the domain's decision (ProtectedPaths.covers — source paths minus
+        // excludes), asked per entry when the response is rendered, never re-derived in the browser.
+        ProtectedPaths protectedPaths = forReadingProtectedPaths.protectedPathsFor(machineName);
         log.debug("Listed {} on {}", directory, machineName);
         return new MachineDirectory(root, directory, FileEntry.listing(root.anchor(listing.entries())),
             protectedPaths);

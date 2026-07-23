@@ -163,4 +163,22 @@ class SourcePathsTest {
     void anEmptySetEnclosesNothing() {
         assertThat(SourcePaths.of(List.of()).enclosesUnder("/home")).isFalse();
     }
+
+    @Test
+    void protectsWithinIsTrueForAMemberAndForAnAncestorOfOne() {
+        // "Would removing this path drop anything?" — the question behind an honest "stop backing up".
+        SourcePaths paths = SourcePaths.of(List.of("/home/geir"));
+
+        assertThat(paths.protectsWithin("/home/geir")).isTrue();     // the member itself
+        assertThat(paths.protectsWithin("/home")).isTrue();          // an ancestor: the member goes with it
+    }
+
+    @Test
+    void protectsWithinIsFalseWhenNothingWouldBeDropped() {
+        SourcePaths paths = SourcePaths.of(List.of("/home/geir"));
+
+        assertThat(paths.protectsWithin("/home/geir/docs")).isFalse();   // covered, but nothing to drop
+        assertThat(paths.protectsWithin("/var")).isFalse();
+        assertThat(SourcePaths.of(List.of()).protectsWithin("/home")).isFalse();
+    }
 }

@@ -8,10 +8,12 @@ import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ListMachineArchivesUseCase;
 import net.vaier.domain.Archive;
 import net.vaier.domain.CannotDeleteSftpRootException;
+import net.vaier.domain.Excludes;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PathOutsideSftpRootException;
+import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.PermissionDeniedException;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.SourcePaths;
@@ -204,6 +206,29 @@ class ExplorerRestControllerTest {
         FileEntryResponse geir = controller.list("apalveien5", "/home", null).getBody().entries().getFirst();
         assertThat(geir.backedUp()).isTrue();
         assertThat(geir.containsBackedUp()).isFalse();
+    }
+
+    @Test
+    void get_marksAnExcludedFolderAsNotBackedUp_evenThoughItsAncestorIsProtected() {
+        // "Stop backing up" a folder inside a protected ancestor records it as an exclude. If the shield were
+        // still drawn from the source paths alone the folder would keep its full shield, the operator would
+        // read the fix as broken, and — worse — believe data is in the archives that borg walks straight past.
+        ProtectedPaths protection = ProtectedPaths.of(
+            SourcePaths.of(List.of("/home")), Excludes.of(List.of("/home/openhab/userdata/logs")));
+        when(browseFilesUseCase.listDirectory("apalveien5", "/home/openhab/userdata", null))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/home/openhab/userdata", List.of(
+                FileEntry.in("/home/openhab/userdata", "logs", true, 4096, WHEN),
+                FileEntry.in("/home/openhab/userdata", "jsondb", true, 4096, WHEN)),
+                protection));
+
+        List<FileEntryResponse> entries =
+            controller.list("apalveien5", "/home/openhab/userdata", null).getBody().entries();
+        FileEntryResponse logs = entries.stream().filter(e -> e.name().equals("logs")).findFirst().orElseThrow();
+        FileEntryResponse jsondb = entries.stream().filter(e -> e.name().equals("jsondb")).findFirst().orElseThrow();
+
+        assertThat(logs.backedUp()).as("an excluded folder is not backed up").isFalse();
+        assertThat(logs.containsBackedUp()).as("and nothing inside it is either").isFalse();
+        assertThat(jsondb.backedUp()).as("its siblings are untouched").isTrue();
     }
 
     @Test
