@@ -135,7 +135,7 @@ class BackupRunTest {
     }
 
     @Test
-    void diagnosticsStripsTrailingJsonStatsBlockFromWarningSummary() {
+    void diagnosticsStripsTrailingJsonStatsBlockFromAnIncompleteRunsSummary() {
         Instant start = Instant.parse("2026-07-13T00:07:47Z");
         Instant end = Instant.parse("2026-07-13T00:07:50Z");
         String summary = """
@@ -271,5 +271,115 @@ class BackupRunTest {
         assertThat(unknown.isFailure()).isTrue();
         // A terminal run is never considered stale-while-running.
         assertThat(unknown.isStaleWhileRunning(started.plus(Duration.ofHours(99)), grace)).isFalse();
+    }
+
+    // --- an incomplete archive is a failure, not a decoration ------------------------------------------
+    //
+    // The Colina 27 case: a job with backupAsRoot=false over /home. borg could not read a great many files,
+    // skipped every one of them, exited 1, and Vaier recorded the run as a non-failure — so nobody was told
+    // the archive had holes in it. A run whose archive is missing source files is INCOMPLETE: terminal, a
+    // failure, and it names what it lost.
+
+    @Test
+    void exitOneWithUnreadableFilesIsIncompleteNotAWarning() {
+        Instant start = Instant.parse("2026-07-08T02:00:00Z");
+        Instant end = Instant.parse("2026-07-08T02:05:00Z");
+        String summary = """
+            /home/nut-http/logs/2026-04-04-14-07-07.log: open: [Errno 13] Permission denied: '2026-04-04-14-07-07.log'
+            /home/nut-http/logs/2026-04-05-01-02-03.log: open: [Errno 13] Permission denied: '2026-04-05-01-02-03.log'
+            """;
+
+        BackupRun run = BackupRun.fromExitCode(job(), "run-i1", start, end, 1, summary);
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.INCOMPLETE);
+        assertThat(run.status().isTerminal()).isTrue();
+        // The whole point: an incomplete archive is a failure, so it pages admins and reads red in the UI.
+        assertThat(run.isFailure()).isTrue();
+        assertThat(run.exitCode()).isEqualTo(1);
+        assertThat(run.unreadableFiles().total()).isEqualTo(2);
+        assertThat(run.unreadableFiles().sample())
+            .contains("/home/nut-http/logs/2026-04-04-14-07-07.log");
+    }
+
+    @Test
+    void completedFromExitOneWithUnreadableFilesSettlesToIncomplete() {
+        Instant started = Instant.parse("2026-07-08T02:00:00Z");
+        Instant done = Instant.parse("2026-07-08T02:40:00Z");
+        BackupRun running = BackupRun.started(job(), "run-i2", started);
+
+        BackupRun run = running.completedFrom(1, done,
+            "/var/lib/docker/volumes/db/_data: scandir: [Errno 13] Permission denied: '_data'");
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.INCOMPLETE);
+        assertThat(run.isFailure()).isTrue();
+        // Identity of the run is preserved across completion, as for every other outcome.
+        assertThat(run.runId()).isEqualTo("run-i2");
+        assertThat(run.finishedAt()).isEqualTo(done);
+    }
+
+    @Test
+    void exitZeroAndExitTwoAreUnchangedByTheUnreadableCheck() {
+        Instant start = Instant.parse("2026-07-08T02:00:00Z");
+        Instant end = Instant.parse("2026-07-08T02:05:00Z");
+        String denials = "/data/db: open: [Errno 13] Permission denied: 'db'";
+
+        // A clean run is a clean run — borg cannot exit 0 having skipped a file, and a stray line in the tail
+        // must never demote one. And a run that never wrote an archive at all stays FAILED: that is a
+        // different problem (no connection, no repository) with its own outcome, and it must not be reworded.
+        assertThat(BackupRun.fromExitCode(job(), "run-i3", start, end, 0, denials).status())
+            .isEqualTo(BackupRunStatus.SUCCESS);
+        assertThat(BackupRun.fromExitCode(job(), "run-i4", start, end, 2, denials).status())
+            .isEqualTo(BackupRunStatus.FAILED);
+        assertThat(BackupRun.fromExitCode(job(), "run-i5", start, end, 2,
+            "Connection closed by remote host").status()).isEqualTo(BackupRunStatus.FAILED);
+    }
+
+    @Test
+    void exitOneWithNoUnreadableFileStaysAWarning() {
+        Instant start = Instant.parse("2026-07-08T02:00:00Z");
+        Instant end = Instant.parse("2026-07-08T02:05:00Z");
+
+        // borg exits 1 for benign things too ("file changed while we backed it up"). Those wrote everything
+        // they were asked to, so they stay WARNING — non-failing, non-paging, exactly as before.
+        BackupRun warn = BackupRun.fromExitCode(job(), "run-i6", start, end, 1,
+            "/home/geir/live.log: file changed while we backed it up");
+
+        assertThat(warn.status()).isEqualTo(BackupRunStatus.WARNING);
+        assertThat(warn.isFailure()).isFalse();
+        assertThat(warn.unreadableFiles().any()).isFalse();
+    }
+
+    @Test
+    void anIncompleteRunTellsAdminsPlainlyThatDataWasNotBackedUp() {
+        Instant start = Instant.parse("2026-07-08T02:00:00Z");
+        Instant end = Instant.parse("2026-07-08T02:05:00Z");
+        String summary = """
+            /home/nut-http/logs/a.log: open: [Errno 13] Permission denied: 'a.log'
+            /home/nut-http/logs/b.log: open: [Errno 13] Permission denied: 'b.log'
+            """;
+
+        BackupRun run = BackupRun.fromExitCode(job(), "run-i7", start, end, 1, summary);
+
+        // "failed" would be a lie (there IS an archive) and "warning" was the lie we are fixing. The subject
+        // says the one thing that matters in a notification list: this backup did not get everything.
+        assertThat(run.failureSubject())
+            .isEqualTo("[Vaier] Backup incomplete: colina-home on Colina 27");
+        String body = run.failureBody("example.com");
+        assertThat(body).contains("2 files could not be read");
+        assertThat(body).contains("are NOT in the archive");
+        assertThat(body).contains("/home/nut-http/logs/a.log");
+        assertThat(body).contains("Back up as root");
+        assertThat(body).contains("vaier.example.com");
+    }
+
+    @Test
+    void aGenuinelyFailedRunKeepsItsOwnSubject() {
+        Instant start = Instant.parse("2026-07-08T02:00:00Z");
+        Instant end = Instant.parse("2026-07-08T02:05:00Z");
+
+        BackupRun failed = BackupRun.fromExitCode(job(), "run-i8", start, end, 2, "borg: repository is locked");
+
+        assertThat(failed.failureSubject()).isEqualTo("[Vaier] Backup failed: colina-home on Colina 27");
+        assertThat(failed.failureBody("example.com")).doesNotContain("could not be read");
     }
 }

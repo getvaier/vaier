@@ -4143,7 +4143,10 @@
     // `run-settled` on the backups stream when borg finishes (watchBackups). Getting a host ready the first
     // time — installing borg, the root grant — happens on the backup server's own entry (see Server operations).
 
-    const RUN_DOT = { SUCCESS: 'is-up', WARNING: 'is-degraded', FAILED: 'is-down',
+    // INCOMPLETE reads red, not amber: the archive exists but is missing files borg could not read, which is
+    // the failure mode that hurts most — it looks fine until you need the data. WARNING stays amber; borg got
+    // everything it was asked for and merely grumbled on the way.
+    const RUN_DOT = { SUCCESS: 'is-up', WARNING: 'is-degraded', INCOMPLETE: 'is-down', FAILED: 'is-down',
                       RUNNING: 'is-idle', UNKNOWN: 'is-idle' };
 
     // A run's summary is only shown when it is a short, human line. Borg's own {@code --json} stats can end up
@@ -4213,6 +4216,21 @@
             body.appendChild(holes);
         }
 
+        // The one backup setting that decides whether a backup of a shared directory is real. Colina 27 ran
+        // without it over /home for months and silently skipped every file another user owned. It is stated as
+        // a consequence, not as "run borg as root": the operator's question is "will my data be in there?",
+        // not "which uid does borg run under". The flag lives on the job spec, so the toggle re-PUTs the job
+        // (see toggleBackupAsRoot) — the same route the job's other fields already travel.
+        body.appendChild(section('Reading the files'));
+        body.appendChild(checkRow('Back up files owned by other users', job.backupAsRoot,
+            (on) => toggleBackupAsRoot(job, on)));
+        body.appendChild(note(job.backupAsRoot
+            ? 'On — Vaier reads every file in the protected paths, whoever owns them, so the archive holds '
+              + 'all of it.'
+            : 'Off — any file here that belongs to someone else is skipped, and the archive is missing it. '
+              + 'Turn this on if the protected paths hold other people’s home directories, a container’s '
+              + 'data, or a database file.', false));
+
         body.appendChild(section('Schedule'));
         const sched = el('div', 'ex-runline');
         sched.textContent = 'Runs every night. A failed run emails the admins.';
@@ -4245,12 +4263,25 @@
             runLine.append(d, txt);
         }
         body.appendChild(runLine);
-        // A failed OR a warning run says why, right here: the skipped-file and error lines the backend pulled
-        // out of borg's own output (a domain decision — BackupRun.diagnostics). A warning reads amber and a
-        // failure red, the same two colours the run's dot uses, so "what went wrong" is never a mystery.
+        // An incomplete run gets the plain sentence first, because the status word alone does not say what
+        // happened to the data. The domain decided the run is incomplete (BackupRunStatus.INCOMPLETE) and the
+        // diagnostics below name the files; this line says what that means and what to do about it.
+        if (held && held.state === 'ready' && held.run.status === 'INCOMPLETE') {
+            body.appendChild(note('Some files were not backed up. Vaier could not read them, so they are '
+                + 'missing from the archive — the backup ran, but the data is not all there. '
+                + (job.backupAsRoot
+                    ? 'Backing up other users’ files is already on, so these are files even root cannot read; '
+                      + 'the diagnostics below name them.'
+                    : 'Turn on “Back up files owned by other users” for this machine and run it again.'), true));
+        }
+        // A failed, warning OR incomplete run says why, right here: the skipped-file and error lines the
+        // backend pulled out of borg's own output (a domain decision — BackupRun.diagnostics). A warning reads
+        // amber and the two failing outcomes red, the same colours the run's dot uses, so "what went wrong" is
+        // never a mystery.
         if (held && held.state === 'ready' && held.run.diagnostics
-            && (held.run.status === 'FAILED' || held.run.status === 'WARNING')) {
-            const n = note(held.run.diagnostics, held.run.status === 'FAILED');
+            && (held.run.status === 'FAILED' || held.run.status === 'WARNING'
+                || held.run.status === 'INCOMPLETE')) {
+            const n = note(held.run.diagnostics, held.run.status !== 'WARNING');
             if (held.run.status === 'WARNING') n.classList.add('is-warn');
             body.appendChild(n);
         }
@@ -4314,8 +4345,37 @@
         }
     }
 
-    // Enable/disable rides on the whole job spec — the flag has no endpoint of its own, so a toggle re-saves the
-    // job with it flipped. Everything else is carried through unchanged.
+    // "Back up files owned by other users" rides on the whole job spec — the flag has no endpoint of its own,
+    // so a toggle re-saves the job with it flipped and carries every other field through unchanged (drop one
+    // and the job would silently lose its protected paths). Optimistic like the SSH-access toggle: the
+    // checkbox is already where the operator put it, so the local job is patched and repainted at once, and a
+    // save that fails puts it back rather than leaving the screen lying about what Vaier will do tonight.
+    async function toggleBackupAsRoot(job, on) {
+        const was = job.backupAsRoot;
+        job.backupAsRoot = on;
+        render();
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(job.name), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machineName: job.machineName, repositoryName: job.repositoryName,
+                    sourcePaths: job.sourcePaths, excludes: job.excludes, keepDaily: job.keepDaily,
+                    keepWeekly: job.keepWeekly, keepMonthly: job.keepMonthly, compression: job.compression,
+                    enabled: job.enabled, backupAsRoot: on }),
+            });
+            if (!res.ok) throw new Error('save failed');
+        } catch (e) {
+            job.backupAsRoot = was;
+            toast('Vaier could not save that. Nothing changed.');
+            render();
+            return;
+        }
+        await loadBackup();
+        toast(on ? 'Vaier will back up files owned by other users on ' + job.machineName + ' from the next run.'
+                 : 'Vaier will skip files owned by other users on ' + job.machineName + '.');
+        render();
+    }
+
     // Stop backing this machine up entirely — Vaier forgets the job and its schedule. It never touches the
     // archives already made; they stay on the server. (Removing individual paths is done in the file browser;
     // this is the one-click "stop everything".) A plain confirm: the data you'd hate to lose is not at risk.
@@ -4781,7 +4841,11 @@
             if (!S.at && (entry.backedUp || entry.containsBackedUp)) {
                 const shield = el('span', 'ex-shield' + (entry.backedUp ? '' : ' is-partial'));
                 shield.innerHTML = svg(entry.backedUp ? 'shield' : 'shieldhalf', 'ex-ico');
-                shield.title = entry.backedUp ? 'Backed up' : 'Something inside is backed up';
+                // One half-shield, two ways to earn it — a folder that holds something protected deeper down,
+                // and a protected folder with an exclude carving a hole inside it. The wording has to be true
+                // of both, and the fact that matters in both is the same: not all of this is in the archive.
+                shield.title = entry.backedUp
+                    ? 'Backed up' : 'Partly backed up — not everything inside is in the archive';
                 name.appendChild(shield);
             }
             if (entry.directory) name.onclick = () => go(S.path.concat([entry.name]));
@@ -4857,12 +4921,21 @@
         const had = S.sel.some((s) => clipId(s.machine, s.path, s.at) === id);
         S.sel = had
             ? S.sel.filter((s) => clipId(s.machine, s.path, s.at) !== id)
+            // Both shields travel with the selection: the full one says the entry is whole, the half one says
+            // it holds backed-up content without being whole. "Stop backing up" needs either (see anyBackedUp),
+            // so carrying only the full shield would take the verb away from a folder with a hole in it.
             : S.sel.concat([{ machine: machine, path: entry.path, at: S.at, name: entry.name,
-                              directory: entry.directory, size: entry.size, backedUp: !!entry.backedUp }]);
+                              directory: entry.directory, size: entry.size, backedUp: !!entry.backedUp,
+                              containsBackedUp: !!entry.containsBackedUp }]);
     }
     // A machine is back-up-eligible for the selection bar unless it is the backup server itself (the store, not
     // a thing that is stored). Present-only items only — you protect the live tree, not an archived shape of it.
     const backupEligible = (machine) => !S.backupServer || machine !== S.backupServer.machineName;
+    // Whether there is anything in the archives at or under a selected item — the precondition for "Stop
+    // backing up" to have work to do. Either shield qualifies: a folder that is whole, and a folder that is
+    // protected but holed (or that merely holds a protected path deeper down) both have data to stop. Gating
+    // on the full shield alone would silently drop the verb the moment one exclude appeared inside a folder.
+    const anyBackedUp = (s) => !!s.backedUp || !!s.containsBackedUp;
     // Group selected items by their machine, preserving first-seen order — how the per-machine verbs fan out.
     function groupByMachine(items) {
         const groups = new Map();
@@ -4959,7 +5032,7 @@
         const live = sel.filter((s) => !s.at);
         const machines = new Set(sel.map((s) => s.machine));
         const backupItems = live.filter((s) => backupEligible(s.machine));
-        const unbackupItems = backupItems.filter((s) => s.backedUp);
+        const unbackupItems = backupItems.filter(anyBackedUp);
 
         const bar = el('div', 'ex-selbar');
         const count = el('div', 'ex-selbar-txt');
@@ -5160,7 +5233,8 @@
     // protecting nothing at all, the backend forgets that machine's job entirely (archives already made are
     // untouched). Only ever the live, already-backed-up items.
     async function selUnbackup() {
-        const groups = groupByMachine(S.sel.filter((s) => !s.at && s.backedUp && backupEligible(s.machine)));
+        const groups = groupByMachine(
+            S.sel.filter((s) => !s.at && anyBackedUp(s) && backupEligible(s.machine)));
         if (!groups.size) return;
         let done = 0;
         const failed = [];

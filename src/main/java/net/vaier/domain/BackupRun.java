@@ -10,10 +10,14 @@ import java.util.List;
  * borg's exit code (null until known), the archive it wrote and a short summary.
  *
  * <p>The mapping from a borg exit code to a status is a business decision and lives here on the entity,
- * following borg's own exit-code contract: {@link #fromExitCode} treats {@code 0} as {@code SUCCESS},
- * {@code 1} as {@code WARNING} (the archive was created but some files were skipped) and any code
- * {@code >= 2} as {@code FAILED}. {@link #started} opens a run in {@code RUNNING} before an outcome
- * exists, and {@link #failed} records a guard failure that never reached borg at all.
+ * following borg's own exit-code contract: {@link #fromExitCode} treats {@code 0} as {@code SUCCESS} and any
+ * code {@code >= 2} as {@code FAILED}. Exit {@code 1} splits in two, and the split is the point: borg reports
+ * "the archive was written but something went wrong" the same way whether it merely grumbled or whether it was
+ * <b>denied on files the job protects</b>. Only the run's own output can tell those apart, so
+ * {@link #statusFor} reads it: denied files make the run {@link BackupRunStatus#INCOMPLETE} — an archive with
+ * holes in it, which is a failure — and anything else stays {@link BackupRunStatus#WARNING}. {@link #started}
+ * opens a run in {@code RUNNING} before an outcome exists, and {@link #failed} records a guard failure that
+ * never reached borg at all.
  *
  * @param runId          a unique id for this run
  * @param exitCode       borg's exit code, or null while running / when a guard stopped the run
@@ -55,27 +59,36 @@ public record BackupRun(
     }
 
     /**
-     * Close a run for {@code job} with borg's {@code exitCode}, following borg's exit-code contract:
-     * {@code 0} is {@code SUCCESS}, {@code 1} is {@code WARNING} (archive created, some files skipped)
-     * and any code {@code >= 2} is {@code FAILED}. This exit-code-to-status rule is the entity's decision.
+     * Close a run for {@code job} with borg's {@code exitCode} and its captured {@code summary}, per
+     * {@link #statusFor}. This exit-code-and-output-to-status rule is the entity's decision.
      */
     public static BackupRun fromExitCode(BackupJob job, String runId, Instant startedAt, Instant now,
                                          int exitCode, String summary) {
         return new BackupRun(runId, job.name(), job.repositoryName(), job.machineName(),
-            statusFor(exitCode), startedAt, now, exitCode, job.archiveNameTemplate(), summary);
+            statusFor(exitCode, summary), startedAt, now, exitCode, job.archiveNameTemplate(), summary);
     }
 
     /**
-     * Borg's exit-code contract as the entity's rule: {@code 0} is {@code SUCCESS}, {@code 1} is
-     * {@code WARNING} (the archive was created but some files were skipped, e.g. unreadable by the SSH
-     * user), and any code {@code >= 2} is {@code FAILED}.
+     * Borg's exit-code contract as the entity's rule, refined by what the run actually said:
+     * <ul>
+     *   <li>{@code 0} — {@code SUCCESS}. borg cannot exit clean having skipped a source file, so the output
+     *       is not consulted: a stray line in the captured tail must never demote a clean run.</li>
+     *   <li>{@code 1} — the archive was written, but borg was unhappy. If its output names files it could not
+     *       read ({@link UnreadableFiles}), those files are missing from the archive and the run is
+     *       {@code INCOMPLETE} — a failure. Otherwise (a file changed mid-read, and borg's other benign
+     *       grumbles) it is {@code WARNING}, exactly as before.</li>
+     *   <li>{@code >= 2} — {@code FAILED}: borg gave up and there is no usable archive from this run. That is
+     *       a different problem from an incomplete one (no connection, no repository, a locked repo) and keeps
+     *       its own outcome and its own wording.</li>
+     * </ul>
      */
-    private static BackupRunStatus statusFor(int exitCode) {
+    private static BackupRunStatus statusFor(int exitCode, String summary) {
         if (exitCode == 0) {
             return BackupRunStatus.SUCCESS;
         }
         if (exitCode == 1) {
-            return BackupRunStatus.WARNING;
+            return UnreadableFiles.from(summary).any()
+                ? BackupRunStatus.INCOMPLETE : BackupRunStatus.WARNING;
         }
         return BackupRunStatus.FAILED;
     }
@@ -91,15 +104,13 @@ public record BackupRun(
     }
 
     /**
-     * Settle this (typically {@code RUNNING}) run with the detached borg chain's {@code exitCode}: the
-     * same rule as {@link #fromExitCode} — {@code 0} is {@code SUCCESS}, {@code 1} is {@code WARNING}
-     * (archive created, some files skipped) and any code {@code >= 2} is {@code FAILED} — preserving the
-     * run's identity (id, job, repository, machine, archive, start time) and stamping the finish instant,
-     * exit code and {@code summary}. This is the wither a poll uses to promote an in-flight run to its
-     * outcome.
+     * Settle this (typically {@code RUNNING}) run with the detached borg chain's {@code exitCode} and its
+     * captured output — the same {@link #statusFor} rule as {@link #fromExitCode} — preserving the run's
+     * identity (id, job, repository, machine, archive, start time) and stamping the finish instant, exit code
+     * and {@code summary}. This is the wither a poll uses to promote an in-flight run to its outcome.
      */
     public BackupRun completedFrom(int exitCode, Instant now, String summary) {
-        return new BackupRun(runId, jobName, repositoryName, machineName, statusFor(exitCode),
+        return new BackupRun(runId, jobName, repositoryName, machineName, statusFor(exitCode, summary),
             startedAt, now, exitCode, archiveName, summary);
     }
 
@@ -127,6 +138,19 @@ public record BackupRun(
     /** Whether this run did not complete successfully. */
     public boolean isFailure() {
         return status.isFailure();
+    }
+
+    /**
+     * The source files this run could not read, read back out of its own {@code summary} — which files are
+     * missing from the archive, and how many.
+     *
+     * <p>Derived rather than stored, deliberately: {@code summary} <em>is</em> the run's captured borg output
+     * and is already bounded when it is captured (a fixed-size tail), so parsing it on demand keeps the
+     * unbounded list of denied paths out of the run store entirely while staying exact about what that output
+     * holds. {@link UnreadableFiles} then caps what it hands on for display. Never null; empty on a clean run.
+     */
+    public UnreadableFiles unreadableFiles() {
+        return UnreadableFiles.from(summary);
     }
 
     /**
@@ -176,9 +200,15 @@ public record BackupRun(
         return -1;
     }
 
-    /** Subject line for the admin failure alert, sent once when a job crosses from healthy to failing. */
+    /**
+     * Subject line for the admin failure alert, sent once when a job crosses from healthy to failing. An
+     * {@code INCOMPLETE} run says so rather than "failed": in an inbox, "failed" reads as "the backup did not
+     * run" and would be dismissed as noise on a job that visibly runs every night — whereas "incomplete" is
+     * the one word that makes an operator open it. Which word to use is the entity's call, not the mailer's.
+     */
     public String failureSubject() {
-        return "[Vaier] Backup failed: " + jobName + " on " + machineName;
+        String what = status == BackupRunStatus.INCOMPLETE ? "Backup incomplete: " : "Backup failed: ";
+        return "[Vaier] " + what + jobName + " on " + machineName;
     }
 
     /** Subject line for the admin all-clear, sent once when a previously failing job succeeds again. */
@@ -200,6 +230,13 @@ public record BackupRun(
         body.append("Status: ").append(status).append("\n");
         body.append("Exit code: ").append(exitCode != null ? exitCode : "unknown").append("\n");
         body.append("Finished: ").append(finishedAt != null ? finishedAt : "unknown").append("\n");
+        // What is missing goes ABOVE the raw borg tail, because that is the whole message: an operator
+        // reading this must not have to find the denial lines in borg's output to learn they lost data —
+        // which is exactly how the Colina 27 holes went unnoticed for months.
+        String missing = unreadableFiles().report();
+        if (!missing.isEmpty()) {
+            body.append("\n").append(missing);
+        }
         if (summary != null && !summary.isBlank()) {
             body.append("\n").append(summary.strip()).append("\n");
         }

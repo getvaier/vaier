@@ -63,6 +63,26 @@ public record Excludes(List<String> patterns) {
     }
 
     /**
+     * Whether a hole sits <b>strictly inside</b> {@code path} — an exclusion deeper than it, so the folder is
+     * protected but not whole. This is what separates "everything under here is in the archive" from "most of
+     * it is", and it is the difference between an honest full shield and a false one.
+     *
+     * <p>An exclusion at {@code path} itself does not count: that folder is not partly backed up, it is out —
+     * {@link #excludes} is the question for that. Glob patterns never count either, for the reason in the
+     * class note: Vaier cannot tell which files {@code *.tmp} bites into, so it can neither claim the folder
+     * is holed nor pretend otherwise, and inventing a verdict from a pattern would be a guess dressed as fact.
+     */
+    public boolean anyStrictlyInside(String path) {
+        String candidate = PathCoverage.normalize(path);
+        if (candidate == null) {
+            return false;
+        }
+        return patterns.stream()
+            .filter(PathCoverage::isAbsolutePath)
+            .anyMatch(pattern -> !pattern.equals(candidate) && PathCoverage.covers(candidate, pattern));
+    }
+
+    /**
      * A new set with every exclusion that <em>conflicts</em> with {@code nowProtected} dropped — the rule that
      * keeps "stop backing up X" then "back up X" honest.
      *

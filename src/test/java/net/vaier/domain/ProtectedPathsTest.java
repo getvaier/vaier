@@ -74,5 +74,86 @@ class ProtectedPathsTest {
         assertThat(ProtectedPaths.none().isEmpty()).isTrue();
         assertThat(ProtectedPaths.none().covers("/home")).isFalse();
         assertThat(ProtectedPaths.none().enclosesUnder("/home")).isFalse();
+        assertThat(ProtectedPaths.none().isBackedUp("/home")).isFalse();
+        assertThat(ProtectedPaths.none().containsBackedUp("/home")).isFalse();
+    }
+
+    // --- the shield a folder wears, which is not the same question as "is this path covered" --------------
+    //
+    // Reported on Colina 27 and Apalveien 5: /home is protected, the openhab logs folder inside it is
+    // excluded, and /home still wore a FULL shield. A full shield is a promise that everything under a folder
+    // is in the archive. With a hole inside it, that promise is false — and a false full shield is the same
+    // class of lie as a run that reports success while skipping files.
+
+    @Test
+    void aProtectedFolderWithAHoleInsideItWearsAHalfShieldNotAFullOne() {
+        ProtectedPaths paths = protecting(List.of("/home"), List.of("/home/openhab/userdata/logs"));
+
+        // Still covered — the folder IS part of the backup, so the operator has not lost it...
+        assertThat(paths.covers("/home")).isTrue();
+        // ...but not whole, so it must not claim to be.
+        assertThat(paths.isBackedUp("/home")).isFalse();
+        assertThat(paths.containsBackedUp("/home")).isTrue();
+
+        // Every ancestor of the hole is equally holed, all the way down to the hole's own parent.
+        assertThat(paths.isBackedUp("/home/openhab")).isFalse();
+        assertThat(paths.containsBackedUp("/home/openhab")).isTrue();
+        assertThat(paths.isBackedUp("/home/openhab/userdata")).isFalse();
+    }
+
+    @Test
+    void aFolderWithNoHoleInsideItKeepsItsFullShield() {
+        ProtectedPaths paths = protecting(List.of("/home"), List.of("/home/openhab/userdata/logs"));
+
+        // A sibling of the hole, and a folder on another branch entirely, are whole — the hole is not theirs.
+        assertThat(paths.isBackedUp("/home/openhab/userdata/logs2")).isTrue();
+        assertThat(paths.containsBackedUp("/home/openhab/userdata/logs2")).isFalse();
+        assertThat(paths.isBackedUp("/home/geir")).isTrue();
+    }
+
+    @Test
+    void aFileIsWholeOrItIsNothing_theHoleRuleNeverDemotesOne() {
+        // A file has nothing inside it, so the new rule must leave the file verdict exactly as it was: the
+        // excluded file is out, every other file under a protected path is fully in.
+        ProtectedPaths paths = protecting(List.of("/home"), List.of("/home/openhab/userdata/logs/openhab.log"));
+
+        assertThat(paths.isBackedUp("/home/openhab/userdata/logs/openhab.log")).isFalse();
+        assertThat(paths.isBackedUp("/home/geir/notes.txt")).isTrue();
+        assertThat(paths.containsBackedUp("/home/geir/notes.txt")).isFalse();
+    }
+
+    @Test
+    void theTwoShieldsStayMutuallyExclusive() {
+        // Whatever the hole rule does, a folder never wears both shields — the Explorer draws one badge.
+        ProtectedPaths holed = protecting(List.of("/home"), List.of("/home/openhab/logs"));
+        ProtectedPaths whole = protecting(List.of("/home"), List.of());
+        ProtectedPaths outside = protecting(List.of("/srv/data"), List.of());
+
+        for (ProtectedPaths paths : List.of(holed, whole, outside)) {
+            assertThat(paths.isBackedUp("/home") && paths.containsBackedUp("/home")).isFalse();
+        }
+        assertThat(outside.isBackedUp("/srv")).isFalse();
+        assertThat(outside.containsBackedUp("/srv")).isTrue();
+    }
+
+    @Test
+    void aFolderWhoseOnlyProtectedContentIsExcludedWearsNoShieldAtAll() {
+        // The hole swallows everything: nothing under it reaches an archive, so neither shield applies.
+        ProtectedPaths paths = protecting(List.of("/home/openhab/userdata/logs"),
+            List.of("/home/openhab/userdata/logs"));
+
+        assertThat(paths.isBackedUp("/home/openhab/userdata")).isFalse();
+        assertThat(paths.containsBackedUp("/home/openhab/userdata")).isFalse();
+    }
+
+    @Test
+    void aGlobExcludeNeverDemotesAFolder_becauseVaierCannotTellWhatItBitesInto() {
+        // '*.tmp' is a borg fnmatch pattern, not a path: Vaier cannot say which files it removes, so it can
+        // neither claim the folder is holed nor pretend it is whole by path arithmetic. The path rules ignore
+        // globs everywhere else (Excludes' own note), and they ignore them here too.
+        ProtectedPaths paths = protecting(List.of("/home"), List.of("*.tmp"));
+
+        assertThat(paths.isBackedUp("/home")).isTrue();
+        assertThat(paths.containsBackedUp("/home")).isFalse();
     }
 }

@@ -223,20 +223,20 @@ public class ExplorerRestController {
      * asked for.
      *
      * <p>{@code backedUp} and {@code containsBackedUp} are the server's verdict — via the domain
-     * {@link ProtectedPaths#covers} / {@link ProtectedPaths#enclosesUnder} — so the Explorer can render a full
-     * or half shield without re-implementing the containment rule in JS. {@code backedUp} is true when a job
-     * protects this exact path or an ancestor of it <em>and</em> no exclude carves it back out; {@code
-     * containsBackedUp} is true only when the entry is <em>not</em> itself backed up but unexcluded protected
-     * content lives somewhere inside it (the two are mutually exclusive). Both are always {@code false} for an
-     * archived (past) listing.
+     * {@link ProtectedPaths#isBackedUp} / {@link ProtectedPaths#containsBackedUp} — so the Explorer can render
+     * a full or half shield without re-implementing the containment rule in JS. {@code backedUp} is true when
+     * a job protects this exact path or an ancestor of it, no exclude carves it back out, <em>and</em> no
+     * exclude carves a hole anywhere inside it — a full shield promises the whole folder is in the archive.
+     * {@code containsBackedUp} is the half shield: backed-up content lives inside, but the entry is not whole.
+     * The two are mutually exclusive. Both are always {@code false} for an archived (past) listing.
      */
     record FileEntryResponse(String name, String path, boolean directory, long size, String modifiedAt,
                              boolean backedUp, boolean containsBackedUp) {
         static FileEntryResponse from(FileEntry entry, ProtectedPaths protectedPaths) {
-            boolean backedUp = protectedPaths.covers(entry.path());
-            // No !backedUp guard here on purpose: the mutual exclusion is ProtectedPaths.enclosesUnder's own
-            // rule, and stating it a second time in the controller is how the two copies eventually disagree.
-            boolean containsBackedUp = protectedPaths.enclosesUnder(entry.path());
+            // Both verdicts are asked of the domain whole — including their mutual exclusion. Restating that
+            // rule here with a !backedUp guard is how the two copies eventually disagree.
+            boolean backedUp = protectedPaths.isBackedUp(entry.path());
+            boolean containsBackedUp = protectedPaths.containsBackedUp(entry.path());
             return new FileEntryResponse(entry.name(), entry.path(), entry.directory(),
                 entry.sizeBytes(), entry.modified().toString(), backedUp, containsBackedUp);
         }

@@ -237,6 +237,37 @@ class ExplorerRestControllerTest {
     }
 
     @Test
+    void get_marksAFolderWithAnExcludedFolderInsideItAsOnlyPartlyBackedUp() {
+        // Reported on Colina 27 and Apalveien 5: the openhab logs folder is excluded, yet /home went on wearing
+        // a FULL shield. A full shield says "everything under here is in the archive" — with a hole inside it
+        // that is a claim about data borg walks straight past. The holed folder now reads half, exactly like a
+        // folder that merely contains something protected; its unholed siblings keep their full shield.
+        ProtectedPaths protection = ProtectedPaths.of(
+            SourcePaths.of(List.of("/home")), Excludes.of(List.of("/home/openhab/userdata/logs")));
+        when(browseFilesUseCase.listDirectory("colina27", "/", null))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/", List.of(
+                FileEntry.in("/", "home", true, 4096, WHEN)), protection));
+        when(browseFilesUseCase.listDirectory("colina27", "/home", null))
+            .thenReturn(new MachineDirectory(SftpRoot.NONE, "/home", List.of(
+                FileEntry.in("/home", "openhab", true, 4096, WHEN),
+                FileEntry.in("/home", "geir", true, 4096, WHEN)), protection));
+
+        FileEntryResponse home = controller.list("colina27", "/", null).getBody().entries().getFirst();
+        assertThat(home.backedUp()).as("/home holds a hole, so it is not whole").isFalse();
+        assertThat(home.containsBackedUp()).isTrue();
+
+        List<FileEntryResponse> inHome = controller.list("colina27", "/home", null).getBody().entries();
+        FileEntryResponse openhab = inHome.stream().filter(e -> e.name().equals("openhab"))
+            .findFirst().orElseThrow();
+        FileEntryResponse geir = inHome.stream().filter(e -> e.name().equals("geir"))
+            .findFirst().orElseThrow();
+        assertThat(openhab.backedUp()).as("the hole is on this branch").isFalse();
+        assertThat(openhab.containsBackedUp()).isTrue();
+        assertThat(geir.backedUp()).as("another branch is untouched by the hole").isTrue();
+        assertThat(geir.containsBackedUp()).isFalse();
+    }
+
+    @Test
     void get_inThePast_marksNothingBackedUp() {
         // An archived listing carries an empty protected set — the past's backup shape is not today's, so no
         // entry is marked, whatever its path.

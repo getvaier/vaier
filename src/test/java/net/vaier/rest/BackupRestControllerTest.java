@@ -343,7 +343,9 @@ class BackupRestControllerTest {
 
     @Test
     void getRunsExposesTheRunDiagnosticsWithoutBorgsJsonStats() {
-        // A real WARNING run: borg's skipped-file lines, then its --json --stats object.
+        // A real INCOMPLETE run: borg's denied-file lines, then its --json --stats object. It used to be
+        // recorded WARNING — a non-failure — which is precisely how a machine went months with holes in its
+        // archives while the run list read as fine.
         String summary = """
             /home/ubuntu/mqtt/data/mosquitto.db: open: [Errno 13] Permission denied: 'mosquitto.db'
             {
@@ -356,7 +358,7 @@ class BackupRestControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().status()).isEqualTo(BackupRunStatus.WARNING);
+        assertThat(response.getBody().status()).isEqualTo(BackupRunStatus.INCOMPLETE);
         // The raw summary is still carried verbatim...
         assertThat(response.getBody().summary()).isEqualTo(summary);
         // ...and the diagnostics are the part worth showing a human — no JSON stats blob.

@@ -677,6 +677,28 @@ class BackupRunnerTest {
     }
 
     @Test
+    void aRunThatCouldNotReadSomeFilesSettlesIncompleteAndPagesAdmins() {
+        // The Colina 27 case, end to end through the poll that settles a run: borg exits 1 having been denied
+        // on files inside the job's source paths. The archive exists but is missing data, which is trouble —
+        // so it settles INCOMPLETE and travels the SAME admin-notification road a failure does. Before this,
+        // it settled WARNING, told nobody, and the operator found out by reading raw borg output months later.
+        seedRunning("run-1");
+        pollSettlesWith("1", """
+            /home/nut-http/logs/2026-04-04-14-07-07.log: open: [Errno 13] Permission denied: '2026-04-04-14-07-07.log'
+            /home/nut-http/logs/2026-04-05-01-02-03.log: open: [Errno 13] Permission denied: '2026-04-05-01-02-03.log'
+            """);
+
+        backupRunner.pollRunningRuns();
+        backupRunner.pollRunningRuns();
+
+        BackupRun settled = runs.latestForJob("colina-home").orElseThrow();
+        assertThat(settled.status()).isEqualTo(BackupRunStatus.INCOMPLETE);
+        assertThat(settled.unreadableFiles().total()).isEqualTo(2);
+        // Once, on the crossing — the second tick finds a terminal run and never re-polls it.
+        verify(backupNotifier, times(1)).notifyAdminsOfBackupFailure(any());
+    }
+
+    @Test
     void warningAfterFailureAllClears() {
         // A failing job pages once; a later WARNING run (archive created, files skipped) is healthy, so it
         // crosses the job back to healthy and sends a single all-clear — a warning is a recovery, not a page.

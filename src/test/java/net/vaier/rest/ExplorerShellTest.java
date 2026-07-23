@@ -1060,4 +1060,70 @@ class ExplorerShellTest {
         assertThat(body).contains("job.excludes");
         assertThat(body).as("named in the operator's words, not borg's").contains("Not backed up");
     }
+
+    @Test
+    void stopBackingUp_staysOfferedOnAFolderThatIsBackedUpButHoled() throws IOException {
+        // A protected folder with an excluded folder inside it now wears the HALF shield (it is not whole), so
+        // gating "Stop backing up" on the full shield alone would quietly take the button away from /home the
+        // moment anything under it was excluded. The precondition is "is any of this in the archive", which is
+        // either shield — and the backend still reports truthfully what actually stopped.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function selUnbackup(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("gated on the shared predicate, not on the full shield").contains("anyBackedUp(s)");
+
+        int bar = js.indexOf("function renderSelectionBar(");
+        String barBody = js.substring(bar, js.indexOf("\n    }", bar));
+        assertThat(barBody).as("the bar offers the verb on the same rule it is executed on")
+            .contains("anyBackedUp");
+        // ...and that one predicate is what reads both shields, so the two sites can never drift apart.
+        assertThat(js).contains("const anyBackedUp = (s) => !!s.backedUp || !!s.containsBackedUp;");
+        // The selection has to carry the half shield for any of that to work.
+        assertThat(js).contains("containsBackedUp: !!entry.containsBackedUp");
+    }
+
+    @Test
+    void backingUpAsRoot_isASettingTheOperatorCanSee_notOneBuriedInTheApi() throws IOException {
+        // Colina 27 ran non-root over /home for months, skipping every file another user owned, because the
+        // one setting that decides whether a backup of /home is real had no control anywhere in the shell.
+        // It has one now, on the machine's backup pane, using the same checkbox idiom as SSH access.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderOneJob(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function ", from + 10));
+
+        assertThat(body).as("the flag is read off the job").contains("job.backupAsRoot");
+        assertThat(body).as("the shell's existing checkbox row, not a new widget").contains("checkRow(");
+        assertThat(body).as("the consequence in the operator's words, not the mechanism")
+            .contains("owned by other users");
+    }
+
+    @Test
+    void theBackupAsRootToggle_ridesTheJobEndpointThatAlreadyExists() throws IOException {
+        // No endpoint was opened for this: the flag lives on the job spec, so the toggle re-PUTs the whole
+        // job with it flipped — the same route the rest of the job's fields already travel.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function toggleBackupAsRoot(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).contains("'/backup-jobs/' + encodeURIComponent(job.name)");
+        assertThat(body).contains("method: 'PUT'");
+        assertThat(body).as("every field is carried through, so a toggle never drops the job's paths")
+            .contains("backupAsRoot: on");
+    }
+
+    @Test
+    void anIncompleteRun_readsAsTroubleAndPointsAtTheSettingThatWouldFixIt() throws IOException {
+        // INCOMPLETE is a real outcome now (the archive exists but is missing files borg could not read), so
+        // the shell must colour it like the trouble it is and say what to do — not leave it as an unstyled
+        // status word the operator has to interpret.
+        String js = read("explorer-shell.js");
+        assertThat(js).as("the run dot knows the outcome").contains("INCOMPLETE:");
+        int from = js.indexOf("function renderOneJob(");
+        String body = js.substring(from, js.indexOf("\n    function ", from + 10));
+        assertThat(body).as("the diagnostics note opens for an incomplete run too").contains("'INCOMPLETE'");
+        assertThat(body).as("said plainly, in the operator's words").contains("not backed up");
+    }
 }
