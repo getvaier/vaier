@@ -64,6 +64,11 @@ class ExplorerRestControllerTest {
         return new MachineDirectory(SftpRoot.NONE, path, List.of(entries));
     }
 
+    /** A machine that backs up {@code sources} and excludes nothing. */
+    private static ProtectedPaths protecting(String... sources) {
+        return ProtectedPaths.of(SourcePaths.of(List.of(sources)), Excludes.none());
+    }
+
     @Test
     void get_listsTheRequestedDirectory_onTheRequestedMachine() {
         when(browseFilesUseCase.listDirectory("apalveien5", "/home/geir", null)).thenReturn(at("/home/geir",
@@ -186,11 +191,11 @@ class ExplorerRestControllerTest {
             .thenReturn(new MachineDirectory(SftpRoot.NONE, "/", List.of(
                 FileEntry.in("/", "home", true, 4096, WHEN),
                 FileEntry.in("/", "var", true, 4096, WHEN)),
-                SourcePaths.of(List.of("/home/geir"))));
+                protecting("/home/geir")));
         when(browseFilesUseCase.listDirectory("apalveien5", "/home", null))
             .thenReturn(new MachineDirectory(SftpRoot.NONE, "/home", List.of(
                 FileEntry.in("/home", "geir", true, 4096, WHEN)),
-                SourcePaths.of(List.of("/home/geir"))));
+                protecting("/home/geir")));
 
         List<FileEntryResponse> root = controller.list("apalveien5", "/", null).getBody().entries();
         FileEntryResponse home = root.stream().filter(e -> e.name().equals("home")).findFirst().orElseThrow();

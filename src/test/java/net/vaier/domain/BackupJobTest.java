@@ -281,4 +281,43 @@ class BackupJobTest {
         assertThat(result).isEmpty();
         org.mockito.Mockito.verifyNoInteractions(readier);
     }
+
+    // --- What a machine's FIRST job looks like is the job's own decision, not the service's ---
+
+    @Test
+    void firstFor_protectsExactlyTheSelectedPaths_normalizedToTheMinimalCover() {
+        // The operator's very first selection becomes the job's whole protected set — nothing more, nothing
+        // less — and it arrives normalized, so a child selected alongside its parent does not survive as a
+        // redundant second source path.
+        BackupJob first = BackupJob.firstFor("colina-27", "Colina 27", "nas-borg",
+            List.of("/home/geir", "/home/geir/docs", "/etc/nginx"));
+
+        assertThat(first.name()).isEqualTo("colina-27");
+        assertThat(first.machineName()).isEqualTo("Colina 27");
+        assertThat(first.repositoryName()).isEqualTo("nas-borg");
+        assertThat(first.sourcePaths()).containsExactly("/home/geir", "/etc/nginx");
+        assertThat(first.excludes()).isEmpty();
+    }
+
+    @Test
+    void firstFor_carriesTheRetentionAndCompressionDefaultsAJobIsBornWith() {
+        // These defaults ARE the job's, not the caller's: a first back-up keeps a week of dailies, a month of
+        // weeklies and half a year of monthlies, compressed the way every job compresses by default.
+        BackupJob first = BackupJob.firstFor("colina-27", "Colina 27", "nas-borg", List.of("/home/geir"));
+
+        assertThat(first.keepDaily()).isEqualTo(7);
+        assertThat(first.keepWeekly()).isEqualTo(4);
+        assertThat(first.keepMonthly()).isEqualTo(6);
+        assertThat(first.compression()).isEqualTo(BackupJob.DEFAULT_COMPRESSION);
+    }
+
+    @Test
+    void firstFor_isScheduledFromTheStart_butNeverEscalatesToRootOnItsOwn() {
+        // Selecting data means "back this up nightly", so the job is enabled immediately. Running borg as root
+        // is a separate, deliberate opt-in — a first job must never grant itself that.
+        BackupJob first = BackupJob.firstFor("colina-27", "Colina 27", "nas-borg", List.of("/home/geir"));
+
+        assertThat(first.enabled()).isTrue();
+        assertThat(first.backupAsRoot()).isFalse();
+    }
 }

@@ -1,6 +1,5 @@
 package net.vaier.application;
 
-import net.vaier.domain.Excludes;
 import net.vaier.domain.FileEntry;
 import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.SftpRoot;
@@ -78,15 +77,6 @@ public interface BrowseFilesUseCase {
         public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries,
                                 ProtectedPaths protectedPaths) {
             this(root, path, entries, null, protectedPaths);
-        }
-
-        /**
-         * A present-tense listing whose protection is source paths only — no exclusions. Kept because plenty of
-         * callers and tests speak in bare {@link SourcePaths}; it says "protected, nothing carved out".
-         */
-        public MachineDirectory(SftpRoot root, String path, List<FileEntry> entries,
-                                SourcePaths protectedPaths) {
-            this(root, path, entries, null, ProtectedPaths.of(protectedPaths, Excludes.none()));
         }
     }
 }

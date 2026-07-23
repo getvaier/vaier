@@ -234,7 +234,9 @@ public class ExplorerRestController {
                              boolean backedUp, boolean containsBackedUp) {
         static FileEntryResponse from(FileEntry entry, ProtectedPaths protectedPaths) {
             boolean backedUp = protectedPaths.covers(entry.path());
-            boolean containsBackedUp = !backedUp && protectedPaths.enclosesUnder(entry.path());
+            // No !backedUp guard here on purpose: the mutual exclusion is ProtectedPaths.enclosesUnder's own
+            // rule, and stating it a second time in the controller is how the two copies eventually disagree.
+            boolean containsBackedUp = protectedPaths.enclosesUnder(entry.path());
             return new FileEntryResponse(entry.name(), entry.path(), entry.directory(),
                 entry.sizeBytes(), entry.modified().toString(), backedUp, containsBackedUp);
         }

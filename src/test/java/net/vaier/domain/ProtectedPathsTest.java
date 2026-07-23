@@ -56,6 +56,20 @@ class ProtectedPathsTest {
     }
 
     @Test
+    void aBackedUpPathNeverAlsoContainsBackedUp_evenWhenASourcePathLivesInsideIt() {
+        // The hard case for the mutual exclusion, and the reason it must be enforced HERE: a source set that is
+        // not a minimal cover (built directly rather than through SourcePaths.of) holds both /home and a path
+        // inside it, so the "some member is strictly under" half of the rule genuinely fires. The verdict must
+        // still be a single shield — "backed up" and "contains backed up" are alternatives, never both — so no
+        // caller ever needs to re-guard it.
+        ProtectedPaths paths = ProtectedPaths.of(
+            new SourcePaths(List.of("/home", "/home/geir")), Excludes.none());
+
+        assertThat(paths.covers("/home")).isTrue();
+        assertThat(paths.enclosesUnder("/home")).isFalse();
+    }
+
+    @Test
     void noneProtectsNothing() {
         assertThat(ProtectedPaths.none().isEmpty()).isTrue();
         assertThat(ProtectedPaths.none().covers("/home")).isFalse();

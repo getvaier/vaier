@@ -80,6 +80,26 @@ public record BackupJob(
     }
 
     /**
+     * The job a machine gets on its <b>first</b> back-up: it protects exactly the {@code paths} the operator
+     * selected (normalized to a minimal cover by {@link SourcePaths}), excludes nothing yet, and is enabled so
+     * tonight's schedule already picks it up.
+     *
+     * <p>What a first job looks like is the job's own decision, so the retention and compression a job is born
+     * with live here rather than as literals in the orchestrating service — a week of dailies, a month of
+     * weeklies and half a year of monthlies, at {@link #DEFAULT_COMPRESSION}. Keeping them here is what stops
+     * the defaults drifting apart between the create path and everything else that reasons about a job.
+     *
+     * <p>{@link #backupAsRoot()} is deliberately {@code false}: running borg as root is an opt-in the operator
+     * makes later, never something a job grants itself the moment it is created.
+     */
+    public static BackupJob firstFor(String name, String machineName, String repositoryName,
+                                     Collection<String> paths) {
+        return new BackupJob(name, machineName, repositoryName,
+            SourcePaths.of(List.of()).protecting(paths).paths(), List.of(),
+            7, 4, 6, DEFAULT_COMPRESSION, true, false);
+    }
+
+    /**
      * A copy of this job protecting {@code newSourcePaths} instead of its current ones. The paths are the
      * job's only mutable-by-selection field in the just-select-and-back-up flow; every other field
      * (repository, retention, compression, flags) is carried through unchanged. The caller supplies an

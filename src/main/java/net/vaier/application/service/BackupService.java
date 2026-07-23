@@ -131,6 +131,11 @@ public class BackupService implements
      * repository secret from a client. Rejects with a {@link ConflictException} (mapped to {@code 409}) when
      * no backup server has been designated, since a repository has nowhere to live without one.
      *
+     * <p>Both branches are the job's own decision, not this method's: an existing job answers
+     * {@link BackupJob#protecting} and a machine backing up for the first time gets the job
+     * {@link BackupJob#firstFor} says it should have — which is why the retention and compression a new job is
+     * born with are nowhere in this service.
+     *
      * <p>On the machine's FIRST back-up (no prior job) the freshly-created job decides its host must be
      * readied and calls the driven {@link ForReadyingBackupClients} port — the operator never runs the
      * provisioning wizard by hand. The service only supplies the port and orchestrates; the decision (first
@@ -148,9 +153,7 @@ public class BackupService implements
             .orElseGet(() -> createRepository(slug, server));
         BackupJob job = existing
             .map(existingJob -> existingJob.protecting(paths))
-            .orElseGet(() -> new BackupJob(slug, machineName, repository.name(),
-                SourcePaths.of(List.of()).protecting(paths).paths(), List.of(),
-                7, 4, 6, BackupJob.DEFAULT_COMPRESSION, true, false));
+            .orElseGet(() -> BackupJob.firstFor(slug, machineName, repository.name(), paths));
         jobs.save(job);
         ReadyingOutcome readying = job.readyClientHostForFirstBackup(firstBackup, readier).orElse(null);
         return new ProtectionOutcome(job, readying);
