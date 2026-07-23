@@ -1340,6 +1340,66 @@ class ExplorerShellTest {
         assertThat(body).as("and never fetched").doesNotContain("fetch(");
     }
 
+    // --- the operator points at a server and at data, and never learns borg's nouns ----------------------
+
+    @Test
+    void theBackupServer_listsTheMachinesItKeeps_notRepositories() throws IOException {
+        // "Repository" is a borg noun. The operator's model is that the NAS keeps the backups of machines,
+        // and that is true by construction: Vaier creates exactly one store per machine and names it after
+        // it. So the store is shown as the machine whose backups are in it, and the job it belongs to is
+        // what says which machine that is.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function repoLabel(");
+        assertThat(from).as("a store knows how to say whose backups it holds").isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("read from the job, which is the truth of the mapping")
+            .contains("repositoryName");
+        assertThat(body).contains("machineName");
+    }
+
+    @Test
+    void aStoreNoMachineClaims_saysSo_ratherThanImpersonatingAMachine() throws IOException {
+        // Unclaimed stores are real: one adopted from before Vaier, or the leftover of a machine that was
+        // renamed. Labelling one with a machine name would invent a machine; labelling it silently would
+        // hide backups nobody is watching.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function repoLabel(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("it falls back to its own name, never to a guess").contains("repoName");
+    }
+
+    @Test
+    void nothingOffersToCreateABackupStoreByHand() throws IOException {
+        // Vaier creates one per machine, behind the Back up verb, with a passphrase nobody types. A "New
+        // repository" button asked the operator to do by hand the one thing that already produced a
+        // data-loss bug: a second store minted with a fresh passphrase over a live borg repository, after
+        // which borg could no longer decrypt what was there.
+        String js = read("explorer-shell.js");
+        assertThat(js).doesNotContain("New repository");
+    }
+
+    @Test
+    void theBackupServerEntry_opensOnWhatItKeeps_notOnItsCoordinates() throws IOException {
+        // The operator made exactly one decision about this machine: the fleet's backups belong here. The
+        // borg user, the paths under it, the port — Vaier chose all of them, and none is a decision to
+        // revisit. Provision and Authorize a host are things Vaier already does; on the surface they asked
+        // the operator to judge buttons they have no way to judge.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderServerBackup(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body.indexOf("Backups kept here"))
+            .as("what it keeps comes first").isLessThan(body.indexOf("Server details"));
+        assertThat(body.split("section\\('Backups kept here'\\)", -1).length - 1)
+            .as("and it heads the list exactly once").isEqualTo(1);
+        assertThat(body).as("and the mechanism folds").contains("disclosure('Server details')");
+        assertThat(body.indexOf("'Provision'"))
+            .as("the operations live inside the fold, as the fallback they are")
+            .isGreaterThan(body.indexOf("disclosure('Server details')"));
+    }
+
     // --- back up is offered only when it can actually work -----------------------------------------------
 
     @Test

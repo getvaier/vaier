@@ -1637,6 +1637,17 @@ Three things this buys that a set of pages structurally cannot:
     on hover/selection. The backup-server glyph is deliberately neither the machine's **device shape** (the NAS
     wears `nas` because it *is* a NAS, and any machine can be designated) nor the **shield** (which says a thing
     is stored, the opposite of storing).
+  - **"Repository" leaves the UI ✅.** It is a borg noun the operator never chose: Vaier creates exactly one
+    per machine behind **Back up**, names it after the machine and generates its passphrase. So the Explorer
+    shows a repository as *the machine whose backups are in it* (resolved through the job that targets it —
+    `repoLabel`), the server's entry reads "Backups kept here", and path/append-only/passphrase fold under
+    "Storage details". The **+ New repository** control is gone entirely (`newRepository` deleted): creating
+    one by hand is exactly what once minted a second repository with a fresh passphrase over a live borg
+    store and orphaned it, and there is now no normal path that needs it. Adopting a store Vaier did not
+    create remains possible over the API. A repository no job targets keeps its own name and says nothing
+    backs up to it any more — an adopted store, or a renamed machine's leftover (the fleet has one: the
+    orphaned `NUC-02` job). *Open: designating a backup server still does not provision it — the operator
+    must find and press Provision afterwards, which is the same shape of gap this entry closes.*
   - **A failed run names a fix that exists ✅.** `BackupRunner`'s borg pre-flight refused a run with "borg is
     not installed on X — run Prepare client", naming a button on `backups.html` — a page deleted when the
     Explorer absorbed it. The one failure an operator can fix was therefore reported by pointing at a control

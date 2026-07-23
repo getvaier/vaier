@@ -251,6 +251,19 @@
     // The repositories that live on a backup server, filtered by the server they name. One server, so this is
     // every repository Vaier knows — but the filter keeps it honest if a stale repo names a server that is gone.
     const reposOn = (server) => (server ? S.backupRepos.filter((r) => r.serverName === server.name) : []);
+
+    // What a store on the backup server is, to a person: the backups of a machine. "Repository" is a borg
+    // noun and the operator never chose one — Vaier creates exactly one per machine, behind the Back up verb,
+    // and names it after the machine. So the job that targets it is the truth of whose backups are inside,
+    // and that is what the tree and the server's entry show.
+    //
+    // A store no job claims keeps its own name instead. Those are real — one adopted from before Vaier, or
+    // the leftover of a machine that was renamed — and both wrong answers are worse: a machine name would
+    // invent a machine, and hiding it would leave backups nobody is watching.
+    function repoLabel(repoName) {
+        const job = S.backupJobs.find((j) => j.repositoryName === repoName);
+        return job ? job.machineName : repoName;
+    }
     // The backup jobs that back a machine up. A job names the machine it protects, so this is how a machine
     // learns it is backed up — and grows a `backup` entry even when it is not the server.
     const jobsOn = (machine) => S.backupJobs.filter((j) => j.machineName === machine);
@@ -297,7 +310,11 @@
             // Only the server's `backup` entry has children — its repositories. A client machine's `backup`
             // entry shows its job inline and has none, so it must not inherit the server's repos as its own.
             const isServer = S.backupServer && S.backupServer.machineName === path[1];
-            return isServer ? reposOn(S.backupServer).map((r) => ({ name: r.name, kind: 'repo' })) : [];
+            // The path segment stays the store's own id — it is the address — while the row reads as the
+            // machine whose backups are in it.
+            return isServer
+                ? reposOn(S.backupServer).map((r) => ({ name: r.name, kind: 'repo', label: repoLabel(r.name) }))
+                : [];
         }
         if (kind === 'containers') {
             return containersOn(path[1]).map((c) => ({ name: c.containerName, kind: 'container' }));
@@ -3560,57 +3577,59 @@
     // The machine that hosts the fleet's borg: its coordinates, the repositories on it (each an entry of its
     // own), and the identity actions. The operations that poll for an outcome stay on the Backups bridge.
     function renderServerBackup(body, machine, s) {
-        body.appendChild(kv([
-            ['Server name', s.name],
+        // The operator pointed at this machine and said "keep the fleet's backups here". Everything that
+        // followed — the borg user, the paths under it, the port Vaier reaches it on — Vaier chose, and none
+        // of it is a decision to revisit. So the entry opens on what the machine is actually doing (what it
+        // keeps), and its coordinates fold away for the day someone needs to check them.
+        // What this machine is keeping, by machine — not a list of borg repositories with their paths. The
+        // operator never made these and never named them: Vaier creates one per machine behind the Back up
+        // verb. There is deliberately no way to add one by hand here, because doing that by hand is what
+        // once minted a second store with a fresh passphrase over a live borg repository and orphaned it.
+        body.appendChild(section('Backups kept here'));
+        const repos = reposOn(s);
+        if (!repos.length) {
+            body.appendChild(note('Nothing is backed up here yet. Tick files or folders on a machine and '
+                + 'choose Back up — Vaier will set the rest up itself.', false));
+        } else {
+            const list = el('div', 'ex-brepos');
+            repos.forEach((r) => {
+                const row = el('div', 'ex-brepo');
+                const nm = el('button', 'ex-brepo-name is-link');
+                nm.textContent = repoLabel(r.name);
+                nm.onclick = () => go(['fleet', machine, 'backup', r.name]);
+                const held = el('span', 'ex-brepo-path');
+                // The one fact worth carrying in a list of machines: whether anything still backs up to it.
+                held.textContent = S.backupJobs.some((j) => j.repositoryName === r.name)
+                    ? '' : 'no machine backs up here';
+                row.append(nm, held);
+                list.appendChild(row);
+            });
+            body.appendChild(list);
+        }
+
+        // Everything below this line is mechanism, and it folds. The coordinates are Vaier's own choices; the
+        // three operations are things it does for the operator already — it provisions when it can, and it
+        // authorizes a host as part of backing that host up — kept only as the manual fallback for the hosts
+        // where it cannot (a Synology it has no root on). Leaving them on the surface asked the operator to
+        // decide whether to press buttons they have no way to judge, on a machine they have already made
+        // exactly one decision about: that the fleet's backups belong here.
+        const adv = disclosure('Server details');
+        adv.appendChild(kv([
+            ['Machine', s.machineName],
             ['Reached at', s.host + ':' + s.sshPort],
             ['Borg user', s.borgUser],
             ['Base repo path', '/' + s.baseRepoPath],
             ['Server data path', s.serverDataPath],
             ['Stood up by Vaier', s.managed ? 'Yes' : 'No — adopted'],
         ]));
-
-        // The repositories that live here — each an entry of its own (open it for its path, archives and the
-        // Edit/Delete of it). This is where a repository is made now.
-        body.appendChild(section('Repositories'));
-        const repos = reposOn(s);
-        if (!repos.length) {
-            body.appendChild(note('No repositories on this server yet. Add the first one below.', false));
-        } else {
-            const list = el('div', 'ex-brepos');
-            repos.forEach((r) => {
-                const row = el('div', 'ex-brepo');
-                const nm = el('button', 'ex-brepo-name is-link');
-                nm.textContent = r.name;
-                nm.onclick = () => go(['fleet', machine, 'backup', r.name]);
-                const path = el('span', 'ex-brepo-path');
-                path.textContent = r.repoPath || '';
-                row.append(nm, path);
-                list.appendChild(row);
-            });
-            body.appendChild(list);
-        }
-        const repoActs = el('div', 'ex-lactions is-static');
-        repoActs.appendChild(selVerb('box', 'New repository', 'ex-btn', () => newRepository(s)));
-        body.appendChild(repoActs);
-
-        // Server operations — the three that once lived on the Backups bridge, native now (#323). A managed
-        // server's next move is to Provision it (so it leads); a registered one is only trusted, but every op
-        // stays available on both. Provision awaits an outcome the backend pushes on the backups stream — the
-        // shell never polls (see provisionBackupServer / watchBackups).
-        body.appendChild(section('Server operations'));
         const ops = el('div', 'ex-lactions is-static');
-        ops.appendChild(selVerb('refresh', 'Provision',
-            s.managed ? 'ex-btn is-accent' : 'ex-btn', () => provisionBackupServer(s)));
+        ops.appendChild(selVerb('refresh', 'Provision', 'ex-btn', () => provisionBackupServer(s)));
         ops.appendChild(selVerb('shield', 'Authorize a host', 'ex-btn', () => authorizeHostDialog(s)));
         ops.appendChild(selVerb('download', 'Setup script', 'ex-btn', () => downloadBackupSetup(s.name)));
-        body.appendChild(ops);
-
-        // Actions: identity only.
-        body.appendChild(section('Designation'));
-        const acts = el('div', 'ex-lactions is-static');
-        acts.appendChild(selVerb('gear', 'Edit coordinates', 'ex-btn', () => editBackupServer(s)));
-        acts.appendChild(selVerb('trash', 'Remove designation', 'ex-btn is-danger', () => removeBackupServer(s)));
-        body.appendChild(acts);
+        ops.appendChild(selVerb('gear', 'Edit coordinates', 'ex-btn', () => editBackupServer(s)));
+        ops.appendChild(selVerb('trash', 'Remove designation', 'ex-btn is-danger', () => removeBackupServer(s)));
+        adv.appendChild(ops);
+        body.appendChild(adv);
     }
 
     // --- Backup server operations (ported from the retired Backups page, #323) --------------------------
@@ -3951,21 +3970,36 @@
         const name = S.path[3];
         const s = S.backupServer;
         const r = reposOn(s).find((x) => x.name === name);
-        if (!r) return pane.appendChild(note('That repository is no longer on this server.', true));
+        if (!r) return pane.appendChild(note('Those backups are no longer on this server.', true));
 
-        pane.appendChild(paneHead(name, true, 'Backup repository on ' + (s ? s.name : '')));
+        // Titled by whose backups these are, not by the store's borg name. Where no machine claims them the
+        // label falls back to that name, and the note below says why — backups nobody is watching are worth
+        // saying out loud, not quietly rendering as an ordinary entry.
+        const owner = repoLabel(r.name);
+        const claimed = S.backupJobs.some((j) => j.repositoryName === r.name);
+        pane.appendChild(paneHead(owner, true,
+            claimed ? 'Backed up to ' + (s ? s.name : '') : 'Kept on ' + (s ? s.name : '')));
         const body = el('div', 'ex-pane-body');
-        body.appendChild(kv([
-            ['Repository path', r.repoPath],
+        if (!claimed) {
+            body.appendChild(note('No machine backs up here any more. These archives are still kept — Vaier '
+                + 'never deletes them — but nothing is adding to them. That happens when a machine was '
+                + 'renamed or stopped being backed up.', true));
+        }
+        // Where the bytes sit, whether the store is append-only and where its passphrase lives are all
+        // mechanism the operator did not choose and cannot act on from here, so they fold away. Vaier's
+        // promise is that they are handled; the fold is for the day someone needs to check.
+        const adv = disclosure('Storage details');
+        adv.appendChild(kv([
+            ['Path on ' + (s ? s.name : 'the server'), r.repoPath],
             ['Append-only', r.appendOnly ? 'Yes' : 'No'],
             ['Passphrase', r.hasPassphrase ? 'Stored in the vault' : 'None'],
         ]));
-
-        body.appendChild(section('Repository'));
         const acts = el('div', 'ex-lactions is-static');
         acts.appendChild(selVerb('gear', 'Edit', 'ex-btn', () => editRepository(r)));
-        acts.appendChild(selVerb('trash', 'Delete', 'ex-btn is-danger', () => deleteRepository(r)));
-        body.appendChild(acts);
+        acts.appendChild(selVerb('trash', 'Forget these backups', 'ex-btn is-danger',
+            () => deleteRepository(r)));
+        adv.appendChild(acts);
+        body.appendChild(adv);
 
         // The archives inside, read on view. A repository nothing targets has no host to read it from, so the
         // answer is an empty list, not an error — the note says which case it is.
@@ -4021,18 +4055,11 @@
     // name, an optional path override (it derives under the server's base path when blank), append-only, and a
     // passphrase — pre-filled with a strong generated one, shown once, because a repository that cannot be
     // unlocked is a repository that cannot be restored. Vaier stores it encrypted in the vault regardless.
-    function newRepository(s) {
-        repoForm({
-            title: 'New repository on ' + s.name,
-            intro: 'A named borg store on ' + s.name + '. Its path derives under the server’s base path unless '
-                + 'you override it.',
-            existing: null,
-            confirmLabel: 'Create',
-        }).then((body) => {
-            if (body) putRepository(body.name, s.name, body, 'created');
-        });
-    }
-
+    // There is no by-hand "create a store" any more. Vaier makes exactly one per machine behind the Back up
+    // verb, names it after the machine and generates its passphrase, so the operator never had a reason to
+    // make one — and making one by hand is what once minted a second store with a fresh passphrase over a
+    // live borg repository and orphaned it. Adopting a store Vaier did not create is still possible over the
+    // API (PUT /backup-repositories/{name}); it is rare enough that it does not belong on this page.
     function editRepository(r) {
         repoForm({
             title: 'Edit ' + r.name,
