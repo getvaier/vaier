@@ -17,6 +17,19 @@ package net.vaier.domain.port;
 public interface ForEncryptingSurvivalKits {
 
     /**
+     * The PBKDF2 work factor, named here because it is shared: the kit <em>prints</em> it in the command that
+     * opens it, and an implementation that used a different number would produce a file its own instructions
+     * could not open.
+     *
+     * <p>Far above OpenSSL's default of 10,000, and deliberately so. The kit's whole design puts copies of
+     * the ciphertext on several machines, so the realistic attack is not against Vaier at all — it is someone
+     * who has obtained one copy and grinds it offline at their leisure. Every additional copy is another
+     * chance for that to happen, so the work factor is what keeps the number of copies from being a
+     * liability. The cost is about half a second, once, to a person who has already lost their fleet.
+     */
+    int PBKDF2_ITERATIONS = 600_000;
+
+    /**
      * The base64-armoured OpenSSL envelope for {@code plaintext} under {@code passphrase}. A fresh random
      * salt per call, so writing the same kit twice never yields the same bytes — a host that keeps an old
      * copy alongside a new one reveals nothing by the comparison.

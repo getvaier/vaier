@@ -9,6 +9,7 @@ import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.RecoverySheet;
 import net.vaier.domain.SurvivalKit;
+import net.vaier.domain.port.ForEncryptingSurvivalKits;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,7 +46,7 @@ class OpensslEnvelopeAdapterTest {
 
         Files.writeString(dir.resolve("cipher.b64"), adapter.encrypt(plaintext, PASSPHRASE));
 
-        assertThat(run("openssl enc -aes-256-cbc -pbkdf2 -d -a -in cipher.b64 -pass pass:'" + PASSPHRASE + "'"))
+        assertThat(run("openssl enc -aes-256-cbc -pbkdf2 -iter " + ForEncryptingSurvivalKits.PBKDF2_ITERATIONS + " -d -a -in cipher.b64 -pass pass:'" + PASSPHRASE + "'"))
             .isEqualTo(plaintext);
     }
 
@@ -54,7 +55,7 @@ class OpensslEnvelopeAdapterTest {
         assumeTrue(opensslPresent(), "openssl is not installed on this machine");
         Files.writeString(dir.resolve("cipher.b64"), adapter.encrypt("secrets", PASSPHRASE));
 
-        assertThat(exitCodeOf("openssl enc -aes-256-cbc -pbkdf2 -d -a -in cipher.b64 -pass pass:wrong"))
+        assertThat(exitCodeOf("openssl enc -aes-256-cbc -pbkdf2 -iter " + ForEncryptingSurvivalKits.PBKDF2_ITERATIONS + " -d -a -in cipher.b64 -pass pass:wrong"))
             .isNotZero();
     }
 

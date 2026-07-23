@@ -51,7 +51,8 @@ public final class SurvivalKit {
      */
     public static String decryptCommand() {
         return "sed '1,/^" + BEGIN_MARKER + "$/d' " + FILE_NAME
-            + " | openssl enc -aes-256-cbc -pbkdf2 -d -a";
+            + " | openssl enc -aes-256-cbc -pbkdf2 -iter "
+            + ForEncryptingSurvivalKits.PBKDF2_ITERATIONS + " -d -a";
     }
 
     /**

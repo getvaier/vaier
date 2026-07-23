@@ -25,9 +25,8 @@ import org.springframework.stereotype.Component;
  * <p>The envelope, which is OpenSSL's and must not be "improved":
  * <ul>
  *   <li>{@code "Salted__"} (8 ASCII bytes) followed by an 8-byte random salt</li>
- *   <li>key and IV from PBKDF2-HMAC-SHA256 over passphrase+salt, {@value #ITERATIONS} iterations — OpenSSL's
- *       default for {@code -pbkdf2}, and it must stay the default, because the printed command does not
- *       spell out an iteration count and the person typing it cannot be expected to</li>
+ *   <li>key and IV from PBKDF2-HMAC-SHA256 over passphrase+salt, {@value #ITERATIONS} iterations, which the printed
+ *       command spells out with {@code -iter} because it is far above OpenSSL's own default</li>
  *   <li>AES-256-CBC, PKCS#5 padding, over the whole of the above</li>
  *   <li>base64 in {@value #BASE64_LINE_LENGTH}-character lines, which is what {@code -a} expects</li>
  * </ul>
@@ -40,8 +39,8 @@ public class OpensslEnvelopeAdapter implements ForEncryptingSurvivalKits {
     private static final int SALT_LENGTH_BYTES = 8;
     private static final int KEY_LENGTH_BYTES = 32;
     private static final int IV_LENGTH_BYTES = 16;
-    /** OpenSSL's default {@code -pbkdf2} iteration count. Changing it breaks the command the kit prints. */
-    private static final int ITERATIONS = 10_000;
+    /** Shared with the printed command via the port; see {@link ForEncryptingSurvivalKits#PBKDF2_ITERATIONS}. */
+    private static final int ITERATIONS = ForEncryptingSurvivalKits.PBKDF2_ITERATIONS;
     private static final int BASE64_LINE_LENGTH = 64;
 
     private final SecureRandom random = new SecureRandom();

@@ -60,7 +60,8 @@ class SurvivalKitTest {
         // A kit whose instructions are inside the kit is a locked box with the key inside it.
         String kit = kit();
 
-        assertThat(kit).contains("openssl enc -aes-256-cbc -pbkdf2 -d -a");
+        assertThat(kit).contains("openssl enc -aes-256-cbc -pbkdf2");
+        assertThat(kit).contains("-iter " + ForEncryptingSurvivalKits.PBKDF2_ITERATIONS);
         assertThat(kit).contains(SurvivalKit.FILE_NAME);
         assertThat(kit.indexOf("openssl")).isLessThan(kit.indexOf(markerLine()));
     }
