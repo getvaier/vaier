@@ -5,13 +5,17 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The one page that survives Vaier.
+ * The contents that survive Vaier — what a person reads after decrypting a {@link SurvivalKit}.
  *
  * <p>Everything Vaier knows about reading its own backups is, today, inside Vaier: the repository
  * passphrases are encrypted in its config store, and the key that decrypts them sits in the same directory.
  * That directory is backed up to the NAS — encrypted with a passphrase held in the store being backed up. So
- * losing the Vaier server leaves an encrypted repository whose passphrase is inside itself. This sheet is the
- * way out of that circle, and it only works if it lives somewhere Vaier does not.
+ * losing the Vaier server leaves an encrypted repository whose passphrase is inside itself. This is the way
+ * out of that circle, and it only works if a copy lives somewhere Vaier does not.
+ *
+ * <p>It is plain text because of where it is read: piped out of {@code openssl} into a terminal by someone
+ * who has just lost their infrastructure. A rendered page would need a browser they may not have and would
+ * survive on disk afterwards.
  */
 class RecoverySheetTest {
 
@@ -68,7 +72,6 @@ class RecoverySheetTest {
         // the one repository that actually needs attention.
         String sheet = RecoverySheet.render(server(), List.of(repo("orphan", null)), List.of(), "k");
 
-        assertThat(sheet).doesNotContain("Passphrase</th><td></td>");
         assertThat(sheet.toLowerCase()).contains("not stored");
     }
 
@@ -82,30 +85,28 @@ class RecoverySheetTest {
     }
 
     @Test
-    void itSaysOnItsFaceWhatItIs_andWhereItMustNotBeKept() {
-        // This is the most dangerous file Vaier will ever produce: every key to every backup, in the clear,
-        // by design — it has to be readable by a person with no infrastructure. A sheet stored on the fleet
-        // it protects is not escrow, it is a second copy of the problem.
+    void itWarnsAboutTheDecryptedCopy_notAboutWhereTheKitIsKept() {
+        // The kit itself is meant to live on fleet machines — encrypted, which is what makes that safe. What
+        // must not linger is THIS, the decrypted contents: every key to every backup, in the clear.
         String sheet = RecoverySheet.render(server(), List.of(repo("r", "p")), List.of(), "k");
 
-        assertThat(sheet.toLowerCase()).contains("print");
-        assertThat(sheet).contains("Vaier");
-        assertThat(sheet.toLowerCase()).contains("do not store this on any machine in the fleet");
+        assertThat(sheet.toLowerCase()).contains("in the clear");
+        assertThat(sheet.toLowerCase()).contains("delete");
     }
 
     @Test
-    void itIsAWholePrintablePage_notAFragment() {
+    void itIsPlainText_becauseItIsReadInATerminalAfterOpenssl() {
+        // Not a page: whoever reads this has lost their fleet and is piping openssl into less.
         String sheet = RecoverySheet.render(server(), List.of(repo("r", "p")), List.of(), "k");
 
-        assertThat(sheet).startsWith("<!doctype html>");
-        assertThat(sheet).contains("@media print");
+        assertThat(sheet).doesNotContain("<");
+        assertThat(sheet).doesNotContain("&amp;");
     }
 
     @Test
     void withNoBackupServerThereIsNothingToRecover_andItSaysThat() {
         String sheet = RecoverySheet.render(null, List.of(), List.of(), "k");
 
-        assertThat(sheet).startsWith("<!doctype html>");
         assertThat(sheet.toLowerCase()).contains("no backup server");
     }
 }

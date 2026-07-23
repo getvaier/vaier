@@ -152,6 +152,19 @@ public enum DeviceCategory {
     }
 
     /**
+     * True for the machine kinds that are normally left running — everything that is not an
+     * {@link #isAppliance() appliance} and not a laptop. Appliances are excluded because they run no
+     * general-purpose filesystem to keep anything on; a laptop because it is shut, moved and off exactly
+     * when something needs writing to it. {@link #GENERIC} counts as always-on: an unclassified LAN server
+     * is far more often a box in a cupboard than a laptop, and treating it as transient would rule out most
+     * of the fleet on no evidence. Seeds where a {@link SurvivalKit} may be kept; presentation-derived, like
+     * the SSH-access seeds above.
+     */
+    public boolean isAlwaysOn() {
+        return !isAppliance() && this != LAPTOP;
+    }
+
+    /**
      * Parses a stored/override category name (trimmed, case-insensitive), or {@code null} when the
      * value is null or blank (meaning "no override"). Throws {@link IllegalArgumentException} for a
      * non-blank value that is not a valid category — callers surface that as a 400.
