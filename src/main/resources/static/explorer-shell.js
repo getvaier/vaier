@@ -4765,7 +4765,13 @@
         // --- Disk monitoring ---
         const disk = sectionForm('Disk monitoring');
         const thresh = input(c.diskMonitorThresholdPercent || 85, '85', 'number');
-        disk.appendChild(field('Alert above', 'Percent full. Vaier emails the admins when a filesystem crosses this.', thresh));
+        // This is the fleet-wide DEFAULT, not the threshold: since every filesystem got a watch of its own,
+        // it is only what a filesystem is judged at until someone gives it a level on the machine's own disk
+        // (DiskWatch.thresholdPercent null means "use this one"). Calling it "Alert above" read as though it
+        // were the only threshold there is, which made the per-disk levels look like they were being ignored.
+        disk.appendChild(field('Default alert level',
+            'Percent full. Every filesystem is judged at this unless you give it a level of its own on the '
+            + 'machine’s disk. Vaier emails the admins when a watched filesystem crosses its level.', thresh));
         saveRow(disk, 'Save threshold', (n) => {
             const t = parseInt(thresh.value, 10);
             if (!t || t < 1 || t > 99) { n.className = 'ex-set-note is-err'; n.textContent = 'Enter 1–99.'; return; }
