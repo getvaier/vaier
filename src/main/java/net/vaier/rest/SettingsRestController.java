@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.application.GetAppSettingsUseCase;
+import net.vaier.application.GetSelfUpgradeStatusUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
@@ -8,6 +9,8 @@ import net.vaier.application.UpdateAwsCredentialsUseCase;
 import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
+import net.vaier.application.UpgradeVaierUseCase;
+import net.vaier.domain.SelfUpgradeStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,6 +30,8 @@ public class SettingsRestController {
     private final TestSmtpCredentialsUseCase testSmtpCredentialsUseCase;
     private final UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase;
     private final UpdateBackupSettingsUseCase updateBackupSettingsUseCase;
+    private final GetSelfUpgradeStatusUseCase getSelfUpgradeStatusUseCase;
+    private final UpgradeVaierUseCase upgradeVaierUseCase;
 
     public SettingsRestController(GetAppSettingsUseCase getAppSettingsUseCase,
                                   GetAppVersionUseCase getAppVersionUseCase,
@@ -34,7 +39,9 @@ public class SettingsRestController {
                                   UpdateSmtpSettingsUseCase updateSmtpSettingsUseCase,
                                   TestSmtpCredentialsUseCase testSmtpCredentialsUseCase,
                                   UpdateDiskMonitorSettingsUseCase updateDiskMonitorSettingsUseCase,
-                                  UpdateBackupSettingsUseCase updateBackupSettingsUseCase) {
+                                  UpdateBackupSettingsUseCase updateBackupSettingsUseCase,
+                                  GetSelfUpgradeStatusUseCase getSelfUpgradeStatusUseCase,
+                                  UpgradeVaierUseCase upgradeVaierUseCase) {
         this.getAppSettingsUseCase = getAppSettingsUseCase;
         this.getAppVersionUseCase = getAppVersionUseCase;
         this.updateAwsCredentialsUseCase = updateAwsCredentialsUseCase;
@@ -42,6 +49,8 @@ public class SettingsRestController {
         this.testSmtpCredentialsUseCase = testSmtpCredentialsUseCase;
         this.updateDiskMonitorSettingsUseCase = updateDiskMonitorSettingsUseCase;
         this.updateBackupSettingsUseCase = updateBackupSettingsUseCase;
+        this.getSelfUpgradeStatusUseCase = getSelfUpgradeStatusUseCase;
+        this.upgradeVaierUseCase = upgradeVaierUseCase;
     }
 
     @GetMapping("/config")
@@ -49,10 +58,49 @@ public class SettingsRestController {
         return ResponseEntity.ok(getAppSettingsUseCase.getSettings());
     }
 
-    /** The deployed Vaier version, surfaced so the operator always sees which build is running. */
+    /**
+     * The deployed Vaier version, surfaced so the operator always sees which build is running. It doubles as
+     * the self-upgrade's liveness probe: the replacement container answering here proves both that it booted
+     * and that it is the build we asked for (see {@code SelfUpgradeScript}).
+     */
     @GetMapping("/version")
     public ResponseEntity<VersionResponse> getVersion() {
         return ResponseEntity.ok(new VersionResponse(getAppVersionUseCase.appVersion()));
+    }
+
+    /**
+     * Whether a newer Vaier image is being served, and how the last self-upgrade went. Both are reads: the
+     * upgrade itself only ever happens because someone pressed the button below.
+     */
+    @GetMapping("/upgrade")
+    public ResponseEntity<UpgradeResponse> getUpgrade() {
+        return ResponseEntity.ok(UpgradeResponse.from(
+            getSelfUpgradeStatusUseCase.upgradeAvailable(), getSelfUpgradeStatusUseCase.lastUpgrade()));
+    }
+
+    /**
+     * Replace Vaier with the newer image. Answers as soon as the host has taken the work — it cannot answer
+     * later, because the container serving this request is the one being replaced. The script on the host
+     * decides how it ends, and rolls back to the image that was running if the new one does not answer.
+     */
+    @PostMapping("/upgrade")
+    public ResponseEntity<UpgradeResponse> upgrade() {
+        SelfUpgradeStatus started = upgradeVaierUseCase.upgradeSelf();
+        return started.outcome() == SelfUpgradeStatus.Outcome.FAILED
+            ? ResponseEntity.unprocessableEntity().body(UpgradeResponse.from(false, started))
+            : ResponseEntity.accepted().body(UpgradeResponse.from(false, started));
+    }
+
+    /**
+     * What the Settings page is told about upgrading. {@code outcome} is the <em>last</em> upgrade's, not
+     * this request's, so the page can say "the previous one rolled back" — which nothing else would reveal,
+     * since a rolled-back Vaier is a running Vaier and looks perfectly healthy.
+     */
+    record UpgradeResponse(boolean available, String outcome, String at, String detail, String runId) {
+        static UpgradeResponse from(boolean available, SelfUpgradeStatus status) {
+            return new UpgradeResponse(available, status.outcome().name(), status.at(), status.detail(),
+                status.runId());
+        }
     }
 
     @PutMapping("/aws")

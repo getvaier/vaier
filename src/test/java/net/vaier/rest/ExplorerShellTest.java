@@ -1340,6 +1340,42 @@ class ExplorerShellTest {
         assertThat(body).as("and never fetched").doesNotContain("fetch(");
     }
 
+    // --- Vaier upgrading itself ---------------------------------------------------------------------------
+
+    @Test
+    void upgradingVaier_isOfferedOnSettings_onlyWhenThereIsSomethingToUpgradeTo() throws IOException {
+        // The button is the whole trigger — nothing upgrades on a schedule. And it appears only when the
+        // registry really serves something newer, so it is never a button that would do nothing.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function upgradeVaier(");
+        assertThat(from).as("the shell can ask for an upgrade").isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).contains("'/settings/upgrade'");
+        assertThat(body).contains("method: 'POST'");
+        assertThat(js).as("offered against the domain's verdict, not a version string compare")
+            .contains("upg.available");
+    }
+
+    @Test
+    void theUpgradeToast_saysWhatIsAboutToHappen_becauseNoAnswerIsComing() throws IOException {
+        // The container serving the request is the one being replaced, so there is no outcome to wait for.
+        // A dropped connection is the expected shape of success and must not be reported as a failure.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function upgradeVaier(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body.indexOf("toast(")).as("it says so before it asks").isLessThan(body.indexOf("fetch("));
+        assertThat(body).contains("go quiet");
+    }
+
+    @Test
+    void aRolledBackUpgrade_isSaidOutLoudOnSettings() throws IOException {
+        // The one outcome nothing else would reveal: Vaier is up, so it looks healthy — it is just running
+        // the build from before. Silence would mean an upgrade reverting every time and nobody knowing.
+        assertThat(read("explorer-shell.js")).contains("'ROLLED_BACK'");
+    }
+
     // --- the operator points at a server and at data, and never learns borg's nouns ----------------------
 
     @Test

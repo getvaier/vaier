@@ -191,6 +191,14 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected net.vaier.application.UpdateBackupSettingsUseCase updateBackupSettingsUseCase;
 
+    // Self-upgrade: the runner that implements these lives in rest/ (it drives a detached process over SSH,
+    // like BackupRunner), so a controller-slice context has no instance of it to wire.
+    @MockBean
+    protected net.vaier.application.GetSelfUpgradeStatusUseCase getSelfUpgradeStatusUseCase;
+
+    @MockBean
+    protected net.vaier.application.UpgradeVaierUseCase upgradeVaierUseCase;
+
     // --- Docker/server use cases ---
     @MockBean
     protected GetServerInfoUseCase getServerInfoUseCase;

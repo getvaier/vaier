@@ -4628,17 +4628,40 @@
         if (S.settings.state === 'loading') return;
         S.settings = { ...S.settings, state: 'loading' };
         try {
-            const [cfg, ver, lic] = await Promise.all([
+            const [cfg, ver, lic, upg] = await Promise.all([
                 fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
                 fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 fetch('/license').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+                // Whether a newer Vaier is being served, and how the last upgrade went. Read with the rest of
+                // the page rather than polled: an image going stale is not news that decays in seconds.
+                fetch('/settings/upgrade', { cache: 'no-store' })
+                    .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
             ]);
             S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
-                version: (ver || {}).version || '', edition: (lic || {}).edition || '' };
+                version: (ver || {}).version || '', edition: (lic || {}).edition || '',
+                upgrade: upg || {} };
         } catch (e) {
-            S.settings = { state: 'error', config: null, version: '', edition: '' };
+            S.settings = { state: 'error', config: null, version: '', edition: '', upgrade: {} };
         }
         render();
+    }
+
+    // Replace Vaier with the newer image. The answer comes back before the work is done and cannot come back
+    // after: the container serving this request is the one being replaced. So the toast is the whole report —
+    // it says what is about to happen and what to expect, rather than pretending to wait for an outcome this
+    // page will not be here to receive. The host decides how it ends, and puts the old build back if the new
+    // one never answers; that verdict is waiting on this page the next time it loads.
+    async function upgradeVaier() {
+        toast('Vaier is replacing itself. It will go quiet for a moment — reload in a minute.');
+        try {
+            const res = await fetch('/settings/upgrade', { method: 'POST' });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                toast('Vaier could not start the upgrade (' + (body.detail || 'unknown') + '). Nothing changed.');
+            }
+        } catch (e) {
+            // A dropped connection here is the expected shape of success: the container answering us died.
+        }
     }
 
     // Save one section: PUT/POST the body, then write the outcome into that section's own note. It never
@@ -4777,6 +4800,34 @@
             if (!t || t < 1 || t > 99) { n.className = 'ex-set-note is-err'; n.textContent = 'Enter 1–99.'; return; }
             saveSetting('/settings/disk-monitor', 'PUT', { diskMonitorThresholdPercent: t }, n, 'Threshold saved.');
         });
+
+        // --- Upgrading Vaier itself ---
+        //
+        // The one image Vaier may replace is its own, and only because a person pressed this. Everything else
+        // in the fleet is detect-only (see ImageUpdateWatcher): pulling someone else's container on a hunch is
+        // not Vaier's business. Doing it to yourself, on request, is a different act.
+        const upg = S.settings.upgrade || {};
+        body.appendChild(section('Vaier'));
+        // A rolled-back upgrade is the one outcome nothing else would ever reveal: Vaier is running, so it
+        // looks perfectly healthy — it is just running the build from before. Said here, every time, until
+        // an upgrade succeeds.
+        if (upg.outcome === 'ROLLED_BACK') {
+            body.appendChild(note('The last upgrade did not come up, so Vaier put the previous build back. '
+                + 'You are running the old one — nothing was lost, and it is safe to try again.', true));
+        } else if (upg.outcome === 'FAILED') {
+            body.appendChild(note('The last upgrade could not be carried out (' + (upg.detail || 'unknown')
+                + '). Vaier was not touched.', true));
+        }
+        const upRow = el('div', 'ex-runline');
+        upRow.textContent = upg.available
+            ? 'A newer Vaier image is being served.'
+            : 'Vaier is running the newest image it can see.';
+        body.appendChild(upRow);
+        if (upg.available) {
+            const upActs = el('div', 'ex-lactions is-static');
+            upActs.appendChild(selVerb('arrowup', 'Upgrade Vaier', 'ex-btn is-accent', () => upgradeVaier()));
+            body.appendChild(upActs);
+        }
 
         // --- About: read-only facts ---
         body.appendChild(section('About'));

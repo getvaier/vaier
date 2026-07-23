@@ -121,6 +121,52 @@ public final class SelfUpgradeScript {
         return composeDir + "/.vaier-upgrade-" + runId + ".sh";
     }
 
+    /** Where a compose-started container's project lives, and what compose calls it there. */
+    public record ComposeLocation(String workingDir, String service) {}
+
+    /**
+     * Ask the host where Vaier's compose project is, rather than asking the operator. Docker stamps the
+     * project's working directory and the service's name onto every container compose starts, so both facts
+     * are already on the running container — and an env var the operator has to fill in is an env var they
+     * can fill in wrongly, on the one operation where being wrong takes Vaier down and leaves it down.
+     */
+    public static String inspectComposeLabels(String containerId) {
+        return "docker inspect --format "
+            + "'{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}"
+            + "\t{{index .Config.Labels \"com.docker.compose.service\"}}' "
+            + quote(containerId);
+    }
+
+    /**
+     * Read that answer. Empty when either label is missing, which means this container was <b>not</b> started
+     * by compose — there is no {@code docker compose up} that would bring it back, so an upgrade would take
+     * Vaier down and leave it down. Refusing is the only safe reading. Never throws.
+     */
+    public static java.util.Optional<ComposeLocation> parseComposeLabels(String stdout) {
+        if (stdout == null || stdout.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        String[] parts = stdout.strip().split("\t", 2);
+        if (parts.length < 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new ComposeLocation(parts[0].strip(), parts[1].strip()));
+    }
+
+    /** Write the rendered script onto the host, the same base64 way the borg setup scripts are staged. */
+    public static String stage(String script, String path) {
+        return "mkdir -p \"$(dirname " + quote(path) + ")\"; "
+            + "printf %s " + quote(java.util.Base64.getEncoder()
+                .encodeToString(script.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+            + " | base64 -d > " + quote(path) + "; "
+            + "chmod +x " + quote(path) + "; echo STAGED";
+    }
+
+    /** Read the account the last upgrade left, if any. Absence is not an error — most hosts have none. */
+    public static String readResult() {
+        return "cat " + quote(RESULT_FILE) + " 2>/dev/null || true";
+    }
+
     /** Single-quoted for the shell, with any embedded quote closed and re-opened — as {@code BorgCommand} does. */
     private static String quote(String value) {
         return "'" + value.replace("'", "'\\''") + "'";
