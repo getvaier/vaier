@@ -1848,6 +1848,17 @@ All original open questions have been resolved:
 
 ## 12. Backlog
 
+**Backup survival kit (next up, designed 2026-07-23).** Everything needed to read Vaier's backups is currently *inside* Vaier, in a circle: repository passphrases are encrypted in its config store; the key that decrypts them (`SecretCipher`, `vault.key`) sits in the same directory; and that directory is backed up to the backup server — encrypted with a passphrase held in the store being backed up. Losing the Vaier server leaves an encrypted repository whose passphrase is inside itself, and every other machine's archives in the same position. Nothing warns, because nothing is broken until everything is.
+
+`RecoverySheet` (committed) renders the way out: per repository, the machine it holds, its full `ssh://` address and its passphrase, plus the `borg list`/`borg extract` commands and the config key. It was first designed as a printed page; that was **rejected** in favour of distribution, because a printed sheet goes stale the moment a passphrase changes (which has already orphaned a repository once) and a stale sheet is worse than none — you believe you are covered.
+
+The agreed design:
+- The sheet's content becomes the **payload of a survival kit**, encrypted with **one passphrase only the operator knows**, set once and never stored by Vaier. Plaintext copies on N hosts were rejected: compromising any single host would hand over every key to every backup.
+- Decryptable with **standard tools only** — `openssl enc -aes-256-cbc -pbkdf2 -d` — with the exact command in a plaintext header at the top of the file. Needing Vaier to open it would restore the circularity.
+- **Vaier selects the hosts**, and says which and why (evidence, like a nudge). The rule: SSH-credentialed, always-on (`deviceCategory`, not a laptop or phone), **not the Vaier server itself**; pick three maximising separation — never two behind the same relay peer, prefer distinct geolocations (already resolved for the Map). Re-evaluated when the fleet changes; rewritten whenever a repository or passphrase changes.
+- **The kit only has to outlive the Vaier server.** The archives exist in exactly one place (the backup server), so if the NAS dies no key helps. The NAS is therefore a *good* host for a copy, not a conflict of interest — the scenario is "Vaier is gone, the NAS is fine".
+- What the operator keeps on paper shrinks from a list that rots to **one short passphrase** that does not.
+
 The backlog is tracked in [GitHub Issues](https://github.com/getvaier/vaier/issues). Feature specs for planned items are in the relevant section above (6.8–6.10). Bugs and smaller improvements are described directly in the issue.
 
 "Server LAN CIDR" remaining follow-ups are closed by [#204](https://github.com/getvaier/vaier/issues/204) — `VAIER_SERVER_LAN_CIDR` passes through `docker-compose.yml`, and split-tunnel `UBUNTU_SERVER`/`WINDOWS_SERVER` peers' client-side `AllowedIPs` includes the resolved CIDR. The `wireguard-masquerade` sidecar's interface-name-agnostic `! -o wg0 -j MASQUERADE` rule covers the source-NAT step on the Vaier server (closes [#248](https://github.com/getvaier/vaier/issues/248) — the linuxserver `PostUp`'s `-o eth+` is a no-op on AWS's `ens5`).
