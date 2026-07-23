@@ -1126,4 +1126,313 @@ class ExplorerShellTest {
         assertThat(body).as("the diagnostics note opens for an incomplete run too").contains("'INCOMPLETE'");
         assertThat(body).as("said plainly, in the operator's words").contains("not backed up");
     }
+
+    // --- the time rail holds its own room ----------------------------------------------------------------
+
+    @Test
+    void theTimeRail_takesItsRoomBeforeItsStopsLand() throws IOException {
+        // A machine's archive list is fetched after its directory is already on screen. A rail that renders
+        // nothing until that lands therefore drops a whole bar into the page mid-read and shoves the rows
+        // down under the operator's eyes — the listing moves while they are reading it. Whether a rail is
+        // coming is a cheaper question Vaier can already answer at first paint: is there a job backing this
+        // machine up? (loadBackup runs at boot.) If so the rail is drawn straight away and the stops fill
+        // into a track that is already there, so nothing moves when the answer arrives.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderRail(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("a backed-up machine's rail is drawn before its archives land")
+            .contains("jobsOn(machine)");
+        assertThat(body).as("the rail says it is still waiting rather than claiming an empty past")
+            .contains("is-waiting");
+    }
+
+    @Test
+    void aMachineWithNoPast_stillGrowsNoTimeRail() throws IOException {
+        // Holding the room is for machines that will have stops. A machine no job backs up has no past to
+        // show and never will, so it keeps the plain listing it has always had — reserving space there would
+        // trade one wrong layout for another.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderRail(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("no job and no archives — nothing is rendered")
+            .contains("document.createDocumentFragment()");
+    }
+
+    @Test
+    void theShell_isNeverWiderThanTheScreen() throws IOException {
+        // An implicit grid column is max-content sized, so the shell was as wide as its widest row — and the
+        // topbar's crumb trail grows with the path. Standing deep in a tree on a phone made the whole page
+        // wider than the screen and every surface under it scrolled sideways.
+        String css = read("explorer-shell.css");
+        int from = css.indexOf(".ex-app {");
+        assertThat(from).isPositive();
+        String rule = css.substring(from, css.indexOf('}', from));
+        assertThat(rule).as("the shell's one column may be narrower than its contents")
+            .contains("grid-template-columns: minmax(0, 1fr)");
+    }
+
+    // --- the stylesheets are parseable at all ------------------------------------------------------------
+
+    @Test
+    void everyStylesheet_hasBalancedCommentsAndBraces() throws IOException {
+        // An edit once left comment prose and a stray `*/` with no opening `/*`. CSS does not fail loudly:
+        // the parser took the prose as a selector and silently dropped the whole rule after it, so the
+        // listing lost its layout while every neighbouring rule still applied — a page that looked
+        // catastrophically broken with every test green. A stylesheet that cannot be parsed is a bug the
+        // suite should catch, not the operator.
+        for (String sheet : List.of("explorer-shell.css", "explorer.css", "styles.css",
+                                    "terminal-window.css")) {
+            String css = read(sheet);
+            int opens = css.split("/\\*", -1).length - 1;
+            int closes = css.split("\\*/", -1).length - 1;
+            assertThat(closes).as("%s: %d comment openings, %d closings", sheet, opens, closes)
+                .isEqualTo(opens);
+
+            // Every `*/` must be preceded by a `/*` that is still open — a stray closer is the exact shape
+            // of the bug, and counting alone would not see it if an edit also dropped an opener elsewhere.
+            int depth = 0;
+            for (int i = 0; i < css.length() - 1; i++) {
+                if (css.charAt(i) == '/' && css.charAt(i + 1) == '*') { depth++; i++; }
+                else if (css.charAt(i) == '*' && css.charAt(i + 1) == '/') {
+                    depth--;
+                    assertThat(depth).as("%s: a `*/` at offset %d closes a comment that was never opened",
+                        sheet, i).isNotNegative();
+                    i++;
+                }
+            }
+
+            String code = css.replaceAll("(?s)/\\*.*?\\*/", "");
+            assertThat(code.chars().filter(c -> c == '{').count())
+                .as("%s: braces balance", sheet)
+                .isEqualTo(code.chars().filter(c -> c == '}').count());
+        }
+    }
+
+    // --- the listing on a phone -------------------------------------------------------------------------
+
+    @Test
+    void theRowActions_neverJoinTheGrid_soARowIsAlwaysOneLine() throws IOException {
+        // The bug that made every entry wrap: on a touch device the per-row action box dropped to
+        // `position: static`, which turned it from an overlay into a FIFTH item in a three-column grid. It
+        // wrapped onto a second line and landed in the 26px checkbox column, where three buttons wrapped
+        // again. The box is designed as an overlay and must stay one — touch only ever changes how lit it is.
+        String css = read("explorer-shell.css");
+        int from = css.indexOf("@media (hover: none) { .ex-lactions");
+        assertThat(from).as("the touch rule for the action overlay is still there").isPositive();
+        String rule = css.substring(from, css.indexOf('}', from));
+
+        assertThat(rule).as("touch changes how lit it is, never where it sits")
+            .doesNotContain("position:");
+    }
+
+    @Test
+    void aPhoneRow_carriesItsFactsOnASecondLine_notInColumns() throws IOException {
+        // Columns are a desktop idea: three of them on a 390px screen leaves a filename about twelve
+        // characters of room. Every phone file browser worth copying (iOS Files, Files by Google, Dropbox)
+        // uses one two-line row instead — name, then its facts underneath, quieter and smaller.
+        String js = read("explorer-shell.js");
+        String css = read("explorer-shell.css");
+        assertThat(js).as("the row carries a secondary line").contains("ex-lsub");
+        assertThat(css).as("laid out as two lines, not wrapped by accident").contains("grid-template-areas");
+        assertThat(css).as("and the column cells step aside on a phone").contains(".ex-lrow .ex-lmeta");
+    }
+
+    @Test
+    void theSecondLine_dropsAColumnsPlaceholderDash() throws IOException {
+        // A SIZE column can hold "—" for a directory because the heading above says what is missing. On one
+        // line there is no heading, so a leading "— ·" is a placeholder for a column that is not there.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("sub.textContent = [size.textContent");
+        assertThat(from).as("the file browser's second line").isPositive();
+        assertThat(js.substring(from, from + 160)).contains("!== '—'");
+    }
+
+    @Test
+    void everyListing_getsTheSecondLine_notJustTheFileBrowser() throws IOException {
+        // The container and published-service listings share the same row builder. Hiding the columns on a
+        // phone without giving those rows the second line would not rearrange their facts, it would delete
+        // them — a container row would be a name and nothing else, no image and no state.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function listRow(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("the shared row carries one too").contains("ex-lsub");
+
+        // …and the wide listings' own column rule outranks a media query, so it is overridden by name.
+        String block = read("explorer-shell.css").substring(
+            read("explorer-shell.css").indexOf("@media (max-width: 760px)"));
+        assertThat(block).contains(".ex-listing.is-wide .ex-lmeta");
+    }
+
+    @Test
+    void aPhoneRow_hasNoPerRowVerbs_becauseTheSelectionBarCarriesThem() throws IOException {
+        // Three icon buttons per row is what made it cramped, and it is not how phone file browsers work.
+        // Every one of those verbs — Copy, Download, Delete — is already on the selection bar, which rises
+        // the moment anything is ticked. So on a phone the row is a thing, and the bar is the verbs.
+        String css = read("explorer-shell.css");
+        int phone = css.indexOf("@media (max-width: 760px)");
+        assertThat(phone).isPositive();
+        String block = css.substring(phone);
+        assertThat(block).contains(".ex-lrow .ex-lactions { display: none; }");
+    }
+
+    @Test
+    void theSelectionBar_sitsAtTheFootOfAPhone_andThePaneKeepsRoomForIt() throws IOException {
+        // The rows handed their verbs to this bar, so it has to be somewhere a thumb reaches without
+        // scrolling back up. Fixed means out of the flow, which would put it over the last row of the very
+        // listing being picked from — so the shell flags that a selection exists and the pane pads itself.
+        String css = read("explorer-shell.css");
+        String js = read("explorer-shell.js");
+        String block = css.substring(css.indexOf("@media (max-width: 760px)"));
+
+        assertThat(block).as("the bar leaves the flow").contains("position: fixed");
+        assertThat(block).as("and the pane makes room under it").contains(".ex-app.has-sel .ex-pane-body");
+        assertThat(js).as("which only the shell can know").contains("'has-sel'");
+    }
+
+    @Test
+    void aFolderRow_isTappableAcrossItsWholeWidth_onAPhone() throws IOException {
+        // A 14px filename is a thumb-hostile target. Phone file browsers make the whole row open the folder
+        // and leave the checkbox as the one thing inside it that does something else.
+        String css = read("explorer-shell.css");
+        String block = css.substring(css.indexOf("@media (max-width: 760px)"));
+        assertThat(block).as("the name's hit area is stretched over the row").contains("button.ex-lname::before");
+        assertThat(block).as("and the checkbox stays above it").contains(".ex-lrow .ex-check");
+    }
+
+    // --- trouble is visible from the tree ----------------------------------------------------------------
+
+    @Test
+    void aMachinesBackupEntry_wearsItsLastOutcomeInTheTree() throws IOException {
+        // The point of a tree is that you do not have to walk it. A failed run that is only visible once an
+        // operator opens that machine's Backup pane is a failure nobody sees, so the entry carries the dot.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function backupDot(");
+        assertThat(from).as("the tree has a dot for a machine's backup").isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("coloured by the job's last outcome").contains("lastRunStatus");
+        assertThat(body).as("through the one map the job pane already uses, so the two cannot disagree")
+            .contains("RUN_DOT[");
+    }
+
+    @Test
+    void aJobThatHasNeverRun_getsTheIdleDot_notTheGreenOne() throws IOException {
+        // "Not yet" is not success. Colouring an unrun job green would make the tree promise data is safe
+        // before a single archive exists.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function backupDot(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("is-idle");
+        assertThat(body).doesNotContain("is-up");
+    }
+
+    @Test
+    void theBackupEntryDot_isReadFromTheJobListAlreadyLoaded_notANewRead() throws IOException {
+        // Painting the tree must not fire a request per machine. The job list lands once at boot and now
+        // carries the outcome, so the dot costs nothing to draw.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function backupDot(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("read off the loaded jobs").contains("jobsOn(");
+        assertThat(body).as("and never fetched").doesNotContain("fetch(");
+    }
+
+    // --- back up is offered only when it can actually work -----------------------------------------------
+
+    @Test
+    void backUp_isNotOfferedWhileTheFleetHasNoBackupServer() throws IOException {
+        // A verb that cannot work is not a verb. With no backup server designated, "Back up" used to appear,
+        // be clicked, and come back as a refusal from the backend — asking the operator to discover by
+        // failing. Vaier does everything behind this button without asking; the one thing it cannot decide
+        // for them is which machine holds the fleet's data, and that decision has its own nudge.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("const backupEligible =");
+        assertThat(from).isPositive();
+        String rule = js.substring(from, js.indexOf(';', from));
+
+        assertThat(rule).as("a designated server is required, not merely respected")
+            .contains("!!S.backupServer");
+        assertThat(rule).as("and the server itself is still never a client of itself")
+            .contains("machine !== S.backupServer.machineName");
+    }
+
+    // --- a failure that names its own fix ----------------------------------------------------------------
+
+    @Test
+    void aRunThatFailedForAMissingBorgClient_offersTheOneActionThatFixesIt() throws IOException {
+        // The old message named "Prepare client" — a button on the Backups page, which was deleted when the
+        // Explorer absorbed it. So a machine could sit failing every night while the fix it named existed
+        // nowhere on screen. The action lives where the failure is reported now.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderOneJob(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function ", from + 10));
+
+        assertThat(body).as("driven by the domain's verdict, not by reading the error text")
+            .contains("needsClientReadying");
+        assertThat(body).as("and it offers the action in the operator's words")
+            .contains("Get this machine ready");
+    }
+
+    @Test
+    void readyingAMachine_usesThePrepareClientRouteThatAlreadyExists() throws IOException {
+        // No endpoint was opened for this: the route survived the page that used to call it.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function readyClient(");
+        assertThat(from).as("the shell can ready a host").isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).contains("/prepare-client");
+        assertThat(body).contains("method: 'POST'");
+        assertThat(body).as("the three outcomes go through the one handler that already knows them")
+            .contains("startReadying");
+    }
+
+    @Test
+    void aHostVaierCannotGetRootOn_keepsItsCommandOnScreen_notInAToast() throws IOException {
+        // Where Vaier cannot gain root it hands over one `sudo bash …` line. A toast is the wrong home for a
+        // command someone has to retype into another machine — it is gone before they have read it.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function startReadying(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("the staged command is kept, not just announced").contains("S.readying");
+    }
+
+    // --- the backup server wears its role --------------------------------------------------------------
+
+    @Test
+    void theBackupServer_wearsItsRoleAsACapabilityGlyph() throws IOException {
+        // The one machine holding the fleet's archives is worth seeing without opening it. The device shape
+        // cannot say it: the NAS wears `nas` because it is a NAS, and any machine can be designated the
+        // server — so the role gets a glyph of its own beside relay and Docker.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function machineCaps(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).as("the strip asks which machine is the server").contains("S.backupServer");
+        assertThat(body).as("and marks it with the role's own glyph").contains("'backupserver'");
+        assertThat(js).as("which is in the icon set").contains("backupserver:");
+    }
+
+    @Test
+    void theBackupServerGlyph_isNotTheDeviceShapeAndNotTheShield() throws IOException {
+        // Reusing `nas` would say "storage appliance" on a machine that already says that, and reusing the
+        // shield would say "this machine is backed up" — which is the opposite of what a store is.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function machineCaps(");
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).doesNotContain("'nas'");
+        assertThat(body).doesNotContain("'shield'");
+    }
+
+    @Test
+    void theWaitingTimeRail_isStyledToLookUnfinished_notEmpty() throws IOException {
+        // The reserved rail is real chrome with nothing on it yet. Without a mark for that state it reads as
+        // "this machine has no backups", which is the opposite of true.
+        assertThat(read("explorer-shell.css")).contains(".ex-rail.is-waiting");
+    }
 }

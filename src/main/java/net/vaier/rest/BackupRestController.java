@@ -317,17 +317,30 @@ public class BackupRestController {
 
     // --- Backup jobs ---
 
+    /**
+     * Every job, each carrying its last outcome. The outcome rides along because the Explorer's tree colours
+     * a machine's backup entry from it: a failed run has to be visible from the fleet's root, not only to an
+     * operator who happens to open that machine. It is one cheap lookup per job against the same run store
+     * {@code GET /backup-jobs/{name}/runs} reads, composed here at the driving edge rather than by making
+     * either domain reach for the other.
+     */
     @GetMapping("/backup-jobs")
     public ResponseEntity<List<JobResponse>> listJobs() {
-        return ResponseEntity.ok(getBackupJobs.getBackupJobs().stream().map(JobResponse::from).toList());
+        return ResponseEntity.ok(getBackupJobs.getBackupJobs().stream().map(this::withLastRun).toList());
     }
 
     @GetMapping("/backup-jobs/{name}")
     public ResponseEntity<JobResponse> getJob(@PathVariable String name) {
         return getBackupJobs.getBackupJobs().stream()
             .filter(j -> j.name().equals(name)).findFirst()
-            .map(job -> ResponseEntity.ok(JobResponse.from(job)))
+            .map(job -> ResponseEntity.ok(withLastRun(job)))
             .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /** A job with its latest run's status attached, or {@code null} status when it has never run. */
+    private JobResponse withLastRun(BackupJob job) {
+        return JobResponse.from(job, getBackupRuns.latestForJob(job.name())
+            .map(BackupRun::status).map(Enum::name).orElse(null));
     }
 
     @PutMapping("/backup-jobs/{name}")
@@ -704,13 +717,23 @@ public class BackupRestController {
                       String compression, boolean enabled, boolean backupAsRoot) {}
 
     /** The job as returned to the browser (jobs hold no secrets). */
+    /**
+     * A job as returned to the browser. {@code lastRunStatus} is the name of its latest
+     * {@link BackupRunStatus}, or {@code null} when the job has never run — null is its own fact and must
+     * stay distinguishable from an outcome, since "no run yet" is not success and a tree that coloured it
+     * green would be lying about untested data.
+     */
     record JobResponse(String name, String machineName, String repositoryName, List<String> sourcePaths,
                        List<String> excludes, int keepDaily, int keepWeekly, int keepMonthly,
-                       String compression, boolean enabled, boolean backupAsRoot) {
+                       String compression, boolean enabled, boolean backupAsRoot, String lastRunStatus) {
         static JobResponse from(BackupJob j) {
+            return from(j, null);
+        }
+
+        static JobResponse from(BackupJob j, String lastRunStatus) {
             return new JobResponse(j.name(), j.machineName(), j.repositoryName(), j.sourcePaths(),
                 j.excludes(), j.keepDaily(), j.keepWeekly(), j.keepMonthly(), j.compression(), j.enabled(),
-                j.backupAsRoot());
+                j.backupAsRoot(), lastRunStatus);
         }
     }
 
@@ -759,13 +782,19 @@ public class BackupRestController {
      * verdict on which of it is worth showing a human (the skipped-file and error lines, without borg's
      * JSON stats object) — empty on a clean run, which is how the UI knows to offer no disclosure.
      */
+    /**
+     * A run as returned to the browser. {@code needsClientReadying} is the domain's verdict, not the
+     * browser's: the shell offers "Get this machine ready" from this flag rather than pattern-matching the
+     * summary, so the rule stays in {@link BackupRun} and cannot break the day the wording changes.
+     */
     record RunResponse(String runId, String jobName, String machineName, String repositoryName,
                        BackupRunStatus status, Instant startedAt, Instant finishedAt, Integer exitCode,
-                       String archiveName, String summary, String diagnostics) {
+                       String archiveName, String summary, String diagnostics,
+                       boolean needsClientReadying) {
         static RunResponse from(BackupRun r) {
             return new RunResponse(r.runId(), r.jobName(), r.machineName(), r.repositoryName(),
                 r.status(), r.startedAt(), r.finishedAt(), r.exitCode(), r.archiveName(), r.summary(),
-                r.diagnostics());
+                r.diagnostics(), r.needsClientReadying());
         }
     }
 }

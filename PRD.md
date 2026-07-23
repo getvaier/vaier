@@ -1466,7 +1466,12 @@ Three things this buys that a set of pages structurally cannot:
     only on a machine that has backups; a machine with no backup job grows no rail (an empty fragment appends
     nothing), so the file browser is untouched where there is no past to show. Archives are read **once** per machine
     when its files are first opened (never on a timer — consistent with the frontend-never-polls rule), and the
-    relative "how long ago" is computed at paint, not on an interval.
+    relative "how long ago" is computed at paint, not on an interval. **The rail holds its own room ✅** — the
+    archive list lands *after* the listing is already on screen, so a rail that materialised on arrival dropped a
+    bar into the page and shoved the rows down mid-read. Whether a rail is coming is now settled at first paint by
+    a cheaper question Vaier has already answered (`jobsOn(machine)` — the job list loads at boot): a backed-up
+    machine draws the rail immediately in an `is-waiting` state (track and reading dimmed, no stops), and the stops
+    fill into a track that is already there. A machine with no job still grows nothing.
   - **Scrubbing back mounts the past.** Clicking a stop browses the machine's files as they were in that archive via
     `?at=<archiveId>` on the existing files endpoint; the whole shell crossfades to the amber `data-past` palette,
     the liveness dots go dark, and a one-line reading states the archive's timestamp and how long ago it was.
@@ -1624,11 +1629,35 @@ Three things this buys that a set of pages structurally cannot:
     lists its own containers (the tree previously showed none, even though the update-available sweep and
     `DiscoverVaierServerContainersUseCase` already covered them, which was a quiet gap between the README claim
     and the tree). Its port stays null: Vaier reaches that engine over the local socket, not a TCP port.
-  - Each machine row draws small **capability glyphs** just before its **status dot** — a Docker glyph when it
-    runs Docker, a relay glyph when it is a **relay peer** — ported from the retired Infrastructure page's
-    machine cards, so the **capability strip** is back, now per-row in the tree rather than a card header. A
-    machine that is neither gets an empty strip so names still line up; the glyphs read as dim metadata that
-    lift with the row on hover/selection.
+  - Each machine row draws small **capability glyphs** just before its **status dot** — a relay glyph when it is
+    a **relay peer**, a Docker glyph when it runs Docker, and a **safe** glyph when it is the fleet's **backup
+    server** — ported from the retired Infrastructure page's machine cards, so the **capability strip** is back,
+    now per-row in the tree rather than a card header. They run in the order reached → runs → keeps. A machine
+    with none gets an empty strip so names still line up; the glyphs read as dim metadata that lift with the row
+    on hover/selection. The backup-server glyph is deliberately neither the machine's **device shape** (the NAS
+    wears `nas` because it *is* a NAS, and any machine can be designated) nor the **shield** (which says a thing
+    is stored, the opposite of storing).
+  - **A failed run names a fix that exists ✅.** `BackupRunner`'s borg pre-flight refused a run with "borg is
+    not installed on X — run Prepare client", naming a button on `backups.html` — a page deleted when the
+    Explorer absorbed it. The one failure an operator can fix was therefore reported by pointing at a control
+    that existed nowhere, and the automatic path could not help either (preparation runs only on a machine's
+    **first back-up**, so a machine with an existing job was stranded). Now `BackupRun.borgMissing` owns the
+    wording and `BackupRun.needsClientReadying()` owns the verdict (a domain rule — the shell never
+    pattern-matches an error string; `RunResponse` carries the flag). The machine's `backup` entry offers
+    **Get this machine ready**, which POSTs the existing `…/prepare-client` route; where Vaier cannot gain
+    root it keeps the staged `sudo bash …` line on the entry instead of flashing it in a toast, since it has
+    to be retyped on another machine. No endpoint was opened — the route outlived the page that called it.
+  - **Trouble is visible from the tree ✅.** A machine's `backup` entry carries a **status dot** coloured by that
+    machine's job's last run — red for `FAILED` *and* `INCOMPLETE`, amber for `WARNING`, green for `SUCCESS`,
+    grey for `RUNNING`/`UNKNOWN`/never-run — from the same `RUN_DOT` map the job pane uses, so the tree and the
+    pane cannot disagree. `GET /backup-jobs` now carries `lastRunStatus` per job (composed at the driving edge
+    from `GetBackupRunsUseCase.latestForJob`, one cheap lookup per job), so the dot is read off state the shell
+    already loads at boot — painting the tree fires no request per row. Anything that learns a newer outcome
+    (`loadJobRun`, an on-demand run, the `run-settled` push) writes it back to the job list, so the dot never
+    shows last night's result all day. The backup server's own `backup` entry has no job behind it and grows no
+    dot. *Still open: the same treatment for a machine's `disk` entry — it needs a fleet-wide read model, since
+    `RemoteDiskWatcher` currently discards its readings and a per-machine `df` at paint time would be N SSH
+    round trips.*
   - **Add machine** moved from the Explorer topbar to the **fleet root's** Inspector (the fleet page), since
     adding a machine is a fleet-level act rather than something floating over whatever path you happen to be
     standing on — matching the "creation is a persistent affordance … of the fleet" decision below.

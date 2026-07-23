@@ -382,4 +382,42 @@ class BackupRunTest {
         assertThat(failed.failureSubject()).isEqualTo("[Vaier] Backup failed: colina-home on Colina 27");
         assertThat(failed.failureBody("example.com")).doesNotContain("could not be read");
     }
+
+    // --- the one failure the operator can fix from where they are standing ------------------------------
+
+    @Test
+    void aRunRefusedForAMissingBorgClient_knowsItCanBeFixedByReadyingTheHost() {
+        // This failure is not like the others: the host is fine, the credential is fine, the repository is
+        // fine — borg simply is not installed there yet, and Vaier can install it. Whether a failure means
+        // that is the domain's call, so the UI never has to read the message and guess.
+        BackupRun run = BackupRun.borgMissing(job(), "run-b1", Instant.parse("2026-07-23T00:12:10Z"));
+
+        assertThat(run.status()).isEqualTo(BackupRunStatus.FAILED);
+        assertThat(run.needsClientReadying()).isTrue();
+        assertThat(run.summary()).contains("Colina 27");
+    }
+
+    @Test
+    void theRefusal_namesSomethingThatExists() {
+        // It used to say "run Prepare client" — a button on a page that was deleted when the Explorer
+        // absorbed it. A message pointing at a control nobody can find is worse than no message: it tells
+        // the operator the fix is their fault to find.
+        BackupRun run = BackupRun.borgMissing(job(), "run-b2", Instant.parse("2026-07-23T00:12:10Z"));
+
+        assertThat(run.summary()).doesNotContain("run Prepare client");
+        assertThat(run.summary()).as("it names where the operator already is").contains("Backup");
+    }
+
+    @Test
+    void everyOtherFailure_isNotAReadyingProblem() {
+        // A missing credential, a locked repository, a dead machine: real failures, none of them fixed by
+        // installing borg. Offering to ready the host there would be a button that does nothing.
+        Instant now = Instant.parse("2026-07-23T00:12:10Z");
+
+        assertThat(BackupRun.failed(job(), "run-b3", now, "No stored credential for Colina 27")
+            .needsClientReadying()).isFalse();
+        assertThat(BackupRun.fromExitCode(job(), "run-b4", now, now, 2, "borg: repository is locked")
+            .needsClientReadying()).isFalse();
+        assertThat(BackupRun.started(job(), "run-b5", now).needsClientReadying()).isFalse();
+    }
 }

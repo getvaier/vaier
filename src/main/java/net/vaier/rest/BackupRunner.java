@@ -182,8 +182,7 @@ public class BackupRunner implements RunBackupJobUseCase, ListArchivesUseCase, L
         // launch anyway (a flaky probe must never block a working host — the run itself still settles cleanly
         // if borg really is missing); only a definite non-borg result blocks the run.
         if (borgDefinitelyMissing(machine.get().name())) {
-            return recorded(BackupRun.failed(job, runId, clock.instant(),
-                "borg is not installed on " + job.machineName() + " — run Prepare client"));
+            return recorded(BackupRun.borgMissing(job, runId, clock.instant()));
         }
 
         // The run reads the passphrase from a provisioned 0600 file via BORG_PASSCOMMAND, so make sure that

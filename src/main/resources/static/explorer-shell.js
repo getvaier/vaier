@@ -49,6 +49,13 @@
         // a hub fanning out to two dots for a relay.
         docker:  '<rect x="2.9" y="6.8" width="2.4" height="2.4"/><rect x="5.8" y="6.8" width="2.4" height="2.4"/><rect x="8.7" y="6.8" width="2.4" height="2.4"/><rect x="5.8" y="4.1" width="2.4" height="2.4"/><path d="M1.8 10.4c1 1.7 2.9 2.4 5.4 2.4 3.3 0 5.4-1.5 6.2-2.9"/>',
         relay:   '<circle cx="3.8" cy="8" r="1.5"/><circle cx="12.2" cy="4" r="1.5"/><circle cx="12.2" cy="12" r="1.5"/><path d="M5.2 7.3l5.6-2.7M5.2 8.7l5.6 2.7"/>',
+        // The fleet's backup server: a safe — a door, a dial and a handle. Deliberately not the `nas` device
+        // shape (the NAS already wears that because it is a NAS, and any machine can be designated), not
+        // `archive` (that is the backup entry every backed-up machine grows), and not `shield` (that says
+        // "this is backed up", which is the opposite of being the place backups are kept). A safe says the
+        // one thing true only here: the fleet's copies live inside this machine.
+        backupserver: '<rect x="2.2" y="3" width="11.6" height="10" rx="1.2"/><circle cx="7.2" cy="8" r="2.5"/>'
+            + '<circle cx="7.2" cy="8" r=".55" fill="currentColor" stroke="none"/><path d="M11.4 6.6v2.8"/>',
         // Device forms, matched to the machine icons the Infrastructure page used, so a machine
         // wears the same shape in the tree as on its card — just smaller. Keyed by device category, lowercased.
         server:  '<rect x="2.5" y="2.5" width="11" height="4" rx=".8"/><rect x="2.5" y="9" width="11" height="4" rx=".8"/><circle cx="4.6" cy="4.5" r=".55" fill="currentColor" stroke="none"/><circle cx="4.6" cy="11" r=".55" fill="currentColor" stroke="none"/><line x1="9.5" y1="4.5" x2="11.8" y2="4.5"/><line x1="9.5" y1="11" x2="11.8" y2="11"/>',
@@ -137,6 +144,7 @@
         backupJobs: [],                  // GET /backup-jobs — the jobs, each backing one machine up to a repository
         jobRuns: new Map(),              // job name -> { state, run }: its last run, read on view and on the run-settled push
         preparing: new Set(),            // machine names Vaier is readying to back up (first back-up), cleared on prepare-client-settled
+        readying: new Map(),             // machine name -> the one `sudo bash …` line Vaier staged where it could not gain root itself
         provisionWatch: null,            // { serverName, bodyEl } while a provision dialog awaits its provision-settled push
         settings: { state: 'idle', config: null, version: '', edition: '' },   // the native Settings entry, read on view
         palSel: 0,
@@ -630,9 +638,11 @@
         return el;
     }
 
-    // A machine's capabilities, as small glyphs riding just before its liveness dot — the two the operator scans
-    // the fleet for. Docker (it hosts containers) reads off the machine; relay (it routes a LAN behind it, so
-    // other machines are reachable only through it) reads off its peer. A machine that is neither gets an empty
+    // A machine's capabilities, as small glyphs riding just before its liveness dot — what the operator scans
+    // the fleet for. Relay (it routes a LAN behind it, so other machines are reachable only through it) reads
+    // off its peer; Docker (it hosts containers) reads off the machine; backup server (it holds the fleet's
+    // archives) reads off the one designated server. They run in that order because it is a progression from
+    // how a machine is reached, through what it runs, to what it keeps. A machine with none gets an empty
     // strip, so names still line up. Icon-only; the capability rides along as the glyph's hover title.
     function machineCaps(name) {
         const m = S.machines.find((x) => x.name === name);
@@ -641,7 +651,34 @@
         caps.className = 'ex-caps';
         if (peer && peer.isRelay) caps.appendChild(capIcon('relay', 'Relay — routes a LAN behind it'));
         if (m && m.runsDocker) caps.appendChild(capIcon('docker', 'Runs Docker'));
+        if (S.backupServer && S.backupServer.machineName === name) {
+            caps.appendChild(capIcon('backupserver', 'Backup server — the fleet’s archives are kept here'));
+        }
         return caps;
+    }
+
+    // How a run's outcome is said to a person, for the tree's hover. The pane spells the same fact out at
+    // length; here it has one line, so each word has to carry the consequence rather than the status name.
+    const RUN_WORD = {
+        SUCCESS:    'Backed up',
+        WARNING:    'Backed up, with a complaint',
+        INCOMPLETE: 'Files are missing from the last backup',
+        FAILED:     'The last backup failed',
+        RUNNING:    'Backing up now',
+        UNKNOWN:    'The last backup’s outcome is unknown',
+    };
+
+    // The dot on a machine's backup entry: its job's last outcome, read straight off the job list Vaier
+    // already loaded at boot — no request per row, and no traversal to find out. The colour comes from the
+    // same RUN_DOT map the job pane uses, so the tree and the pane can never disagree about a run. A machine
+    // with no job (the backup server's own entry — it is the store, not a thing that is stored) grows no dot,
+    // and a job that has never run gets the idle one: "not yet" is neither trouble nor success.
+    function backupDot(machine) {
+        const job = jobsOn(machine)[0];
+        if (!job) return null;
+        const d = el('span', 'ex-dot ' + (RUN_DOT[job.lastRunStatus] || 'is-idle'));
+        d.title = RUN_WORD[job.lastRunStatus] || 'No backup has run yet';
+        return d;
     }
 
     function capIcon(kind, title) {
@@ -715,6 +752,13 @@
             row.appendChild(machineCaps(path[1]));
             row.appendChild(dot(path[1]));
         }
+        // A machine's backup entry wears its last outcome, so a failed run is seen from the tree instead of
+        // only by whoever thinks to open that machine. Same colours as the liveness dots beside it — one
+        // vocabulary of light for the whole rail: green is fine, amber is grumbling, red is trouble.
+        if (kind === 'backup') {
+            const d = backupDot(path[1]);
+            if (d) row.appendChild(d);
+        }
         // A container row wears its update mark in the rail, so an operator scanning the fleet sees the one
         // that needs them without opening anything. The verdict is the backend's; updateMark decides nothing
         // but whether there is something worth drawing.
@@ -780,6 +824,11 @@
                 bar.appendChild(crumb);
             }
         });
+        // A path too long for the bar scrolls inside it, and it is the tail that matters: the folder you are
+        // standing in is the answer to "where am I", while the fleet root it hangs off is the part you can
+        // already guess. Left at zero a phone showed "fleet / Vaier server / files / home / ubu…" and cut off
+        // the only crumb that was news. The ancestors are still one swipe away.
+        bar.scrollLeft = bar.scrollWidth;
     }
 
     // --- the Inspector ----------------------------------------------------------------------------------
@@ -3348,6 +3397,17 @@
             cell.appendChild(text);
             row.appendChild(cell);
         });
+        // The same columns again as one line under the name, for a screen with no room for columns. Without
+        // it a phone would simply lose them — a container row would be a name and nothing else, no image, no
+        // state — so the narrow layout would be hiding facts rather than rearranging them. The state keeps
+        // its dot here too: it is the one column that is a colour before it is a word.
+        const sub = document.createElement('span');
+        sub.className = 'ex-lsub';
+        if (state !== undefined) sub.appendChild(stateDot(state));
+        const subText = document.createElement('span');
+        subText.textContent = meta.filter(Boolean).join(' · ');
+        sub.appendChild(subText);
+        row.appendChild(sub);
         return row;
     }
 
@@ -4286,10 +4346,34 @@
             body.appendChild(n);
         }
 
+        // The one failure an operator can fix from where they are standing: the host has no borg client. The
+        // domain decides that this is what happened (BackupRun.needsClientReadying) — the shell never reads
+        // the error text to work it out — and the fix is offered on the spot rather than named and left to
+        // be hunted for. The command below appears only where Vaier could not gain root itself.
+        const needsReady = held && held.state === 'ready' && held.run.needsClientReadying;
+        const staged = S.readying.get(machine);
+        if (needsReady && !S.preparing.has(machine)) {
+            body.appendChild(note('This machine has no borg client yet — nothing else is wrong. Vaier can '
+                + 'install it, and tonight’s backup will run.', true));
+        }
+        if (staged) {
+            body.appendChild(note('Vaier cannot become root on ' + machine + ', so it has left the installer '
+                + 'there. Open this machine’s shell and run this once:', true));
+            const cmd = el('div', 'ex-cmd');
+            cmd.textContent = staged;
+            body.appendChild(cmd);
+        }
+
         const running = held && held.state === 'ready' && held.run.status === 'RUNNING';
         const acts = el('div', 'ex-lactions is-static');
-        const run = selVerb('refresh', running ? 'Backing up…' : 'Back up now', 'ex-btn is-accent',
-            () => runNow(job));
+        if (needsReady) {
+            const ready = selVerb('shield', S.preparing.has(machine) ? 'Getting ready…' : 'Get this machine ready',
+                'ex-btn is-accent', () => readyClient(job));
+            if (S.preparing.has(machine)) ready.disabled = true;
+            acts.appendChild(ready);
+        }
+        const run = selVerb('refresh', running ? 'Backing up…' : 'Back up now',
+            needsReady ? 'ex-btn' : 'ex-btn is-accent', () => runNow(job));
         if (running) run.disabled = true;
         acts.append(run);
         acts.appendChild(selVerb('cross', 'Stop backing up this machine', 'ex-btn is-danger',
@@ -4304,6 +4388,14 @@
         go(path);
     }
 
+    // The tree's backup dot reads the outcome off the job list, which is loaded once at boot — so anything
+    // that learns a newer outcome has to write it back there, or the tree would keep showing last night's
+    // result all day. This is that write-back: one line, called wherever a run's outcome becomes known.
+    function noteRunStatus(jobName, status) {
+        const job = S.backupJobs.find((j) => j.name === jobName);
+        if (job) job.lastRunStatus = status;
+    }
+
     // The last run, read on view (404 means it has never run) and again on the run-settled push. Not skipped on
     // 'ready' — the push calls this to replace a RUNNING run with its outcome — but skipped while a read is in
     // flight, and only ever the latest run, so a machine's whole history is not dragged into the browser.
@@ -4315,8 +4407,11 @@
             const res = await fetch('/backup-jobs/' + encodeURIComponent(name) + '/runs', { cache: 'no-store' });
             if (res.status === 404) {
                 S.jobRuns.set(name, { state: 'none', run: null });
+                noteRunStatus(name, null);
             } else if (res.ok) {
-                S.jobRuns.set(name, { state: 'ready', run: await res.json() });
+                const run = await res.json();
+                S.jobRuns.set(name, { state: 'ready', run: run });
+                noteRunStatus(name, run.status);
             } else {
                 S.jobRuns.set(name, { state: 'error', run: null });
             }
@@ -4337,7 +4432,9 @@
                     : 'Vaier could not start the backup.');
                 return;
             }
-            S.jobRuns.set(job.name, { state: 'ready', run: await res.json() });   // RUNNING
+            const started = await res.json();                                     // RUNNING
+            S.jobRuns.set(job.name, { state: 'ready', run: started });
+            noteRunStatus(job.name, started.status);   // the tree goes amber-idle while it runs, from here
             toast('Backing up ' + job.machineName + '…');
             render();
         } catch (e) {
@@ -4410,6 +4507,8 @@
             const d = JSON.parse(e.data);   // { machineName, state }
             if (!S.preparing.has(d.machineName)) return;
             S.preparing.delete(d.machineName);
+            // The staged command was a standing instruction; a readying that landed on its own retires it.
+            if (d.state === 'SUCCESS') S.readying.delete(d.machineName);
             toast(d.state === 'SUCCESS'
                 ? d.machineName + ' is ready — its backup will run tonight, or now if you like.'
                 : 'Vaier could not finish getting ' + d.machineName + ' ready — try backing it up again.');
@@ -4704,9 +4803,17 @@
     // there is no past to show.
     function renderRail(machine) {
         const held = S.archives.get(machine);
-        if (!held || held.state !== 'ready' || !held.list.length) return document.createDocumentFragment();
+        const ready = !!held && held.state === 'ready';
+        // The rail takes its room from the first paint, before the archive list has landed. It has to: that
+        // list is fetched while the directory is already on screen, so a rail that appears when it arrives
+        // drops a whole bar into the page and shoves the rows down while the operator is reading them.
+        // "Is a rail coming?" is answered by a cheaper question Vaier can settle immediately — does a job
+        // back this machine up? The job list is loaded at boot, before the first tree paint, so the answer
+        // costs nothing and is in hand in time. The stops then fill into a track that is already there.
+        if (ready ? !held.list.length : !jobsOn(machine).length) return document.createDocumentFragment();
+        const archives = ready ? held.list : [];
 
-        const rail = el('div', 'ex-rail');
+        const rail = el('div', 'ex-rail' + (ready ? '' : ' is-waiting'));
 
         const now = el('button', 'ex-rail-now' + (S.at ? '' : ' is-on'));
         now.textContent = 'Now';
@@ -4716,7 +4823,7 @@
 
         const track = el('div', 'ex-rail-track');
         const stops = el('div', 'ex-rail-stops');
-        held.list.forEach((a) => {
+        archives.forEach((a) => {
             const stop = el('button', 'ex-rail-stop' + (a.id === S.at ? ' is-on' : ''));
             stop.title = archiveLabel(a);
             stop.setAttribute('aria-label', 'Backup from ' + archiveLabel(a));
@@ -4858,7 +4965,20 @@
             time.className = 'ex-lmeta';
             time.textContent = VaierListing.formatTime(entry.modifiedAt);
 
-            row.append(check, name, size, time, rowActions(machine, entry));
+            // The same two facts again, joined into one quiet line under the name. A phone has no room for
+            // columns — three of them leave a filename about twelve characters wide — so on a narrow screen
+            // the columns step aside and this takes over, which is the two-line row every phone file browser
+            // settled on. One row, one entry. The stylesheet decides which of the two is showing; both are
+            // built here because they are the same facts, and deriving them twice is how they drift apart.
+            // A column can hold a dash for "no size here" because the heading above it says what is missing.
+            // On one line there is no heading, so a leading "— ·" says nothing at all — it is a placeholder
+            // for a column that is not there. A directory simply gives its date.
+            const sub = document.createElement('span');
+            sub.className = 'ex-lsub';
+            sub.textContent = [size.textContent, time.textContent]
+                .filter((v) => v && v !== '—').join(' · ');
+
+            row.append(check, name, size, time, sub, rowActions(machine, entry));
             rows.appendChild(row);
         });
     }
@@ -4928,9 +5048,17 @@
                               directory: entry.directory, size: entry.size, backedUp: !!entry.backedUp,
                               containsBackedUp: !!entry.containsBackedUp }]);
     }
-    // A machine is back-up-eligible for the selection bar unless it is the backup server itself (the store, not
-    // a thing that is stored). Present-only items only — you protect the live tree, not an archived shape of it.
-    const backupEligible = (machine) => !S.backupServer || machine !== S.backupServer.machineName;
+    // A machine is back-up-eligible only while the fleet HAS a backup server, and never when it IS that server
+    // (the store, not a thing that is stored). Present-only items only — you protect the live tree, not an
+    // archived shape of it.
+    //
+    // The first clause is the point: with no server designated, "Back up" used to be offered, clicked, and
+    // refused by the backend — the operator discovering the precondition by tripping over it. Everything else
+    // behind this button Vaier does for them without asking (it creates the repository, writes the job, folds
+    // the paths in, installs borg on the host and trusts its key on the server). The single thing it cannot
+    // decide for them is which machine holds the fleet's data, and that decision has a nudge of its own. So
+    // until it is made, the verb simply is not there.
+    const backupEligible = (machine) => !!S.backupServer && machine !== S.backupServer.machineName;
     // Whether there is anything in the archives at or under a selected item — the precondition for "Stop
     // backing up" to have work to do. Either shield qualifies: a folder that is whole, and a folder that is
     // protected but holed (or that merely holds a protected path deeper down) both have data to stop. Gating
@@ -5206,13 +5334,38 @@
         render();
     }
 
+    // Ready a host that a run found had no borg client. The same work the first back-up does silently, asked
+    // for on purpose this time — so a machine whose job already exists is not stranded, which is exactly what
+    // used to happen: preparation only ever ran on a machine's FIRST back-up, and adding paths to a machine
+    // that already had a job deliberately never re-did it. No endpoint was opened; this route outlived the
+    // page that used to call it.
+    async function readyClient(job) {
+        const machine = job.machineName;
+        S.readying.delete(machine);
+        try {
+            const res = await fetch('/backup-jobs/' + encodeURIComponent(job.name) + '/prepare-client',
+                { method: 'POST' });
+            if (!res.ok) {
+                toast('Vaier could not start getting ' + machine + ' ready.');
+                return;
+            }
+            startReadying(machine, await res.json());
+        } catch (e) {
+            toast('Vaier could not start getting ' + machine + ' ready.');
+        }
+    }
+
     // What Vaier does behind the first back-up: ready the host (install borg, trust its key). It's silent by
     // design — a quiet "Getting X ready…" and nothing more — unless it hits the one wall it can't pass on its
     // own, a host where it lacks the root to install borg, in which case it names the single command to run.
     function startReadying(machine, p) {
         if (p.scriptOnly && p.stagedScriptPath) {
-            toast('Almost there — to finish setting ' + machine + ' up, run this on it once: sudo bash '
-                + p.stagedScriptPath);
+            // A command someone has to retype into another machine cannot live in a toast — it is gone
+            // before it has been read, let alone copied. It is kept against the machine and rendered on its
+            // Backup entry, where the failure that needs it is already reported, until the readying lands.
+            S.readying.set(machine, 'sudo bash ' + p.stagedScriptPath);
+            toast('One command left to run on ' + machine + ' — it is on its Backup entry.');
+            render();
             return;
         }
         if (p.started) {
@@ -5737,6 +5890,11 @@
         // The past is a different light, not a badge: one attribute on the shell, and every surface crossfades
         // to the amber past palette (explorer-shell.css). Only the present is ever cold-lit.
         document.querySelector('.ex-app').setAttribute('data-past', S.at ? '1' : '0');
+        // On a phone the selection bar is fixed to the foot of the screen (it is the only verb surface there,
+        // so it has to be thumb-reachable). A fixed bar is out of the flow and would sit over the last row of
+        // the very listing you are picking from, so the shell says when one exists and the pane keeps room
+        // under itself. Nothing on a wide screen reads this class.
+        app.classList.toggle('has-sel', S.sel.length > 0);
         renderTree();
         renderCrumbs();
         renderPane();

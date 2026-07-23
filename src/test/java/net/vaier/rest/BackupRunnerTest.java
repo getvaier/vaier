@@ -471,8 +471,13 @@ class BackupRunnerTest {
 
         assertThat(run.status()).isEqualTo(BackupRunStatus.FAILED);
         assertThat(runs.getAll().get(0).status()).isEqualTo(BackupRunStatus.FAILED);
-        // The reason names the machine and points at the fix.
-        assertThat(run.summary()).contains("borg is not installed").contains("Colina 27").contains("Prepare client");
+        // The reason names the machine and points at the fix — and the fix has to be somewhere the operator
+        // can reach. It used to say "run Prepare client", which was a button on the Backups page; that page
+        // was deleted when the Explorer absorbed it, so the message named a control that existed nowhere.
+        assertThat(run.summary()).contains("borg is not installed").contains("Colina 27");
+        assertThat(run.summary()).doesNotContain("Prepare client");
+        assertThat(run.needsClientReadying())
+            .as("the domain marks it as the one failure a single action fixes").isTrue();
         // Crucially: no detached launch happened — the run was refused before any borg was started.
         verify(runner, never()).run(eq("Colina 27"), org.mockito.ArgumentMatchers.contains("nohup"));
     }

@@ -182,6 +182,32 @@ class BackupRestControllerTest {
             List.of("/home/geir"), List.of(), 7, 4, 6, "zstd,6", true, false);
     }
 
+    @Test
+    void theJobList_carriesEachJobsLastOutcome() throws Exception {
+        // The Explorer's tree colours a machine's backup entry from this, so trouble is visible without
+        // opening anything. Reading it per job on view was the old shape, and it meant an operator had to
+        // walk into every machine to find the one that failed — the opposite of what a tree is for.
+        jobs.save(job());
+        runs.record(BackupRun.failed(job(), "run-1", Instant.parse("2026-07-22T02:00:00Z"), "borg died"));
+
+        String body = enterpriseMockMvc().perform(get("/backup-jobs"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("\"lastRunStatus\":\"FAILED\"");
+    }
+
+    @Test
+    void aJobThatHasNeverRun_saysSoRatherThanClaimingAnOutcome() throws Exception {
+        // A missing status is its own fact — "no run yet" is not success, and a dot that guesses either way
+        // would be the tree's first lie.
+        jobs.save(job());
+
+        String body = enterpriseMockMvc().perform(get("/backup-jobs"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("\"lastRunStatus\":null");
+    }
+
     /** MockMvc that runs the Community-edition Enterprise gate in front of the controller. */
     private MockMvc communityMockMvc() {
         return MockMvcBuilders.standaloneSetup(controller)

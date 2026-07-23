@@ -104,6 +104,40 @@ public record BackupRun(
     }
 
     /**
+     * The opening of the one refusal an operator can act on without leaving the page. Kept as a constant
+     * because two things depend on it agreeing with itself: the run that is written and
+     * {@link #needsClientReadying()}, which reads it back.
+     */
+    private static final String BORG_MISSING = "borg is not installed on ";
+
+    /**
+     * A run refused before borg because the machine has no borg client yet. This failure is unlike the
+     * others: nothing is broken — the host is reachable, the credential works, the repository is fine — the
+     * client simply was never installed, and Vaier can install it (see {@code PrepareBackupClientUseCase}).
+     *
+     * <p>It used to say "run Prepare client", naming a button on the Backups page, which was deleted when
+     * the Explorer absorbed it. A message pointing at a control that no longer exists is worse than no
+     * message: it tells the operator a fix exists and makes finding it their problem. So it names where they
+     * already are — the machine's Backup entry — which is also where {@link #needsClientReadying()} puts the
+     * action that does it for them.
+     */
+    public static BackupRun borgMissing(BackupJob job, String runId, Instant now) {
+        return failed(job, runId, now, BORG_MISSING + job.machineName()
+            + " — nothing else is wrong. Open this machine's Backup entry and choose "
+            + "“Get this machine ready”, and Vaier will install it.");
+    }
+
+    /**
+     * Whether this run failed only because its machine has no borg client — the one outcome that a single
+     * action fixes. Deciding this is the domain's job and not the browser's: the alternative is a UI that
+     * pattern-matches an error string, which puts a business rule in a view and breaks silently the day the
+     * wording changes.
+     */
+    public boolean needsClientReadying() {
+        return status == BackupRunStatus.FAILED && summary != null && summary.startsWith(BORG_MISSING);
+    }
+
+    /**
      * Settle this (typically {@code RUNNING}) run with the detached borg chain's {@code exitCode} and its
      * captured output — the same {@link #statusFor} rule as {@link #fromExitCode} — preserving the run's
      * identity (id, job, repository, machine, archive, start time) and stamping the finish instant, exit code

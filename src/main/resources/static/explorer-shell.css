@@ -39,6 +39,13 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
     height: 100%;
     display: grid;
     grid-template-rows: 48px 1fr auto;   /* topbar · tree+inspector · dock */
+    /* The single column has to be told it may be narrower than its contents. An implicit grid column is
+       max-content sized, so the shell was as wide as its widest row — and the topbar's crumb trail grows with
+       the path. Standing in /home/ubuntu/vaier on a phone therefore made the whole page 470px wide inside a
+       360px screen, and every surface under it scrolled sideways. minmax(0, 1fr) caps the column at the
+       viewport; the address bar then does what it was always built to do and scrolls its crumbs inside its
+       own pill. */
+    grid-template-columns: minmax(0, 1fr);
     transition: background .5s ease;
 }
 
@@ -382,7 +389,24 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-iconbtn.is-on { color: var(--accent); }
 .ex-iconbtn.is-danger:hover { color: var(--red); background: rgba(244, 135, 113, .1); }
 .ex-iconbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-@media (hover: none) { .ex-lactions { opacity: 1; position: static; padding-left: 0; background: none; } }
+/* Touch changes how lit the overlay is, and nothing else. It used to be dropped to `position: static` here to
+   give it room, which quietly turned it into an extra item in the row's grid — it wrapped onto a second line,
+   landed in the 26px checkbox column, and wrapped again. That was the cramped, many-times-wrapped listing.
+   Where there is genuinely no room for it — a phone — it is not made static, it is not shown at all, and the
+   selection bar carries its verbs (see the width query at the foot of this file). */
+@media (hover: none) { .ex-lactions { opacity: 1; } }
+
+/* The secondary line: the row's facts restated under its name, for screens too narrow for columns. Off by
+   default — on a wide screen the columns say it better, and saying it twice would be noise. */
+.ex-lsub {
+    display: none;
+    align-items: center; gap: 6px;
+    min-width: 0;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+.ex-lsub span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A shared button for the shell's few real verbs (Paste, a dialog's Confirm/Cancel). styles.css owns .btn,
    so this is ex-btn — same restraint, this page's tokens. */
@@ -461,6 +485,12 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
 }
 [data-past='1'] .ex-rail { border-color: var(--border-hi); }
 
+/* The rail before its stops have landed. It is real chrome holding its own room, so it must read as
+   unfinished rather than as a machine with no past: the track fades back and the reading with it, and both
+   come up to full when the archives arrive. No spinner — nothing here is work the operator is waiting on. */
+.ex-rail.is-waiting .ex-rail-track::before { opacity: .22; }
+.ex-rail.is-waiting .ex-rail-when { opacity: .5; }
+
 /* Now: the way back to the light. In the past it is the one warm exit; clicking it cools the whole shell. */
 .ex-rail-now {
     flex: none;
@@ -495,7 +525,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     transform: translateY(-50%);
     background: linear-gradient(to right, var(--accent), var(--rail) 88%);
     opacity: .7;
-    transition: background .5s ease;
+    transition: background .5s ease, opacity .3s ease;
 }
 /* One stop per archive, evenly spaced so each is an equal target; the gradient, not the gaps, reads time. */
 .ex-rail-stops {
@@ -538,6 +568,7 @@ button.ex-lname:focus-visible { outline: 2px solid var(--accent); outline-offset
     font-size: 12px;
     color: var(--text-muted);
     line-height: 1.35;
+    transition: opacity .3s ease;
 }
 .ex-rail-stamp { display: block; font-family: var(--mono); color: var(--text); }
 .ex-rail-ago { color: var(--text-dim); }
@@ -1313,17 +1344,73 @@ select.ex-input { cursor: pointer; }
         transition: opacity .22s ease;
     }
     .ex-app.tree-open .ex-tree-scrim { opacity: 1; pointer-events: auto; }
+    /* The drawer is the whole of a phone's navigation, so its rows are thumb targets like the listing's. A
+       3px-padded tree row is about 26px — a pointer's target, and a coin-flip for a thumb. */
+    .ex-tree .ex-row { padding: 10px 10px 10px 0; }
+
+    /* The address bar is the other thing every navigation goes through, and its crumbs were 2px-padded text.
+       It gets the same treatment: a taller bar, and crumbs a thumb can actually land on. */
+    .ex-addressbar { height: 34px; }
+    .ex-crumb, .ex-crumb-here { padding: 6px 5px; }
 
     /* The pane's header wraps rather than shoving its actions off the edge, and reclaims a little side room. */
     .ex-pane-head { flex-wrap: wrap; padding: 10px 12px; }
     .ex-pane-body { padding: 14px 12px 40px; }
-    /* Rows become touch targets. A 5px-padded row is ~30px tall — fine for a pointer, under half what a
-       thumb reliably hits, which is why every phone file browser (iOS Files, Files by Google, Dropbox) sits
-       at 48px or more. The padding does the work so the row grows with its content rather than being pinned
-       to a fixed height. */
-    .ex-lhead, .ex-lrow { grid-template-columns: 24px minmax(0, 1fr) 80px; padding: 5px 8px; }
-    .ex-lrow { padding: 12px 8px; }
-    .ex-lhead span:last-child, .ex-lrow .ex-lmeta:last-child { display: none; }
+    /* --- the listing, as a phone file browser ---------------------------------------------------------
+       Columns are a desktop idea. Three of them across 390px leave a filename about twelve characters of
+       room, and the row's own controls had nowhere to go — which is how a single entry ended up wrapped
+       three times over. Every phone file browser worth copying (iOS Files, Files by Google, Dropbox) threw
+       columns out for the same reason and landed on the same shape, so this does too:
+
+           ┌──────────────────────────────────────┐
+           │ ☐   ▸ invoices                  🛡 › │   name — one line, ellipsised, never wrapped
+           │       2.1 MB · 3 days ago            │   its facts, quieter, underneath
+           └──────────────────────────────────────┘
+
+       One row is one entry: a checkbox, two lines of text, and a chevron when there is somewhere to go. The
+       column header goes with the columns — a heading for cells that no longer exist is just a stolen line. */
+    .ex-lhead { display: none; }
+    /* The first column is `auto`, not a fixed width: the file browser's rows lead with a checkbox and the
+       container and service listings do not, and an empty column that sizes itself costs those rows nothing. */
+    .ex-lrow {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas: "check name" "check sub";
+        column-gap: 12px;
+        row-gap: 1px;
+        padding: 10px 26px 10px 10px;   /* room on the right for the chevron */
+    }
+    .ex-lrow .ex-check { grid-area: check; position: relative; z-index: 1; }
+    .ex-lrow .ex-lname { grid-area: name; }
+    .ex-lrow .ex-lsub { grid-area: sub; display: flex; }
+    .ex-lrow .ex-lmeta { display: none; }
+    /* The wide listings (containers, published services) carry their own column rule at a specificity a media
+       query does not raise, so they have to be told again by name — otherwise they would keep three columns
+       on a phone while the areas above describe two, and the row would come apart. */
+    .ex-listing.is-wide .ex-lhead { display: none; }
+    .ex-listing.is-wide .ex-lrow { grid-template-columns: auto minmax(0, 1fr); }
+    .ex-listing.is-wide .ex-lmeta { display: none; }
+    /* The verbs are not lost, they have moved: Copy, Download and Delete are all on the selection bar, which
+       rises the moment anything is ticked. So on a phone the row is a thing and the bar is the verbs — the
+       select-then-act model every touch file browser uses, instead of three icon buttons per row. */
+    .ex-lrow .ex-lactions { display: none; }
+
+    /* A 14px filename is a thumb-hostile target, so a folder's whole row opens it: the name button's hit area
+       is stretched over the row (it is the row that is positioned, so inset:0 resolves against it). The
+       checkbox sits above that sheet and keeps doing its own job — the one thing inside the row that means
+       something else. Files are a <span>, not a button, so they get neither the sheet nor the chevron. */
+    button.ex-lname::before { content: ''; position: absolute; inset: 0; }
+    button.ex-lname::after {
+        content: '';
+        position: absolute;
+        right: 13px; top: 50%;
+        width: 7px; height: 7px;
+        border-right: 1.5px solid var(--text-dim);
+        border-top: 1.5px solid var(--text-dim);
+        transform: translateY(-50%) rotate(45deg);
+    }
+    /* Underlining a name on tap is a pointer idiom; a touch row says "pressed" with its whole surface. */
+    button.ex-lname:hover .ex-nm { color: inherit; text-decoration: none; }
+    .ex-lrow:active { background: var(--bg-hover); }
     /* 16px keeps iOS from zooming the layout the instant a field takes focus — the search field, and every
        form input (Settings, Add machine, credentials). */
     .ex-pal input, .ex-input { font-size: 16px; }
@@ -1334,10 +1421,15 @@ select.ex-input { cursor: pointer; }
     .ex-kv dt:first-child { margin-top: 0; }
     /* The version endpoint + property stack rather than share a cramped row. */
     .ex-field-pair { flex-direction: column; }
-    /* The rail wraps: Now over the track, the reading drops to its own line under both. */
-    .ex-rail { flex-wrap: wrap; gap: 10px 12px; }
+    /* The rail wraps onto two lines, not three: Now and the reading share the first (they are one sentence —
+       "you are standing here, at this time"), and the track, which needs the width, takes the second. Three
+       stacked lines pushed the first file most of a screen down, which on a file browser is the wrong thing
+       to spend a phone's height on. */
+    .ex-rail { flex-wrap: wrap; gap: 8px 12px; padding: 9px 12px; }
     .ex-rail-track { flex: 1 1 100%; order: 3; }
-    .ex-rail-when { max-width: none; flex: 1 1 100%; order: 2; text-align: left; }
+    .ex-rail-when { max-width: none; flex: 1 1 auto; order: 2; text-align: left; }
+    .ex-rail-stamp { display: inline; }
+    .ex-rail-ago::before { content: ' · '; }
 
     /* The bars above the listing (the selection toolbar, "Paste here") are label-left / buttons-right rows.
        On a phone the button group cannot shrink past its content, so space-between pushed it off the right
@@ -1349,4 +1441,19 @@ select.ex-input { cursor: pointer; }
     /* Touch targets, not pointer targets: the compact 4px selection buttons are below the ~44px a thumb
        needs, so they take the roomier default padding back on small screens. */
     .ex-selbar-actions .ex-btn { padding: 8px 12px; }
+
+    /* Since the rows gave their verbs up to this bar, the bar has to be somewhere a thumb can always reach —
+       so it leaves the scrolling flow and sits at the foot of the screen, where every touch file browser puts
+       the actions for a selection. It is the only thing in this shell that floats, and it earns it: it exists
+       only while something is ticked, and while it does it is the one way to act on it. The pane makes room
+       underneath so the bar can never cover the last row of a listing you are choosing from. */
+    .ex-selbar {
+        position: fixed;
+        left: 10px; right: 10px;
+        bottom: calc(10px + env(safe-area-inset-bottom));
+        z-index: 50;
+        margin: 0;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
+    }
+    .ex-app.has-sel .ex-pane-body { padding-bottom: 148px; }
 }
