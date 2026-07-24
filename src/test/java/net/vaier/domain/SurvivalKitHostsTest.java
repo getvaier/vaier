@@ -38,18 +38,18 @@ class SurvivalKitHostsTest {
     }
 
     private Machine peer(String name, String lanCidr, DeviceCategory category) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, "key", "10.13.13.2/32", "88.0.0.1", "51820",
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, "key", "10.13.13.2/32", "88.0.0.1", "51820",
             "now", "0 B", "0 B", lanCidr, null, true, null, category, null);
     }
 
     /** A peer with its own public address, so it can be given a place on the map. */
     private Machine peerAt(String name, String lanCidr, String endpointIp) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, "key", "10.13.13.2/32", endpointIp, "51820",
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, "key", "10.13.13.2/32", endpointIp, "51820",
             "now", "0 B", "0 B", lanCidr, null, true, null, DeviceCategory.SERVER, null);
     }
 
     private Machine lanServer(String name, String lanAddress, DeviceCategory category) {
-        return new Machine(name, MachineType.LAN_SERVER, null, null, null, null, null, null, null,
+        return new Machine(MachineId.generate(), name, MachineType.LAN_SERVER, null, null, null, null, null, null, null,
             null, lanAddress, false, null, category, null);
     }
 
@@ -107,9 +107,9 @@ class SurvivalKitHostsTest {
         // Vaier rewrites kits when passphrases change. A machine that is in a bag at that moment keeps a kit
         // that is silently out of date — the exact failure the printed sheet was rejected for. This reads
         // MachineType, the routing decision, not the icon beside the machine's name.
-        Machine laptop = new Machine("geir-pc", MachineType.WINDOWS_CLIENT, "key", null, null, null, null,
+        Machine laptop = new Machine(MachineId.generate(), "geir-pc", MachineType.WINDOWS_CLIENT, "key", null, null, null, null,
             null, null, null, null, false, null, DeviceCategory.SERVER, true);
-        Machine phone = new Machine("geirs-android", MachineType.MOBILE_CLIENT, "key", null, null, null,
+        Machine phone = new Machine(MachineId.generate(), "geirs-android", MachineType.MOBILE_CLIENT, "key", null, null, null,
             null, null, null, null, null, false, null, DeviceCategory.SERVER, true);
 
         SurvivalKitHosts.Selection selection = SurvivalKitHosts.select(List.of(laptop, phone,
@@ -126,11 +126,11 @@ class SurvivalKitHostsTest {
         // gateways — and both Roon machines are MEDIA. Reading the category threw all four out and left the
         // fleet holding a single copy that looked like a working kit. A category an operator picked to get a
         // nicer icon must never cost them a backup.
-        Machine gateway = new Machine("Colina 27", MachineType.UBUNTU_SERVER, "key", null, null, null, null,
+        Machine gateway = new Machine(MachineId.generate(), "Colina 27", MachineType.UBUNTU_SERVER, "key", null, null, null, null,
             null, null, "192.168.1.0/24", "192.168.1.118", true, null, DeviceCategory.GATEWAY, true);
-        Machine dietpi = new Machine("Roon kjokken", MachineType.LAN_SERVER, null, null, null, null, null,
+        Machine dietpi = new Machine(MachineId.generate(), "Roon kjokken", MachineType.LAN_SERVER, null, null, null, null, null,
             null, null, null, "192.168.3.104", false, null, DeviceCategory.MEDIA, true);
-        Machine printerShaped = new Machine("NUC02", MachineType.LAN_SERVER, null, null, null, null, null,
+        Machine printerShaped = new Machine(MachineId.generate(), "NUC02", MachineType.LAN_SERVER, null, null, null, null, null,
             null, null, null, "192.168.9.9", false, null, DeviceCategory.PRINTER, true);
 
         SurvivalKitHosts.Selection selection =
@@ -207,7 +207,7 @@ class SurvivalKitHostsTest {
 
     @Test
     void aMachineVaierCannotReachOverSshIsNotEligible_becauseItCouldNeverBeGivenAKit() {
-        Machine unreachable = new Machine("locked-down", MachineType.LAN_SERVER, null, null, null, null,
+        Machine unreachable = new Machine(MachineId.generate(), "locked-down", MachineType.LAN_SERVER, null, null, null, null,
             null, null, null, null, "192.168.9.4", false, null, DeviceCategory.SERVER, false);
 
         SurvivalKitHosts.Selection selection = SurvivalKitHosts.select(List.of(unreachable,
@@ -246,7 +246,7 @@ class SurvivalKitHostsTest {
     @Test
     void withNoEligibleMachineAtAll_itChoosesNothingRatherThanSomethingUnsuitable() {
         // Silently relaxing the rules would produce a kit on a laptop and a green tick next to it.
-        Machine laptop = new Machine("geir-pc", MachineType.WINDOWS_CLIENT, "key", null, null, null, null,
+        Machine laptop = new Machine(MachineId.generate(), "geir-pc", MachineType.WINDOWS_CLIENT, "key", null, null, null, null,
             null, null, null, null, false, null, DeviceCategory.SERVER, true);
 
         SurvivalKitHosts.Selection selection = SurvivalKitHosts.select(List.of(laptop), VAIER, NO_GEO);

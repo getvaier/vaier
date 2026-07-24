@@ -5,27 +5,46 @@ import java.net.UnknownHostException;
 import java.util.Collection;
 import java.util.Optional;
 
+/**
+ * A non-WireGuard machine Vaier knows about, persisted in {@code lan-servers.yml}.
+ *
+ * <p>Identified by its {@link MachineId} — not by its {@link #name()}, which is a freely editable
+ * label. Every {@code with*} copy and {@link #renamedTo} carries the id through unchanged: editing
+ * what a machine is called must never make it a different machine.
+ */
 public record LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
-                        String description, DeviceCategory deviceCategory, Boolean sshAccessOverride) {
+                        String description, DeviceCategory deviceCategory, Boolean sshAccessOverride,
+                        MachineId machineId) {
 
     private static final int MIN_PORT = 1;
     private static final int MAX_PORT = 65535;
 
-    /** Convenience constructor for a LAN server with no description and no device-category override. */
-    public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
-        this(name, lanAddress, runsDocker, dockerPort, null, null, null);
+    public LanServer {
+        if (machineId == null) {
+            throw new IllegalArgumentException("LAN server machineId must not be null");
+        }
     }
 
-    /** Convenience constructor for a LAN server with a description but no device-category override. */
+    /**
+     * Convenience constructor for a LAN server being <em>created</em> — it mints a fresh
+     * {@link MachineId}. A LAN server being <em>read</em> from storage must carry the id it was stored
+     * with, so the file adapter uses the full constructor instead. Same for the two overloads below.
+     */
+    public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort) {
+        this(name, lanAddress, runsDocker, dockerPort, null, null, null, MachineId.generate());
+    }
+
+    /** Convenience constructor for a new LAN server with a description. Mints a fresh {@link MachineId}. */
     public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                      String description) {
-        this(name, lanAddress, runsDocker, dockerPort, description, null, null);
+        this(name, lanAddress, runsDocker, dockerPort, description, null, null, MachineId.generate());
     }
 
-    /** Pre-ssh-access constructor: no SSH-access override, effective access is the smart default. */
+    /** Convenience constructor for a new LAN server with a device category. Mints a fresh {@link MachineId}. */
     public LanServer(String name, String lanAddress, boolean runsDocker, Integer dockerPort,
                      String description, DeviceCategory deviceCategory) {
-        this(name, lanAddress, runsDocker, dockerPort, description, deviceCategory, null);
+        this(name, lanAddress, runsDocker, dockerPort, description, deviceCategory, null,
+            MachineId.generate());
     }
 
     /** True when this LAN server is the one named {@code candidate} (exact match). */
@@ -59,7 +78,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
             throw new IllegalArgumentException("LAN server name must not contain '/'");
         }
         return new LanServer(newName.trim(), lanAddress, runsDocker, dockerPort, description,
-            deviceCategory, sshAccessOverride);
+            deviceCategory, sshAccessOverride, machineId);
     }
 
     /**
@@ -70,7 +89,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         String normalized = (newDescription == null || newDescription.isBlank())
             ? null : newDescription.trim();
         return new LanServer(name, lanAddress, runsDocker, dockerPort, normalized, deviceCategory,
-            sshAccessOverride);
+            sshAccessOverride, machineId);
     }
 
     /**
@@ -79,7 +98,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
      */
     public LanServer withDeviceCategory(DeviceCategory newDeviceCategory) {
         return new LanServer(name, lanAddress, runsDocker, dockerPort, description, newDeviceCategory,
-            sshAccessOverride);
+            sshAccessOverride, machineId);
     }
 
     /**
@@ -88,7 +107,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
      */
     public LanServer withSshAccessOverride(Boolean newSshAccessOverride) {
         return new LanServer(name, lanAddress, runsDocker, dockerPort, description, deviceCategory,
-            newSshAccessOverride);
+            newSshAccessOverride, machineId);
     }
 
     /**

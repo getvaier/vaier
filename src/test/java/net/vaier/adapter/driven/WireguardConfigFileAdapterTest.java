@@ -25,6 +25,70 @@ class WireguardConfigFileAdapterTest {
         ReflectionTestUtils.setField(adapter, "wireguardConfigPath", configDir.toString());
     }
 
+    // --- machine identity (#312 follow-up) ---
+
+    private static final String ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+    @Test
+    void getPeerConfigByName_readsTheMachineIdFromVaierMetadata() throws IOException {
+        createPeerConfWithVaierMetadata("laptop", "10.13.13.2",
+            "{\"id\":\"" + ID + "\",\"peerType\":\"UBUNTU_SERVER\"}");
+
+        assertThat(adapter.getPeerConfigByName("laptop")).get()
+            .extracting(p -> p.machineId().value()).isEqualTo(ID);
+    }
+
+    /**
+     * A peer's identity is read, never minted. A conf with no {@code id} is an unfinished hand-edit,
+     * and inventing one would produce a peer that is a stranger to its own credential and backup job.
+     */
+    @Test
+    void getPeerConfigByName_isEmptyWhenTheConfCarriesNoMachineId() throws IOException {
+        // Written raw: the shared fixture splices an id in, which is exactly what must be absent here.
+        Path peerDir = configDir.resolve("laptop");
+        Files.createDirectories(peerDir);
+        Files.writeString(peerDir.resolve("laptop.conf"),
+            "# VAIER: {\"peerType\":\"UBUNTU_SERVER\"}\n"
+            + "[Interface]\nAddress=10.13.13.2/32\nPrivateKey=testkey\n");
+
+        assertThat(adapter.getPeerConfigByName("laptop")).isEmpty();
+    }
+
+    @Test
+    void getPeerConfigByName_isEmptyWhenTheMachineIdIsMalformed() throws IOException {
+        createPeerConfWithVaierMetadata("laptop", "10.13.13.2",
+            "{\"id\":\"not-a-uuid\",\"peerType\":\"UBUNTU_SERVER\"}");
+
+        assertThat(adapter.getPeerConfigByName("laptop")).isEmpty();
+    }
+
+    /**
+     * The rename footgun, pinned: every {@code update*} rewrites the whole {@code # VAIER:} line, so a
+     * field dropped from that rewrite is a field erased from disk. Losing the id here would orphan the
+     * peer from everything keyed to it — the exact failure this identity work exists to end.
+     */
+    @Test
+    void updateName_preservesTheMachineId() throws IOException {
+        createPeerConfWithVaierMetadata("laptop", "10.13.13.2",
+            "{\"id\":\"" + ID + "\",\"peerType\":\"UBUNTU_SERVER\"}");
+
+        adapter.updateName("laptop", "Geir's laptop");
+
+        assertThat(adapter.getPeerConfigByName("laptop")).get()
+            .extracting(p -> p.machineId().value()).isEqualTo(ID);
+    }
+
+    @Test
+    void updateDescription_preservesTheMachineId() throws IOException {
+        createPeerConfWithVaierMetadata("laptop", "10.13.13.2",
+            "{\"id\":\"" + ID + "\",\"peerType\":\"UBUNTU_SERVER\"}");
+
+        adapter.updateDescription("laptop", "the one in the bag");
+
+        assertThat(adapter.getPeerConfigByName("laptop")).get()
+            .extracting(p -> p.machineId().value()).isEqualTo(ID);
+    }
+
     // --- getPeerConfigByName ---
 
     @Test
@@ -58,7 +122,8 @@ class WireguardConfigFileAdapterTest {
         Path peerDir = configDir.resolve("laptop");
         Files.createDirectories(peerDir);
         Files.writeString(peerDir.resolve("laptop.conf"),
-                "[Interface]\nAddress = 10.13.13.3/32\nPrivateKey = abc123\n");
+                "# VAIER: {\"id\":\"" + ID + "\"}\n"
+                + "[Interface]\nAddress = 10.13.13.3/32\nPrivateKey = abc123\n");
 
         Optional<PeerConfiguration> result = adapter.getPeerConfigByName("laptop");
 
@@ -667,18 +732,28 @@ class WireguardConfigFileAdapterTest {
 
     // helpers
 
+    /**
+     * A well-formed peer conf. Every peer Vaier can read carries a machine {@code id}, so the fixture
+     * writes one — a test about anything else should not have to restate that.
+     */
     private void createPeerConf(String peerName, String ip) throws IOException {
-        Path peerDir = configDir.resolve(peerName);
-        Files.createDirectories(peerDir);
-        Files.writeString(peerDir.resolve(peerName + ".conf"),
-                "[Interface]\nAddress=" + ip + "/32\nPrivateKey=testkey\n");
+        createPeerConfWithVaierMetadata(peerName, ip, "{}");
     }
 
+    /**
+     * A peer conf carrying {@code vaierJson} as its {@code # VAIER:} line. A machine {@code id} is
+     * spliced in when the supplied JSON does not already name one, so the many tests that pin some
+     * other metadata field still describe a readable peer. Pass an explicit {@code "id"} to control it.
+     */
     private void createPeerConfWithVaierMetadata(String peerName, String ip, String vaierJson)
             throws IOException {
+        String json = vaierJson.contains("\"id\"")
+            ? vaierJson
+            : vaierJson.replaceFirst("^\\{", "{\"id\":\"" + java.util.UUID.randomUUID() + "\"" +
+                (vaierJson.trim().equals("{}") ? "" : ","));
         Path peerDir = configDir.resolve(peerName);
         Files.createDirectories(peerDir);
         Files.writeString(peerDir.resolve(peerName + ".conf"),
-                "# VAIER: " + vaierJson + "\n[Interface]\nAddress=" + ip + "/32\nPrivateKey=testkey\n");
+                "# VAIER: " + json + "\n[Interface]\nAddress=" + ip + "/32\nPrivateKey=testkey\n");
     }
 }

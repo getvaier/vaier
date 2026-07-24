@@ -1,6 +1,7 @@
 package net.vaier.adapter.driven;
 
 import net.vaier.domain.LanServer;
+import net.vaier.domain.MachineId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 class LanServerFileAdapterTest {
 
@@ -28,17 +30,66 @@ class LanServerFileAdapterTest {
     }
 
     @Test
-    void save_runsDockerTrue_thenGetAll_returnsSavedServer() {
-        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375));
+    void save_thenGetAll_roundTripsTheMachineId() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
 
-        assertThat(adapter.getAll()).containsExactly(new LanServer("nas", "192.168.3.50", true, 2375));
+        adapter.save(nas);
+
+        assertThat(adapter.getAll()).singleElement()
+            .extracting(LanServer::machineId).isEqualTo(nas.machineId());
+    }
+
+    /**
+     * A stored machine's identity is read, never minted: an entry with no {@code id} is a hand-edit
+     * that has not been finished, and silently inventing one would mint a <em>new</em> machine that
+     * no credential, backup job or disk watch is keyed to. The entry is skipped loudly instead, and
+     * the rest of the file still loads — one bad line never costs the whole fleet.
+     */
+    @Test
+    void getAll_skipsAnEntryWithNoMachineIdButStillLoadsTheRest() throws Exception {
+        Files.writeString(tempDir.resolve("lan-servers.yml"), """
+            servers:
+            - name: no-id
+              lanAddress: 192.168.3.11
+              runsDocker: false
+            - name: has-id
+              lanAddress: 192.168.3.12
+              runsDocker: false
+              id: 3f2504e0-4f89-41d3-9a0c-0305e82c3301
+            """);
+
+        assertThat(adapter.getAll()).extracting(LanServer::name).containsExactly("has-id");
+    }
+
+    @Test
+    void getAll_skipsAnEntryWhoseMachineIdIsMalformed() throws Exception {
+        Files.writeString(tempDir.resolve("lan-servers.yml"), """
+            servers:
+            - name: bad-id
+              lanAddress: 192.168.3.11
+              runsDocker: false
+              id: not-a-uuid
+            """);
+
+        assertThat(adapter.getAll()).isEmpty();
+    }
+
+    @Test
+    void save_runsDockerTrue_thenGetAll_returnsSavedServer() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+
+        adapter.save(nas);
+
+        assertThat(adapter.getAll()).containsExactly(nas);
     }
 
     @Test
     void save_runsDockerFalse_persistsWithoutDockerPort() {
-        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+        LanServer printer = new LanServer("printer", "192.168.3.20", false, null);
 
-        assertThat(adapter.getAll()).containsExactly(new LanServer("printer", "192.168.3.20", false, null));
+        adapter.save(printer);
+
+        assertThat(adapter.getAll()).containsExactly(printer);
     }
 
     @Test
@@ -65,31 +116,34 @@ class LanServerFileAdapterTest {
 
     @Test
     void save_multipleServers_persistsAll() {
-        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375));
-        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+        LanServer printer = new LanServer("printer", "192.168.3.20", false, null);
 
-        assertThat(adapter.getAll()).containsExactlyInAnyOrder(
-            new LanServer("nas", "192.168.3.50", true, 2375),
-            new LanServer("printer", "192.168.3.20", false, null)
-        );
+        adapter.save(nas);
+        adapter.save(printer);
+
+        assertThat(adapter.getAll()).containsExactlyInAnyOrder(nas, printer);
     }
 
     @Test
     void save_existingName_replacesEntry() {
-        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375));
-        adapter.save(new LanServer("nas", "192.168.3.99", true, 2376));
+        LanServer replacement = new LanServer("nas", "192.168.3.99", true, 2376);
 
-        assertThat(adapter.getAll()).containsExactly(new LanServer("nas", "192.168.3.99", true, 2376));
+        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375));
+        adapter.save(replacement);
+
+        assertThat(adapter.getAll()).containsExactly(replacement);
     }
 
     @Test
     void deleteByName_existingServer_removesIt() {
+        LanServer printer = new LanServer("printer", "192.168.3.20", false, null);
         adapter.save(new LanServer("nas", "192.168.3.50", true, 2375));
-        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+        adapter.save(printer);
 
         adapter.deleteByName("nas");
 
-        assertThat(adapter.getAll()).containsExactly(new LanServer("printer", "192.168.3.20", false, null));
+        assertThat(adapter.getAll()).containsExactly(printer);
     }
 
     @Test
@@ -103,15 +157,14 @@ class LanServerFileAdapterTest {
 
     @Test
     void getAll_roundTripsThroughFreshAdapter() {
-        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375));
-        adapter.save(new LanServer("printer", "192.168.3.20", false, null));
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
+        LanServer printer = new LanServer("printer", "192.168.3.20", false, null);
+        adapter.save(nas);
+        adapter.save(printer);
 
         LanServerFileAdapter reread = new LanServerFileAdapter(tempDir.toString());
 
-        assertThat(reread.getAll()).containsExactlyInAnyOrder(
-            new LanServer("nas", "192.168.3.50", true, 2375),
-            new LanServer("printer", "192.168.3.20", false, null)
-        );
+        assertThat(reread.getAll()).containsExactlyInAnyOrder(nas, printer);
     }
 
     @Test
@@ -128,10 +181,15 @@ class LanServerFileAdapterTest {
 
         LanServerFileAdapter migrated = new LanServerFileAdapter(tempDir.toString());
 
-        assertThat(migrated.getAll()).containsExactlyInAnyOrder(
-            new LanServer("nas", "192.168.3.50", true, 2375),
-            new LanServer("media", "192.168.3.51", true, 2376)
-        );
+        // Promoting a pre-LanServer legacy file is the one place identity is minted rather than read,
+        // so the ids are unpredictable — compare the fields the migration is responsible for, and
+        // assert only that every promoted machine came away with an identity.
+        assertThat(migrated.getAll())
+            .extracting(LanServer::name, LanServer::lanAddress, LanServer::runsDocker, LanServer::dockerPort)
+            .containsExactlyInAnyOrder(
+                tuple("nas", "192.168.3.50", true, 2375),
+                tuple("media", "192.168.3.51", true, 2376));
+        assertThat(migrated.getAll()).allSatisfy(s -> assertThat(s.machineId()).isNotNull());
         assertThat(Files.exists(tempDir.resolve("lan-servers.yml"))).isTrue();
         assertThat(Files.exists(tempDir.resolve("lan-docker-hosts.yml"))).isFalse();
     }
@@ -140,7 +198,8 @@ class LanServerFileAdapterTest {
     void migration_idempotent_doesNotOverwriteWhenNewFileExists() throws Exception {
         Files.writeString(tempDir.resolve("lan-servers.yml"), """
             servers:
-              - name: existing
+              - id: 3f2504e0-4f89-41d3-9a0c-0305e82c3301
+                name: existing
                 lanAddress: 10.0.0.1
                 runsDocker: false
             """);
@@ -154,7 +213,8 @@ class LanServerFileAdapterTest {
         LanServerFileAdapter migrated = new LanServerFileAdapter(tempDir.toString());
 
         assertThat(migrated.getAll()).containsExactly(
-            new LanServer("existing", "10.0.0.1", false, null)
+            new LanServer("existing", "10.0.0.1", false, null, null, null, null,
+                MachineId.of("3f2504e0-4f89-41d3-9a0c-0305e82c3301"))
         );
         assertThat(Files.exists(tempDir.resolve("lan-docker-hosts.yml"))).isTrue();
     }
@@ -171,10 +231,11 @@ class LanServerFileAdapterTest {
 
     @Test
     void save_withDescription_thenGetAll_roundTripsTheDescription() {
-        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, "Synology in the closet"));
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375, "Synology in the closet");
 
-        assertThat(adapter.getAll()).containsExactly(
-            new LanServer("nas", "192.168.3.50", true, 2375, "Synology in the closet"));
+        adapter.save(nas);
+
+        assertThat(adapter.getAll()).containsExactly(nas);
     }
 
     @Test
@@ -219,7 +280,8 @@ class LanServerFileAdapterTest {
 
     @Test
     void save_withSshAccessOverride_roundTripsThroughFreshAdapter() {
-        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, null, null, false));
+        adapter.save(new LanServer("nas", "192.168.3.50", true, 2375, null, null, false,
+            MachineId.generate()));
 
         LanServerFileAdapter fresh = new LanServerFileAdapter(tempDir.toString());
         LanServer loaded = fresh.getAll().get(0);

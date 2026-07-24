@@ -2,6 +2,7 @@ package net.vaier.domain.port;
 
 import net.vaier.domain.DeviceCategory;
 import net.vaier.domain.Machine;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.PeerId;
 
@@ -40,28 +41,44 @@ public interface ForGettingPeerConfigurations {
         String lanAddress,
         String description,
         DeviceCategory deviceCategory,
-        Boolean sshAccess
+        Boolean sshAccess,
+        MachineId machineId
     ) {
+        public PeerConfiguration {
+            if (machineId == null) {
+                throw new IllegalArgumentException("Peer machineId must not be null");
+            }
+        }
+
+        /**
+         * Convenience constructor for a peer being <em>created</em> — it mints a fresh
+         * {@link MachineId}. A peer being <em>read</em> from its config file must carry the id stored
+         * in its {@code # VAIER:} metadata, so the WireGuard adapter uses the full constructor
+         * instead. Same for the four overloads below.
+         */
         public PeerConfiguration(String id, String ipAddress, String configContent) {
             this(id, PeerId.display(id), ipAddress, configContent, MachineType.UBUNTU_SERVER,
-                null, null, null, null, null);
+                null, null, null, null, null, MachineId.generate());
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, null, null, null,
+                null, MachineId.generate());
         }
 
         public PeerConfiguration(String id, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress) {
-            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null, null, null);
+            this(id, PeerId.display(id), ipAddress, configContent, peerType, lanCidr, lanAddress, null,
+                null, null, MachineId.generate());
         }
 
         /** Pre-device-category constructor: no override, effective category is auto-detected. */
         public PeerConfiguration(String id, String name, String ipAddress, String configContent,
                                  MachineType peerType, String lanCidr, String lanAddress,
                                  String description) {
-            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null, null);
+            this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description, null,
+                null, MachineId.generate());
         }
 
         /** Pre-ssh-access constructor: no SSH-access override, effective access is the smart default. */
@@ -69,7 +86,7 @@ public interface ForGettingPeerConfigurations {
                                  MachineType peerType, String lanCidr, String lanAddress,
                                  String description, DeviceCategory deviceCategory) {
             this(id, name, ipAddress, configContent, peerType, lanCidr, lanAddress, description,
-                deviceCategory, null);
+                deviceCategory, null, MachineId.generate());
         }
 
         /**

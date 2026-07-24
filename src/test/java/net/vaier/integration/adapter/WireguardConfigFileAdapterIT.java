@@ -40,13 +40,12 @@ class WireguardConfigFileAdapterIT {
         content.append("[Interface]\n");
         content.append("Address = ").append(ipAddress).append("/32\n");
         content.append("PrivateKey = somePrivateKey\n");
-        if (peerType != null || lanCidr != null) {
-            content.append("# VAIER: {");
-            if (peerType != null) content.append("\"peerType\":\"").append(peerType.name()).append("\"");
-            if (peerType != null && lanCidr != null) content.append(",");
-            if (lanCidr != null) content.append("\"lanCidr\":\"").append(lanCidr).append("\"");
-            content.append("}\n");
-        }
+        // Every readable peer carries a machine id, so the fixture always writes one — a test about
+        // peer type or LAN CIDR should not have to restate that.
+        content.append("# VAIER: {\"id\":\"").append(java.util.UUID.randomUUID()).append("\"");
+        if (peerType != null) content.append(",\"peerType\":\"").append(peerType.name()).append("\"");
+        if (lanCidr != null) content.append(",\"lanCidr\":\"").append(lanCidr).append("\"");
+        content.append("}\n");
         content.append("[Peer]\n");
         content.append("PublicKey = serverPublicKey\n");
         Files.writeString(peerDir.resolve(peerName + ".conf"), content.toString());

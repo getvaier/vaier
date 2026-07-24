@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class MachineNudgeTest {
 
     private static Machine storageMachine(String name, DeviceCategory category) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, "pk", "10.13.13.9/32", null, null,
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, "pk", "10.13.13.9/32", null, null,
             null, null, null, null, null, true, null, category, null);
     }
 

@@ -31,6 +31,14 @@ public class VaierConfig {
      */
     private Boolean vaierServerSshAccess;
 
+    /**
+     * The {@link MachineId} of the Vaier-server machine (#311), as its canonical string. The Vaier
+     * server is neither a peer nor a LAN server, so — like its SSH-access override — its identity has
+     * nowhere else to live. Null on a Vaier that has not yet been assigned one; it is minted once, on
+     * first use, and persisted here.
+     */
+    private String vaierServerMachineId;
+
     /** The default host-disk alert threshold when none is configured: notify above 85% used. */
     public static final int DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT = 85;
 

@@ -13,6 +13,7 @@ import java.util.Map;
  * LAN servers with {@code runsDocker=true}.
  */
 public record Machine(
+    MachineId id,
     String name,
     MachineType type,
     String publicKey,
@@ -63,6 +64,7 @@ public record Machine(
      */
     public static Machine fromPeer(PeerConfiguration peer, VpnClient client) {
         return new Machine(
+            peer.machineId(),
             peer.name(),
             peer.peerType(),
             client == null ? null : client.publicKey(),
@@ -87,6 +89,7 @@ public record Machine(
      */
     public static Machine fromLanServer(LanServer server, String anchorLanCidr) {
         return new Machine(
+            server.machineId(),
             server.name(),
             MachineType.LAN_SERVER,
             null, null, null, null, null, null, null,
@@ -111,9 +114,9 @@ public record Machine(
      * entry for it; the port is null because Vaier reaches that engine over the local socket, not a TCP port.
      * Every peer/LAN-only field is null.
      */
-    public static Machine vaierServer(Boolean sshAccessOverride) {
+    public static Machine vaierServer(MachineId id, Boolean sshAccessOverride) {
         return new Machine(
-            LanAnchor.VAIER_SERVER_NAME, MachineType.UBUNTU_SERVER,
+            id, LanAnchor.VAIER_SERVER_NAME, MachineType.UBUNTU_SERVER,
             null, null, null, null, null, null, null,
             null, null, true, null, DeviceCategory.SERVER, sshAccessOverride);
     }

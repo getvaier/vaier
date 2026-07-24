@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.domain.MachineId;
 import net.vaier.application.AuthorizeBackupClientUseCase.AuthorizeResult;
 import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.CheckBackupPrerequisitesUseCase.BorgAvailability;
@@ -74,7 +75,7 @@ class BackupProvisionerTest {
     }
 
     private Machine sshMachine(String name) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
             null, "10.13.13.9", false, null, DeviceCategory.SERVER, null);
     }
 

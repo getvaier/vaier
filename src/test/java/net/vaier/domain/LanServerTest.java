@@ -10,6 +10,56 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LanServerTest {
 
+    private static final MachineId ID = MachineId.of("3f2504e0-4f89-41d3-9a0c-0305e82c3301");
+
+    private static LanServer nas() {
+        return new LanServer("NAS", "192.168.3.50", true, 2375, "the box", DeviceCategory.NAS, true, ID);
+    }
+
+    /**
+     * The invariant this whole refactor exists for: a rename edits a label and touches nothing else.
+     * Identity must survive it, or every record keyed on the machine is orphaned the moment someone
+     * fixes a typo in a name.
+     */
+    @Test
+    void renamedTo_preservesTheMachineId() {
+        assertThat(nas().renamedTo("Storage").machineId()).isEqualTo(ID);
+    }
+
+    @Test
+    void withDescription_preservesTheMachineId() {
+        assertThat(nas().withDescription("something else").machineId()).isEqualTo(ID);
+    }
+
+    @Test
+    void withDeviceCategory_preservesTheMachineId() {
+        assertThat(nas().withDeviceCategory(DeviceCategory.PRINTER).machineId()).isEqualTo(ID);
+    }
+
+    @Test
+    void withSshAccessOverride_preservesTheMachineId() {
+        assertThat(nas().withSshAccessOverride(false).machineId()).isEqualTo(ID);
+    }
+
+    @Test
+    void constructor_rejectsAMissingMachineId() {
+        assertThatThrownBy(() -> new LanServer("NAS", "192.168.3.50", false, null, null, null, null, null))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /**
+     * The short constructors describe a machine being <em>created</em>, so they mint a fresh identity.
+     * A machine being <em>read</em> from storage must carry the id it was stored with — that is the
+     * eight-argument constructor, and the file adapter uses it.
+     */
+    @Test
+    void shortConstructor_mintsAFreshIdentityForANewMachine() {
+        LanServer one = new LanServer("NAS", "192.168.3.50", false, null);
+        LanServer two = new LanServer("NAS", "192.168.3.50", false, null);
+        assertThat(one.machineId()).isNotNull();
+        assertThat(one.machineId()).isNotEqualTo(two.machineId());
+    }
+
     @Test
     void validate_runsDockerTrueWithValidPort_passes() {
         LanServer.validate("nas", "192.168.3.50", true, 2375);

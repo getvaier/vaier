@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.domain.MachineId;
 import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupServersUseCase;
@@ -77,11 +78,11 @@ class MachineRestControllerTest {
     @Test
     void list_returnsMachinesAcrossWgPeerAndLanServer() {
         when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
-            new Machine("alice", MachineType.UBUNTU_SERVER,
+            new Machine(MachineId.generate(), "alice", MachineType.UBUNTU_SERVER,
                 "pubkey", "10.13.13.2/32", "1.2.3.4", "51820",
                 "1700000000", "100", "200",
                 null, null, true, null, net.vaier.domain.DeviceCategory.SERVER, null),
-            new Machine("nas", MachineType.LAN_SERVER,
+            new Machine(MachineId.generate(), "nas", MachineType.LAN_SERVER,
                 null, null, null, null, null, null, null,
                 "192.168.3.0/24", "192.168.3.50", true, 2375, net.vaier.domain.DeviceCategory.NAS, null)
         ));
@@ -106,10 +107,10 @@ class MachineRestControllerTest {
         // credential for it, not merely the ssh-access toggle — so GET /machines carries hasCredential
         // per machine: true iff a stored host credential with a secret exists for that name.
         when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
-            new Machine("nas", MachineType.LAN_SERVER,
+            new Machine(MachineId.generate(), "nas", MachineType.LAN_SERVER,
                 null, null, null, null, null, null, null,
                 "192.168.3.0/24", "192.168.3.50", true, 2375, DeviceCategory.NAS, null),
-            new Machine("printer", MachineType.LAN_SERVER,
+            new Machine(MachineId.generate(), "printer", MachineType.LAN_SERVER,
                 null, null, null, null, null, null, null,
                 "192.168.3.0/24", "192.168.3.20", false, null, DeviceCategory.PRINTER, null)
         ));
@@ -126,10 +127,10 @@ class MachineRestControllerTest {
     void list_exposesEffectiveSshAccess() {
         // A server defaults SSH-on; a phone client defaults SSH-off — both with no override.
         when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
-            new Machine("alice", MachineType.UBUNTU_SERVER,
+            new Machine(MachineId.generate(), "alice", MachineType.UBUNTU_SERVER,
                 null, null, null, null, null, null, null,
                 null, null, true, null, net.vaier.domain.DeviceCategory.SERVER, null),
-            new Machine("phone", MachineType.MOBILE_CLIENT,
+            new Machine(MachineId.generate(), "phone", MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, null, null,
                 null, null, false, null, net.vaier.domain.DeviceCategory.PHONE, null)
         ));
@@ -165,7 +166,7 @@ class MachineRestControllerTest {
 
     @Test
     void vaierServer_reportsEffectiveSshAccessAndCredentialPresence() {
-        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(null));
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(MachineId.generate(), null));
         when(getHostCredentialUseCase.getHostCredential(LanAnchor.VAIER_SERVER_NAME))
             .thenReturn(Optional.of(new HostCredentialView(LanAnchor.VAIER_SERVER_NAME, "root",
                 AuthMethod.PASSWORD, true)));
@@ -179,7 +180,7 @@ class MachineRestControllerTest {
 
     @Test
     void vaierServer_noCredentialStored_reportsHasCredentialFalse() {
-        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(false));
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(MachineId.generate(), false));
         when(getHostCredentialUseCase.getHostCredential(LanAnchor.VAIER_SERVER_NAME))
             .thenReturn(Optional.empty());
 
@@ -210,10 +211,10 @@ class MachineRestControllerTest {
         // A reachable, storage-class peer, with an exposed service, an SSH credential, nothing backed up,
         // and no backup server anywhere ⇒ all three nudges fire.
         String freshHandshake = String.valueOf(System.currentTimeMillis() / 1000);
-        Machine alice = new Machine("alice", MachineType.UBUNTU_SERVER, "pk", "10.13.13.2/32",
+        Machine alice = new Machine(MachineId.generate(), "alice", MachineType.UBUNTU_SERVER, "pk", "10.13.13.2/32",
             "1.2.3.4", "51820", freshHandshake, "1", "1", null, null, true, null, DeviceCategory.SERVER, null);
         when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(alice));
-        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(null));
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(MachineId.generate(), null));
         when(getPublishableServicesUseCase.getPublishableServices()).thenReturn(List.of(
             new PublishableService(PublishableSource.PEER, "alice", "10.13.13.2", "grafana", 3000, null, false)));
         when(getHostCredentialUseCase.getHostCredential("alice")).thenReturn(

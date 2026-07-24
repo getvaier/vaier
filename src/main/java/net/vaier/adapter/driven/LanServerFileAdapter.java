@@ -60,6 +60,8 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
                     String hostIp = asString(m.get("hostIp"));
                     Object port = m.get("port");
                     if (name != null && hostIp != null && port instanceof Number n) {
+                        // Minting is correct here and only here: this is the one-time promotion of a
+                        // pre-LanServer legacy file, so these machines have no identity yet to preserve.
                         result.add(new LanServer(name, hostIp, true, n.intValue()));
                     }
                 }
@@ -92,9 +94,10 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
                     net.vaier.domain.DeviceCategory deviceCategory =
                         parseDeviceCategory(asString(m.get("deviceCategory")));
                     Boolean sshAccessOverride = m.get("sshAccessOverride") instanceof Boolean b2 ? b2 : null;
-                    if (name != null && lanAddress != null) {
+                    net.vaier.domain.MachineId machineId = readMachineId(asString(m.get("id")), name);
+                    if (name != null && lanAddress != null && machineId != null) {
                         result.add(new LanServer(name, lanAddress, runsDocker, dockerPort, description,
-                            deviceCategory, sshAccessOverride));
+                            deviceCategory, sshAccessOverride, machineId));
                     }
                 }
             }
@@ -132,6 +135,8 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
         List<Map<String, Object>> serialized = new ArrayList<>();
         for (LanServer s : servers) {
             Map<String, Object> entry = new LinkedHashMap<>();
+            // Identity first, so it reads as the key it is when someone opens the file.
+            entry.put("id", s.machineId().value());
             entry.put("name", s.name());
             entry.put("lanAddress", s.lanAddress());
             entry.put("runsDocker", s.runsDocker());
@@ -162,6 +167,33 @@ public class LanServerFileAdapter implements ForPersistingLanServers {
 
     private static String asString(Object o) {
         return o == null ? null : o.toString();
+    }
+
+    /**
+     * The stored {@link net.vaier.domain.MachineId} for an entry, or null when it has none or the value
+     * is malformed — the caller then skips the entry.
+     *
+     * <p>A stored machine's identity is <em>read</em>, never minted. Inventing an id here would produce a
+     * machine that looks right in the UI but is a stranger to every record keyed on it — its credential,
+     * its host-key pin, its backup jobs. Skipping loudly leaves the operator a file to fix; a silent mint
+     * would leave them a fleet to debug.
+     */
+    private static net.vaier.domain.MachineId readMachineId(String raw, String name) {
+        // name comes from lan-servers.yml, which can be hand-edited — collapse any CR/LF so a
+        // malformed value can't forge multiline log entries.
+        String safeName = name == null ? "(unnamed)" : name.replaceAll("[\r\n]+", "_");
+        if (raw == null || raw.isBlank()) {
+            log.error("LAN server '{}' in {} has no id — skipping it. Add an `id:` (a UUID) to that entry.",
+                safeName, FILE_NAME);
+            return null;
+        }
+        try {
+            return net.vaier.domain.MachineId.of(raw);
+        } catch (IllegalArgumentException e) {
+            log.error("LAN server '{}' in {} has a malformed id — skipping it: {}",
+                safeName, FILE_NAME, e.getMessage());
+            return null;
+        }
     }
 
     /**

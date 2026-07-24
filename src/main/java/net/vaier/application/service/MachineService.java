@@ -199,12 +199,36 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     // override. Resolved here (or in the SSH-session adapter) when the connection lands; not needed for
     // the credential/SSH-access surface in this slice.
 
-    /** The Vaier-server singleton, carrying its SSH-access override read from the Vaier config. */
+    /**
+     * The Vaier-server singleton, carrying its identity and SSH-access override from the Vaier config.
+     *
+     * <p>Unlike a peer or a LAN server, this machine has no creation event to mint an identity at — it
+     * exists because Vaier was installed. So its {@link net.vaier.domain.MachineId} is assigned on first
+     * use and persisted; every later call reads the stored one. This is initialisation, not migration:
+     * a brand-new Vaier reaches this path too, and the assignment is idempotent.
+     */
     private Machine vaierServerMachine() {
-        Boolean override = forPersistingAppConfiguration.load()
-            .map(VaierConfig::getVaierServerSshAccess)
-            .orElse(null);
-        return Machine.vaierServer(override);
+        VaierConfig config = forPersistingAppConfiguration.load().orElse(null);
+        Boolean override = config == null ? null : config.getVaierServerSshAccess();
+        return Machine.vaierServer(vaierServerMachineId(config), override);
+    }
+
+    /** The stored Vaier-server machine id, or a freshly minted one persisted back to the config. */
+    private net.vaier.domain.MachineId vaierServerMachineId(VaierConfig config) {
+        if (config != null && config.getVaierServerMachineId() != null) {
+            try {
+                return net.vaier.domain.MachineId.of(config.getVaierServerMachineId());
+            } catch (IllegalArgumentException e) {
+                log.error("vaierServerMachineId in the Vaier config is malformed ({}); assigning a new one."
+                    + " Anything keyed to the old id will need re-pointing.", e.getMessage());
+            }
+        }
+        net.vaier.domain.MachineId assigned = net.vaier.domain.MachineId.generate();
+        VaierConfig toSave = (config == null ? VaierConfig.builder().build() : config)
+            .toBuilder().vaierServerMachineId(assigned.value()).build();
+        forPersistingAppConfiguration.save(toSave);
+        log.info("Assigned the Vaier server its machine id {}", assigned);
+        return assigned;
     }
 
     @Override

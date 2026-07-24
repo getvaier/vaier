@@ -79,7 +79,7 @@ class LanServerServiceTest {
 
         ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
         verify(forPersistingLanServers).save(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new LanServer("nas", "192.168.3.50", true, 2375));
+        assertThat(captor.getValue()).usingRecursiveComparison().ignoringFields("machineId").isEqualTo(new LanServer("nas", "192.168.3.50", true, 2375));
     }
 
     @Test
@@ -92,7 +92,7 @@ class LanServerServiceTest {
 
         ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
         verify(forPersistingLanServers).save(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new LanServer("printer", "192.168.3.20", false, null));
+        assertThat(captor.getValue()).usingRecursiveComparison().ignoringFields("machineId").isEqualTo(new LanServer("printer", "192.168.3.20", false, null));
     }
 
     @Test
@@ -124,8 +124,11 @@ class LanServerServiceTest {
             net.vaier.domain.DeviceCategory.NAS, draft);
 
         // The machine is registered exactly as the credential-free register does.
-        verify(forPersistingLanServers).save(new LanServer(
-            "roon", "192.168.3.50", true, 2375, "Roon core", net.vaier.domain.DeviceCategory.NAS));
+        ArgumentCaptor<LanServer> saved = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(saved.capture());
+        assertThat(saved.getValue()).usingRecursiveComparison().ignoringFields("machineId")
+            .isEqualTo(new LanServer(
+                "roon", "192.168.3.50", true, 2375, "Roon core", net.vaier.domain.DeviceCategory.NAS));
         // The credential is stored keyed to the machine's name, unmanaged.
         verify(forPersistingHostCredentials).save(new net.vaier.domain.HostCredential(
             "roon", "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false));
@@ -192,7 +195,7 @@ class LanServerServiceTest {
         // open 2375, category (NAS) pinned as the override.
         ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
         verify(forPersistingLanServers).save(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new LanServer(
+        assertThat(captor.getValue()).usingRecursiveComparison().ignoringFields("machineId").isEqualTo(new LanServer(
             "synology-nas", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS));
         // The candidate is dropped from the snapshot so it stops surfacing as a discovered machine.
         verify(forForgettingDiscoveredLanMachines).forget("192.168.3.50");
@@ -213,7 +216,7 @@ class LanServerServiceTest {
 
         ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
         verify(forPersistingLanServers).save(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new LanServer(
+        assertThat(captor.getValue()).usingRecursiveComparison().ignoringFields("machineId").isEqualTo(new LanServer(
             "hallway-printer", "192.168.3.20", false, null, null,
             net.vaier.domain.DeviceCategory.PRINTER));
     }
@@ -236,8 +239,11 @@ class LanServerServiceTest {
         var outcome = service.adopt("192.168.3.50", null, draft);
 
         // The machine is registered exactly as the 2-arg adopt does.
-        verify(forPersistingLanServers).save(new LanServer(
-            "synology-nas", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS));
+        ArgumentCaptor<LanServer> adopted = ArgumentCaptor.forClass(LanServer.class);
+        verify(forPersistingLanServers).save(adopted.capture());
+        assertThat(adopted.getValue()).usingRecursiveComparison().ignoringFields("machineId")
+            .isEqualTo(new LanServer(
+                "synology-nas", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS));
         verify(forForgettingDiscoveredLanMachines).forget("192.168.3.50");
         // The credential is stored keyed to the new machine's derived name, unmanaged.
         verify(forPersistingHostCredentials).save(new net.vaier.domain.HostCredential(
@@ -397,7 +403,7 @@ class LanServerServiceTest {
 
         ArgumentCaptor<LanServer> captor = ArgumentCaptor.forClass(LanServer.class);
         verify(forPersistingLanServers).save(captor.capture());
-        assertThat(captor.getValue()).isEqualTo(new LanServer("vpc-box", "172.31.5.20", true, 2375));
+        assertThat(captor.getValue()).usingRecursiveComparison().ignoringFields("machineId").isEqualTo(new LanServer("vpc-box", "172.31.5.20", true, 2375));
     }
 
     @Test

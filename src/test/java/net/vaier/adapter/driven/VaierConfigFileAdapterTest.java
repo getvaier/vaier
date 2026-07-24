@@ -309,6 +309,28 @@ class VaierConfigFileAdapterTest {
         assertThat(adapter().load().orElseThrow().getAwsSecret()).isEqualTo("legacy-plain-aws");
     }
 
+    // --- Vaier-server machine identity ---
+
+    @Test
+    void load_roundTripsVaierServerMachineId() {
+        VaierConfig config = VaierConfig.builder()
+            .domain("example.com")
+            .vaierServerMachineId("3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+            .build();
+
+        adapter().save(config);
+
+        assertThat(adapter().load().orElseThrow().getVaierServerMachineId())
+            .isEqualTo("3f2504e0-4f89-41d3-9a0c-0305e82c3301");
+    }
+
+    @Test
+    void load_vaierServerMachineIdNullWhenNotPresent() {
+        adapter().save(VaierConfig.builder().domain("example.com").build());
+
+        assertThat(adapter().load().orElseThrow().getVaierServerMachineId()).isNull();
+    }
+
     // --- Vaier-server SSH access (#311) ---
 
     @Test

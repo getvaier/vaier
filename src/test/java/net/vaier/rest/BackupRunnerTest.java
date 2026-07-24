@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.domain.MachineId;
 import net.vaier.application.BackupWorkDirResolver;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
@@ -88,7 +89,7 @@ class BackupRunnerTest {
     }
 
     private Machine sshMachine(String name) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
             null, "10.13.13.9", false, null, DeviceCategory.SERVER, null);
     }
 
@@ -445,7 +446,7 @@ class BackupRunnerTest {
         verify(runner, never()).run(any(), any());
 
         // SSH access disabled: never runs, records a FAILED run.
-        Machine off = new Machine("Colina 27", MachineType.LAN_SERVER, null, null, null, null, null, null, null,
+        Machine off = new Machine(MachineId.generate(), "Colina 27", MachineType.LAN_SERVER, null, null, null, null, null, null, null,
             null, "10.13.13.9", false, null, DeviceCategory.SERVER, false);
         when(machines.getAllMachines()).thenReturn(List.of(off));
 

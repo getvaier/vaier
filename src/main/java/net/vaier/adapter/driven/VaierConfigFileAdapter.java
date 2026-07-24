@@ -63,6 +63,7 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
                 .diskMonitorThresholdPercent((Integer) data.get("diskMonitorThresholdPercent"))
                 .backupScheduleHour((Integer) data.get("backupScheduleHour"))
                 .vaierServerSshAccess((Boolean) data.get("vaierServerSshAccess"))
+                .vaierServerMachineId((String) data.get("vaierServerMachineId"))
                 .build());
         } catch (Exception e) {
             log.warn("Failed to load vaier config from {}", configFilePath, e);
@@ -98,6 +99,10 @@ public class VaierConfigFileAdapter implements ForPersistingAppConfiguration, Fo
         // Vaier-server SSH-access override (#311); only written when the operator has pinned one.
         if (config.getVaierServerSshAccess() != null) {
             data.put("vaierServerSshAccess", config.getVaierServerSshAccess());
+        }
+        // The Vaier-server machine's identity; absent until one has been assigned.
+        if (config.getVaierServerMachineId() != null) {
+            data.put("vaierServerMachineId", config.getVaierServerMachineId());
         }
 
         try (FileWriter writer = new FileWriter(file)) {

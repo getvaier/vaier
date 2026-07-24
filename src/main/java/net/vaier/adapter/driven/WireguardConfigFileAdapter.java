@@ -32,9 +32,38 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    /**
+     * The peer's Vaier-owned fields, carried in its {@code # VAIER:} config comment.
+     *
+     * <p>{@code id} is the peer's {@link net.vaier.domain.MachineId} — its identity. Note that every
+     * {@code update*} rewrites this whole line, so a field omitted from a rewrite is erased from disk:
+     * each mutator must carry {@code id} through explicitly.
+     */
     private record VaierMetadata(String peerType, String lanCidr, String lanAddress, String description,
-                                 String name, String deviceCategory, Boolean sshAccess) {
-        VaierMetadata() { this(null, null, null, null, null, null, null); }
+                                 String name, String deviceCategory, Boolean sshAccess, String id) {
+        VaierMetadata() { this(null, null, null, null, null, null, null, null); }
+    }
+
+    /**
+     * The peer's stored {@link net.vaier.domain.MachineId}, or null when it has none or the value is
+     * malformed — the peer then does not load at all.
+     *
+     * <p>A peer's identity is read, never minted. Inventing one here would hand back a peer that looks
+     * right but is a stranger to its own credential, host-key pin and backup job.
+     */
+    private static net.vaier.domain.MachineId readMachineId(String peerName, VaierMetadata meta) {
+        if (meta.id() == null || meta.id().isBlank()) {
+            log.error("Peer '{}' has no id in its # VAIER: metadata — refusing to load it. "
+                + "Add an \"id\" (a UUID) to that line.", peerName.replaceAll("[\r\n]+", "_"));
+            return null;
+        }
+        try {
+            return net.vaier.domain.MachineId.of(meta.id());
+        } catch (IllegalArgumentException e) {
+            log.error("Peer '{}' has a malformed id in its # VAIER: metadata — refusing to load it: {}",
+                peerName.replaceAll("[\r\n]+", "_"), e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -59,10 +88,15 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             String configContent = Files.readString(peerConfigPath);
             String ipAddress = WireGuardPeerConfig.readIpAddress(configContent);
             VaierMetadata meta = extractVaierMetadata(configContent);
+            net.vaier.domain.MachineId machineId = readMachineId(peerName, meta);
+            if (machineId == null) {
+                return Optional.empty();
+            }
 
             return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
                     configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
-                    meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess()));
+                    meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess(),
+                    machineId));
         } catch (Exception e) {
             log.error("Failed to read peer config: {}", e.getMessage(), e);
             return Optional.empty();
@@ -97,10 +131,15 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
                 Path peerConfigPath = foundPeerDir.get().resolve(peerName + ".conf");
                 String configContent = Files.readString(peerConfigPath);
                 VaierMetadata meta = extractVaierMetadata(configContent);
+                net.vaier.domain.MachineId machineId = readMachineId(peerName, meta);
+                if (machineId == null) {
+                    return Optional.empty();
+                }
 
                 return Optional.of(new PeerConfiguration(peerName, effectiveName(peerName, meta), ipAddress,
                         configContent, parseMachineType(meta.peerType()), meta.lanCidr(), meta.lanAddress(),
-                        meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess()));
+                        meta.description(), parseDeviceCategory(meta.deviceCategory()), meta.sshAccess(),
+                        machineId));
             }
         } catch (Exception e) {
             log.error("Failed to find peer by IP {}: {}", ipAddress, e.getMessage(), e);
@@ -202,7 +241,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         rewriteVaierMetadata(peerId, "lanAddress", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
                 normalized, existing.description(), existing.name(), existing.deviceCategory(),
-                existing.sshAccess()));
+                existing.sshAccess(), existing.id()));
     }
 
     @Override
@@ -211,7 +250,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         rewriteVaierMetadata(peerId, "lanCidr", normalized,
             existing -> new VaierMetadata(existing.peerType(), normalized,
                 existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory(),
-                existing.sshAccess()));
+                existing.sshAccess(), existing.id()));
     }
 
     @Override
@@ -220,7 +259,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         rewriteVaierMetadata(peerId, "description", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
                 existing.lanAddress(), normalized, existing.name(), existing.deviceCategory(),
-                existing.sshAccess()));
+                existing.sshAccess(), existing.id()));
     }
 
     @Override
@@ -229,7 +268,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         rewriteVaierMetadata(peerId, "name", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
                 existing.lanAddress(), existing.description(), normalized, existing.deviceCategory(),
-                existing.sshAccess()));
+                existing.sshAccess(), existing.id()));
     }
 
     @Override
@@ -238,7 +277,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         rewriteVaierMetadata(peerId, "deviceCategory", normalized,
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
                 existing.lanAddress(), existing.description(), existing.name(), normalized,
-                existing.sshAccess()));
+                existing.sshAccess(), existing.id()));
     }
 
     @Override
@@ -248,7 +287,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
         rewriteVaierMetadata(peerId, "sshAccess", String.valueOf(enabled),
             existing -> new VaierMetadata(existing.peerType(), existing.lanCidr(),
                 existing.lanAddress(), existing.description(), existing.name(), existing.deviceCategory(),
-                enabled));
+                enabled, existing.id()));
     }
 
     @Override
@@ -287,7 +326,7 @@ public class WireguardConfigFileAdapter implements ForGettingPeerConfigurations,
             VaierMetadata withType = new VaierMetadata(
                 existing.peerType() != null ? existing.peerType() : MachineType.UBUNTU_SERVER.name(),
                 existing.lanCidr(), existing.lanAddress(), existing.description(), existing.name(),
-                existing.deviceCategory(), existing.sshAccess());
+                existing.deviceCategory(), existing.sshAccess(), existing.id());
             VaierMetadata updated = mutator.apply(withType);
             String newLine = "# VAIER: " + OBJECT_MAPPER.writeValueAsString(updated);
 

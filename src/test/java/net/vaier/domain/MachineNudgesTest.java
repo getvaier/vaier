@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MachineNudgesTest {
 
     private static Machine machine(DeviceCategory category) {
-        return new Machine("nas", MachineType.UBUNTU_SERVER, "pk", "10.13.13.9/32", null, null,
+        return new Machine(MachineId.generate(), "nas", MachineType.UBUNTU_SERVER, "pk", "10.13.13.9/32", null, null,
             null, null, null, null, null, true, null, category, null);
     }
 

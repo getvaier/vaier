@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.domain.MachineId;
 import net.vaier.application.GetDiskWatchesUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
@@ -83,7 +84,7 @@ class RemoteDiskWatcherTest {
 
     /** An SSH-capable server-type machine (effectiveSshAccess() true by default). */
     private Machine sshMachine(String name) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
             null, "10.13.13.9", false, null, DeviceCategory.SERVER, null);
     }
 
@@ -154,7 +155,7 @@ class RemoteDiskWatcherTest {
     @Test
     void machineWithSshAccessOff_isSkipped_neverRuns() {
         // sshAccessOverride = false forces effectiveSshAccess() false
-        Machine off = new Machine("printer", MachineType.LAN_SERVER, null, null, null, null, null, null, null,
+        Machine off = new Machine(MachineId.generate(), "printer", MachineType.LAN_SERVER, null, null, null, null, null, null, null,
             null, "192.168.1.111", false, null, DeviceCategory.SERVER, false);
         when(machines.getAllMachines()).thenReturn(List.of(off));
 

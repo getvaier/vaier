@@ -155,20 +155,21 @@ class MachineTest {
     void effectiveSshAccess_overrideWinsOverDefault() {
         // A server that would default to true, pinned off.
         PeerConfiguration peer = new PeerConfiguration("srv", "srv", "10.13.13.2", "",
-            MachineType.UBUNTU_SERVER, null, null, null, null, false);
+            MachineType.UBUNTU_SERVER, null, null, null, null, false, MachineId.generate());
         Machine machine = Machine.fromPeer(peer, null);
         assertThat(machine.effectiveSshAccess()).isFalse();
 
         // A printer that would default to false, pinned on.
         Machine forced = Machine.fromLanServer(
-            new LanServer("p", "192.168.1.9", false, null, null, DeviceCategory.PRINTER, true), null);
+            new LanServer("p", "192.168.1.9", false, null, null, DeviceCategory.PRINTER, true,
+                MachineId.generate()), null);
         assertThat(forced.effectiveSshAccess()).isTrue();
     }
 
     @Test
     void effectiveSshAccess_noOverride_usesDefault() {
         PeerConfiguration peer = new PeerConfiguration("srv", "srv", "10.13.13.2", "",
-            MachineType.UBUNTU_SERVER, null, null, null, null, null);
+            MachineType.UBUNTU_SERVER, null, null, null, null, null, MachineId.generate());
         assertThat(Machine.fromPeer(peer, null).effectiveSshAccess()).isTrue();
     }
 
@@ -176,7 +177,7 @@ class MachineTest {
 
     @Test
     void vaierServer_hasCanonicalNameServerCategory_andDefaultsSshOn() {
-        Machine m = Machine.vaierServer(null);
+        Machine m = Machine.vaierServer(MachineId.generate(), null);
 
         assertThat(m.name()).isEqualTo(LanAnchor.VAIER_SERVER_NAME);
         assertThat(m.type()).isEqualTo(MachineType.UBUNTU_SERVER);
@@ -189,12 +190,12 @@ class MachineTest {
         // The Vaier server host is itself a Docker engine — it runs the whole compose stack (WireGuard,
         // Traefik, oauth2-proxy, Vaier). So its Machine projection must say it runs Docker, or the Explorer
         // tree never grows a `containers` entry for it and its own containers stay invisible.
-        assertThat(Machine.vaierServer(null).runsDocker()).isTrue();
+        assertThat(Machine.vaierServer(MachineId.generate(), null).runsDocker()).isTrue();
     }
 
     @Test
     void vaierServer_honoursExplicitOverride() {
-        assertThat(Machine.vaierServer(false).effectiveSshAccess()).isFalse();
-        assertThat(Machine.vaierServer(true).effectiveSshAccess()).isTrue();
+        assertThat(Machine.vaierServer(MachineId.generate(), false).effectiveSshAccess()).isFalse();
+        assertThat(Machine.vaierServer(MachineId.generate(), true).effectiveSshAccess()).isTrue();
     }
 }

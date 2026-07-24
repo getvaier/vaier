@@ -41,8 +41,9 @@ class LanServerViewAdapterTest {
 
     @Test
     void getAll_resolvesRelayPeerNameForEachServer() {
+        LanServer nas = new LanServer("nas", "192.168.3.50", true, 2375);
         when(forPersistingLanServers.getAll()).thenReturn(List.of(
-            new LanServer("nas", "192.168.3.50", true, 2375)
+            nas
         ));
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             relay("apalveien5", "10.13.13.5", "192.168.3.0/24")
@@ -51,7 +52,7 @@ class LanServerViewAdapterTest {
         List<LanServerView> views = adapter.getAll();
 
         assertThat(views).hasSize(1);
-        assertThat(views.get(0).server()).isEqualTo(new LanServer("nas", "192.168.3.50", true, 2375));
+        assertThat(views.get(0).server()).isEqualTo(nas);
         assertThat(views.get(0).relayPeerName()).isEqualTo("apalveien5");
     }
 

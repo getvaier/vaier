@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.domain.MachineId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.AuthorizeBackupClientUseCase;
 import net.vaier.application.AuthorizeBackupClientUseCase.AuthorizeResult;
@@ -157,7 +158,7 @@ class BackupRestControllerTest {
     }
 
     private Machine machine(String name) {
-        return new Machine(name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
+        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
             null, "10.13.13.9", false, null, DeviceCategory.SERVER, null);
     }
 
