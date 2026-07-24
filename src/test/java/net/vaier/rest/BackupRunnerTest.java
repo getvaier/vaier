@@ -46,6 +46,10 @@ import static org.mockito.Mockito.when;
 
 class BackupRunnerTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     GetMachinesUseCase machines;
     GetHostCredentialUseCase credentials;
     RunRemoteCommandUseCase runner;
@@ -95,7 +99,7 @@ class BackupRunnerTest {
 
     private void hasCredential(String name) {
         when(credentials.getHostCredential(name)).thenReturn(
-            Optional.of(new HostCredentialView(name, "root", AuthMethod.PASSWORD, true)));
+            Optional.of(new HostCredentialView(mid(name), "root", AuthMethod.PASSWORD, true)));
     }
 
     /**

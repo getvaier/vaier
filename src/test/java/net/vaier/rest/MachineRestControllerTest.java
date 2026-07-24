@@ -46,6 +46,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class MachineRestControllerTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock GetMachinesUseCase getMachinesUseCase;
     @Mock GetVaierServerUseCase getVaierServerUseCase;
     @Mock SetMachineSshAccessUseCase setMachineSshAccessUseCase;
@@ -115,7 +119,7 @@ class MachineRestControllerTest {
                 "192.168.3.0/24", "192.168.3.20", false, null, DeviceCategory.PRINTER, null)
         ));
         when(getHostCredentialUseCase.getHostCredential("nas")).thenReturn(
-            Optional.of(new HostCredentialView("nas", "root", AuthMethod.PASSWORD, true)));
+            Optional.of(new HostCredentialView(mid("nas"), "root", AuthMethod.PASSWORD, true)));
 
         var response = controller.list();
 
@@ -168,7 +172,7 @@ class MachineRestControllerTest {
     void vaierServer_reportsEffectiveSshAccessAndCredentialPresence() {
         when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(Machine.vaierServer(MachineId.generate(), null));
         when(getHostCredentialUseCase.getHostCredential(LanAnchor.VAIER_SERVER_NAME))
-            .thenReturn(Optional.of(new HostCredentialView(LanAnchor.VAIER_SERVER_NAME, "root",
+            .thenReturn(Optional.of(new HostCredentialView(mid(LanAnchor.VAIER_SERVER_NAME), "root",
                 AuthMethod.PASSWORD, true)));
 
         var response = controller.vaierServer();
@@ -218,7 +222,7 @@ class MachineRestControllerTest {
         when(getPublishableServicesUseCase.getPublishableServices()).thenReturn(List.of(
             new PublishableService(PublishableSource.PEER, "alice", "10.13.13.2", "grafana", 3000, null, false)));
         when(getHostCredentialUseCase.getHostCredential("alice")).thenReturn(
-            Optional.of(new HostCredentialView("alice", "root", AuthMethod.PASSWORD, true)));
+            Optional.of(new HostCredentialView(mid("alice"), "root", AuthMethod.PASSWORD, true)));
         when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of());
         when(getBackupServersUseCase.getBackupServers()).thenReturn(List.of());
 

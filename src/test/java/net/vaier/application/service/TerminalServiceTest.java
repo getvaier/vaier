@@ -32,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,19 +41,35 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TerminalServiceTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ForPersistingHostCredentials forPersistingHostCredentials;
     @Mock ForResolvingSshTargets forResolvingSshTargets;
     @Mock ForOpeningSshSessions forOpeningSshSessions;
     @Mock ForRunningSshCommands forRunningSshCommands;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
     @Mock net.vaier.domain.port.ForVerifyingSshCredentials forVerifyingSshCredentials;
+    @Mock net.vaier.domain.port.ForResolvingMachineIds forResolvingMachineIds;
+
+    /**
+     * Every machine named in these tests resolves to its own stable id. The service crosses from the
+     * name a REST path carries to the identity its stores are keyed by, so without this the crossing
+     * fails and nothing downstream is exercised — the seam is background here, not the subject.
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void namesResolveToIds() {
+        lenient().when(forResolvingMachineIds.idForName(anyString()))
+            .thenAnswer(i -> java.util.Optional.of(mid(i.getArgument(0))));
+    }
     @Mock SshOutputListener onOutput;
     @Mock SshSession sshSession;
 
     @InjectMocks TerminalService service;
 
     private HostCredential passwordCred(String machine) {
-        return new HostCredential(machine, "root", AuthMethod.PASSWORD, "pw", null, false);
+        return new HostCredential(mid(machine), "root", AuthMethod.PASSWORD, "pw", null, false);
     }
 
     /** Stub the resolver port: a machine now becomes an SshTarget in one place (MachineSshTargetAdapter). */
@@ -64,25 +82,27 @@ class TerminalServiceTest {
 
     @Test
     void saveHostCredential_persistsViaPort() {
-        HostCredential credential = new HostCredential("nas", "admin", AuthMethod.PASSWORD, "s3cret", null, false);
-        service.saveHostCredential(credential);
-        verify(forPersistingHostCredentials).save(credential);
+        service.saveHostCredential("nas", new net.vaier.domain.SshCredentialDraft(
+            "admin", AuthMethod.PASSWORD, "s3cret", null));
+
+        verify(forPersistingHostCredentials).save(new HostCredential(
+            mid("nas"), "admin", AuthMethod.PASSWORD, "s3cret", null, false));
     }
 
     @Test
     void getHostCredential_returnsRedactedView_neverSecretBytes() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
-            new HostCredential("nas", "admin", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", "keypass", false)));
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(
+            new HostCredential(mid("nas"), "admin", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", "keypass", false)));
 
         Optional<HostCredentialView> view = service.getHostCredential("nas");
 
-        assertThat(view).contains(new HostCredentialView("nas", "admin", AuthMethod.PRIVATE_KEY, true));
+        assertThat(view).contains(new HostCredentialView(mid("nas"), "admin", AuthMethod.PRIVATE_KEY, true));
     }
 
     @Test
     void deleteHostCredential_deletesViaPort() {
         service.deleteHostCredential("nas");
-        verify(forPersistingHostCredentials).deleteByMachine("nas");
+        verify(forPersistingHostCredentials).deleteByMachine(mid("nas"));
     }
 
     // --- pre-registration SSH credential verify ("Add a machine" slice 2, Part A) ---
@@ -166,7 +186,7 @@ class TerminalServiceTest {
         verify(forOpeningSshSessions).open(target.capture(), command.capture(), any());
         assertThat(target.getValue().host()).isEqualTo("10.13.13.9");   // tunnel IP
         assertThat(command.getValue()).contains("tmux new-session -A -D -s 'vaier-pane1'");
-        verify(forTrackingHostKeys).pin("nuc", "SHA256:fresh");         // TOFU pin on first use
+        verify(forTrackingHostKeys).pin(mid("nuc"), "SHA256:fresh");         // TOFU pin on first use
     }
 
     @Test
@@ -240,7 +260,7 @@ class TerminalServiceTest {
     @Test
     void clearHostKey_clearsViaPort() {
         service.clearHostKey("nas");
-        verify(forTrackingHostKeys).clear("nas");
+        verify(forTrackingHostKeys).clear(mid("nas"));
     }
 
     // --- remote command (slice 3 keystone reuse) ---
@@ -272,7 +292,7 @@ class TerminalServiceTest {
         ArgumentCaptor<SshTarget> target = ArgumentCaptor.forClass(SshTarget.class);
         verify(forRunningSshCommands).run(target.capture(), any());
         assertThat(target.getValue().pinnedFingerprint()).isNull();
-        verify(forTrackingHostKeys).pin("nuc", "SHA256:fresh"); // TOFU pin on first use
+        verify(forTrackingHostKeys).pin(mid("nuc"), "SHA256:fresh"); // TOFU pin on first use
     }
 
     @Test
@@ -288,8 +308,8 @@ class TerminalServiceTest {
 
     @Test
     void sendPassword_atPrompt_writesSecretNewline_exactlyOnce() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
-            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(
+            new HostCredential(mid("nas"), "root", AuthMethod.PASSWORD, "s3cret", null, false)));
 
         SendHostPasswordUseCase.SendPasswordResult result =
             service.sendPassword("nas", sshSession, "geir@nas's password: ");
@@ -301,8 +321,8 @@ class TerminalServiceTest {
 
     @Test
     void sendPassword_result_neverCarriesTheSecret() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
-            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(
+            new HostCredential(mid("nas"), "root", AuthMethod.PASSWORD, "s3cret", null, false)));
 
         SendHostPasswordUseCase.SendPasswordResult result =
             service.sendPassword("nas", sshSession, "Password: ");
@@ -312,8 +332,8 @@ class TerminalServiceTest {
 
     @Test
     void sendPassword_notAtPrompt_writesNothing() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
-            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(
+            new HostCredential(mid("nas"), "root", AuthMethod.PASSWORD, "s3cret", null, false)));
 
         SendHostPasswordUseCase.SendPasswordResult result =
             service.sendPassword("nas", sshSession, "geir@nas:~$ ");
@@ -324,8 +344,8 @@ class TerminalServiceTest {
 
     @Test
     void sendPassword_keyAuthCredential_returnsNoPasswordCredential_writesNothing() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
-            new HostCredential("nas", "root", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", null, true)));
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(
+            new HostCredential(mid("nas"), "root", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", null, true)));
 
         SendHostPasswordUseCase.SendPasswordResult result =
             service.sendPassword("nas", sshSession, "Password: ");
@@ -336,7 +356,7 @@ class TerminalServiceTest {
 
     @Test
     void sendPassword_missingCredential_returnsNoPasswordCredential_writesNothing() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.empty());
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.empty());
 
         SendHostPasswordUseCase.SendPasswordResult result =
             service.sendPassword("nas", sshSession, "Password: ");
@@ -347,8 +367,8 @@ class TerminalServiceTest {
 
     @Test
     void sendPassword_throwingSession_returnsFailed_doesNotPropagate() {
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(
-            new HostCredential("nas", "root", AuthMethod.PASSWORD, "s3cret", null, false)));
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(
+            new HostCredential(mid("nas"), "root", AuthMethod.PASSWORD, "s3cret", null, false)));
         org.mockito.Mockito.doThrow(new RuntimeException("pipe broken")).when(sshSession).write(any());
 
         SendHostPasswordUseCase.SendPasswordResult result =

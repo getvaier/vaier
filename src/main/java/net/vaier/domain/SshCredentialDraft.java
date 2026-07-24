@@ -3,13 +3,13 @@ package net.vaier.domain;
 /**
  * The SSH login an operator supplies while a machine is still only a discovered candidate: a username,
  * an {@link AuthMethod}, the secret material, and an optional key passphrase — everything a
- * {@link HostCredential} holds except the machine name, which does not exist yet.
+ * {@link HostCredential} holds except the machine identity, which does not exist yet.
  *
  * <p>It is the shape both halves of "attach a credential during adoption" work from: a pre-registration
  * {@link #targetAt test target} (which pins nothing — nothing is trusted for a machine never connected
  * to) and, once the machine is registered, the {@link #forMachine vault credential} keyed to its new
  * name. Keeping both derivations here means "a tested-but-unregistered credential pins no host key" and
- * "an adopted credential is unmanaged and keyed to the machine's name" are decided in one place.
+ * "an adopted credential is unmanaged and keyed to the machine's identity" are decided in one place.
  */
 public record SshCredentialDraft(String username, AuthMethod authMethod, String secret, String passphrase) {
 
@@ -22,10 +22,10 @@ public record SshCredentialDraft(String username, AuthMethod authMethod, String 
     }
 
     /**
-     * This draft as the vault {@link HostCredential} for {@code machineName}. Always unmanaged
+     * This draft as the vault {@link HostCredential} for the machine identified by {@code machineId}. Always unmanaged
      * ({@code managed=false}) — Vaier did not generate this keypair; the operator supplied it.
      */
-    public HostCredential forMachine(String machineName) {
-        return new HostCredential(machineName, username, authMethod, secret, passphrase, false);
+    public HostCredential forMachine(MachineId machineId) {
+        return new HostCredential(machineId, username, authMethod, secret, passphrase, false);
     }
 }

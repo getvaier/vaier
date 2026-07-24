@@ -59,6 +59,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ExplorerServiceTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ForResolvingSshTargets forResolvingSshTargets;
     @Mock ForBrowsingRemoteFiles forBrowsingRemoteFiles;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
@@ -72,7 +76,7 @@ class ExplorerServiceTest {
 
     private static SshTarget target(String pinnedFingerprint) {
         return SshTarget.on("10.13.13.6",
-            new HostCredential("apalveien5", "root", AuthMethod.PASSWORD, "pw", null, false), pinnedFingerprint);
+            new HostCredential(mid("apalveien5"), "root", AuthMethod.PASSWORD, "pw", null, false), pinnedFingerprint);
     }
 
     private void machineResolves(String machine, String pinnedFingerprint) {
@@ -174,7 +178,7 @@ class ExplorerServiceTest {
 
         service.listDirectory("apalveien5", "/");
 
-        verify(forTrackingHostKeys).pin("apalveien5", "SHA256:fresh");
+        verify(forTrackingHostKeys).pin(mid("apalveien5"), "SHA256:fresh");
     }
 
     @Test

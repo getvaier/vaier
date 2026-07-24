@@ -8,6 +8,7 @@ import net.vaier.domain.SshTarget;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForPersistingHostCredentials;
 import net.vaier.domain.port.ForPersistingLanServers;
+import net.vaier.domain.port.ForResolvingMachineIds;
 import net.vaier.domain.port.ForResolvingSshTargets;
 import net.vaier.domain.port.ForResolvingVaierServerSshAddress;
 import net.vaier.domain.port.ForTrackingHostKeys;
@@ -34,6 +35,7 @@ public class MachineSshTargetAdapter implements ForResolvingSshTargets {
     private final ForResolvingVaierServerSshAddress forResolvingVaierServerSshAddress;
     private final ForPersistingHostCredentials forPersistingHostCredentials;
     private final ForTrackingHostKeys forTrackingHostKeys;
+    private final ForResolvingMachineIds forResolvingMachineIds;
 
     @Override
     public SshTarget resolve(String machineName) {
@@ -41,9 +43,13 @@ public class MachineSshTargetAdapter implements ForResolvingSshTargets {
         // the stores it needs to make it.
         String host = SshAddress.of(machineName,
             forGettingPeerConfigurations, forPersistingLanServers, forResolvingVaierServerSshAddress);
-        HostCredential credential = forPersistingHostCredentials.getByMachine(machineName)
+        // The vault and the host-key store are keyed by identity, while callers still arrive holding a
+        // name. This is the one place that crossing happens, so a rename can never strand a login.
+        net.vaier.domain.MachineId machineId = forResolvingMachineIds.idForName(machineName)
+            .orElseThrow(() -> new net.vaier.domain.NotFoundException("Machine not found: " + machineName));
+        HostCredential credential = forPersistingHostCredentials.getByMachine(machineId)
             .orElseThrow(() -> new NoHostCredentialException(machineName));
-        String pinned = forTrackingHostKeys.getFingerprint(machineName).orElse(null);
+        String pinned = forTrackingHostKeys.getFingerprint(machineId).orElse(null);
         return SshTarget.on(host, credential, pinned);
     }
 }

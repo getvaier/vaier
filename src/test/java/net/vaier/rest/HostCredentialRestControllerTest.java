@@ -21,6 +21,8 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -31,6 +33,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @ExtendWith(MockitoExtension.class)
 class HostCredentialRestControllerTest {
+
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
 
     @Mock SaveHostCredentialUseCase saveHostCredentialUseCase;
     @Mock GetHostCredentialUseCase getHostCredentialUseCase;
@@ -48,14 +54,15 @@ class HostCredentialRestControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody().hasSecret()).isTrue();
-        ArgumentCaptor<HostCredential> captor = ArgumentCaptor.forClass(HostCredential.class);
-        verify(saveHostCredentialUseCase).saveHostCredential(captor.capture());
-        HostCredential saved = captor.getValue();
-        assertThat(saved.machineName()).isEqualTo("nas");
+        // The controller hands on the machine's name and the operator's draft; turning that pair into a
+        // credential keyed by identity is the application's decision, not the controller's.
+        ArgumentCaptor<net.vaier.domain.SshCredentialDraft> captor =
+            ArgumentCaptor.forClass(net.vaier.domain.SshCredentialDraft.class);
+        verify(saveHostCredentialUseCase).saveHostCredential(eq("nas"), captor.capture());
+        net.vaier.domain.SshCredentialDraft saved = captor.getValue();
         assertThat(saved.username()).isEqualTo("admin");
         assertThat(saved.authMethod()).isEqualTo(AuthMethod.PASSWORD);
         assertThat(saved.secret()).isEqualTo("s3cret");
-        assertThat(saved.managed()).isFalse();
     }
 
     @Test
@@ -68,9 +75,16 @@ class HostCredentialRestControllerTest {
     }
 
     @Test
-    void put_blankSecret_propagatesIllegalArgument() {
+    /**
+     * A blank secret is still rejected, just no longer by the controller: it assembles a draft and the
+     * application turns that into the credential, where the domain's invariant lives. The controller's
+     * job here is not to swallow it — the exception must reach GlobalExceptionHandler as a 400.
+     */
+    void put_blankSecret_propagatesIllegalArgumentFromTheUseCase() {
         var request = new HostCredentialRestController.SaveCredentialRequest(
             "admin", "PASSWORD", "  ", null);
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("secret must not be blank"))
+            .when(saveHostCredentialUseCase).saveHostCredential(eq("nas"), any());
 
         assertThatThrownBy(() -> controller.save("nas", request))
             .isInstanceOf(IllegalArgumentException.class);
@@ -79,7 +93,7 @@ class HostCredentialRestControllerTest {
     @Test
     void get_present_returnsRedactedView() {
         when(getHostCredentialUseCase.getHostCredential("nas"))
-            .thenReturn(Optional.of(new HostCredentialView("nas", "admin", AuthMethod.PASSWORD, true)));
+            .thenReturn(Optional.of(new HostCredentialView(mid("nas"), "admin", AuthMethod.PASSWORD, true)));
 
         ResponseEntity<HostCredentialRestController.CredentialResponse> response = controller.get("nas");
 
@@ -121,7 +135,7 @@ class HostCredentialRestControllerTest {
             .andExpect(jsonPath("$.hasSecret").value(true));
 
         when(getHostCredentialUseCase.getHostCredential("nas"))
-            .thenReturn(Optional.of(new HostCredentialView("nas", "admin", AuthMethod.PRIVATE_KEY, true)));
+            .thenReturn(Optional.of(new HostCredentialView(mid("nas"), "admin", AuthMethod.PRIVATE_KEY, true)));
 
         mockMvc.perform(get("/machines/nas/ssh-credential"))
             .andExpect(status().isOk())

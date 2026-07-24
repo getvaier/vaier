@@ -50,6 +50,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class MachineServiceTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock ForGettingVpnClients forGettingVpnClients;
     @Mock ForGettingLanServers forGettingLanServers;
@@ -324,8 +328,10 @@ class MachineServiceTest {
     // backup) was invisible. So the service now reads every real filesystem, and the domain decides all of
     // it: RemoteDiskUsage owns how df is read, which rows are real, and what counts as a breach.
 
+    /** A resolved target always knows which machine it is for; that is what gets pinned against. */
     private static final SshTarget UNPINNED =
-        new SshTarget("10.13.13.6", 22, "geir", AuthMethod.PASSWORD, "secret", null, null);
+        new SshTarget("10.13.13.6", 22, "geir", AuthMethod.PASSWORD, "secret", null, null,
+            net.vaier.domain.TestMachineIds.of("Apalveien 5"));
 
     /** The real `df -P` from the NAS, trimmed to two of the eight aufs aliases (#325). */
     private static final String NAS_DF = """
@@ -452,7 +458,7 @@ class MachineServiceTest {
 
         service.getDiskUsage("Apalveien 5");
 
-        verify(forTrackingHostKeys).pin("Apalveien 5", "SHA256:abc");
+        verify(forTrackingHostKeys).pin(mid("Apalveien 5"), "SHA256:abc");
     }
 
     @Test

@@ -19,8 +19,8 @@ import org.yaml.snakeyaml.Yaml;
 
 /**
  * File-backed credential vault: persists one {@link HostCredential} per machine to
- * {@code host-credentials.yml}, keyed on {@code machineName}. The {@code secret} and {@code passphrase}
- * are encrypted at rest via {@link SecretCipher}; the machine name, username, auth method and
+ * {@code host-credentials.yml}, keyed on the machine's {@code id}. The {@code secret} and {@code passphrase}
+ * are encrypted at rest via {@link SecretCipher}; the machine id, username, auth method and
  * {@code managed} flag are stored in the clear.
  */
 @Component
@@ -64,37 +64,47 @@ public class HostCredentialFileAdapter implements ForPersistingHostCredentials {
     }
 
     @Override
-    public synchronized Optional<HostCredential> getByMachine(String machineName) {
-        return getAll().stream().filter(c -> c.machineName().equals(machineName)).findFirst();
+    public synchronized Optional<HostCredential> getByMachine(net.vaier.domain.MachineId machineId) {
+        return getAll().stream().filter(c -> c.machineId().equals(machineId)).findFirst();
     }
 
     @Override
     public synchronized void save(HostCredential credential) {
         List<HostCredential> current = new ArrayList<>(getAll());
-        current.removeIf(c -> c.machineName().equals(credential.machineName()));
+        current.removeIf(c -> c.machineId().equals(credential.machineId()));
         current.add(credential);
         writeAll(current);
     }
 
     @Override
-    public synchronized void deleteByMachine(String machineName) {
+    public synchronized void deleteByMachine(net.vaier.domain.MachineId machineId) {
         List<HostCredential> current = new ArrayList<>(getAll());
-        boolean removed = current.removeIf(c -> c.machineName().equals(machineName));
+        boolean removed = current.removeIf(c -> c.machineId().equals(machineId));
         if (removed) writeAll(current);
     }
 
     private HostCredential deserialize(Map<?, ?> m) {
-        String machineName = asString(m.get("machineName"));
+        String rawId = asString(m.get("machineId"));
         String username = asString(m.get("username"));
         AuthMethod authMethod = parseAuthMethod(asString(m.get("authMethod")));
         String secret = cipher.decrypt(asString(m.get("secret")));
         String passphrase = cipher.decrypt(asString(m.get("passphrase")));
         boolean managed = m.get("managed") instanceof Boolean b && b;
-        if (machineName == null || username == null || authMethod == null || secret == null) {
+        if (rawId == null || username == null || authMethod == null || secret == null) {
             log.warn("Skipping malformed host-credential entry in {}", filePath);
             return null;
         }
-        return new HostCredential(machineName, username, authMethod, secret, passphrase, managed);
+        net.vaier.domain.MachineId machineId;
+        try {
+            machineId = net.vaier.domain.MachineId.of(rawId);
+        } catch (IllegalArgumentException e) {
+            // A credential whose machineId is unreadable belongs to no machine Vaier can name. Skipping
+            // it loudly beats guessing: the wrong guess hands a login to the wrong host.
+            log.error("Skipping host-credential entry in {} with an unusable machineId: {}",
+                filePath, e.getMessage());
+            return null;
+        }
+        return new HostCredential(machineId, username, authMethod, secret, passphrase, managed);
     }
 
     private void writeAll(List<HostCredential> credentials) {
@@ -109,7 +119,7 @@ public class HostCredentialFileAdapter implements ForPersistingHostCredentials {
         List<Map<String, Object>> serialized = new ArrayList<>();
         for (HostCredential c : credentials) {
             Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("machineName", c.machineName());
+            entry.put("machineId", c.machineId().value());
             entry.put("username", c.username());
             entry.put("authMethod", c.authMethod().name());
             entry.put("secret", cipher.encrypt(c.secret()));

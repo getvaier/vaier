@@ -6,6 +6,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SshCredentialDraftTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Test
     void targetAt_buildsATargetForTheAddressAndPort_withNoPinnedFingerprint() {
         // Pre-registration: the machine has never been connected to, so nothing is pinned yet.
@@ -26,9 +30,8 @@ class SshCredentialDraftTest {
         SshCredentialDraft draft =
             new SshCredentialDraft("admin", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", "keypass");
 
-        HostCredential credential = draft.forMachine("nas");
+        HostCredential credential = draft.forMachine(mid("nas"));
 
-        assertThat(credential).isEqualTo(new HostCredential(
-            "nas", "admin", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", "keypass", false));
+        assertThat(credential).isEqualTo(new HostCredential(mid("nas"), "admin", AuthMethod.PRIVATE_KEY, "-----BEGIN KEY-----", "keypass", false));
     }
 }

@@ -107,7 +107,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     public List<MachineFilesystemUco> getDiskUsage(String machineName) {
         SshTarget target = forResolvingSshTargets.resolve(machineName);
         CommandResult result = forRunningSshCommands.run(target, RemoteDiskUsage.DF_COMMAND);
-        target.pinOnFirstUse(machineName, result.hostKeyFingerprint(), forTrackingHostKeys);
+        target.pinOnFirstUse(result.hostKeyFingerprint(), forTrackingHostKeys);
 
         if (result.timedOut() || result.exitCode() != 0) {
             log.debug("df on {} failed (exit={}, timedOut={})", machineName, result.exitCode(),

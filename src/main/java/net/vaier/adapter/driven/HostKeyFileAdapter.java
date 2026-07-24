@@ -16,7 +16,7 @@ import org.yaml.snakeyaml.Yaml;
 
 /**
  * File-backed trust-on-first-use store of SSH host-key fingerprints, persisted to
- * {@code ssh-known-hosts.yml} as a {@code machineName: fingerprint} map. Plain text — a fingerprint is
+ * {@code ssh-known-hosts.yml} as a {@code machineId: fingerprint} map. Plain text — a fingerprint is
  * public key material, not a secret.
  */
 @Component
@@ -35,22 +35,22 @@ public class HostKeyFileAdapter implements ForTrackingHostKeys {
     }
 
     @Override
-    public synchronized Optional<String> getFingerprint(String machineName) {
-        Object value = readAll().get(machineName);
+    public synchronized Optional<String> getFingerprint(net.vaier.domain.MachineId machineId) {
+        Object value = readAll().get(machineId.value());
         return value == null ? Optional.empty() : Optional.of(value.toString());
     }
 
     @Override
-    public synchronized void pin(String machineName, String fingerprint) {
+    public synchronized void pin(net.vaier.domain.MachineId machineId, String fingerprint) {
         Map<String, Object> all = new TreeMap<>(readAll());
-        all.put(machineName, fingerprint);
+        all.put(machineId.value(), fingerprint);
         writeAll(all);
     }
 
     @Override
-    public synchronized void clear(String machineName) {
+    public synchronized void clear(net.vaier.domain.MachineId machineId) {
         Map<String, Object> all = new TreeMap<>(readAll());
-        if (all.remove(machineName) != null) {
+        if (all.remove(machineId.value()) != null) {
             writeAll(all);
         }
     }

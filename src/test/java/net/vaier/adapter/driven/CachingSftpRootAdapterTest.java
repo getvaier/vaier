@@ -40,13 +40,17 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class CachingSftpRootAdapterTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ForRunningSshCommands forRunningSshCommands;
     @Mock ForBrowsingRemoteFiles forBrowsingRemoteFiles;
 
     @InjectMocks CachingSftpRootAdapter adapter;
 
     private static final SshTarget NAS = SshTarget.on("10.13.13.9",
-        new HostCredential("NAS", "geir", AuthMethod.PASSWORD, "pw", null, false), "SHA256:pinned");
+        new HostCredential(mid("NAS"), "geir", AuthMethod.PASSWORD, "pw", null, false), "SHA256:pinned");
 
     /** What the exec channel answers the *physical* home probe with — the home with its symlinks resolved. */
     private void execHomeIs(String home) {

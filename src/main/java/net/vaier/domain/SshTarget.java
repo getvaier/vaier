@@ -8,7 +8,17 @@ package net.vaier.domain;
  * SSH address and its vault credential; it carries reversible secrets and never leaves the process.
  */
 public record SshTarget(String host, int port, String username, AuthMethod authMethod,
-                        String secret, String passphrase, String pinnedFingerprint) {
+                        String secret, String passphrase, String pinnedFingerprint,
+                        MachineId machineId) {
+
+    /**
+     * A target for a machine Vaier has no identity for — a pre-registration credential test against a
+     * bare address. Nothing may be pinned for it, because there is nothing to pin it against.
+     */
+    public SshTarget(String host, int port, String username, AuthMethod authMethod,
+                     String secret, String passphrase, String pinnedFingerprint) {
+        this(host, port, username, authMethod, secret, passphrase, pinnedFingerprint, null);
+    }
 
     /** The IANA default SSH port. */
     public static final int DEFAULT_PORT = 22;
@@ -31,7 +41,7 @@ public record SshTarget(String host, int port, String username, AuthMethod authM
     /** Builds a target for {@code host} on the {@link #DEFAULT_PORT default port} from a credential. */
     public static SshTarget on(String host, HostCredential credential, String pinnedFingerprint) {
         return new SshTarget(host, DEFAULT_PORT, credential.username(), credential.authMethod(),
-            credential.secret(), credential.passphrase(), pinnedFingerprint);
+            credential.secret(), credential.passphrase(), pinnedFingerprint, credential.machineId());
     }
 
     /**
@@ -53,15 +63,19 @@ public record SshTarget(String host, int port, String username, AuthMethod authM
      * {@link #needsPinning} says it should be. The port is handed in and called here, so the rule and the
      * act of recording it stay together.
      *
+     * <p>The machine pinned for is this target's own {@link #machineId()}, not a name passed alongside:
+     * a caller that could supply the wrong one would pin a host's key against a different machine. A
+     * target with no identity — a pre-registration credential test — pins nothing.
+     *
      * <p>Every path that reaches a machine over SSH — the shell, a remote command, an Explorer listing, a
      * disk reading — must pin on first use, or a machine touched only by that path would never gain a
      * pinned key and could never detect one changing. Each service used to keep its own copy of this
      * three-line dance; a third copy (the disk read) is what made it worth having exactly one.
      */
-    public void pinOnFirstUse(String machineName, String presentedFingerprint,
+    public void pinOnFirstUse(String presentedFingerprint,
                               net.vaier.domain.port.ForTrackingHostKeys hostKeys) {
-        if (needsPinning(presentedFingerprint)) {
-            hostKeys.pin(machineName, presentedFingerprint);
+        if (machineId != null && needsPinning(presentedFingerprint)) {
+            hostKeys.pin(machineId, presentedFingerprint);
         }
     }
 }

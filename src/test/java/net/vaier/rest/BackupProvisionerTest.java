@@ -45,6 +45,10 @@ import static org.mockito.Mockito.when;
 
 class BackupProvisionerTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     GetMachinesUseCase machines;
     GetHostCredentialUseCase credentials;
     RunRemoteCommandUseCase runner;
@@ -81,7 +85,7 @@ class BackupProvisionerTest {
 
     private void hasCredential(String name) {
         when(credentials.getHostCredential(name)).thenReturn(
-            Optional.of(new HostCredentialView(name, "root", AuthMethod.PASSWORD, true)));
+            Optional.of(new HostCredentialView(mid(name), "root", AuthMethod.PASSWORD, true)));
     }
 
     @BeforeEach
@@ -437,7 +441,7 @@ class BackupProvisionerTest {
         // Vaier SSHes to the NAS as the credential's user (e.g. geir, uid 1029) — the borg container must
         // chown its data to THAT user, so the generated script bakes it as the OWNER whose uid/gid it derives.
         when(credentials.getHostCredential("NAS")).thenReturn(
-            Optional.of(new HostCredentialView("NAS", "geir", AuthMethod.PASSWORD, true)));
+            Optional.of(new HostCredentialView(mid("NAS"), "geir", AuthMethod.PASSWORD, true)));
 
         Optional<String> script = provisioner.generateSetupScript("nas-borg");
 

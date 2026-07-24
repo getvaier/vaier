@@ -36,24 +36,30 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class MachineSshTargetAdapterTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ForGettingPeerConfigurations forGettingPeerConfigurations;
     @Mock ForPersistingLanServers forPersistingLanServers;
     @Mock ForResolvingVaierServerSshAddress forResolvingVaierServerSshAddress;
     @Mock ForPersistingHostCredentials forPersistingHostCredentials;
     @Mock ForTrackingHostKeys forTrackingHostKeys;
+    @Mock net.vaier.domain.port.ForResolvingMachineIds forResolvingMachineIds;
 
     @InjectMocks MachineSshTargetAdapter adapter;
 
     private HostCredential passwordCred(String machine) {
-        return new HostCredential(machine, "root", AuthMethod.PASSWORD, "pw", null, false);
+        return new HostCredential(mid(machine), "root", AuthMethod.PASSWORD, "pw", null, false);
     }
 
     @Test
     void peer_resolvesToTheTunnelIp_withVaultCredentialAndPinnedKey() {
+        when(forResolvingMachineIds.idForName("nuc")).thenReturn(Optional.of(mid("nuc")));
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.of(passwordCred("nuc")));
-        when(forTrackingHostKeys.getFingerprint("nuc")).thenReturn(Optional.of("SHA256:pinned"));
+        when(forPersistingHostCredentials.getByMachine(mid("nuc"))).thenReturn(Optional.of(passwordCred("nuc")));
+        when(forTrackingHostKeys.getFingerprint(mid("nuc"))).thenReturn(Optional.of("SHA256:pinned"));
 
         SshTarget target = adapter.resolve("nuc");
 
@@ -66,10 +72,11 @@ class MachineSshTargetAdapterTest {
 
     @Test
     void lanServer_resolvesToTheLanAddress() {
+        when(forResolvingMachineIds.idForName("nas")).thenReturn(Optional.of(mid("nas")));
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         when(forPersistingLanServers.getAll()).thenReturn(List.of(new LanServer("nas", "192.168.3.50", true, 2375)));
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(Optional.of(passwordCred("nas")));
-        when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(Optional.empty());
+        when(forPersistingHostCredentials.getByMachine(mid("nas"))).thenReturn(Optional.of(passwordCred("nas")));
+        when(forTrackingHostKeys.getFingerprint(mid("nas"))).thenReturn(Optional.empty());
 
         SshTarget target = adapter.resolve("nas");
 
@@ -79,12 +86,13 @@ class MachineSshTargetAdapterTest {
 
     @Test
     void vaierServer_resolvesToTheResolvedHostAddress() {
+        when(forResolvingMachineIds.idForName(LanAnchor.VAIER_SERVER_NAME)).thenReturn(Optional.of(mid(LanAnchor.VAIER_SERVER_NAME)));
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
         when(forResolvingVaierServerSshAddress.resolve()).thenReturn("172.17.0.1");
-        when(forPersistingHostCredentials.getByMachine(LanAnchor.VAIER_SERVER_NAME))
+        when(forPersistingHostCredentials.getByMachine(mid(LanAnchor.VAIER_SERVER_NAME)))
             .thenReturn(Optional.of(passwordCred(LanAnchor.VAIER_SERVER_NAME)));
-        when(forTrackingHostKeys.getFingerprint(LanAnchor.VAIER_SERVER_NAME)).thenReturn(Optional.empty());
+        when(forTrackingHostKeys.getFingerprint(mid(LanAnchor.VAIER_SERVER_NAME))).thenReturn(Optional.empty());
 
         SshTarget target = adapter.resolve(LanAnchor.VAIER_SERVER_NAME);
 
@@ -103,9 +111,10 @@ class MachineSshTargetAdapterTest {
 
     @Test
     void machineWithoutAVaultCredential_throwsNoHostCredential() {
+        when(forResolvingMachineIds.idForName("nuc")).thenReturn(Optional.of(mid("nuc")));
         when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("nuc", "nuc", "10.13.13.9", "", MachineType.UBUNTU_SERVER, null, null, null)));
-        when(forPersistingHostCredentials.getByMachine("nuc")).thenReturn(Optional.empty());
+        when(forPersistingHostCredentials.getByMachine(mid("nuc"))).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> adapter.resolve("nuc"))
             .isInstanceOf(NoHostCredentialException.class);

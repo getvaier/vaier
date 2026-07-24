@@ -11,9 +11,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class SshTargetTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     private static SshTarget target(String pinnedFingerprint) {
         return SshTarget.on("10.13.13.6",
-            new HostCredential("nuc", "root", AuthMethod.PASSWORD, "pw", null, false), pinnedFingerprint);
+            new HostCredential(mid("nuc"), "root", AuthMethod.PASSWORD, "pw", null, false), pinnedFingerprint);
     }
 
     @Test

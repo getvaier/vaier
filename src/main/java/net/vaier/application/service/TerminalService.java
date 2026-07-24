@@ -60,10 +60,23 @@ public class TerminalService implements
     private final ForRunningSshCommands forRunningSshCommands;
     private final ForTrackingHostKeys forTrackingHostKeys;
     private final ForVerifyingSshCredentials forVerifyingSshCredentials;
+    private final net.vaier.domain.port.ForResolvingMachineIds forResolvingMachineIds;
 
     @Override
-    public void saveHostCredential(HostCredential credential) {
-        forPersistingHostCredentials.save(credential);
+    public void saveHostCredential(String machineName, SshCredentialDraft draft) {
+        // The draft knows how to become a vault credential; the machine's identity is what it needs,
+        // and resolving a typed name to that identity is a driven-port lookup.
+        forPersistingHostCredentials.save(draft.forMachine(machineIdOf(machineName)));
+    }
+
+    /**
+     * The identity of the machine named {@code machineName}. The credential vault and the host-key store
+     * are keyed by identity while REST paths still carry names, so every write here crosses once, in one
+     * place, and refuses rather than guesses when the name matches nothing.
+     */
+    private net.vaier.domain.MachineId machineIdOf(String machineName) {
+        return forResolvingMachineIds.idForName(machineName)
+            .orElseThrow(() -> new net.vaier.domain.NotFoundException("Machine not found: " + machineName));
     }
 
     @Override
@@ -75,12 +88,12 @@ public class TerminalService implements
 
     @Override
     public Optional<HostCredentialView> getHostCredential(String machineName) {
-        return forPersistingHostCredentials.getByMachine(machineName).map(HostCredential::toView);
+        return forPersistingHostCredentials.getByMachine(machineIdOf(machineName)).map(HostCredential::toView);
     }
 
     @Override
     public void deleteHostCredential(String machineName) {
-        forPersistingHostCredentials.deleteByMachine(machineName);
+        forPersistingHostCredentials.deleteByMachine(machineIdOf(machineName));
     }
 
     @Override
@@ -91,7 +104,7 @@ public class TerminalService implements
         // continuity, so the reconnect banner can say "reattached" only when it really was. This first
         // connection is also where an unpinned host is pinned on first use.
         CommandResult probe = forRunningSshCommands.run(target, PersistentShell.probeCommand(paneId));
-        pinOnFirstUse(machineName, target, probe.hostKeyFingerprint());
+        pinOnFirstUse(target, probe.hostKeyFingerprint());
         PersistentShell.Continuity continuity = PersistentShell.readProbe(probe.stdout());
 
         // Open the persistent shell: tmux attach-or-create for the pane, falling back to a plain login
@@ -125,14 +138,14 @@ public class TerminalService implements
         // Same host-key trust as the shell path: a changed key throws HostKeyMismatchException.
         CommandResult result = forRunningSshCommands.run(target, command);
 
-        pinOnFirstUse(machineName, target, result.hostKeyFingerprint());
+        pinOnFirstUse(target, result.hostKeyFingerprint());
         return result;
     }
 
     @Override
     public SendPasswordResult sendPassword(String machineName, SshSession session, String recentOutput) {
         try {
-            Optional<HostCredential> credential = forPersistingHostCredentials.getByMachine(machineName);
+            Optional<HostCredential> credential = forPersistingHostCredentials.getByMachine(machineIdOf(machineName));
             if (credential.isEmpty() || credential.get().authMethod() != AuthMethod.PASSWORD) {
                 return SendPasswordResult.NO_PASSWORD_CREDENTIAL;
             }
@@ -151,7 +164,7 @@ public class TerminalService implements
 
     @Override
     public void clearHostKey(String machineName) {
-        forTrackingHostKeys.clear(machineName);
+        forTrackingHostKeys.clear(machineIdOf(machineName));
         log.info("Cleared pinned host key for {}", machineName);
     }
 
@@ -162,7 +175,7 @@ public class TerminalService implements
      * <p>The rule itself lives on {@link SshTarget#pinOnFirstUse} — every path that reaches a machine over
      * SSH (shell, exec, SFTP listing, disk reading) pins the same way, from one copy.
      */
-    private void pinOnFirstUse(String machineName, SshTarget target, String presentedFingerprint) {
-        target.pinOnFirstUse(machineName, presentedFingerprint, forTrackingHostKeys);
+    private void pinOnFirstUse(SshTarget target, String presentedFingerprint) {
+        target.pinOnFirstUse(presentedFingerprint, forTrackingHostKeys);
     }
 }

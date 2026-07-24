@@ -591,30 +591,9 @@ public class VpnService implements
         }
 
         forUpdatingPeerConfigurations.updateName(peerId, newName);
-        // #312: carry the name-keyed SSH credential + pinned host key to the new display name.
-        migrateSshState(oldName, effectiveLabel);
         log.info("Set display name of peer {} to '{}'", peerId, newName);
     }
 
-    /**
-     * Carries a machine's name-keyed SSH state — its vault credential and pinned host key — from
-     * {@code oldName} to {@code newName} on rename (#312). Write-new-then-delete-old so a failure can
-     * never leave a live credential under a name the machine no longer has. A no-op when the name is
-     * unchanged (so we don't delete what we just wrote) or when no state exists. Driven ports only.
-     */
-    private void migrateSshState(String oldName, String newName) {
-        if (oldName == null || newName == null || oldName.equals(newName)) {
-            return;
-        }
-        forPersistingHostCredentials.getByMachine(oldName).ifPresent(cred -> {
-            forPersistingHostCredentials.save(cred.reKeyedTo(newName));
-            forPersistingHostCredentials.deleteByMachine(oldName);
-        });
-        forTrackingHostKeys.getFingerprint(oldName).ifPresent(fingerprint -> {
-            forTrackingHostKeys.pin(newName, fingerprint);
-            forTrackingHostKeys.clear(oldName);
-        });
-    }
 
     /**
      * Names of every machine Vaier knows about — VPN peers and LAN servers — except the peer with

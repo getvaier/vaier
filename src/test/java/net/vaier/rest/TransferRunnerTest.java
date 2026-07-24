@@ -44,6 +44,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TransferRunnerTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ResolveFileCoordinateUseCase resolveFileCoordinate;
     @Mock ForBrowsingRemoteFiles files;
     @Mock ForPublishingEvents events;
@@ -53,7 +57,7 @@ class TransferRunnerTest {
     private static final Instant WHEN = Instant.parse("2026-07-15T10:00:00Z");
 
     private static SshTarget target(String host) {
-        return SshTarget.on(host, new HostCredential(host, "root", AuthMethod.PASSWORD, "pw", null, false), "SHA256:x");
+        return SshTarget.on(host, new HostCredential(mid(host), "root", AuthMethod.PASSWORD, "pw", null, false), "SHA256:x");
     }
 
     /** An executor that runs the task inline, so the async relay completes before startTransfer returns. */

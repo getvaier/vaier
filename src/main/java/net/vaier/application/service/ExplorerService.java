@@ -80,7 +80,7 @@ public class ExplorerService
         String directory = requested != null ? requested : root.path();
 
         DirectoryListing listing = forBrowsingRemoteFiles.list(target, root.toJailPath(directory));
-        pinOnFirstUse(machineName, target, listing.hostKeyFingerprint());
+        pinOnFirstUse(target, listing.hostKeyFingerprint());
 
         // What the machine backs up travels back with the listing so the browser can mark backed-up entries.
         // Whether a given entry is covered is the domain's decision (ProtectedPaths.covers — source paths minus
@@ -105,7 +105,7 @@ public class ExplorerService
         String machinePath = mounted.machinePath(directory);
 
         DirectoryListing listing = forBrowsingRemoteFiles.list(target, root.toJailPath(machinePath));
-        pinOnFirstUse(machineName, target, listing.hostKeyFingerprint());
+        pinOnFirstUse(target, listing.hostKeyFingerprint());
 
         // Two maps home: the jail anchors entries onto real machine paths, then the mount strips itself off
         // to leave the file's own path in the archive — the same coordinate the live tree uses.
@@ -318,7 +318,7 @@ public class ExplorerService
      * SFTP connect is where its host key gets pinned — the same rule the shell and exec paths follow, from
      * the one copy that lives on {@link SshTarget#pinOnFirstUse}.
      */
-    private void pinOnFirstUse(String machineName, SshTarget target, String presentedFingerprint) {
-        target.pinOnFirstUse(machineName, presentedFingerprint, forTrackingHostKeys);
+    private void pinOnFirstUse(SshTarget target, String presentedFingerprint) {
+        target.pinOnFirstUse(presentedFingerprint, forTrackingHostKeys);
     }
 }

@@ -54,6 +54,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class VpnServiceTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock ConfigResolver configResolver;
     @Mock ForGettingVpnClients forGettingVpnClients;
     @Mock ForResolvingPeerNames forResolvingPeerNames;
@@ -1035,29 +1039,10 @@ class VpnServiceTest {
 
     @Test
     void renamePeer_migratesSshCredentialAndHostKeyPinToNewName() {
-        // The peer "alice" has a stored credential + pinned host key, keyed by its display name.
+        // Renaming sets a label. The credential and host-key pin hang off the peer's identity, which a
+        // rename does not touch — so there is nothing to carry, and carrying nothing is the point.
         when(peerConfigProvider.getPeerConfigByName("alice"))
             .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
-        var cred = new net.vaier.domain.HostCredential("alice", "root",
-            net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false);
-        when(forPersistingHostCredentials.getByMachine("alice")).thenReturn(Optional.of(cred));
-        when(forTrackingHostKeys.getFingerprint("alice")).thenReturn(Optional.of("SHA256:abc"));
-
-        service.renamePeer("alice", "wonderland");
-
-        verify(forUpdatingPeerConfigurations).updateName("alice", "wonderland");
-        verify(forPersistingHostCredentials).save(cred.reKeyedTo("wonderland"));
-        verify(forPersistingHostCredentials).deleteByMachine("alice");
-        verify(forTrackingHostKeys).pin("wonderland", "SHA256:abc");
-        verify(forTrackingHostKeys).clear("alice");
-    }
-
-    @Test
-    void renamePeer_withNoSshState_isACleanNoOp() {
-        when(peerConfigProvider.getPeerConfigByName("alice"))
-            .thenReturn(Optional.of(new PeerConfiguration("alice", "10.13.13.2", "config")));
-        when(forPersistingHostCredentials.getByMachine("alice")).thenReturn(Optional.empty());
-        when(forTrackingHostKeys.getFingerprint("alice")).thenReturn(Optional.empty());
 
         service.renamePeer("alice", "wonderland");
 
@@ -1067,6 +1052,7 @@ class VpnServiceTest {
         verify(forTrackingHostKeys, never()).pin(any(), any());
         verify(forTrackingHostKeys, never()).clear(any());
     }
+
 
     @Test
     void renamePeer_noOpSameName_leavesSshStateIntact() {

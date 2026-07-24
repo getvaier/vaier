@@ -11,11 +11,13 @@ package net.vaier.domain;
  * expose is a domain decision: {@link #toView()} produces the redacted {@link HostCredentialView} that
  * is the only shape allowed to leave the process.
  */
-public record HostCredential(String machineName, String username, AuthMethod authMethod,
+public record HostCredential(MachineId machineId, String username, AuthMethod authMethod,
                              String secret, String passphrase, boolean managed) {
 
     public HostCredential {
-        requireNonBlank(machineName, "machineName");
+        if (machineId == null) {
+            throw new IllegalArgumentException("machineId must not be null");
+        }
         requireNonBlank(username, "username");
         requireNonBlank(secret, "secret");
         if (authMethod == null) {
@@ -25,17 +27,7 @@ public record HostCredential(String machineName, String username, AuthMethod aut
 
     /** The redacted view of this credential — carries no secret or passphrase bytes. */
     public HostCredentialView toView() {
-        return new HostCredentialView(machineName, username, authMethod, secret != null && !secret.isBlank());
-    }
-
-    /**
-     * A copy of this credential re-keyed to {@code newMachineName}; every other field carries over
-     * unchanged. Used when a machine is renamed — the vault is keyed by machine name, so the stored
-     * credential must move to the new name. Mirrors {@code LanServer.renamedTo}: the "how to re-key"
-     * rule lives on the entity.
-     */
-    public HostCredential reKeyedTo(String newMachineName) {
-        return new HostCredential(newMachineName, username, authMethod, secret, passphrase, managed);
+        return new HostCredentialView(machineId, username, authMethod, secret != null && !secret.isBlank());
     }
 
     private static void requireNonBlank(String value, String field) {

@@ -43,6 +43,10 @@ import static org.mockito.Mockito.when;
  */
 class BorgArchiveMountAdapterTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     private ForResolvingSshTargets sshTargets;
     private ForRunningSshCommands ssh;
     private BackupWorkDirResolver workDirResolver;
@@ -91,7 +95,7 @@ class BorgArchiveMountAdapterTest {
 
     private static SshTarget target() {
         return SshTarget.on("10.13.13.6",
-            new HostCredential("Apalveien 5", "ubuntu", AuthMethod.PASSWORD, "pw", null, false), "SHA256:pinned");
+            new HostCredential(mid("Apalveien 5"), "ubuntu", AuthMethod.PASSWORD, "pw", null, false), "SHA256:pinned");
     }
 
     private static BackupJob job() {

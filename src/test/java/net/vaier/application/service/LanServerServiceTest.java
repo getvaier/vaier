@@ -35,6 +35,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class LanServerServiceTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     @Mock private ForPersistingLanServers forPersistingLanServers;
     @Mock private net.vaier.domain.port.ForGettingLanServers forGettingLanServers;
     @Mock private ForGettingPeerConfigurations forGettingPeerConfigurations;
@@ -129,9 +133,14 @@ class LanServerServiceTest {
         assertThat(saved.getValue()).usingRecursiveComparison().ignoringFields("machineId")
             .isEqualTo(new LanServer(
                 "roon", "192.168.3.50", true, 2375, "Roon core", net.vaier.domain.DeviceCategory.NAS));
-        // The credential is stored keyed to the machine's name, unmanaged.
-        verify(forPersistingHostCredentials).save(new net.vaier.domain.HostCredential(
-            "roon", "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false));
+        // The credential is keyed to the machine that was just registered — its identity, not its
+        // label — so it is still that machine's login after any later rename.
+        ArgumentCaptor<net.vaier.domain.HostCredential> cred =
+            ArgumentCaptor.forClass(net.vaier.domain.HostCredential.class);
+        verify(forPersistingHostCredentials).save(cred.capture());
+        assertThat(cred.getValue().machineId()).isEqualTo(saved.getValue().machineId());
+        assertThat(cred.getValue().username()).isEqualTo("root");
+        assertThat(cred.getValue().managed()).isFalse();
         // The probe targeted the machine's LAN address, with nothing pinned yet.
         ArgumentCaptor<net.vaier.domain.SshTarget> target =
             ArgumentCaptor.forClass(net.vaier.domain.SshTarget.class);
@@ -245,9 +254,13 @@ class LanServerServiceTest {
             .isEqualTo(new LanServer(
                 "synology-nas", "192.168.3.50", true, 2375, null, net.vaier.domain.DeviceCategory.NAS));
         verify(forForgettingDiscoveredLanMachines).forget("192.168.3.50");
-        // The credential is stored keyed to the new machine's derived name, unmanaged.
-        verify(forPersistingHostCredentials).save(new net.vaier.domain.HostCredential(
-            "synology-nas", "root", net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false));
+        // Keyed to the identity of the machine the adoption just created, not to its derived name.
+        ArgumentCaptor<net.vaier.domain.HostCredential> cred =
+            ArgumentCaptor.forClass(net.vaier.domain.HostCredential.class);
+        verify(forPersistingHostCredentials).save(cred.capture());
+        assertThat(cred.getValue().machineId()).isEqualTo(adopted.getValue().machineId());
+        assertThat(cred.getValue().username()).isEqualTo("root");
+        assertThat(cred.getValue().managed()).isFalse();
         // The probe targeted the machine's LAN address, with nothing pinned yet.
         ArgumentCaptor<net.vaier.domain.SshTarget> target =
             ArgumentCaptor.forClass(net.vaier.domain.SshTarget.class);
@@ -594,31 +607,16 @@ class LanServerServiceTest {
         verify(publishedServicesCacheInvalidator).invalidatePublishedServicesCache();
     }
 
+    /**
+     * A rename no longer migrates anything, because nothing is keyed to the name any more. The vault and
+     * the host-key store hang off the machine's identity, and a rename does not change it — so the
+     * credential the machine had before the rename is, without anyone moving it, the credential it has
+     * after. The old carry-it-over dance was only ever compensating for the name being the key.
+     */
     @Test
-    void rename_migratesSshCredentialAndHostKeyPinToNewName() {
-        // #312: the vault + host-key store are keyed by machine name, so a rename must carry them over.
+    void rename_leavesTheSshCredentialAndHostKeyPinUntouched() {
         when(forPersistingLanServers.getAll())
             .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
-        var cred = new net.vaier.domain.HostCredential("nas", "root",
-            net.vaier.domain.AuthMethod.PASSWORD, "pw", null, false);
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(java.util.Optional.of(cred));
-        when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(java.util.Optional.of("SHA256:abc"));
-
-        service.rename("nas", "media-nas");
-
-        // write-new-then-delete-old for both stores.
-        verify(forPersistingHostCredentials).save(cred.reKeyedTo("media-nas"));
-        verify(forPersistingHostCredentials).deleteByMachine("nas");
-        verify(forTrackingHostKeys).pin("media-nas", "SHA256:abc");
-        verify(forTrackingHostKeys).clear("nas");
-    }
-
-    @Test
-    void rename_withNoSshState_isACleanNoOp() {
-        when(forPersistingLanServers.getAll())
-            .thenReturn(List.of(new LanServer("nas", "192.168.1.50", true, 2375)));
-        when(forPersistingHostCredentials.getByMachine("nas")).thenReturn(java.util.Optional.empty());
-        when(forTrackingHostKeys.getFingerprint("nas")).thenReturn(java.util.Optional.empty());
 
         service.rename("nas", "media-nas");
 
@@ -627,6 +625,7 @@ class LanServerServiceTest {
         verify(forTrackingHostKeys, never()).pin(any(), any());
         verify(forTrackingHostKeys, never()).clear(any());
     }
+
 
     @Test
     void rename_noOpSameName_leavesSshStateIntact() {
