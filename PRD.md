@@ -1762,6 +1762,63 @@ Three things this buys that a set of pages structurally cannot:
 
 ---
 
+### 6.22 Machine identity 🟡 (in progress)
+
+**Why.** Vaier had no machine registry. It had three — WireGuard config directories, `lan-servers.yml`,
+and a flag in the Vaier config — unified only by a read projection that identified machines by their
+**name**. A name is a label an operator edits, so editing one orphaned everything keyed to it. The live
+fleet already showed the damage: `Colina-27` had no stored name at all, so `"Colina 27"` was re-derived at
+read time from a directory name, and three config files used that derived string as their primary key.
+
+**The fix.** Every machine carries a `MachineId` — an opaque generated UUID, deliberately not derived from
+the name, the address, or the machine kind. Identity is *read, never minted*: a machine whose stored id is
+missing or malformed does not load, rather than coming back as a stranger to its own records.
+
+#### Done ✅
+
+- `domain.MachineId` — UUID value type. Validation is by pattern, **not** `UUID.fromString`, which accepts
+  `"1-1-1-1-1"` and silently expands it into a different valid-looking UUID.
+- Identity on all three machine kinds: peer `# VAIER:` metadata, `lan-servers.yml`, `vaier-config.yml`
+  (`vaierServerMachineId`, assigned on first use). `Machine.id` is non-null.
+- Credential vault + host-key store keyed by `MachineId`. **Both copies of `migrateSshState` deleted**,
+  along with `HostCredential.reKeyedTo` — the code that existed only to compensate for name-keying.
+- `SshTarget` carries its own `machineId`; `pinOnFirstUse` no longer takes a name that could disagree with it.
+- Disk watches keyed by `MachineId`, with the file adapter refusing an unreadable id **loudly** (its
+  fallback is watched-at-the-global-threshold, so a silent miss reverts a disk to a threshold nobody chose).
+- `GET /machines` and `/machines/vaier-server` expose `id`.
+- `ForResolvingMachineIds` + `MachineIdRegistryAdapter` — the single name→id seam. **Scaffolding**; see below.
+
+#### Remaining
+
+1. **Backup group** (one session). `BackupJob`/`BackupRun`/`BackupServer` `machineName` → `machineId`, plus
+   `BackupJobProtectedPathsAdapter` and `BackupWorkDirResolver`'s home cache. Measured: re-keying the three
+   records alone yields ~90 main-source compile errors (`BackupRestController` 26, `BackupRunner` 18,
+   `BackupProvisioner` 14), and roughly 200 test errors behind them. Not subdividable — the three records
+   reference each other (`BackupRun.from(job, …)` copies the machine through). Decide first whether the
+   backup REST DTOs keep exposing `machineName` for display (resolved at the controller, as
+   `HostCredentialRestController` now does) or expose `machineId` and let the browser resolve from
+   `/machines`; the second is cleaner and fits step 3.
+2. **SFTP root cache** — `CachingSftpRootAdapter`'s in-memory map. Small and independent of everything else.
+3. **Driving edge** — `/machines/{id}/…` and the frontend using ids. **Blocked by step 1**: `BorgArchiveMountAdapter`
+   and `BackupRunner` still call `sshTargets.resolve(job.machineName())`, so the SSH path cannot go id-native
+   until backups hold ids. Once it does, `ForResolvingMachineIds`, `MachineIdRegistryAdapter`,
+   `Machine.nameIsTaken` and `Machine.hasSameName` all delete in one commit — and machine names stop needing
+   to be unique at all.
+
+#### Working method (proven across the slices above)
+
+Change the record, let the compiler enumerate every call site, bulk-convert the mechanical ones with a
+script, then hand-fix assertions that compared whole records (they now differ by id). `TestMachineIds.of(name)`
+gives fixtures a stable name-derived id — production never derives an id from anything. Watch for fixtures
+where a `Machine` mints a random id while its related record uses a name-derived one; that mismatch is
+invisible except as a test that fails for the right reason.
+
+**Migration is by hand** — one site, no migration code. Resolve names to ids by reading the three stores,
+back up `vaier/config/` first, migrate, then build and deploy in the same step: the running container and the
+config files must agree about which key they use.
+
+---
+
 ## 7. End-to-End Workflows
 
 ### 7.1 New service on a peer (primary workflow)
