@@ -73,8 +73,8 @@ public class MachineIdRegistryAdapter implements ForResolvingMachineIds {
             });
     }
 
-    /** Name equality, as the domain defines it for machine names: trimmed and case-insensitive. */
+    /** Name equality is the domain's rule, not this adapter's — it only asks. */
     private static boolean matches(String candidate, String wanted) {
-        return candidate != null && net.vaier.domain.Machine.nameIsTaken(wanted, java.util.List.of(candidate));
+        return net.vaier.domain.Machine.hasSameName(candidate, wanted);
     }
 }

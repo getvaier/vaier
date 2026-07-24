@@ -91,6 +91,25 @@ class MachineTest {
             .isEqualTo(DeviceCategory.PRINTER);
     }
 
+    // --- hasSameName: the one rule for when two machine names mean the same machine ---
+
+    @Test
+    void hasSameName_isCaseInsensitiveAndIgnoresSurroundingWhitespace() {
+        assertThat(Machine.hasSameName("NAS", "  nas ")).isTrue();
+    }
+
+    @Test
+    void hasSameName_falseForDifferentNames() {
+        assertThat(Machine.hasSameName("nas", "media-nas")).isFalse();
+    }
+
+    @Test
+    void hasSameName_falseWhenEitherIsNullOrBlank() {
+        assertThat(Machine.hasSameName(null, "nas")).isFalse();
+        assertThat(Machine.hasSameName("nas", null)).isFalse();
+        assertThat(Machine.hasSameName("  ", "nas")).isFalse();
+    }
+
     // --- nameIsTaken: machine names are unique across Vaier (#284) ---
 
     @Test

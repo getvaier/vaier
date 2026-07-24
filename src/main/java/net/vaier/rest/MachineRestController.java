@@ -80,11 +80,11 @@ public class MachineRestController {
     @GetMapping("/vaier-server")
     public VaierServerResponse vaierServer() {
         Machine server = getVaierServerUseCase.getVaierServerMachine();
-        return new VaierServerResponse(server.name(), server.effectiveSshAccess(),
+        return new VaierServerResponse(server.id().value(), server.name(), server.effectiveSshAccess(),
             hasStoredCredential(server.name()));
     }
 
-    record VaierServerResponse(String name, boolean sshAccess, boolean hasCredential) {}
+    record VaierServerResponse(String id, String name, boolean sshAccess, boolean hasCredential) {}
 
     /**
      * The progressive-adoption nudges Vaier suggests for one machine: evidence-backed, single yes/no
@@ -223,6 +223,7 @@ public class MachineRestController {
     record SshAccessResponse(boolean sshAccess) {}
 
     public record MachineResponse(
+        String id,
         String name,
         String type,
         String publicKey,
@@ -242,6 +243,7 @@ public class MachineRestController {
     ) {
         static MachineResponse from(Machine m, boolean hasCredential) {
             return new MachineResponse(
+                m.id().value(),
                 m.name(),
                 m.type().name(),
                 m.publicKey(),
