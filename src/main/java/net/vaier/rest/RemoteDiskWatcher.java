@@ -131,7 +131,7 @@ public class RemoteDiskWatcher {
      */
     private void checkFilesystem(Machine machine, RemoteDiskUsage filesystem, DiskWatches watches,
                                  int globalThreshold) {
-        DiskWatch watch = watches.forFilesystem(machine.name(), filesystem.mountPoint());
+        DiskWatch watch = watches.forFilesystem(machine.id(), filesystem.mountPoint());
         RemoteDiskUsage.DiskVerdict verdict = filesystem.judge(watch, globalThreshold);
         if (verdict.silent()) {
             return;

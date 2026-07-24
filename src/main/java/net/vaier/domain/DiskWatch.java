@@ -14,15 +14,15 @@ package net.vaier.domain;
  * <em>silence about the disk that matters</em>, so a filesystem nobody has configured nags rather than
  * hides. Muting is a decision someone takes, never one they inherit.
  *
- * @param machineName      the machine the filesystem is on
+ * @param machineId        the machine the filesystem is on
  * @param mountPoint       the filesystem's mount point (e.g. {@code /volume1})
  * @param watched          whether Vaier alerts on this filesystem at all
  * @param thresholdPercent this filesystem's own alert threshold (1–100), or null to use the global one
  */
-public record DiskWatch(String machineName, String mountPoint, boolean watched, Integer thresholdPercent) {
+public record DiskWatch(MachineId machineId, String mountPoint, boolean watched, Integer thresholdPercent) {
 
     public DiskWatch {
-        if (machineName == null || machineName.isBlank()) {
+        if (machineId == null) {
             throw new IllegalArgumentException("A disk watch must name a machine");
         }
         if (mountPoint == null || mountPoint.isBlank()) {
@@ -38,8 +38,8 @@ public record DiskWatch(String machineName, String mountPoint, boolean watched, 
      * The watch a filesystem has when nobody has configured it: watched, at the global threshold. Nothing
      * is ever silently unwatched.
      */
-    public static DiskWatch watchedByDefault(String machineName, String mountPoint) {
-        return new DiskWatch(machineName, mountPoint, true, null);
+    public static DiskWatch watchedByDefault(MachineId machineId, String mountPoint) {
+        return new DiskWatch(machineId, mountPoint, true, null);
     }
 
     /**
@@ -50,20 +50,20 @@ public record DiskWatch(String machineName, String mountPoint, boolean watched, 
      * unwatched" is the whole point of #325, and a store that could quietly hold a different default would be
      * a second place to invert it.
      */
-    public static DiskWatch of(String machineName, String mountPoint, Boolean watched,
+    public static DiskWatch of(MachineId machineId, String mountPoint, Boolean watched,
                                Integer thresholdPercent) {
-        return new DiskWatch(machineName, mountPoint, watched == null || watched, thresholdPercent);
+        return new DiskWatch(machineId, mountPoint, watched == null || watched, thresholdPercent);
     }
 
     /**
-     * Whether this watch is the one for {@code mountPoint} on {@code machineName} — machine <em>and</em>
+     * Whether this watch is the one for {@code mountPoint} on {@code machineId} — machine <em>and</em>
      * mount together, because one mount point means two different disks on two different machines.
      *
      * <p>It lives on the entity because it is a watch's <b>identity</b>: the store replaces a watch by it, and
      * an identity asked in two places can drift in two directions.
      */
-    public boolean isFor(String machineName, String mountPoint) {
-        return this.machineName.equals(machineName) && this.mountPoint.equals(mountPoint);
+    public boolean isFor(MachineId machineId, String mountPoint) {
+        return this.machineId.equals(machineId) && this.mountPoint.equals(mountPoint);
     }
 
     /** This filesystem's own threshold when it has one, otherwise the global disk alert threshold. */

@@ -8,6 +8,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class RemoteDiskUsageTest {
 
+    private static net.vaier.domain.MachineId mid(String name) {
+        return net.vaier.domain.TestMachineIds.of(name);
+    }
+
     /**
      * The real {@code df -P} from the NAS (#325). Everything that makes the old {@code df -P /} reading a
      * lie is in here: {@code /} is the 2.3 GB DSM system partition, pinned at 88% by design; {@code /volume1}
@@ -151,7 +155,7 @@ class RemoteDiskUsageTest {
 
     @Test
     void breaches_withNoWatchOfItsOwn_fallsBackToTheGlobalThreshold() {
-        DiskWatch defaulted = DiskWatch.watchedByDefault("NAS", "/volume1");
+        DiskWatch defaulted = DiskWatch.watchedByDefault(mid("NAS"), "/volume1");
 
         assertThat(fs("/volume1", 90).breaches(defaulted, 85)).isTrue();
         assertThat(fs("/volume1", 39).breaches(defaulted, 85)).isFalse();
@@ -161,7 +165,7 @@ class RemoteDiskUsageTest {
     void breaches_withItsOwnThreshold_ignoresTheGlobalOne() {
         // The NAS's / sits at 88% by design and would page forever at the global 85%. Given its own 95%
         // threshold it is quiet — and still watched, so a genuinely full system partition still speaks.
-        DiskWatch ownThreshold = new DiskWatch("NAS", "/", true, 95);
+        DiskWatch ownThreshold = new DiskWatch(mid("NAS"), "/", true, 95);
 
         assertThat(fs("/", 88).breaches(ownThreshold, 85)).isFalse();
         assertThat(fs("/", 96).breaches(ownThreshold, 85)).isTrue();
@@ -169,15 +173,15 @@ class RemoteDiskUsageTest {
 
     @Test
     void breaches_whenMuted_isNeverABreach_howeverFull() {
-        DiskWatch muted = new DiskWatch("NAS", "/", false, null);
+        DiskWatch muted = new DiskWatch(mid("NAS"), "/", false, null);
 
         assertThat(fs("/", 100).breaches(muted, 85)).isFalse();
     }
 
     @Test
     void effectiveThreshold_isTheFilesystemsOwn_orTheGlobalOne() {
-        assertThat(fs("/", 50).effectiveThreshold(new DiskWatch("NAS", "/", true, 95), 85)).isEqualTo(95);
-        assertThat(fs("/", 50).effectiveThreshold(DiskWatch.watchedByDefault("NAS", "/"), 85)).isEqualTo(85);
+        assertThat(fs("/", 50).effectiveThreshold(new DiskWatch(mid("NAS"), "/", true, 95), 85)).isEqualTo(95);
+        assertThat(fs("/", 50).effectiveThreshold(DiskWatch.watchedByDefault(mid("NAS"), "/"), 85)).isEqualTo(85);
     }
 
     // --- one verdict, asked once ------------------------------------------------------------------------
@@ -190,13 +194,13 @@ class RemoteDiskUsageTest {
     void judge_resolvesMuteThresholdAndFallback_inOneAnswer() {
         RemoteDiskUsage volume1 = fs("/volume1", 91);
 
-        var watched = volume1.judge(DiskWatch.watchedByDefault("NAS", "/volume1"), 85);
+        var watched = volume1.judge(DiskWatch.watchedByDefault(mid("NAS"), "/volume1"), 85);
         assertThat(watched.watched()).isTrue();
         assertThat(watched.thresholdPercent()).isEqualTo(85);
         assertThat(watched.breaching()).isTrue();
         assertThat(watched.silent()).isFalse();
 
-        var ownThreshold = fs("/", 88).judge(new DiskWatch("NAS", "/", true, 95), 85);
+        var ownThreshold = fs("/", 88).judge(new DiskWatch(mid("NAS"), "/", true, 95), 85);
         assertThat(ownThreshold.thresholdPercent()).isEqualTo(95);
         assertThat(ownThreshold.breaching()).isFalse();      // 88% is normal on a DSM system partition
     }
@@ -205,7 +209,7 @@ class RemoteDiskUsageTest {
     void judge_aMutedFilesystem_isSilent_soVaierSaysNothingAboutItAtAll() {
         // Silent is stronger than "does not breach": a muted filesystem raises no level alert AND no fill
         // forecast. Muting means "do not speak about this disk", and an early-warning email is speaking.
-        var verdict = fs("/", 100).judge(new DiskWatch("NAS", "/", false, null), 85);
+        var verdict = fs("/", 100).judge(new DiskWatch(mid("NAS"), "/", false, null), 85);
 
         assertThat(verdict.watched()).isFalse();
         assertThat(verdict.silent()).isTrue();

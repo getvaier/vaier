@@ -66,6 +66,7 @@ class MachineServiceTest {
     @Mock ForTrackingHostKeys forTrackingHostKeys;
     @Mock ForPersistingDiskWatches forPersistingDiskWatches;
     @Mock ConfigResolver configResolver;
+    @Mock net.vaier.domain.port.ForResolvingMachineIds forResolvingMachineIds;
 
     MachineService service;
 
@@ -79,7 +80,9 @@ class MachineServiceTest {
         service = new MachineService(forGettingPeerConfigurations, forGettingVpnClients, forGettingLanServers,
             forResolvingServerLanCidr, forUpdatingPeerConfigurations, forPersistingLanServers,
             forPersistingAppConfiguration, forResolvingSshTargets, forRunningSshCommands,
-            forTrackingHostKeys, forPersistingDiskWatches, configResolver);
+            forTrackingHostKeys, forPersistingDiskWatches, forResolvingMachineIds, configResolver);
+        lenient().when(forResolvingMachineIds.idForName(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(i -> java.util.Optional.of(mid(i.getArgument(0))));
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -298,6 +301,8 @@ class MachineServiceTest {
     @Test
     void setMachineSshAccess_unknownMachine_throwsNotFound() {
         lenient().when(forPersistingLanServers.getAll()).thenReturn(List.of());
+        lenient().when(forResolvingMachineIds.idForName(org.mockito.ArgumentMatchers.anyString()))
+            .thenAnswer(i -> java.util.Optional.of(mid(i.getArgument(0))));
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.setMachineSshAccess("ghost", true))
@@ -429,8 +434,8 @@ class MachineServiceTest {
             .thenReturn(new CommandResult(0, NAS_DF, "", false, null));
         when(configResolver.getDiskMonitorThresholdPercent()).thenReturn(85);
         when(forPersistingDiskWatches.getAll()).thenReturn(List.of(
-            new DiskWatch("NAS", "/", true, 95),
-            new DiskWatch("NAS", "/volume2", false, null)));
+            new DiskWatch(mid("NAS"), "/", true, 95),
+            new DiskWatch(mid("NAS"), "/volume2", false, null)));
 
         var byMount = service.getDiskUsage("NAS").stream()
             .collect(java.util.stream.Collectors.toMap(MachineFilesystemUco::mountPoint, fs -> fs));
@@ -497,7 +502,7 @@ class MachineServiceTest {
 
         var saved = ArgumentCaptor.forClass(DiskWatch.class);
         verify(forPersistingDiskWatches).save(saved.capture());
-        assertThat(saved.getValue()).isEqualTo(new DiskWatch("NAS", "/", true, 95));
+        assertThat(saved.getValue()).isEqualTo(new DiskWatch(mid("NAS"), "/", true, 95));
     }
 
     @Test
@@ -522,11 +527,11 @@ class MachineServiceTest {
     void getDiskWatches_resolvesAnUnconfiguredFilesystem_toWatchedByDefault() {
         // What the scheduled watcher reads. Nothing is ever silently unwatched — the failure #325 fixes is
         // silence about the disk that matters, so an unseen mount nags rather than hides.
-        when(forPersistingDiskWatches.getAll()).thenReturn(List.of(new DiskWatch("NAS", "/", false, null)));
+        when(forPersistingDiskWatches.getAll()).thenReturn(List.of(new DiskWatch(mid("NAS"), "/", false, null)));
 
         var watches = service.getDiskWatches();
 
-        assertThat(watches.forFilesystem("NAS", "/").watched()).isFalse();
-        assertThat(watches.forFilesystem("NAS", "/volume1").watched()).isTrue();
+        assertThat(watches.forFilesystem(mid("NAS"), "/").watched()).isFalse();
+        assertThat(watches.forFilesystem(mid("NAS"), "/volume1").watched()).isTrue();
     }
 }

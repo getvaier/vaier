@@ -26,8 +26,10 @@ import org.yaml.snakeyaml.Yaml;
  * absent file is the healthy first-boot state, not an error.
  *
  * <p>Tolerant on load, like the backup adapters: a malformed entry is <em>skipped</em> with a warning rather
- * than aborting the load of every other watch. An entry whose machine or mount point no longer exists — a
- * renamed machine, an unmounted volume — is simply never looked up; it costs nothing and is not an error.
+ * than aborting the load of every other watch. An entry whose machine or mount point no longer exists — a decommissioned machine, an unmounted
+ * volume — is simply never looked up; it costs nothing and is not an error. An entry with no readable
+ * machine id is a different matter and is skipped loudly: its filesystem silently reverts to the global
+ * threshold, which is a number nobody chose.
  */
 @Component
 @Slf4j
@@ -72,7 +74,7 @@ public class DiskWatchFileAdapter implements ForPersistingDiskWatches {
         List<DiskWatch> current = new ArrayList<>(getAll());
         // A watch's identity — machine AND mount point — is DiskWatch.isFor: the domain's, not a rule this
         // adapter re-derives and could drift on.
-        current.removeIf(w -> w.isFor(watch.machineName(), watch.mountPoint()));
+        current.removeIf(w -> w.isFor(watch.machineId(), watch.mountPoint()));
         current.add(watch);
         writeAll(current);
     }
@@ -83,14 +85,25 @@ public class DiskWatchFileAdapter implements ForPersistingDiskWatches {
      * — that carries a nonsense threshold is skipped with a warning rather than crashing the load.
      */
     private DiskWatch deserialize(Map<?, ?> m) {
-        String machineName = asString(m.get("machineName"));
+        String rawId = asString(m.get("machineId"));
         String mountPoint = asString(m.get("mountPoint"));
         Integer thresholdPercent = m.get("thresholdPercent") instanceof Number n ? n.intValue() : null;
         Boolean watched = m.get("watched") instanceof Boolean b ? b : null;
+        net.vaier.domain.MachineId machineId;
+        try {
+            machineId = net.vaier.domain.MachineId.of(rawId);
+        } catch (IllegalArgumentException e) {
+            // Loud, not quiet: this filesystem now falls back to the global threshold, a number nobody
+            // chose for it. A watch that fails to load must be visible here rather than inferred later
+            // from an alert that fires at the wrong percentage.
+            log.error("Skipping disk-watch entry in {} with an unusable machineId: {}",
+                FILE_NAME, e.getMessage());
+            return null;
+        }
         try {
             // DiskWatch.of applies the "absent means watched" policy. It is the domain's — a store that held
             // its own default would be a second place to silently unwatch a disk, which is the #325 bug.
-            return DiskWatch.of(machineName, mountPoint, watched, thresholdPercent);
+            return DiskWatch.of(machineId, mountPoint, watched, thresholdPercent);
         } catch (IllegalArgumentException e) {
             log.warn("Skipping invalid disk-watch entry in {}: {}", FILE_NAME, e.getMessage());
             return null;
@@ -109,7 +122,7 @@ public class DiskWatchFileAdapter implements ForPersistingDiskWatches {
         List<Map<String, Object>> serialized = new ArrayList<>();
         for (DiskWatch w : watches) {
             Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("machineName", w.machineName());
+            entry.put("machineId", w.machineId().value());
             entry.put("mountPoint", w.mountPoint());
             entry.put("watched", w.watched());
             if (w.thresholdPercent() != null) {

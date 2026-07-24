@@ -25,28 +25,28 @@ public class DiskWatches {
         if (watches != null) {
             for (DiskWatch watch : watches) {
                 if (watch != null) {
-                    byMachineAndMount.put(key(watch.machineName(), watch.mountPoint()), watch);
+                    byMachineAndMount.put(key(watch.machineId(), watch.mountPoint()), watch);
                 }
             }
         }
     }
 
     /**
-     * The watch for {@code mountPoint} on {@code machineName} — the stored one when there is one, otherwise
+     * The watch for {@code mountPoint} on {@code machineId} — the stored one when there is one, otherwise
      * the watched-by-default one. Keyed on machine <em>and</em> mount: {@code /} on the NAS and {@code /} on
      * Apalveien 5 are two different disks with two different verdicts.
      */
-    public DiskWatch forFilesystem(String machineName, String mountPoint) {
-        DiskWatch stored = byMachineAndMount.get(key(machineName, mountPoint));
-        return stored != null ? stored : DiskWatch.watchedByDefault(machineName, mountPoint);
+    public DiskWatch forFilesystem(MachineId machineId, String mountPoint) {
+        DiskWatch stored = byMachineAndMount.get(key(machineId, mountPoint));
+        return stored != null ? stored : DiskWatch.watchedByDefault(machineId, mountPoint);
     }
 
     /**
      * Machine and mount joined on NUL — a byte neither a machine name nor a POSIX path can contain, so no
-     * two keys can collide. A space separator would: machine {@code NAS} with mount {@code /a b} keys the
-     * same as machine {@code NAS /a} with mount {@code b}.
+     * two keys can collide. A space separator would: an id ending in {@code /a} with mount {@code b} would key
+     * the same as that id with mount {@code /a b}.
      */
-    private static String key(String machineName, String mountPoint) {
-        return machineName + '\u0000' + mountPoint;
+    private static String key(MachineId machineId, String mountPoint) {
+        return machineId.value() + '\u0000' + mountPoint;
     }
 }

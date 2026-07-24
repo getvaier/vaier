@@ -87,8 +87,9 @@ class RemoteDiskWatcherTest {
     }
 
     /** An SSH-capable server-type machine (effectiveSshAccess() true by default). */
+    /** A machine whose id is the stable test id for its name, so watches keyed to it actually match. */
     private Machine sshMachine(String name) {
-        return new Machine(MachineId.generate(), name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
+        return new Machine(mid(name), name, MachineType.UBUNTU_SERVER, null, null, null, null, null, null, null,
             null, "10.13.13.9", false, null, DeviceCategory.SERVER, null);
     }
 
@@ -339,7 +340,7 @@ class RemoteDiskWatcherTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
         hasCredential("NAS");
         when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of(
-            new DiskWatch("NAS", "/", true, 95))));      // the DSM system partition, given its own threshold
+            new DiskWatch(mid("NAS"), "/", true, 95))));      // the DSM system partition, given its own threshold
 
         when(runner.run(eq("NAS"), any())).thenReturn(nasDf(39));
         watcher.checkRemoteDiskUsage();                   // baseline: nothing breaches
@@ -359,7 +360,7 @@ class RemoteDiskWatcherTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
         hasCredential("NAS");
         when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of(
-            new DiskWatch("NAS", "/", true, 95))));
+            new DiskWatch(mid("NAS"), "/", true, 95))));
 
         when(runner.run(eq("NAS"), any())).thenReturn(nasDf(39));
         watcher.checkRemoteDiskUsage();
@@ -379,7 +380,7 @@ class RemoteDiskWatcherTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
         hasCredential("NAS");
         when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of(
-            new DiskWatch("NAS", "/", true, 95))));
+            new DiskWatch(mid("NAS"), "/", true, 95))));
 
         when(runner.run(eq("NAS"), any())).thenReturn(nasDf(39));
         watcher.checkRemoteDiskUsage();
@@ -393,9 +394,9 @@ class RemoteDiskWatcherTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
         hasCredential("NAS");
         when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of(
-            new DiskWatch("NAS", "/", false, null),
-            new DiskWatch("NAS", "/volume1", false, null),
-            new DiskWatch("NAS", "/volume2", false, null))));
+            new DiskWatch(mid("NAS"), "/", false, null),
+            new DiskWatch(mid("NAS"), "/volume1", false, null),
+            new DiskWatch(mid("NAS"), "/volume2", false, null))));
 
         when(runner.run(eq("NAS"), any())).thenReturn(nasDf(20));
         watcher.checkRemoteDiskUsage();
@@ -451,7 +452,7 @@ class RemoteDiskWatcherTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
         hasCredential("NAS");
         when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of(
-            new DiskWatch("NAS", "/", true, 95))));      // keep / quiet so only /volume1 can speak
+            new DiskWatch(mid("NAS"), "/", true, 95))));      // keep / quiet so only /volume1 can speak
 
         // /volume1 climbs 1%/h toward full while / sits at its usual 88%.
         for (int used : new int[]{74, 75, 76, 77, 78}) {
@@ -471,9 +472,9 @@ class RemoteDiskWatcherTest {
         when(machines.getAllMachines()).thenReturn(List.of(sshMachine("NAS")));
         hasCredential("NAS");
         when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of(
-            new DiskWatch("NAS", "/", false, null),
-            new DiskWatch("NAS", "/volume1", false, null),
-            new DiskWatch("NAS", "/volume2", false, null))));
+            new DiskWatch(mid("NAS"), "/", false, null),
+            new DiskWatch(mid("NAS"), "/volume1", false, null),
+            new DiskWatch(mid("NAS"), "/volume2", false, null))));
 
         for (int used : new int[]{74, 75, 76, 77, 78}) {
             when(runner.run(eq("NAS"), any())).thenReturn(nasDf(used));

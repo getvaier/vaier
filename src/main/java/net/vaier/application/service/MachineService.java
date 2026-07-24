@@ -58,6 +58,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     private final ForRunningSshCommands forRunningSshCommands;
     private final ForTrackingHostKeys forTrackingHostKeys;
     private final ForPersistingDiskWatches forPersistingDiskWatches;
+    private final net.vaier.domain.port.ForResolvingMachineIds forResolvingMachineIds;
     private final ConfigResolver configResolver;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
@@ -71,6 +72,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                           ForRunningSshCommands forRunningSshCommands,
                           ForTrackingHostKeys forTrackingHostKeys,
                           ForPersistingDiskWatches forPersistingDiskWatches,
+                          net.vaier.domain.port.ForResolvingMachineIds forResolvingMachineIds,
                           ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -83,6 +85,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         this.forRunningSshCommands = forRunningSshCommands;
         this.forTrackingHostKeys = forTrackingHostKeys;
         this.forPersistingDiskWatches = forPersistingDiskWatches;
+        this.forResolvingMachineIds = forResolvingMachineIds;
         this.configResolver = configResolver;
     }
 
@@ -126,7 +129,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                 // One call, one verdict — the same RemoteDiskUsage.judge the scheduled watcher asks before it
                 // sends the alert email. Neither of them recombines "how full" with "how full is too full".
                 RemoteDiskUsage.DiskVerdict verdict =
-                    fs.judge(watches.forFilesystem(machineName, fs.mountPoint()), globalThreshold);
+                    fs.judge(watches.forFilesystem(machineIdOf(machineName), fs.mountPoint()), globalThreshold);
                 return new MachineFilesystemUco(machineName, fs.device(), fs.mountPoint(),
                     fs.sizeKb(), fs.usedKb(), fs.availableKb(), fs.sizeHuman(), fs.availableHuman(),
                     fs.usedPercent(), verdict.thresholdPercent(), verdict.watched(), verdict.breaching());
@@ -154,7 +157,8 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     @Override
     public void setDiskWatch(String machineName, String mountPoint, boolean watched,
                              Integer thresholdPercent) {
-        forPersistingDiskWatches.save(new DiskWatch(machineName, mountPoint, watched, thresholdPercent));
+        forPersistingDiskWatches.save(
+            new DiskWatch(machineIdOf(machineName), mountPoint, watched, thresholdPercent));
     }
 
     @Override
@@ -207,6 +211,15 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
      * use and persisted; every later call reads the stored one. This is initialisation, not migration:
      * a brand-new Vaier reaches this path too, and the assignment is idempotent.
      */
+    /**
+     * The identity of the machine named {@code machineName}. Disk watches hang off identity while REST
+     * paths still carry names; this crossing goes away with the paths.
+     */
+    private net.vaier.domain.MachineId machineIdOf(String machineName) {
+        return forResolvingMachineIds.idForName(machineName)
+            .orElseThrow(() -> new NotFoundException("Machine not found: " + machineName));
+    }
+
     private Machine vaierServerMachine() {
         VaierConfig config = forPersistingAppConfiguration.load().orElse(null);
         Boolean override = config == null ? null : config.getVaierServerSshAccess();
