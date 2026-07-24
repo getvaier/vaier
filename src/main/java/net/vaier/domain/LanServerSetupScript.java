@@ -59,7 +59,7 @@ public final class LanServerSetupScript {
         }
 
         if (dockerPort == null && gateway == null) return Optional.empty();
-        return Optional.of(generate(dockerPort, gateway, cidrs));
+        return Optional.of(generate(server.name(), server.lanAddress(), dockerPort, gateway, cidrs));
     }
 
     /**
@@ -84,7 +84,13 @@ public final class LanServerSetupScript {
         return new ArrayList<>(out);
     }
 
-    public static String generate(Integer dockerPort, String gateway, List<String> routeCidrs) {
+    /**
+     * Renders the script. {@code machineName} and {@code expectedAddress} feed the
+     * {@link SetupScriptGuard} — a LAN server is reached at a known address, so the guard can assert
+     * this host actually holds it before anything is changed.
+     */
+    public static String generate(String machineName, String expectedAddress, Integer dockerPort,
+                                  String gateway, List<String> routeCidrs) {
         boolean doDocker = dockerPort != null;
         boolean doRoutes = gateway != null && routeCidrs != null && !routeCidrs.isEmpty();
         // Lock the (unauthenticated) Docker API only when we know the source Vaier's scrape arrives from —
@@ -100,6 +106,11 @@ public final class LanServerSetupScript {
         if (doRoutes) sb.append("#   - static routes to the Vaier server subnet (and other site LANs) via its relay peer\n");
         sb.append("#\n");
         sb.append("set -euo pipefail\n\n");
+        // Ahead of the root check: telling someone to re-run with sudo is the wrong advice when they
+        // are on the wrong machine altogether.
+        sb.append(SetupScriptGuard.preamble(machineName, routeCidrs == null ? List.of() : routeCidrs,
+            expectedAddress));
+        sb.append("\n");
         sb.append("if [ \"$(id -u)\" -ne 0 ]; then\n");
         sb.append("    echo \"ERROR: run this script as root (sudo bash $0)\" >&2\n");
         sb.append("    exit 2\n");
@@ -109,6 +120,7 @@ public final class LanServerSetupScript {
         if (doFirewall) sb.append(firewallBlock(dockerPort, gateway));
         if (doRoutes) sb.append(routeBlock(gateway, routeCidrs));
 
+        sb.append(SetupScriptGuard.stamp(machineName));
         sb.append("\necho\n");
         sb.append("echo \"==> Vaier LAN host setup complete.\"\n");
         if (doFirewall) {

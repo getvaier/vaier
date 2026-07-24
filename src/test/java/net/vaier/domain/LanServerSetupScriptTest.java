@@ -39,11 +39,43 @@ class LanServerSetupScriptTest {
         assertThat(cidrs).containsExactly("10.13.13.0/24");
     }
 
+    // --- the setup-script guard (2026-07-23: a setup script ran on the wrong machine) ---
+
+    @Test
+    void generate_guardsBeforeTheRootCheckAndBeforeAnyMutation() {
+        String s = LanServerSetupScript.generate("NAS", "192.168.3.3", 2375, "192.168.3.1",
+            List.of("10.13.13.0/24"));
+
+        int guard = s.indexOf(SetupScriptGuard.MARKER);
+        assertThat(guard).isPositive();
+        // Ahead of the root check too: "run me as root" is the wrong thing to tell someone who is
+        // on the wrong machine entirely.
+        assertThat(guard).isLessThan(s.indexOf("run this script as root"));
+        assertThat(guard).isLessThan(s.indexOf("get.docker.com"));
+        assertThat(guard).isLessThan(s.indexOf("ip route replace"));
+    }
+
+    @Test
+    void generate_assertsTheHostHoldsTheAddressVaierRecorded() {
+        String s = LanServerSetupScript.generate("NAS", "192.168.3.3", 2375, null, List.of());
+
+        assertThat(s).contains("grep -qx '192.168.3.3'");
+        assertThat(s).contains("Vaier has recorded");
+    }
+
+    @Test
+    void generate_refusesToRouteTheHostsOwnNetworkIntoTheTunnel() {
+        String s = LanServerSetupScript.generate("NAS", null, null, "172.31.32.1",
+            List.of("172.31.32.0/20"));
+
+        assertThat(s).contains("for vaier_cidr in '172.31.32.0/20'");
+    }
+
     // --- generate: adaptive blocks ---
 
     @Test
     void generate_dockerOnly_emitsDockerBlockNoRouteBlock() {
-        String s = LanServerSetupScript.generate(2375, null, List.of());
+        String s = LanServerSetupScript.generate("NAS", null, 2375, null, List.of());
 
         assertThat(s).startsWith("#!/usr/bin/env bash");
         assertThat(s).contains("set -euo pipefail");
@@ -73,7 +105,8 @@ class LanServerSetupScriptTest {
         // so the script locks tcp/2375 to that gateway and drops it from everyone else, persisted as a
         // systemd oneshot so it re-applies on boot. This is the secure form of the manual advice the script
         // used to only print.
-        String s = LanServerSetupScript.generate(2375, "192.168.3.121", List.of("10.13.13.0/24"));
+        String s = LanServerSetupScript.generate("NAS", null, 2375, "192.168.3.121",
+            List.of("10.13.13.0/24"));
 
         assertThat(s).contains("/usr/local/sbin/vaier-docker-firewall.sh");
         assertThat(s).contains("/etc/systemd/system/vaier-docker-firewall.service");
@@ -89,7 +122,7 @@ class LanServerSetupScriptTest {
 
     @Test
     void generate_routesOnly_emitsRouteBlockAndOneshotNoDockerBlock() {
-        String s = LanServerSetupScript.generate(
+        String s = LanServerSetupScript.generate("NAS", null,
             null, "192.168.3.121", List.of("172.31.16.0/20", "10.13.13.0/24"));
 
         assertThat(s).startsWith("#!/usr/bin/env bash");
@@ -107,7 +140,7 @@ class LanServerSetupScriptTest {
 
     @Test
     void generate_dockerAndRoutes_emitsBothBlocks() {
-        String s = LanServerSetupScript.generate(
+        String s = LanServerSetupScript.generate("NAS", null,
             2375, "192.168.3.121", List.of("172.31.16.0/20"));
 
         assertThat(s).contains("tcp://0.0.0.0:2375");

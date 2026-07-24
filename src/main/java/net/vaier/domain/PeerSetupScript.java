@@ -24,6 +24,13 @@ public final class PeerSetupScript {
         sb.append("VPN_IP=\"").append(vpnIp).append("\"\n");
         sb.append("INSTALL_DIR=\"$HOME/vaier\"\n");
         sb.append("\n");
+        // Refuse the wrong machine before a single line mutates it. Vaier cannot know this host's
+        // address yet — the peer has no tunnel until this script builds one — so the guard leans on
+        // the Vaier-server probes, the machine stamp, and the CIDRs the config about to be installed
+        // would route into the tunnel.
+        sb.append(SetupScriptGuard.preamble(peerName,
+            SetupScriptGuard.tunneledCidrs(wgConfig, vpnSubnet), null));
+        sb.append("\n");
         sb.append("docker_compose_up() {\n");
         sb.append("  local RETRIES=5\n");
         sb.append("  for i in $(seq 1 $RETRIES); do\n");
@@ -209,6 +216,8 @@ public final class PeerSetupScript {
         sb.append("    echo \"WARNING: VPN IP $VPN_IP not yet visible. Waiting longer...\"\n");
         sb.append("    sleep 10\n");
         sb.append("fi\n");
+        sb.append("\n");
+        sb.append(SetupScriptGuard.stamp(peerName));
         sb.append("\n");
         sb.append("# WireGuard runs in host network mode, so it survives Docker restart\n");
         sb.append("echo \"\"\n");
