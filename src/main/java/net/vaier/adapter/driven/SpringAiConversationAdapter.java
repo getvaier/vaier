@@ -22,12 +22,14 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * The one class in Vaier that knows Spring AI exists (#360). It translates and nothing else: a
@@ -137,7 +139,10 @@ public class SpringAiConversationAdapter implements ForConversing {
     private static Map<String, String> strings(Map<String, Object> arguments) {
         Map<String, String> strings = new LinkedHashMap<>();
         if (arguments != null) {
-            arguments.forEach((name, value) -> strings.put(name, value == null ? null : String.valueOf(value)));
+            arguments.forEach((name, value) -> strings.put(name, value == null ? null
+                : value instanceof Collection<?> many
+                    ? many.stream().map(String::valueOf).collect(Collectors.joining("\n"))
+                    : String.valueOf(value)));
         }
         return strings;
     }
@@ -147,9 +152,12 @@ public class SpringAiConversationAdapter implements ForConversing {
         schema.put("type", "object");
         ObjectNode properties = schema.putObject("properties");
         for (ToolParameter parameter : tool.parameters()) {
-            properties.putObject(parameter.name())
-                .put("type", "string")
+            ObjectNode property = properties.putObject(parameter.name())
+                .put("type", parameter.many() ? "array" : "string")
                 .put("description", parameter.description());
+            if (parameter.many()) {
+                property.putObject("items").put("type", "string");
+            }
         }
         tool.parameters().forEach(parameter -> schema.withArray("required").add(parameter.name()));
         schema.put("additionalProperties", false);

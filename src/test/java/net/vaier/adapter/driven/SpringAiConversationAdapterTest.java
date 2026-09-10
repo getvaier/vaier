@@ -126,6 +126,21 @@ class SpringAiConversationAdapterTest {
         assertThat(seen).containsExactly(Map.of("machine", "Colina 27", "command", "uptime"));
     }
 
+    /** A parameter that takes many values is offered as an array, and arrives one per line. */
+    @Test
+    void aParameterThatTakesManyValues_isAnArrayInTheSchema_andArrivesOnePerLine() {
+        List<Map<String, String>> seen = new ArrayList<>();
+        converse(List.of(), List.of(new ToolOffer(AskTool.BUNDLE_FILES, args -> {
+            seen.add(args);
+            return "offered";
+        })));
+
+        ToolCallback bundle = ((ToolCallingChatOptions) model.prompt.getOptions()).getToolCallbacks().get(0);
+        assertThat(bundle.getToolDefinition().inputSchema()).contains("\"paths\":{\"type\":\"array\"");
+        bundle.call("{\"machine\":\"NAS\",\"paths\":[\"/a\",\"/b\"],\"name\":\"x\"}");
+        assertThat(seen.get(0)).containsEntry("paths", "/a\n/b").containsEntry("machine", "NAS");
+    }
+
     @Test
     void itForwardsTheAnswerInPiecesInOrder() {
         model.chunks = List.of("Colina", " is ", "red.");

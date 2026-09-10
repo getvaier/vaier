@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -12,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AskPromptTest {
 
     private String prompt() {
-        return AskPrompt.forFleet("example.com").text();
+        return AskPrompt.forFleet("example.com", LocalDate.of(2026, 9, 10)).text();
     }
 
     @Test
@@ -114,6 +116,20 @@ class AskPromptTest {
         assertThat(prompt()).contains("do not try another spelling");
     }
 
+    /** "Last year today" needs today; the fleet's clock is the one the operator means. */
+    @Test
+    void itSaysWhatDayItIs() {
+        assertThat(prompt()).contains("Today is 2026-09-10.");
+    }
+
+    /** Files are handed over by finding them first, then bundling exactly what was found. */
+    @Test
+    void itSaysHowToHandOverFiles_andNeverToInventAPath() {
+        assertThat(prompt()).contains("find them first with run_on_machine");
+        assertThat(prompt()).contains("bundle_files");
+        assertThat(prompt()).contains("Never invent a path");
+    }
+
     /** Slice 3: what the model is told when asked to shorten a long conversation into a summary. */
     @Test
     void theCompactionPromptAsksForAShortFaithfulSummaryInPlainText() {
@@ -138,7 +154,7 @@ class AskPromptTest {
     /** A fleet with no domain configured yet still gets a prompt; it simply has no name to use. */
     @Test
     void itHoldsUpWhenNoDomainIsConfiguredYet() {
-        assertThat(AskPrompt.forFleet(null).text()).contains("You are Vaier");
-        assertThat(AskPrompt.forFleet("  ").text()).contains("You are Vaier");
+        assertThat(AskPrompt.forFleet(null, LocalDate.of(2026, 9, 10)).text()).contains("You are Vaier");
+        assertThat(AskPrompt.forFleet("  ", LocalDate.of(2026, 9, 10)).text()).contains("You are Vaier");
     }
 }

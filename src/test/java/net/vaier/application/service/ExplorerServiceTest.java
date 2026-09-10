@@ -18,6 +18,9 @@ import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
 import net.vaier.domain.Selection;
 import net.vaier.domain.MountedArchive;
+import net.vaier.domain.Bundle;
+import net.vaier.domain.port.ForHoldingBundles;
+import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
 import net.vaier.domain.Excludes;
@@ -57,6 +60,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -79,6 +83,7 @@ class ExplorerServiceTest {
     @Mock ForResolvingSftpRoots forResolvingSftpRoots;
     @Mock ForMountingArchives forMountingArchives;
     @Mock ForReadingProtectedPaths forReadingProtectedPaths;
+    @Mock ForHoldingBundles forHoldingBundles;
 
     @InjectMocks ExplorerService service;
 
@@ -943,5 +948,64 @@ class ExplorerServiceTest {
             .isInstanceOf(PathOutsideSftpRootException.class);
 
         verify(forBrowsingRemoteFiles, never()).upload(any(), any(), any());
+    }
+
+    // --- a bundle, offered and opened (#360) ---------------------------------------------------------
+
+    private static final MachineId NAS = MachineId.of("41a14c07-b2b9-4e6f-bb48-3991a11bb862");
+
+    /** Every path is stat'd before the offer, so a path that is not there is refused now, not at download. */
+    @Test
+    void offer_statsEveryPath_andHoldsTheSizedBundle() {
+        SshTarget target = mock(SshTarget.class);
+        when(forResolvingSshTargets.resolve(NAS)).thenReturn(target);
+        when(forResolvingSftpRoots.rootFor(target)).thenReturn(SftpRoot.NONE);
+        when(forBrowsingRemoteFiles.stat(target, "/volume1/photo/a.jpg")).thenReturn(new RemoteStat(false, 1_000_000));
+        when(forBrowsingRemoteFiles.stat(target, "/volume1/photo/b.jpg")).thenReturn(new RemoteStat(false, 2_000_000));
+
+        Bundle bundle = service.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"), "pictures");
+
+        assertThat(bundle.name()).isEqualTo("pictures.zip");
+        assertThat(bundle.describe()).isEqualTo("2 files, 3.0 MB");
+        verify(forHoldingBundles).hold(bundle);
+    }
+
+    @Test
+    void offer_refusesAPathThatIsNotThere_namingIt() {
+        SshTarget target = mock(SshTarget.class);
+        when(forResolvingSshTargets.resolve(NAS)).thenReturn(target);
+        when(forResolvingSftpRoots.rootFor(target)).thenReturn(SftpRoot.NONE);
+        when(forBrowsingRemoteFiles.stat(target, "/volume1/photo/gone.jpg"))
+            .thenThrow(new NotFoundException("No such file: /volume1/photo/gone.jpg"));
+
+        assertThatThrownBy(() -> service.offer(NAS, "NAS", List.of("/volume1/photo/gone.jpg"), "x"))
+            .isInstanceOf(NotFoundException.class)
+            .hasMessage("/volume1/photo/gone.jpg is not on NAS.");
+        verify(forHoldingBundles, never()).hold(any());
+    }
+
+    /** Opening a bundle is the selection zip under the bundle's own name; a gone bundle is a 404 in words. */
+    @Test
+    void open_isTheSelectionZipUnderTheBundlesName() {
+        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg"), "pictures", System.currentTimeMillis());
+        when(forHoldingBundles.find(bundle.id())).thenReturn(Optional.of(bundle));
+
+        Download download = service.open(bundle.id());
+
+        assertThat(download.filename()).isEqualTo("pictures.zip");
+        assertThat(download.contentType()).isEqualTo("application/zip");
+        assertThat(download.sizeBytes()).isEqualTo(-1);
+    }
+
+    @Test
+    void open_refusesABundleThatIsGoneOrExpired() {
+        when(forHoldingBundles.find("gone")).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.open("gone"))
+            .isInstanceOf(NotFoundException.class).hasMessage("That download is gone; ask again.");
+
+        Bundle stale = Bundle.offer(NAS, "NAS", List.of("/a"), "x", System.currentTimeMillis() - Bundle.TTL.toMillis() - 1);
+        when(forHoldingBundles.find(stale.id())).thenReturn(Optional.of(stale));
+        assertThatThrownBy(() -> service.open(stale.id()))
+            .isInstanceOf(NotFoundException.class).hasMessage("That download has expired; ask again.");
     }
 }

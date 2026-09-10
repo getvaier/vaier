@@ -4166,4 +4166,22 @@ class ExplorerShellTest {
         assertThat(forgetBody).contains("fetch('/ask/conversation', { method: 'DELETE' })");
         assertThat(js).contains("'Start over'");
     }
+
+    @Test
+    void filesHandedOverByAsk_areADownloadCard_whoseButtonIsTheLink() throws IOException {
+        // #360: the answer stream can carry a `bundle` event — files on one machine, offered as one zip. The
+        // card names the zip and what it holds, and its button is the download. Nothing is fetched by the
+        // shell: the browser follows the link and streams the zip to disk, as every Explorer download does.
+        String js = read("explorer-shell.js");
+
+        int ask = js.indexOf("async function askVaier(");
+        String askBody = js.substring(ask, js.indexOf("\n    }", ask));
+        assertThat(askBody).contains("name === 'bundle'");
+        int card = js.indexOf("function askBundleCard(");
+        assertThat(card).isPositive();
+        String cardBody = js.substring(card, js.indexOf("\n    }", card));
+        assertThat(cardBody).contains("window.location.href = t.url");
+        assertThat(cardBody).contains("'Download ' + t.name");
+        assertThat(cardBody).doesNotContain("ex-ask-text");
+    }
 }

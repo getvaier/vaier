@@ -25,6 +25,7 @@ import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingConversations;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -84,7 +85,7 @@ public class AskService implements AskUseCase, IsAskAvailableUseCase, ProposeAct
         log.info("Ask: answering a question with {} tools offered", tools.size());
         StringBuilder answer = new StringBuilder();
         forConversing.converse(configured.getAnthropicApiKey(),
-            AskPrompt.forFleet(configured.getDomain()).text(),
+            AskPrompt.forFleet(configured.getDomain(), LocalDate.now()).text(),
             conversation.forModel(), question, tools, text -> {
                 answer.append(text);
                 onText.accept(text);

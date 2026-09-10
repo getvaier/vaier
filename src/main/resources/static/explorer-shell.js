@@ -6961,6 +6961,7 @@
 
     function askTurn(t) {
         if (t.kind === 'card') return askCard(t);
+        if (t.kind === 'bundle') return askBundleCard(t);
         const turn = el('div', 'ex-ask-turn ' + (t.role === 'OPERATOR' ? 'is-you' : 'is-vaier'));
         const who = el('div', 'ex-ask-who'); who.textContent = t.role === 'OPERATOR' ? 'You' : 'Vaier';
         const text = el('div', 'ex-ask-text'); text.textContent = t.text || (t.role === 'VAIER' ? '…' : '');
@@ -7037,6 +7038,22 @@
         render();
     }
 
+    // Files handed over, as a card whose button is the download. The browser follows the link and streams
+    // the zip to disk, as every Explorer download does; the link lives an hour.
+    function askBundleCard(t) {
+        const card = el('div', 'ex-ask-card is-bundle');
+        const sentence = el('div', 'ex-ask-card-sentence');
+        sentence.textContent = t.name + ' is ready: ' + t.size + '.';
+        const row = el('div', 'ex-ask-card-row');
+        const get = el('button', 'ex-btn is-accent');
+        get.innerHTML = svg('download', 'ex-ico');
+        get.append(document.createTextNode('Download ' + t.name));
+        get.onclick = () => { window.location.href = t.url; };
+        row.appendChild(get);
+        card.append(sentence, row);
+        return card;
+    }
+
     // "Not now". Told to the server, so the card can never run afterwards and Vaier remembers it was
     // declined; the card says so either way.
     async function declineAction(t) {
@@ -7069,6 +7086,12 @@
             }
             await readAnswerStream(res.body, (name, data) => {
                 if (name === 'text') { answer.text += data; paintLastAnswer(answer.text); }
+                else if (name === 'bundle') {
+                    const b = JSON.parse(data);
+                    S.ask.turns.splice(S.ask.turns.length - 1, 0,
+                        { role: 'VAIER', kind: 'bundle', id: b.id, name: b.name, size: b.size, url: b.url });
+                    render();
+                }
                 else if (name === 'confirm') {
                     // The card goes before the answer being written, so the answer stays the last Vaier
                     // turn and the streaming painter keeps writing into the right element.

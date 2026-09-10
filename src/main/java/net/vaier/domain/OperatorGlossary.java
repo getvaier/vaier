@@ -260,6 +260,11 @@ public final class OperatorGlossary {
                     "Your click is the only thing that runs it. A card lives ten minutes and runs once, "
                         + "and \"Not now\" runs nothing — so nothing on this fleet ever changes on the "
                         + "model's say-so."),
+                Concept.of("Bundle",
+                    "Files on one machine that Ask offers you as a download card: one zip, named for what "
+                        + "it holds, built while it downloads.",
+                    "It is how Ask hands over the files it found — the pictures from last year today, say. "
+                        + "Nothing is copied or written anywhere, and the card's link lives an hour."),
                 Concept.of("Conversation",
                     "What you have asked in Ask and what Vaier answered, in order, kept by Vaier under "
                         + "your login the way everything else is kept: a file.",

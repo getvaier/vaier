@@ -5,6 +5,7 @@ import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
 import net.vaier.application.AskUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.GetConversationUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
@@ -22,6 +23,8 @@ import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.IsAskAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
+import net.vaier.application.OfferBundleUseCase;
+import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RefuseEnrolmentUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
@@ -41,6 +44,7 @@ import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.BlockDecision;
+import net.vaier.domain.Bundle;
 import net.vaier.domain.CommandOutcome;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
@@ -61,6 +65,7 @@ import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.UpdateAvailability;
+import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +77,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter.DataWithMediaType;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder;
 
@@ -135,6 +141,8 @@ class AskRestControllerTest {
     @Mock GetConversationUseCase getConversationUseCase;
     @Mock ForgetConversationUseCase forgetConversationUseCase;
     @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
+    @Mock OfferBundleUseCase offerBundleUseCase;
+    @Mock OpenBundleUseCase openBundleUseCase;
 
     private AskRestController controller;
 
@@ -151,7 +159,8 @@ class AskRestControllerTest {
             getLanServerReachabilityUseCase, runReadOnlyCommandUseCase, proposeActionUseCase,
             takeActionProposalUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase, runBackupJobUseCase,
             getBackupRepositoriesUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
-            getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, new ObjectMapper());
+            getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, offerBundleUseCase,
+            openBundleUseCase, new ObjectMapper());
     }
 
     // --- is Ask offered at all -------------------------------------------------------------------------
@@ -661,6 +670,55 @@ class AskRestControllerTest {
 
         assertThat(controller.decline(EMAIL, "gone").getBody().text()).isEqualTo("Not done.");
         verifyNoInteractions(rememberActionOutcomeUseCase);
+    }
+
+    // --- bundle_files: files handed over as a download card (#360) ---------------------------------------
+
+    @Test
+    void bundlingFiles_offersThem_sendsTheDownloadCard_andSaysNothingWasWritten() throws IOException {
+        answering("ok");
+        fleetOf();
+        Bundle bundle = Bundle.offer(COLINA, "Colina 27", List.of("/home/geir/a.jpg", "/home/geir/b.jpg"),
+            "pictures-2025-09-10", NOW).sized(List.of(new RemoteStat(false, 1_000_000), new RemoteStat(false, 1_000_000)));
+        when(offerBundleUseCase.offer(COLINA, "Colina 27", List.of("/home/geir/a.jpg", "/home/geir/b.jpg"),
+            "pictures-2025-09-10")).thenReturn(bundle);
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        String told = read(emitter, AskTool.BUNDLE_FILES, Map.of("machine", "colina 27",
+            "paths", "/home/geir/a.jpg\n/home/geir/b.jpg", "name", "pictures-2025-09-10"));
+
+        assertThat(sentEvents(emitter)).anySatisfy(event -> assertThat(event)
+            .startsWith("event:bundle\ndata:").contains("pictures-2025-09-10.zip").contains("2 files, 2.0 MB")
+            .contains("/ask/bundles/" + bundle.id()));
+        assertThat(told).contains("pictures-2025-09-10.zip").contains("Nothing was copied or written");
+    }
+
+    @Test
+    void bundlingFiles_thatAreNotThere_isRefusedInWords_andNoCardIsSent() throws IOException {
+        answering("ok");
+        fleetOf();
+        when(offerBundleUseCase.offer(any(), anyString(), anyList(), any()))
+            .thenThrow(new NotFoundException("/home/geir/gone.jpg is not on Colina 27."));
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        String told = read(emitter, AskTool.BUNDLE_FILES, Map.of("machine", "Colina 27", "paths", "/home/geir/gone.jpg"));
+
+        assertThat(told).isEqualTo("/home/geir/gone.jpg is not on Colina 27.");
+        assertThat(sentEvents(emitter)).noneSatisfy(event -> assertThat(event).contains("event:bundle"));
+    }
+
+    /** The card's link: the bundle streamed as a zip under its own name, like any Explorer download. */
+    @Test
+    void downloadingABundle_streamsTheZipUnderItsName() {
+        when(openBundleUseCase.open("b1")).thenReturn(new Download("pictures-2025-09-10.zip", -1,
+            "application/zip", out -> { }));
+
+        ResponseEntity<StreamingResponseBody> response = controller.bundle("b1");
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getHeaders().getFirst("Content-Disposition"))
+            .isEqualTo("attachment; filename=\"pictures-2025-09-10.zip\"");
+        assertThat(response.getHeaders().getContentType().toString()).isEqualTo("application/zip");
     }
 
     // --- fixtures and plumbing -------------------------------------------------------------------------

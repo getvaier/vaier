@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.AskUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.GetConversationUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
@@ -23,6 +24,8 @@ import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.IsAskAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
+import net.vaier.application.OfferBundleUseCase;
+import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RefuseEnrolmentUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
@@ -40,6 +43,7 @@ import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BlockDecision;
+import net.vaier.domain.Bundle;
 import net.vaier.domain.CommandOutcome;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.Conversation;
@@ -58,6 +62,7 @@ import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -69,6 +74,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -138,6 +144,8 @@ public class AskRestController {
     private final GetConversationUseCase getConversationUseCase;
     private final ForgetConversationUseCase forgetConversationUseCase;
     private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
+    private final OfferBundleUseCase offerBundleUseCase;
+    private final OpenBundleUseCase openBundleUseCase;
     private final ObjectMapper objectMapper;
 
     /**
@@ -173,6 +181,8 @@ public class AskRestController {
                              GetConversationUseCase getConversationUseCase,
                              ForgetConversationUseCase forgetConversationUseCase,
                              RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
+                             OfferBundleUseCase offerBundleUseCase,
+                             OpenBundleUseCase openBundleUseCase,
                              ObjectMapper objectMapper) {
         this.getLanServerReachabilityUseCase = getLanServerReachabilityUseCase;
         this.askUseCase = askUseCase;
@@ -200,6 +210,8 @@ public class AskRestController {
         this.getConversationUseCase = getConversationUseCase;
         this.forgetConversationUseCase = forgetConversationUseCase;
         this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
+        this.offerBundleUseCase = offerBundleUseCase;
+        this.openBundleUseCase = openBundleUseCase;
         this.objectMapper = objectMapper;
     }
 
@@ -381,6 +393,7 @@ public class AskRestController {
         reads.put(AskTool.CONTAINER_UPDATES, arguments -> readContainerUpdates());
         reads.put(AskTool.SECURITY, arguments -> readSecurity());
         reads.put(AskTool.RUN_ON_MACHINE, this::readRunOnMachine);
+        reads.put(AskTool.BUNDLE_FILES, arguments -> offerBundle(arguments, emitter));
 
         List<ToolOffer> offers = new ArrayList<>();
         for (AskTool tool : AskTool.values()) {
@@ -506,6 +519,45 @@ public class AskRestController {
     }
 
     /**
+     * Files handed over: the bundle is offered — every path stat'd now — the pane gets the download card,
+     * and the model is told it is ready. A path that is not there, or a machine Vaier cannot reach, is a
+     * sentence back to the model and no card.
+     */
+    private String offerBundle(Map<String, String> arguments, SseEmitter emitter) {
+        Machine machine;
+        try {
+            machine = new MachineReference(arguments.get("machine")).resolve(getMachinesUseCase.getAllMachines());
+        } catch (IllegalArgumentException refused) {
+            return refused.getMessage();
+        }
+        try {
+            Bundle bundle = offerBundleUseCase.offer(machine.id(), machine.name(),
+                Bundle.pathsOf(arguments.get("paths")), arguments.get("name"));
+            send(emitter, "bundle", asJson(BundleEvent.of(bundle)));
+            return bundle.toolResult();
+        } catch (IllegalArgumentException | NotFoundException refused) {
+            return refused.getMessage();
+        } catch (NoHostCredentialException e) {
+            return "No SSH credential is stored for " + machine.name() + ", so Vaier cannot read anything there.";
+        } catch (RuntimeException e) {
+            log.warn("Ask could not bundle files on {}: {}", machine.name(), e.toString());
+            return machine.name() + " could not be reached over SSH.";
+        }
+    }
+
+    /** The card's link: the bundle streamed as one zip, exactly as an Explorer selection download is. */
+    @GetMapping("/bundles/{id}")
+    public ResponseEntity<StreamingResponseBody> bundle(@PathVariable String id) {
+        Download download = openBundleUseCase.open(id);
+        StreamingResponseBody body = download.writer()::accept;
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + download.filename().replaceAll("[\"\\\\\r\n]", "_") + "\"")
+            .contentType(MediaType.parseMediaType(download.contentType()))
+            .body(body);
+    }
+
+    /**
      * One command on the machine the model named. Every way this can fail is answered in a sentence the
      * model can repeat: the domain's own refusal verbatim, a name no machine has, a machine Vaier holds no
      * login for. A transport failure's own message can carry an address, a user or a path, so that one is
@@ -556,6 +608,13 @@ public class AskRestController {
 
     /** The card, as the answer stream carries it: enough to draw it and to click it. */
     record ConfirmationEvent(String id, String sentence) {}
+
+    /** The download card: the zip's name, what it holds, and where the click goes. */
+    record BundleEvent(String id, String name, String size, String url) {
+        static BundleEvent of(Bundle bundle) {
+            return new BundleEvent(bundle.id(), bundle.name(), bundle.describe(), "/ask/bundles/" + bundle.id());
+        }
+    }
 
     /** What became of a click: whether it ran, and the sentence for the card either way. */
     record ActionOutcome(boolean done, String text) {}

@@ -104,7 +104,7 @@ class OperatorGlossaryTest {
 
         assertThat(ask.concepts()).extracting(Concept::term)
             .containsExactly("Ask", "Anthropic API key", "Ask tool", "Read-only command", "Ask action",
-                "Confirmation", "Conversation");
+                "Confirmation", "Bundle", "Conversation");
         // The two promises an operator needs before pasting a key: the key never leaves for anywhere but
         // the Claude API, and the shell tool cannot change a machine.
         Concept key = ask.concepts().get(1);
@@ -115,7 +115,7 @@ class OperatorGlossaryTest {
         Concept confirmation = ask.concepts().get(5);
         assertThat(confirmation.definition() + " " + confirmation.whyYouCare()).contains("click");
         // Slice 3: the conversation is kept, per operator, and a long one is shortened by the model.
-        Concept conversation = ask.concepts().get(6);
+        Concept conversation = ask.concepts().get(7);
         assertThat(conversation.definition() + " " + conversation.whyYouCare())
             .contains("kept").contains("summary").doesNotContain("keeps none of it");
     }

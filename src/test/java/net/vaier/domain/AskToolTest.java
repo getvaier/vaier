@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * The <b>Ask tool</b> catalogue (#360). Every name here is pinned: the model learns a tool by its name, and
@@ -24,12 +25,23 @@ class AskToolTest {
         assertThat(AskTool.CONTAINER_UPDATES.toolName()).isEqualTo("container_updates");
         assertThat(AskTool.SECURITY.toolName()).isEqualTo("security");
         assertThat(AskTool.RUN_ON_MACHINE.toolName()).isEqualTo("run_on_machine");
+        assertThat(AskTool.BUNDLE_FILES.toolName()).isEqualTo("bundle_files");
     }
 
-    /** Seven whole-fleet reads and one command run, and no ninth that nobody wrote a read for. */
+    /** Seven whole-fleet reads, one command run, one bundle — and no tenth that nobody wrote a read for. */
     @Test
-    void theCatalogueIsExactlyTheSevenReadsOfSliceOnePlusTheCommandRun() {
-        assertThat(AskTool.values()).hasSize(8);
+    void theCatalogueIsExactlyTheSevenReadsOfSliceOnePlusTheCommandRunAndTheBundle() {
+        assertThat(AskTool.values()).hasSize(9);
+    }
+
+    /** The bundle names the machine, the files one per line, and what to call the zip. */
+    @Test
+    void theBundleTakesTheMachine_thePathsAsAList_andAName() {
+        assertThat(AskTool.BUNDLE_FILES.parameters()).extracting(ToolParameter::name, ToolParameter::many)
+            .containsExactly(tuple("machine", false),
+                tuple("paths", true),
+                tuple("name", false));
+        assertThat(AskTool.BUNDLE_FILES.description()).contains("download card").contains("Nothing is copied");
     }
 
     /**
@@ -40,7 +52,7 @@ class AskToolTest {
     @Test
     void onlyTheCommandRunTakesArguments_andItTakesExactlyTwo() {
         for (AskTool tool : AskTool.values()) {
-            if (tool != AskTool.RUN_ON_MACHINE) {
+            if (tool != AskTool.RUN_ON_MACHINE && tool != AskTool.BUNDLE_FILES) {
                 assertThat(tool.parameters()).as(tool.toolName()).isEmpty();
             }
         }

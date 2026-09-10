@@ -5,11 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.BrowseFilesUseCase;
 import net.vaier.application.DeleteFileUseCase;
 import net.vaier.application.DownloadFileUseCase;
+import net.vaier.application.OfferBundleUseCase;
+import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ResolveFileCoordinateUseCase;
 import net.vaier.application.UploadFileUseCase;
 import net.vaier.application.ViewFileUseCase;
 import net.vaier.application.ViewFileUseCase.View;
 import net.vaier.domain.FileEntry;
+import net.vaier.domain.Bundle;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MountedArchive;
 import net.vaier.domain.NotFoundException;
@@ -20,6 +23,7 @@ import net.vaier.domain.ProtectedPaths;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.Upload;
 import net.vaier.domain.ViewableFile;
+import net.vaier.domain.port.ForHoldingBundles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
@@ -34,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -52,12 +57,13 @@ import java.util.zip.ZipOutputStream;
 @RequiredArgsConstructor
 public class ExplorerService
     implements BrowseFilesUseCase, ResolveFileCoordinateUseCase, DownloadFileUseCase, ViewFileUseCase,
-               DeleteFileUseCase, UploadFileUseCase {
+               DeleteFileUseCase, UploadFileUseCase, OfferBundleUseCase, OpenBundleUseCase {
 
     private final ForResolvingSshTargets forResolvingSshTargets;
     private final ForBrowsingRemoteFiles forBrowsingRemoteFiles;
     private final ForTrackingHostKeys forTrackingHostKeys;
     private final ForResolvingSftpRoots forResolvingSftpRoots;
+    private final ForHoldingBundles forHoldingBundles;
     private final ForMountingArchives forMountingArchives;
     private final ForReadingProtectedPaths forReadingProtectedPaths;
 
@@ -266,6 +272,37 @@ public class ExplorerService
         String zipFilename = selection.downloadFilename();
         log.debug("Opening a {}-coordinate selection for a zip download ({})", placements.size(), zipFilename);
         return new Download(zipFilename, -1, ZIP, out -> streamSelectionZip(placements, out));
+    }
+
+    /**
+     * A <b>Bundle</b> for Ask (#360): every path stat'd now — so a path that is not there is refused now,
+     * naming it, never at download time — then held for its hour. Nothing is copied or written anywhere.
+     */
+    @Override
+    public Bundle offer(MachineId machineId, String machineLabel, List<String> paths, String name) {
+        Bundle bundle = Bundle.offer(machineId, machineLabel, paths, name, System.currentTimeMillis());
+        List<RemoteStat> stats = new ArrayList<>();
+        for (String path : bundle.paths()) {
+            ResolvedFileCoordinate resolved = resolve(machineId, path, null);
+            try {
+                stats.add(forBrowsingRemoteFiles.stat(resolved.target(), resolved.path()));
+            } catch (NotFoundException e) {
+                throw new NotFoundException(path + " is not on " + machineLabel + ".");
+            }
+        }
+        Bundle sized = bundle.sized(stats);
+        forHoldingBundles.hold(sized);
+        return sized;
+    }
+
+    /** The bundle's download: the selection zip, under the bundle's own name. */
+    @Override
+    public Download open(String id) {
+        Bundle bundle = forHoldingBundles.find(id)
+            .orElseThrow(() -> new NotFoundException("That download is gone; ask again."))
+            .requireLive(System.currentTimeMillis());
+        Download zip = openForDownload(bundle.coordinates());
+        return new Download(bundle.name(), zip.sizeBytes(), zip.contentType(), zip.writer());
     }
 
     /**

@@ -23,6 +23,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -110,7 +111,7 @@ class AskServiceTest {
         service.ask(GEIR, "which machine is red?", TOOLS, received::add);
 
         verify(forConversing).converse(eq("sk-ant-api03-the-key"),
-            eq(AskPrompt.forFleet("example.com").text()),
+            eq(AskPrompt.forFleet("example.com", LocalDate.now()).text()),
             eq(kept.forModel()), eq("which machine is red?"), eq(TOOLS), any());
         assertThat(received).containsExactly("Colina.");
     }

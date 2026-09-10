@@ -47,7 +47,17 @@ public enum AskTool implements AskCapability {
             + "refused. Use it for what no other read answers: operating system updates (apt list "
             + "--upgradable, dnf check-update), uptime, logs, processes, a file's contents.",
         new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id."),
-        new ToolParameter("command", "The command line to run, for example: apt list --upgradable"));
+        new ToolParameter("command", "The command line to run, for example: apt list --upgradable")),
+
+    BUNDLE_FILES("bundle_files",
+        "Offer the operator a zip of files on one machine, as a download card. Give every file by its "
+            + "absolute path, exactly as run_on_machine found it; a directory takes its whole tree. Nothing "
+            + "is copied or written anywhere: the zip is built while it downloads, and the card's link lives "
+            + "an hour. Use it whenever the operator wants files handed to them.",
+        new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id."),
+        new ToolParameter("paths", "The files or directories to include, each by its absolute path as "
+            + "run_on_machine printed it.", true),
+        new ToolParameter("name", "What to call the zip, for example pictures-2025-09-10; Vaier adds .zip."));
 
     private final String toolName;
     private final String description;

@@ -1,5 +1,7 @@
 package net.vaier.domain;
 
+import java.time.LocalDate;
+
 /**
  * What Vaier tells the model before a word of the operator's question reaches it (#360).
  *
@@ -13,16 +15,18 @@ package net.vaier.domain;
 public record AskPrompt(String text) {
 
     /**
-     * The system prompt for one fleet. {@code domain} is the fleet's base domain, or blank when none is
-     * configured yet — a Vaier that cannot name its fleet still answers about it.
+     * The system prompt for one fleet, on one day. {@code domain} is the fleet's base domain, or blank when
+     * none is configured yet — a Vaier that cannot name its fleet still answers about it. {@code today} is
+     * handed in, never read here: "last year today" needs to know which day today is, and the domain does
+     * not look at clocks.
      */
-    public static AskPrompt forFleet(String domain) {
+    public static AskPrompt forFleet(String domain, LocalDate today) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("You are Vaier, answering an operator's question about their own fleet");
         if (domain != null && !domain.isBlank()) {
             prompt.append(" at ").append(domain.trim());
         }
-        prompt.append(".\n\n");
+        prompt.append(". Today is ").append(today).append(".\n\n");
 
         prompt.append("Answer in plain words, as short as the question allows, and never in jargon.\n");
         prompt.append("Answer only from what the tools return. You know nothing else about this fleet.\n");
@@ -41,6 +45,9 @@ public record AskPrompt(String text) {
             + "words and do not try another spelling of it. Name the machine exactly as the fleet read does. "
             + "Use it for what no other read covers: operating system updates, uptime, logs, processes, a "
             + "file's contents.\n");
+        prompt.append("To hand the operator files, find them first with run_on_machine (ls, find), then offer "
+            + "exactly those paths with bundle_files; the card carries the download. Never invent a path, and "
+            + "never bundle what you have not seen listed.\n");
         prompt.append("Never say that you will check, look or fetch — your first words are already the "
             + "answer. Look first, silently, then speak.\n");
         prompt.append("Plain text only: no markdown, no headings, no bold. A list is lines that start with "
