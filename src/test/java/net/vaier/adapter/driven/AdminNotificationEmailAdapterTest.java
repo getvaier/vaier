@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.Role;
+import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
@@ -19,6 +20,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doThrow;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -189,6 +193,59 @@ class AdminNotificationEmailAdapterTest {
 
         adapter.notifyNewPendingIdentity("newcomer@example.com");
 
+        verify(emailSender, never()).sendEmail(any(), anyInt(), any(), any(), any(), anyList(), any(), any());
+    }
+
+    // --- sendTo: one person, and whether it went ---
+
+    @Test
+    void sendTo_mailsTheOnePersonNamed_andSaysItWent() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("smtpPass"));
+
+        boolean sent = adapter.sendTo("geir@example.com", "subject", "body", "ctx");
+
+        assertThat(sent).isTrue();
+        ArgumentCaptor<List<String>> recipients = ArgumentCaptor.forClass(List.class);
+        verify(emailSender).sendEmail(any(), anyInt(), any(), any(), any(), recipients.capture(), any(), any());
+        assertThat(recipients.getValue()).containsExactly("geir@example.com");
+    }
+
+    /**
+     * A server that will not take the mail just now is not "mail not set up": one more try after a moment,
+     * and then the truth — the settings are fine, the moment was not.
+     */
+    @Test
+    void sendTo_triesOnceMore_thenSaysTheServerWouldNotTakeIt() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("smtpPass"));
+        adapter.retryPauseMs = 1;
+        doThrow(new RuntimeException("421 4.4.5 Server busy, try again later"))
+            .when(emailSender).sendEmail(any(), anyInt(), any(), any(), any(), anyList(), any(), any());
+
+        assertThatThrownBy(() -> adapter.sendTo("geir@example.com", "subject", "body", "ctx"))
+            .isInstanceOf(MailNotSentException.class)
+            .hasMessage("The mail server would not take the mail just now; ask again in a minute.");
+        verify(emailSender, times(2)).sendEmail(any(), anyInt(), any(), any(), any(), anyList(), any(), any());
+    }
+
+    @Test
+    void sendTo_succeedsOnTheSecondTry_whenTheFirstWasRefused() {
+        when(configPersistence.load()).thenReturn(Optional.of(smtpConfigured()));
+        when(storedPasswordReader.readStoredPassword()).thenReturn(Optional.of("smtpPass"));
+        adapter.retryPauseMs = 1;
+        doThrow(new RuntimeException("421 busy")).doNothing()
+            .when(emailSender).sendEmail(any(), anyInt(), any(), any(), any(), anyList(), any(), any());
+
+        assertThat(adapter.sendTo("geir@example.com", "subject", "body", "ctx")).isTrue();
+    }
+
+    /** Unlike a notification, a mail somebody asked for must say when it did not go. */
+    @Test
+    void sendTo_saysItDidNotGo_whenMailIsNotSetUp() {
+        when(configPersistence.load()).thenReturn(Optional.of(VaierConfig.builder().domain("example.com").build()));
+
+        assertThat(adapter.sendTo("geir@example.com", "subject", "body", "ctx")).isFalse();
         verify(emailSender, never()).sendEmail(any(), anyInt(), any(), any(), any(), anyList(), any(), any());
     }
 }

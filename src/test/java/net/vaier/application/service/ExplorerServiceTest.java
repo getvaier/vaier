@@ -13,6 +13,7 @@ import net.vaier.domain.MachineId;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.SshTarget;
+import net.vaier.domain.ZipLayout;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.PathOutsideSftpRootException;
 import net.vaier.domain.SftpRoot;
@@ -960,13 +961,17 @@ class ExplorerServiceTest {
         SshTarget target = mock(SshTarget.class);
         when(forResolvingSshTargets.resolve(NAS)).thenReturn(target);
         when(forResolvingSftpRoots.rootFor(target)).thenReturn(SftpRoot.NONE);
-        when(forBrowsingRemoteFiles.stat(target, "/volume1/photo/a.jpg")).thenReturn(new RemoteStat(false, 1_000_000));
-        when(forBrowsingRemoteFiles.stat(target, "/volume1/photo/b.jpg")).thenReturn(new RemoteStat(false, 2_000_000));
+        Map<String, RemoteStat> stats = new LinkedHashMap<>();
+        stats.put("/volume1/photo/a.jpg", new RemoteStat(false, 1_000_000));
+        stats.put("/volume1/photo/b.jpg", new RemoteStat(false, 2_000_000));
+        when(forBrowsingRemoteFiles.stats(target, List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"))).thenReturn(stats);
 
         Bundle bundle = service.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"), "pictures");
 
         assertThat(bundle.name()).isEqualTo("pictures.zip");
         assertThat(bundle.describe()).isEqualTo("2 files, 3.0 MB");
+        // One connection for all of them: a bundle of a hundred photos must not be a hundred SSH sessions.
+        verify(forBrowsingRemoteFiles, never()).stat(any(), any());
         verify(forHoldingBundles).hold(bundle);
     }
 
@@ -975,8 +980,7 @@ class ExplorerServiceTest {
         SshTarget target = mock(SshTarget.class);
         when(forResolvingSshTargets.resolve(NAS)).thenReturn(target);
         when(forResolvingSftpRoots.rootFor(target)).thenReturn(SftpRoot.NONE);
-        when(forBrowsingRemoteFiles.stat(target, "/volume1/photo/gone.jpg"))
-            .thenThrow(new NotFoundException("No such file: /volume1/photo/gone.jpg"));
+        when(forBrowsingRemoteFiles.stats(target, List.of("/volume1/photo/gone.jpg"))).thenReturn(Map.of());
 
         assertThatThrownBy(() -> service.offer(NAS, "NAS", List.of("/volume1/photo/gone.jpg"), "x"))
             .isInstanceOf(NotFoundException.class)
@@ -984,17 +988,44 @@ class ExplorerServiceTest {
         verify(forHoldingBundles, never()).hold(any());
     }
 
-    /** Opening a bundle is the selection zip under the bundle's own name; a gone bundle is a 404 in words. */
+    /**
+     * A bundle of plain files is streamed uncompressed, so its length is known before the first byte and
+     * the browser can show progress. The sizes are read fresh at download time — one connection — so the
+     * length announced is the length sent.
+     */
     @Test
-    void open_isTheSelectionZipUnderTheBundlesName() {
-        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg"), "pictures", System.currentTimeMillis());
+    void open_ofPlainFiles_announcesTheZipsExactLength() {
+        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"), "pictures",
+            System.currentTimeMillis()).sized(List.of(new RemoteStat(false, 100), new RemoteStat(false, 200)));
         when(forHoldingBundles.find(bundle.id())).thenReturn(Optional.of(bundle));
+        SshTarget target = mock(SshTarget.class);
+        when(forResolvingSshTargets.resolve(NAS)).thenReturn(target);
+        when(forResolvingSftpRoots.rootFor(target)).thenReturn(SftpRoot.NONE);
+        Map<String, RemoteStat> fresh = new LinkedHashMap<>();
+        fresh.put("/volume1/photo/a.jpg", new RemoteStat(false, 100));
+        fresh.put("/volume1/photo/b.jpg", new RemoteStat(false, 250));
+        when(forBrowsingRemoteFiles.stats(target, List.of("/volume1/photo/a.jpg", "/volume1/photo/b.jpg"))).thenReturn(fresh);
 
         Download download = service.open(bundle.id());
 
         assertThat(download.filename()).isEqualTo("pictures.zip");
         assertThat(download.contentType()).isEqualTo("application/zip");
+        // fresh sizes, not the ones read at offer time: a.jpg 100, b.jpg 250
+        assertThat(download.sizeBytes()).isEqualTo(new ZipLayout(List.of(
+            new ZipLayout.Entry("a.jpg", 100), new ZipLayout.Entry("b.jpg", 250))).sizeBytes().orElseThrow());
+    }
+
+    /** A directory inside means a walk at download time, and a walk's length is not known ahead. */
+    @Test
+    void open_withADirectoryInside_doesNotGuessTheLength() {
+        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/volume1/photo"), "pictures", System.currentTimeMillis())
+            .sized(List.of(new RemoteStat(true, 4096)));
+        when(forHoldingBundles.find(bundle.id())).thenReturn(Optional.of(bundle));
+
+        Download download = service.open(bundle.id());
+
         assertThat(download.sizeBytes()).isEqualTo(-1);
+        assertThat(download.contentType()).isEqualTo("application/zip");
     }
 
     @Test

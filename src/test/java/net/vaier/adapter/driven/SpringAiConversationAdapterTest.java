@@ -213,7 +213,7 @@ class SpringAiConversationAdapterTest {
         AnthropicChatOptions options = SpringAiConversationAdapter.chatOptions();
 
         assertThat(options.getModel()).isEqualTo("claude-opus-5");
-        assertThat(options.getMaxTokens()).isEqualTo(4096);
+        assertThat(options.getMaxTokens()).isEqualTo(32_768);
         assertThat(options.getCacheOptions().getStrategy().name()).isEqualTo("SYSTEM_AND_TOOLS");
     }
 

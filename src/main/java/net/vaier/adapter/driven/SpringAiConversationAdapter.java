@@ -51,7 +51,11 @@ public class SpringAiConversationAdapter implements ForConversing {
 
     /** What Vaier asks for. Pinned here, in the one place that speaks to the API at all. */
     private static final String MODEL = "claude-opus-5";
-    private static final int MAX_TOKENS = 4096;
+    /**
+     * Room for the answer AND for a tool call: bundling a hundred photos is a few thousand tokens of paths
+     * before a word is said, and a call cut off mid-JSON at the cap ends the whole answer with nothing.
+     */
+    private static final int MAX_TOKENS = 32_768;
 
     /** Said to the operator when the conversation could not be held; it never carries the key. */
     private static final String COULD_NOT_SIGN_IN =

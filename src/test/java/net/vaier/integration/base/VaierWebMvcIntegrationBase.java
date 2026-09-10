@@ -265,6 +265,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetSpendUseCase getSpendUseCase;
 
+    @MockBean
+    protected EmailBundleUseCase emailBundleUseCase;
+
     // Implemented by rest/SurvivalKitWriter, which composes machines, the backup stores and SSH — mocked
     // here like the other rest-layer orchestrators (@WebMvcTest loads controllers only).
     @MockBean

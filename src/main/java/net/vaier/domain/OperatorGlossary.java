@@ -282,13 +282,13 @@ public final class OperatorGlossary {
                     "What Marvin remembers across conversations, kept by Vaier for the whole fleet: short facts such as where "
                         + "the photos live or which machine is the relay, whether you said them or Chat found "
                         + "them by looking.",
-                    "It is why you only have to explain something once. Every memory is listed on the Chat "
-                        + "pane, folded under \"What Vaier remembers\", and you can remove any of them "
+                    "It is why you only have to explain something once. Every memory is one menu entry away "
+                        + "on the Chat pane, under \"What Marvin remembers\", and you can remove any of them "
                         + "there; nothing can be planted in it unseen."),
                 Concept.of("Spend",
                     "What Chat has cost this month on your own Anthropic API key: the tokens every answer "
                         + "used, counted by Vaier and priced at Anthropic's list price.",
-                    "It is the figure under the Chat pane's description, so a chatty afternoon never comes as "
+                    "It is behind the Chat pane's own menu, so a chatty afternoon never comes as "
                         + "a surprise on the bill. Vaier's own count, not Anthropic's invoice: the two "
                         + "should agree to the cent, and the invoice wins if they do not."))));
     }

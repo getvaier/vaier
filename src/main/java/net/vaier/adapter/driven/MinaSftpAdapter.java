@@ -22,7 +22,9 @@ import java.io.UncheckedIOException;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Apache MINA SFTP adapter — the Explorer's window onto a machine's filesystem. It hangs an SFTP client
@@ -132,6 +134,32 @@ public class MinaSftpAdapter implements ForBrowsingRemoteFiles {
 
         } catch (IOException | UncheckedIOException e) {
             throw translate(e, target, path);
+        }
+    }
+
+    @Override
+    public Map<String, RemoteStat> stats(SshTarget target, List<String> paths) {
+        Map<String, RemoteStat> stats = new LinkedHashMap<>();
+        String current = null;
+        try (Connection conn = SshConnector.establish(target);
+             SftpClient sftp = SftpClientFactory.instance().createSftpClient(conn.session())) {
+
+            for (String path : paths) {
+                current = path;
+                try {
+                    SftpClient.Attributes attrs = sftp.stat(path);
+                    stats.put(path, new RemoteStat(attrs.isDirectory(), Math.max(0, attrs.getSize())));
+                } catch (IOException | UncheckedIOException e) {
+                    Integer status = sftpStatus(e);
+                    if (status == null || status != SftpConstants.SSH_FX_NO_SUCH_FILE) {
+                        throw e;
+                    }
+                }
+            }
+            return stats;
+
+        } catch (IOException | UncheckedIOException e) {
+            throw translate(e, target, current == null ? String.join(", ", paths) : current);
         }
     }
 

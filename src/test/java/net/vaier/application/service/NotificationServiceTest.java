@@ -3,6 +3,7 @@ package net.vaier.application.service;
 import java.time.Duration;
 import java.time.Instant;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.Bundle;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupServer;
@@ -13,10 +14,14 @@ import net.vaier.domain.DiskFillForecastCleared;
 import net.vaier.domain.EnrolmentRequest;
 import org.springframework.scheduling.annotation.Async;
 import net.vaier.domain.LockoutWarning;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.Operator;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
+import net.vaier.domain.port.ForHoldingBundles;
 import net.vaier.domain.port.ForSendingAdminNotification;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,10 +30,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Optional;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +51,7 @@ import static org.mockito.Mockito.when;
 class NotificationServiceTest {
 
     @Mock ForSendingAdminNotification adminNotifier;
+    @Mock ForHoldingBundles forHoldingBundles;
     @Mock ConfigResolver configResolver;
 
     @InjectMocks NotificationService service;
@@ -267,5 +276,47 @@ class NotificationServiceTest {
         verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
         assertThat(subject.getValue()).isEqualTo(rollup.subject());
         assertThat(body.getValue()).contains("1.2.3.4").contains("vaier.example.com");
+    }
+
+    // --- a bundle's link, by mail (#360) --------------------------------------------------------------
+
+    private static final MachineId NAS = MachineId.of("41a14c07-b2b9-4e6f-bb48-3991a11bb862");
+
+    /** The link is mailed to the operator who asked, and the bundle is kept a day so the link works. */
+    @Test
+    void emailBundle_mailsTheLinkToTheOperator_andKeepsTheBundleADay() {
+        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/volume1/photo/a.jpg"), "pictures", System.currentTimeMillis());
+        when(forHoldingBundles.find(bundle.id())).thenReturn(Optional.of(bundle));
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(adminNotifier.sendTo(eq("geir@example.com"), any(), any(), any())).thenReturn(true);
+
+        String to = service.email(bundle.id(), Operator.of("Geir@Example.com"));
+
+        assertThat(to).isEqualTo("geir@example.com");
+        ArgumentCaptor<Bundle> kept = ArgumentCaptor.forClass(Bundle.class);
+        verify(forHoldingBundles).hold(kept.capture());
+        assertThat(kept.getValue().id()).isEqualTo(bundle.id());
+        assertThat(kept.getValue().expired(System.currentTimeMillis() + Bundle.TTL.toMillis() + 1)).isFalse();
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendTo(eq("geir@example.com"), eq("Your files from NAS: pictures.zip"), body.capture(), any());
+        assertThat(body.getValue()).contains("https://vaier.example.com/chat/bundles/" + bundle.id());
+    }
+
+    @Test
+    void emailBundle_refusesWhenTheBundleIsGone_orNobodyIsSignedIn_orMailIsNotSetUp() {
+        when(forHoldingBundles.find("gone")).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.email("gone", Operator.of("geir@example.com")))
+            .isInstanceOf(NotFoundException.class).hasMessage("That download is gone; ask again.");
+
+        assertThatThrownBy(() -> service.email("any", Operator.of(null)))
+            .isInstanceOf(IllegalArgumentException.class).hasMessage("Vaier does not know your email address.");
+
+        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/a"), "x", System.currentTimeMillis());
+        when(forHoldingBundles.find(bundle.id())).thenReturn(Optional.of(bundle));
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(adminNotifier.sendTo(any(), any(), any(), any())).thenReturn(false);
+        assertThatThrownBy(() -> service.email(bundle.id(), Operator.of("geir@example.com")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Vaier could not send mail; check the SMTP settings.");
     }
 }

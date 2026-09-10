@@ -7,6 +7,7 @@ import net.vaier.application.NotifyAdminsOfBreachAttemptUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
 import net.vaier.application.NotifyAdminsOfEnrolmentRequestUseCase;
 import net.vaier.application.NotifyAdminsOfLockoutWarningUseCase;
+import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
@@ -17,12 +18,17 @@ import net.vaier.domain.BreachAttemptRollup;
 import net.vaier.domain.DiskFillForecast;
 import net.vaier.domain.DiskFillForecastCleared;
 import net.vaier.domain.ImageUpdateRollup;
+import net.vaier.domain.Bundle;
+import net.vaier.domain.BundleMailNotice;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.Operator;
 import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.JoinRequestNotice;
 import net.vaier.domain.LockoutWarning;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
+import net.vaier.domain.port.ForHoldingBundles;
 import net.vaier.domain.port.ForSendingAdminNotification;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -30,6 +36,7 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class NotificationService implements
+        EmailBundleUseCase,
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
         NotifyAdminsOfDiskFillForecastUseCase,
@@ -42,11 +49,14 @@ public class NotificationService implements
 
     private final ForSendingAdminNotification adminNotifier;
     private final ConfigResolver configResolver;
+    private final ForHoldingBundles forHoldingBundles;
 
     public NotificationService(ForSendingAdminNotification adminNotifier,
-                               ConfigResolver configResolver) {
+                               ConfigResolver configResolver,
+                               ForHoldingBundles forHoldingBundles) {
         this.adminNotifier = adminNotifier;
         this.configResolver = configResolver;
+        this.forHoldingBundles = forHoldingBundles;
     }
 
     @Override
@@ -154,4 +164,25 @@ public class NotificationService implements
                 "lockout warning: " + warning.decisions().size() + " trusted address(es) blocked");
     }
 
+
+    /**
+     * A bundle's link, by mail, to the operator who asked (#360): the bundle is kept a day so the link works
+     * when they get to it. Whether the mail went is the adapter's word, and not going is said, never swallowed.
+     */
+    @Override
+    public String email(String bundleId, Operator operator) {
+        String to = operator.email()
+            .orElseThrow(() -> new IllegalArgumentException("Vaier does not know your email address."));
+        long now = System.currentTimeMillis();
+        Bundle bundle = forHoldingBundles.find(bundleId)
+            .orElseThrow(() -> new NotFoundException("That download is gone; ask again."))
+            .requireLive(now)
+            .keptForADay(now);
+        forHoldingBundles.hold(bundle);
+        BundleMailNotice notice = BundleMailNotice.of(bundle, configResolver.getDomain());
+        if (!adminNotifier.sendTo(to, notice.subject(), notice.body(), "bundle " + bundle.id())) {
+            throw new IllegalArgumentException("Vaier could not send mail; check the SMTP settings.");
+        }
+        return to;
+    }
 }

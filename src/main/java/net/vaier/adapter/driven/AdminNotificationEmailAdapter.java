@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.PendingIdentity;
+import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
@@ -68,6 +69,55 @@ public class AdminNotificationEmailAdapter implements ForSendingAdminNotificatio
     }
 
     /** Send {@code subject}/{@code body} to every admin with an email, if SMTP is fully configured. */
+    /** A server that will not take the mail just now gets one more try after this pause; a test makes it short. */
+    long retryPauseMs = 5_000L;
+
+    @Override
+    public boolean sendTo(String recipient, String subject, String body, String context) {
+        Optional<VaierConfig> maybeConfig = configPersistence.load();
+        if (maybeConfig.isEmpty() || !maybeConfig.get().isSmtpConfigured()) {
+            log.debug("SMTP not configured; cannot mail {} for {}", recipient, context);
+            return false;
+        }
+        VaierConfig config = maybeConfig.get();
+        Optional<String> password = storedPasswordReader.readStoredPassword().filter(p -> !p.isBlank());
+        if (password.isEmpty()) {
+            log.debug("SMTP password not stored; cannot mail {} for {}", recipient, context);
+            return false;
+        }
+        for (int attempt = 1; ; attempt++) {
+            try {
+                emailSender.sendEmail(
+                        config.getSmtpHost(),
+                        config.getSmtpPort() != null ? config.getSmtpPort() : DEFAULT_SMTP_PORT,
+                        config.getSmtpUsername(),
+                        password.get(),
+                        config.getSmtpSender(),
+                        List.of(recipient),
+                        subject,
+                        body);
+                return true;
+            } catch (Exception e) {
+                // Mail is set up; the server would not take it — a "try again later" is common from Gmail.
+                // Once more after a moment, then the truth: the settings are fine, the moment was not.
+                log.warn("Mail to {} for {} refused on attempt {}: {}", recipient, context, attempt, e.getMessage());
+                if (attempt == 2) {
+                    throw new MailNotSentException();
+                }
+                pause();
+            }
+        }
+    }
+
+    private void pause() {
+        try {
+            Thread.sleep(retryPauseMs);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new MailNotSentException();
+        }
+    }
+
     @Override
     public void sendToAdmins(String subject, String body, String context) {
         Optional<VaierConfig> maybeConfig = configPersistence.load();

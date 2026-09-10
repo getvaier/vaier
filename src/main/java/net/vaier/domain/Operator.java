@@ -1,6 +1,7 @@
 package net.vaier.domain;
 
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * Who is asking (#360 slice 3): the signed-in email, as the key a <b>Conversation</b> is kept under. With
@@ -14,6 +15,11 @@ public record Operator(String key) {
     public static Operator of(String email) {
         String key = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
         return new Operator(key.isEmpty() ? NOBODY : key);
+    }
+
+    /** The address mail can go to; nobody signed in has none. */
+    public Optional<String> email() {
+        return key.contains("@") ? Optional.of(key) : Optional.empty();
     }
 
     /** A name safe for any file system, derived from the key and nothing else. */

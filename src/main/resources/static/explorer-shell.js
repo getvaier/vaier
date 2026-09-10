@@ -6903,16 +6903,11 @@
 
     function renderChat(pane) {
         const head = paneHead('Chat', false, 'Marvin answers, looks, proposes, hands over files, and remembers.');
-        // What Chat has cost this month, on the operator's own key: a quiet line under the description.
-        if (S.chat.spend) {
-            const spend = el('div', 'ex-chat-spend');
-            spend.textContent = 'Claude ' + S.chat.spend.figure + ' this month, ' + S.chat.spend.calls
-                + (S.chat.spend.calls === 1 ? ' answer' : ' answers') + '.';
-            spend.title = S.chat.spend.inputTokens.toLocaleString() + ' tokens in, '
-                + S.chat.spend.outputTokens.toLocaleString() + ' out, '
-                + S.chat.spend.cacheReadTokens.toLocaleString() + ' read from cache. List price on your own key; the invoice wins if they differ.';
-            head.appendChild(spend);
-        }
+        // Marvin's memory and his cost are reached from one menu on the pane's own bar: facts
+        // about Chat, kept off the thread and out of the way of typing.
+        const acts = el('div', 'ex-pane-actions');
+        acts.appendChild(chatMenu());
+        head.appendChild(acts);
         pane.appendChild(head);
         const body = el('div', 'ex-pane-body ex-chat');
         pane.appendChild(body);
@@ -6969,23 +6964,6 @@
         box.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } };
         row.append(box, send);
         body.appendChild(row);
-        // Everything Marvin remembers, folded and under the input so it is never in the way of typing: nothing is planted in its memory unseen, and the
-        // remove button is the operator's last word on what stays.
-        if (S.chat.memory.length) {
-            const fold = disclosure('What Marvin remembers (' + S.chat.memory.length + ')');
-            const list = el('div', 'ex-chat-memory');
-            S.chat.memory.forEach((f) => {
-                const row = el('div', 'ex-chat-memory-row');
-                const text = el('div', 'ex-chat-memory-text'); text.textContent = f.text;
-                const rm = el('button', 'ex-iconbtn is-danger'); rm.innerHTML = svg('trash', 'ex-ico');
-                rm.title = 'Forget this'; rm.onclick = () => forgetFact(f);
-                row.append(text, rm);
-                list.appendChild(row);
-            });
-            fold.appendChild(list);
-            body.appendChild(fold);
-        }
-
         if (!S.chat.busy && (entering || hadFocus || !was || was === document.body)) {
             box.focus();
             if (caret) box.setSelectionRange(caret[0], caret[1]);
@@ -7018,6 +6996,111 @@
             // Nothing kept, or nothing reachable: the pane starts empty either way.
         }
         if (kindOf(S.path) === 'chat') render();
+    }
+
+    // The Chat pane's own menu: Memory and Spend, each opening a dialog. Same shape as the Vaier menu in the
+    // top bar, so it reads as one thing; closed by a click anywhere else, as every menu is.
+    function chatMenu() {
+        const wrap = el('div', 'ex-vmenu-wrap ex-chat-menu');
+        // A verb like the pane's other verbs, not a second copy of the top bar's button: the word and a
+        // small chevron, nothing else.
+        const btn = el('button', 'ex-btn ex-chat-menu-btn');
+        btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
+        const lbl = el('span'); lbl.textContent = 'Marvin';
+        btn.appendChild(lbl);
+        btn.insertAdjacentHTML('beforeend', svg('chev', 'ex-ico ex-chat-menu-chev'));
+        const menu = el('div', 'ex-vmenu'); menu.setAttribute('role', 'menu');
+        const close = () => { menu.classList.remove('is-open'); btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('click', close); };
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            const open = !menu.classList.contains('is-open');
+            if (open) { menu.classList.add('is-open'); btn.setAttribute('aria-expanded', 'true'); document.addEventListener('click', close); }
+            else close();
+        };
+        menu.onclick = (e) => e.stopPropagation();
+        const memory = el('button', 'ex-vmenu-item'); memory.setAttribute('role', 'menuitem');
+        memory.innerHTML = svg('book', 'ex-ico');
+        const ml = el('span'); ml.textContent = 'What Marvin remembers (' + S.chat.memory.length + ')';
+        memory.appendChild(ml);
+        memory.onclick = () => { close(); openMemoryDialog(); };
+        const spend = el('button', 'ex-vmenu-item'); spend.setAttribute('role', 'menuitem');
+        spend.innerHTML = svg('claude', 'ex-ico');
+        const sl = el('span'); sl.textContent = S.chat.spend ? 'Spend this month, ' + S.chat.spend.figure : 'Spend this month';
+        spend.appendChild(sl);
+        spend.onclick = () => { close(); openSpendDialog(); };
+        menu.append(memory, spend);
+        wrap.append(btn, menu);
+        return wrap;
+    }
+
+    // One dialog shell for both, in the shape every other dialog here has: a scrim, a title, a body, Done.
+    function chatDialog(title, body) {
+        const scrim = el('div', 'ex-scrim is-on');
+        const dialog = el('div', 'ex-dialog');
+        const h = el('div', 'ex-dialog-title'); h.textContent = title;
+        dialog.append(h, body);
+        const actions = el('div', 'ex-dialog-actions');
+        const done = el('button', 'ex-btn'); done.textContent = 'Done'; actions.appendChild(done);
+        dialog.appendChild(actions);
+        scrim.appendChild(dialog); document.body.appendChild(scrim);
+        const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+        const onKey = (e) => { if (e.key === 'Escape') close(); };
+        done.onclick = close; scrim.onclick = (e) => { if (e.target === scrim) close(); };
+        document.addEventListener('keydown', onKey);
+        return close;
+    }
+
+    // Everything Marvin remembers, with a remove button on each: nothing is planted in his memory unseen,
+    // and the operator, not the model, has the last word on what stays.
+    function openMemoryDialog() {
+        const body = el('div', 'ex-dialog-body');
+        const paint = () => {
+            body.textContent = '';
+            if (!S.chat.memory.length) {
+                const none = el('div', 'ex-chat-memory-text'); none.textContent = 'Nothing yet. Tell Marvin something worth keeping.';
+                body.appendChild(none);
+                return;
+            }
+            const list = el('div', 'ex-chat-memory');
+            S.chat.memory.forEach((f) => {
+                const row = el('div', 'ex-chat-memory-row');
+                const text = el('div', 'ex-chat-memory-text'); text.textContent = f.text;
+                const rm = el('button', 'ex-iconbtn is-danger'); rm.innerHTML = svg('trash', 'ex-ico');
+                rm.title = 'Forget this'; rm.onclick = () => forgetFact(f).then(paint);
+                row.append(text, rm);
+                list.appendChild(row);
+            });
+            body.appendChild(list);
+        };
+        paint();
+        chatDialog('What Marvin remembers', body);
+    }
+
+    // The month's figure, and the tokens behind it. Vaier's own count at list price on the operator's own
+    // key; the invoice wins if they differ, and the dialog says so.
+    function openSpendDialog() {
+        const body = el('div', 'ex-dialog-body');
+        const s = S.chat.spend;
+        if (!s) {
+            body.textContent = 'Nothing counted yet this month.';
+        } else {
+            const figure = el('div', 'ex-chat-spend-figure');
+            figure.textContent = s.figure + ' this month';
+            const answers = el('div', 'ex-chat-memory-text');
+            answers.textContent = s.calls + (s.calls === 1 ? ' answer' : ' answers') + ' in ' + s.month + '.';
+            const rows = el('div', 'ex-chat-spend-rows');
+            [['Tokens in', s.inputTokens], ['Tokens out', s.outputTokens],
+             ['Written to cache', s.cacheWriteTokens], ['Read from cache', s.cacheReadTokens]].forEach(([k, v]) => {
+                const row = el('div', 'ex-chat-spend-row');
+                const kk = el('span'); kk.textContent = k;
+                const vv = el('span'); vv.textContent = v.toLocaleString();
+                row.append(kk, vv); rows.appendChild(row);
+            });
+            const note = el('div', 'ex-chat-memory-text');
+            note.textContent = 'Vaier\u2019s own count, at list price on your own key. The invoice wins if they differ.';
+            body.append(figure, answers, rows, note);
+        }
+        chatDialog('Claude spend', body);
     }
 
     // What Marvin remembers. Re-read after every answer, because the answer may have remembered something.
@@ -7129,6 +7212,7 @@
         S.chat.turns.push(answer);
         S.chat.busy = true; S.chat.error = null;
         render();
+        let finished = false;
         try {
             const res = await fetch('/chat', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -7139,7 +7223,10 @@
                 throw new Error(e.message || 'Vaier could not answer.');
             }
             await readAnswerStream(res.body, (name, data) => {
-                if (name === 'text') { answer.text += data; paintLastAnswer(answer.text); }
+                if (name === 'text') { answer.text += data; paintLastAnswer(answer.text); paintWorking(null); }
+                else if (name === 'working') paintWorking(data);
+                else if (name === 'done') finished = true;
+                else if (name === 'ping') { /* the pulse that keeps a quiet stream open; nothing to show */ }
                 else if (name === 'bundle') {
                     const b = JSON.parse(data);
                     S.chat.turns.splice(S.chat.turns.length - 1, 0,
@@ -7156,6 +7243,13 @@
                 }
                 else if (name === 'error') throw new Error(data || 'Vaier could not answer.');
             });
+            // The stream ended without Vaier saying so: something on the way closed a quiet connection
+            // while Marvin was still working. His answer is still made and kept, so say that rather than
+            // leave a half-sentence looking like the whole of it.
+            if (!finished) {
+                S.chat.error = 'The connection dropped while Marvin was still working. His answer lands in '
+                    + 'the thread when he finishes; reload to see it.';
+            }
         } catch (e) {
             if (!answer.text) S.chat.turns.pop();
             S.chat.error = e.message || 'Vaier could not answer.';
@@ -7164,6 +7258,26 @@
         render();
         loadMemory();
         loadSpend();
+    }
+
+    // What Marvin is doing right now, under the answer being written — so a long wait says what it waits
+    // on. Cleared the moment words arrive; never part of the answer.
+    const WORKING = {
+        fleet: 'Marvin is looking at the fleet\u2026', waiting_to_join: 'Marvin is checking who is waiting\u2026',
+        published_services: 'Marvin is checking the services\u2026', backups: 'Marvin is reading the backup runs\u2026',
+        disks: 'Marvin is reading the disks\u2026', container_updates: 'Marvin is checking for container updates\u2026',
+        security: 'Marvin is reading the block list\u2026', run_on_machine: 'Marvin is running a command\u2026',
+        bundle_files: 'Marvin is gathering the files\u2026', email_bundle: 'Marvin is sending the mail\u2026',
+        remember: 'Marvin is making a note\u2026', forget: 'Marvin is forgetting\u2026',
+    };
+    function paintWorking(tool) {
+        const turns = document.querySelectorAll('.ex-chat-turn.is-vaier');
+        const last = turns[turns.length - 1];
+        if (!last) return;
+        let line = last.querySelector('.ex-chat-working');
+        if (!tool) { if (line) line.remove(); return; }
+        if (!line) { line = el('div', 'ex-chat-working'); last.appendChild(line); }
+        line.textContent = WORKING[tool] || 'Marvin is writing a card\u2026';
     }
 
     // Repaint only the answer being written, so the page does not rebuild on every few words.

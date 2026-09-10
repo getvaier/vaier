@@ -26,4 +26,11 @@ class OperatorTest {
         assertThat(Operator.of("geir.eilertsen+x@example.com").fileName()).isEqualTo("geir_eilertsen_x_example_com");
         assertThat(Operator.of("../../etc/passwd").fileName()).isEqualTo("etc_passwd");
     }
+
+    /** Mail needs an address; "operator" is not one. */
+    @Test
+    void anOperatorHasAnEmailOnlyWhenSignedIn() {
+        assertThat(Operator.of("Geir@Example.com").email()).contains("geir@example.com");
+        assertThat(Operator.of(null).email()).isEmpty();
+    }
 }

@@ -3,7 +3,10 @@ package net.vaier.domain;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -74,6 +77,12 @@ class BundleTest {
 
         Bundle withDirectory = pictures().sized(List.of(new RemoteStat(false, 800), new RemoteStat(true, 4096)));
         assertThat(withDirectory.describe()).isEqualTo("2 entries, one of them a whole directory, at least 800 B");
+        // one directory and nothing else: no "one of them", no "at least 0 B"
+        assertThat(Bundle.offer(NAS, "NAS", List.of("/a"), "x", NOW).sized(List.of(new RemoteStat(true, 4096))).describe())
+            .isEqualTo("a whole directory");
+        assertThat(Bundle.offer(NAS, "NAS", List.of("/a", "/b"), "x", NOW)
+            .sized(List.of(new RemoteStat(true, 4096), new RemoteStat(true, 4096))).describe())
+            .isEqualTo("2 entries, whole directories among them");
 
         assertThat(Bundle.offer(NAS, "NAS", List.of("/a"), "x", NOW).sized(List.of(new RemoteStat(false, 3_000_000_000L)))
             .describe()).isEqualTo("1 file, 3.0 GB");
@@ -106,5 +115,60 @@ class BundleTest {
         assertThat(bundle.toolResult())
             .contains("pictures-2025-09-10.zip").contains("2 files, 2.0 MB")
             .contains("download card").contains("lives for an hour").contains("Nothing was copied or written");
+    }
+
+    /** Past fifty files or a hundred megabytes the zip is a wait, and the operator gets a choice. */
+    @Test
+    void aBundleIsLargePastFiftyFilesOrAHundredMegabytes() {
+        Bundle two = pictures().sized(List.of(new RemoteStat(false, 1_000), new RemoteStat(false, 1_000)));
+        assertThat(two.isLarge()).isFalse();
+        List<RemoteStat> many = Collections.nCopies(51, new RemoteStat(false, 10));
+        assertThat(pictures().sized(many).isLarge()).isTrue();
+        assertThat(pictures().sized(List.of(new RemoteStat(false, 100_000_001L))).isLarge()).isTrue();
+    }
+
+    /** Mailed, the link must outlive the hour: a day, from when it was mailed. */
+    @Test
+    void keptForADay_livesADayFromNow() {
+        Bundle bundle = pictures();
+        Bundle kept = bundle.keptForADay(NOW + 1000);
+
+        assertThat(kept.id()).isEqualTo(bundle.id());
+        assertThat(kept.expired(NOW + 1000 + Bundle.TTL.toMillis())).isFalse();
+        assertThat(kept.expired(NOW + 1000 + Bundle.MAILED_TTL.toMillis() - 1)).isFalse();
+        assertThat(kept.expired(NOW + 1000 + Bundle.MAILED_TTL.toMillis())).isTrue();
+    }
+
+    /** The model needs the id to mail it, and is told when to ask rather than offer. */
+    @Test
+    void theToolResultCarriesTheId_andSaysWhenToAskAboutMail() {
+        Bundle small = pictures().sized(List.of(new RemoteStat(false, 1_000)));
+        assertThat(small.toolResult()).contains("Its id is " + small.id() + ".").doesNotContain("large");
+
+        Bundle large = pictures().sized(Collections.nCopies(122, new RemoteStat(false, 3_000_000)));
+        assertThat(large.toolResult())
+            .contains("It is large")
+            .contains("ask the operator whether they want the download card now or a link by email")
+            .contains("email_bundle").contains(large.id());
+    }
+
+    /**
+     * The paths are read where SFTP keeps them, which on a jailed machine is not where the operator named
+     * them; so the bundle, which holds both, is the one that says which of the operator's paths is missing.
+     */
+    @Test
+    void sizedFromWhatWasFound_namesTheOperatorsOwnPathWhenOneIsMissing() {
+        Bundle bundle = Bundle.offer(NAS, "NAS", List.of("/home/geir/a.jpg", "/home/geir/b.jpg"), "x", NOW);
+        List<String> jailed = List.of("/a.jpg", "/b.jpg");
+        Map<String, RemoteStat> found = new LinkedHashMap<>();
+        found.put("/a.jpg", new RemoteStat(false, 10));
+        found.put("/b.jpg", new RemoteStat(false, 20));
+
+        assertThat(bundle.sizedFrom(jailed, found).totalBytes()).isEqualTo(30);
+
+        found.remove("/b.jpg");
+        assertThatThrownBy(() -> bundle.sizedFrom(jailed, found))
+            .isInstanceOf(NotFoundException.class)
+            .hasMessage("/home/geir/b.jpg is not on NAS.");
     }
 }

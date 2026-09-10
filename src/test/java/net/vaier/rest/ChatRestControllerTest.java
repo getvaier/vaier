@@ -6,6 +6,7 @@ import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
 import net.vaier.application.ChatUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
+import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
@@ -61,6 +62,7 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.Memory;
 import net.vaier.domain.ModelUsage;
 import net.vaier.domain.Spend;
@@ -155,6 +157,7 @@ class ChatRestControllerTest {
     @Mock ForgetUseCase forgetUseCase;
     @Mock GetMemoryUseCase getMemoryUseCase;
     @Mock GetSpendUseCase getSpendUseCase;
+    @Mock EmailBundleUseCase emailBundleUseCase;
 
     private ChatRestController controller;
 
@@ -172,7 +175,7 @@ class ChatRestControllerTest {
             takeActionProposalUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase, runBackupJobUseCase,
             getBackupRepositoriesUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
             getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, offerBundleUseCase,
-            openBundleUseCase, rememberUseCase, forgetUseCase, getMemoryUseCase, getSpendUseCase, new ObjectMapper());
+            openBundleUseCase, rememberUseCase, forgetUseCase, getMemoryUseCase, getSpendUseCase, emailBundleUseCase, new ObjectMapper());
     }
 
     // --- is Ask offered at all -------------------------------------------------------------------------
@@ -406,6 +409,55 @@ class ChatRestControllerTest {
         assertThat(everything.toLowerCase()).doesNotContain(
             "publickey", "privatekey", "presharedkey", "passphrase", "password", "credential",
             "apikey", "ticket", "token", "secret", "configfile");
+    }
+
+    /** A turn that ends without a word is said as an error, never as a silent done. */
+    @Test
+    void answer_thatSaysNothing_isAnError_notASilentDone() throws IOException {
+        answering();
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        controller.answer(emitter, GEIR, "anything?");
+
+        assertThat(sentEvents(emitter)).containsExactly("event:error\ndata:" + ChatRestController.NOTHING_SAID + "\n\n");
+        verify(emitter).complete();
+    }
+
+    // --- while the answer is being made: working events, and a heartbeat -----------------------------
+
+    /** Every tool call is announced to the pane first, so a long wait says what it is waiting on. */
+    @Test
+    void everyToolCall_isAnnouncedToThePaneBeforeItRuns() throws IOException {
+        answering("ok");
+        fleetOf();
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        read(emitter, ChatTool.FLEET, Map.of());
+
+        assertThat(sentEvents(emitter)).contains("event:working\ndata:fleet\n\n");
+    }
+
+    /**
+     * A tool call or a long think can leave the stream silent for a minute, and something on the way to
+     * the browser closes a quiet connection. So the answer keeps a pulse: a ping every so often, for as
+     * long as it takes, and never after it is done.
+     */
+    @Test
+    void theAnswerKeepsAPulse_whileItIsBeingMade() throws IOException {
+        controller.heartbeatMs = 10;
+        doAnswer(invocation -> {
+            Thread.sleep(80);
+            Consumer<String> onText = invocation.getArgument(3);
+            onText.accept("late");
+            return null;
+        }).when(chatUseCase).ask(any(), anyString(), anyList(), any());
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        controller.answer(emitter, GEIR, "anything?");
+
+        List<String> events = sentEvents(emitter);
+        assertThat(events).contains("event:ping\ndata:\n\n");
+        assertThat(events.get(events.size() - 1)).isEqualTo("event:done\ndata:\n\n");
     }
 
     // --- run_on_machine: one looking command, on the machine the model named ----------------------------
@@ -732,6 +784,18 @@ class ChatRestControllerTest {
         assertThat(response.getHeaders().getFirst("Content-Disposition"))
             .isEqualTo("attachment; filename=\"pictures-2025-09-10.zip\"");
         assertThat(response.getHeaders().getContentType().toString()).isEqualTo("application/zip");
+        assertThat(response.getHeaders().getContentLength()).isEqualTo(-1);
+    }
+
+    /** A length the service knows is told to the browser, so it can show how far along the download is. */
+    @Test
+    void downloadingABundle_tellsTheBrowserTheLengthWhenItIsKnown() {
+        when(openBundleUseCase.open("b2")).thenReturn(new Download("pictures.zip", 302_000_000L,
+            "application/zip", out -> { }));
+
+        ResponseEntity<StreamingResponseBody> response = controller.bundle("b2");
+
+        assertThat(response.getHeaders().getContentLength()).isEqualTo(302_000_000L);
     }
 
     // --- memory: what Vaier keeps across conversations (#360) --------------------------------------------
@@ -795,6 +859,34 @@ class ChatRestControllerTest {
         assertThat(response.inputTokens()).isEqualTo(1_000_000);
         assertThat(response.outputTokens()).isEqualTo(100_000);
         assertThat(response.cacheReadTokens()).isEqualTo(3_000_000);
+    }
+
+    // --- email_bundle: the link by mail, to the operator who asked (#360) ----------------------------------
+
+    @Test
+    void mailingABundle_goesToTheOperatorWhoAsked_andSaysSo() {
+        answering("ok");
+        when(emailBundleUseCase.email("b1", GEIR)).thenReturn("geir@example.com");
+
+        assertThat(read(ChatTool.EMAIL_BUNDLE, Map.of("id", "b1")))
+            .isEqualTo("Mailed a link to geir@example.com; it works for a day.");
+    }
+
+    @Test
+    void mailingABundle_thatIsGone_orWithoutMailSetUp_isSaidInWords() {
+        answering("ok");
+        when(emailBundleUseCase.email("gone", GEIR)).thenThrow(new NotFoundException("That download is gone; ask again."));
+        assertThat(read(ChatTool.EMAIL_BUNDLE, Map.of("id", "gone"))).isEqualTo("That download is gone; ask again.");
+
+        when(emailBundleUseCase.email("b2", GEIR))
+            .thenThrow(new IllegalArgumentException("Vaier could not send mail; check the SMTP settings."));
+        assertThat(read(ChatTool.EMAIL_BUNDLE, Map.of("id", "b2")))
+            .isEqualTo("Vaier could not send mail; check the SMTP settings.");
+
+        // A server that would not take it just now is said as that — never as a settings problem.
+        when(emailBundleUseCase.email("b3", GEIR)).thenThrow(new MailNotSentException());
+        assertThat(read(ChatTool.EMAIL_BUNDLE, Map.of("id", "b3")))
+            .isEqualTo("The mail server would not take the mail just now; ask again in a minute.");
     }
 
     // --- fixtures and plumbing -------------------------------------------------------------------------

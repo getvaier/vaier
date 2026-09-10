@@ -403,6 +403,35 @@ class MinaSftpAdapterTest {
         assertThat(dir.directory()).isTrue();
     }
 
+    /** Many paths, one connection: a bundle of a hundred photos is one SSH session, not a hundred. */
+    @Test
+    void stats_readsManyPathsOnOneConnection_inTheOrderAsked() throws Exception {
+        int port = startServer();
+        Files.writeString(remoteRoot.resolve("a.jpg"), "aaaa");
+        Files.writeString(remoteRoot.resolve("b.jpg"), "bb");
+        Files.createDirectory(remoteRoot.resolve("media"));
+
+        Map<String, ForBrowsingRemoteFiles.RemoteStat> stats = adapter.stats(target(port),
+            List.of(remote("a.jpg"), remote("media"), remote("b.jpg")));
+
+        assertThat(stats.keySet()).containsExactly(remote("a.jpg"), remote("media"), remote("b.jpg"));
+        assertThat(stats.get(remote("a.jpg")).sizeBytes()).isEqualTo(4);
+        assertThat(stats.get(remote("media")).directory()).isTrue();
+        assertThat(stats.get(remote("b.jpg")).sizeBytes()).isEqualTo(2);
+    }
+
+    /** A path that is not there is left out, not thrown: which path that was is the caller's to say. */
+    @Test
+    void stats_leavesOutAPathThatIsNotThere() throws Exception {
+        int port = startServer();
+        Files.writeString(remoteRoot.resolve("a.jpg"), "aaaa");
+
+        Map<String, ForBrowsingRemoteFiles.RemoteStat> stats = adapter.stats(target(port),
+            List.of(remote("a.jpg"), remote("ghost")));
+
+        assertThat(stats.keySet()).containsExactly(remote("a.jpg"));
+    }
+
     @Test
     void stat_ofAPathThatIsNotThere_throwsNotFound() throws Exception {
         int port = startServer();

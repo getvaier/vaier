@@ -17,4 +17,11 @@ public interface ForSendingAdminNotification {
      * the scheduler and the forward-auth hot path keep running.
      */
     void sendToAdmins(String subject, String body, String context);
+
+    /**
+     * One person, named, and whether it went. A notification nobody asked for may be skipped in silence
+     * when mail is not set up; a mail somebody asked for must say so: {@code false} when mail is not set
+     * up, and {@code MailNotSentException} when it is set up and the server still would not take it.
+     */
+    boolean sendTo(String recipient, String subject, String body, String context);
 }

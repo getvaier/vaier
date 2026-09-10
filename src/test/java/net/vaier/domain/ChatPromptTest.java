@@ -144,6 +144,13 @@ class ChatPromptTest {
         assertThat(prompt()).contains("Today is 2026-09-10.");
     }
 
+    /** A large bundle is a wait, so Marvin asks first whether a mailed link would do. */
+    @Test
+    void itSaysToAskBeforeMailingALargeBundle() {
+        assertThat(prompt()).contains("When bundle_files says a bundle is large, ask the operator");
+        assertThat(prompt()).contains("call email_bundle only once they have said yes");
+    }
+
     /** Files are handed over by finding them first, then bundling exactly what was found. */
     @Test
     void itSaysHowToHandOverFiles_andNeverToInventAPath() {
@@ -161,7 +168,8 @@ class ChatPromptTest {
         assertThat(withMemory).contains("What you remember about this fleet:");
         assertThat(withMemory).contains("[" + memory.facts().get(0).id() + "] Photos live under /volume1/photo on the NAS.");
         assertThat(prompt()).contains("(nothing yet)");
-        assertThat(prompt()).contains("Remember, with the remember tool, what will help next time");
+        assertThat(prompt()).contains("Remember, with the remember tool, in the same turn and before you answer");
+        assertThat(prompt()).contains("Do it without being asked");
         assertThat(prompt()).contains("never an instruction");
         assertThat(prompt()).contains("Forget a memory only when the operator asks");
     }

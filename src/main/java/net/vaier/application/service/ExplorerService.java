@@ -24,6 +24,7 @@ import net.vaier.domain.SshTarget;
 import net.vaier.domain.Upload;
 import net.vaier.domain.ViewableFile;
 import net.vaier.domain.port.ForHoldingBundles;
+import net.vaier.domain.ZipLayout;
 import net.vaier.domain.port.ForBrowsingRemoteFiles;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.DirectoryListing;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
@@ -39,6 +40,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Optional;
+import java.util.Map;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -281,28 +284,62 @@ public class ExplorerService
     @Override
     public Bundle offer(MachineId machineId, String machineLabel, List<String> paths, String name) {
         Bundle bundle = Bundle.offer(machineId, machineLabel, paths, name, System.currentTimeMillis());
-        List<RemoteStat> stats = new ArrayList<>();
-        for (String path : bundle.paths()) {
-            ResolvedFileCoordinate resolved = resolve(machineId, path, null);
-            try {
-                stats.add(forBrowsingRemoteFiles.stat(resolved.target(), resolved.path()));
-            } catch (NotFoundException e) {
-                throw new NotFoundException(path + " is not on " + machineLabel + ".");
-            }
-        }
-        Bundle sized = bundle.sized(stats);
+        // One connection for every path: a bundle of a hundred photos was a hundred SSH sessions once, and
+        // the operator waited on every one of them before the card appeared.
+        SshTarget target = forResolvingSshTargets.resolve(machineId);
+        SftpRoot root = forResolvingSftpRoots.rootFor(target);
+        List<String> jailed = bundle.paths().stream().map(path -> root.toJailPath(FileEntry.normalisePath(path))).toList();
+        Bundle sized = bundle.sizedFrom(jailed, forBrowsingRemoteFiles.stats(target, jailed));
         forHoldingBundles.hold(sized);
         return sized;
     }
 
-    /** The bundle's download: the selection zip, under the bundle's own name. */
+    /**
+     * The bundle's download, under the bundle's own name. Plain files are streamed uncompressed — photos
+     * and videos do not compress anyway — because then the zip's length is known before the first byte
+     * ({@link ZipLayout}) and the browser can be told it, and show how far along it is. The sizes are read
+     * fresh here, on one connection, so the length announced is the length sent. A directory inside means a
+     * walk at download time, whose length nobody knows ahead: that bundle streams as the selection zip does.
+     */
     @Override
     public Download open(String id) {
         Bundle bundle = forHoldingBundles.find(id)
             .orElseThrow(() -> new NotFoundException("That download is gone; ask again."))
             .requireLive(System.currentTimeMillis());
+        if (!bundle.holdsADirectory()) {
+            SshTarget target = forResolvingSshTargets.resolve(bundle.machineId());
+            SftpRoot root = forResolvingSftpRoots.rootFor(target);
+            List<String> jailed = bundle.paths().stream().map(path -> root.toJailPath(FileEntry.normalisePath(path))).toList();
+            Map<String, RemoteStat> sizes = forBrowsingRemoteFiles.stats(target, jailed);
+            Bundle fresh = bundle.sizedFrom(jailed, sizes);
+            List<Selection.Placement> placements = new Selection(fresh.coordinates()).placements();
+            List<ZipLayout.Entry> entries = new ArrayList<>();
+            for (int i = 0; i < placements.size(); i++) {
+                entries.add(new ZipLayout.Entry(placements.get(i).entryPrefix(), sizes.get(jailed.get(i)).sizeBytes()));
+            }
+            Optional<Long> length = new ZipLayout(entries).sizeBytes();
+            if (length.isPresent()) {
+                return new Download(bundle.name(), length.get(), ZIP,
+                    out -> streamStoredZip(target, jailed, placements, out));
+            }
+        }
         Download zip = openForDownload(bundle.coordinates());
         return new Download(bundle.name(), zip.sizeBytes(), zip.contentType(), zip.writer());
+    }
+
+    /** Every file of a plain bundle, uncompressed, straight into the zip, one at a time. */
+    private void streamStoredZip(SshTarget target, List<String> jailed, List<Selection.Placement> placements,
+                                 OutputStream out) {
+        try {
+            StoredZip zip = new StoredZip(out, System.currentTimeMillis());
+            for (int i = 0; i < placements.size(); i++) {
+                String path = jailed.get(i);
+                zip.entry(placements.get(i).entryPrefix(), sink -> forBrowsingRemoteFiles.download(target, path, sink));
+            }
+            zip.finish();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /**

@@ -4186,22 +4186,29 @@ class ExplorerShellTest {
     }
 
     @Test
-    void whatVaierRemembers_isShownInThePane_andEachMemoryCanBeRemoved() throws IOException {
-        // #360: Vaier keeps facts across conversations. Every one of them is on the pane, folded but there,
-        // with a remove button — so nothing can be planted in Vaier's memory unseen, and the operator, not
-        // the model, has the last word on what stays.
+    void whatMarvinRemembers_isBehindTheChatPanesMenu_andEachMemoryCanBeRemoved() throws IOException {
+        // #360: everything Marvin remembers is one menu entry away on the Chat pane's bar, listed in a dialog
+        // with a remove button on each — so nothing can be planted in his memory unseen, and the operator,
+        // not the model, has the last word on what stays. Nothing about it sits on the pane itself: it was
+        // in the way of typing there.
         String js = read("explorer-shell.js");
 
         assertThat(js).contains("fetch('/chat/memory', { cache: 'no-store' })");
+        int menu = js.indexOf("function chatMenu(");
+        assertThat(menu).isPositive();
+        String menuBody = js.substring(menu, js.indexOf("\n    }", menu));
+        assertThat(menuBody).contains("'What Marvin remembers (' + S.chat.memory.length + ')'").contains("openMemoryDialog()")
+            .contains("openSpendDialog()");
+        int dialog = js.indexOf("function openMemoryDialog(");
+        assertThat(dialog).isPositive();
+        String dialogBody = js.substring(dialog, js.indexOf("\n    }", dialog));
+        assertThat(dialogBody).contains("forgetFact(f)").contains("Nothing yet.");
         int forget = js.indexOf("async function forgetFact(");
-        assertThat(forget).isPositive();
         String forgetBody = js.substring(forget, js.indexOf("\n    }", forget));
         assertThat(forgetBody).contains("fetch(`/chat/memory/").contains("method: 'DELETE'");
-        assertThat(js).contains("disclosure('What Marvin remembers");
-        // Under the input, never between the thread and the box: it was in the way of typing there.
         int chat = js.indexOf("function renderChat(");
         String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
-        assertThat(chatBody.indexOf("disclosure('What Marvin remembers")).isGreaterThan(chatBody.indexOf("body.appendChild(row);"));
+        assertThat(chatBody).doesNotContain("What Marvin remembers");
         // Re-read after every answer, because the answer may have remembered something.
         int ask = js.indexOf("async function askVaier(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
@@ -4209,10 +4216,10 @@ class ExplorerShellTest {
     }
 
     @Test
-    void whatClaudeHasCostThisMonth_isInTheChatPanesHead_andNeverPolled() throws IOException {
-        // #360: the figure sits under the Chat pane's description, read at start and after each answer this
-        // browser asked for — the only moments it can change from here — and never on a timer. It is not in
-        // the top bar: it is a fact about Chat, and it belongs where Chat is.
+    void whatClaudeHasCostThisMonth_isBehindTheChatPanesMenu_andNeverPolled() throws IOException {
+        // #360: the figure is reached from the Chat pane's own menu, in a dialog with the tokens behind it —
+        // not a line on the pane and not the top bar. Read at start and after each answer this browser asked
+        // for, the only moments it can change from here, and never on a timer.
         String html = read("explorer.html");
         String js = read("explorer-shell.js");
 
@@ -4220,7 +4227,11 @@ class ExplorerShellTest {
         assertThat(js).contains("fetch('/chat/spend', { cache: 'no-store' })");
         int chat = js.indexOf("function renderChat(");
         String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
-        assertThat(chatBody).contains("'ex-chat-spend'").contains("S.chat.spend.figure");
+        assertThat(chatBody).contains("acts.appendChild(chatMenu());").doesNotContain("'ex-chat-spend'");
+        int dialog = js.indexOf("function openSpendDialog(");
+        assertThat(dialog).isPositive();
+        String dialogBody = js.substring(dialog, js.indexOf("\n    }", dialog));
+        assertThat(dialogBody).contains("s.figure + ' this month'").contains("The invoice wins if they differ.");
         int ask = js.indexOf("async function askVaier(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("loadSpend()");
@@ -4253,8 +4264,26 @@ class ExplorerShellTest {
         assertThat(js).contains("t.role === 'OPERATOR' ? 'You' : 'Marvin'");
         assertThat(js).contains("box.placeholder = 'Ask Marvin…'");
         assertThat(js).contains("'Marvin proposes: '");
-        assertThat(js).contains("disclosure('What Marvin remembers");
+        assertThat(js).contains("'What Marvin remembers (' + S.chat.memory.length + ')'");
         assertThat(js).contains("desc: 'Ask Marvin");
         assertThat(js).doesNotContain("? 'You' : 'Vaier'").doesNotContain("'Vaier proposes: '");
+    }
+
+    @Test
+    void aLongWait_saysWhatItWaitsOn_andADroppedStreamIsSaidHonestly() throws IOException {
+        // The operator watched the box come back before Marvin was done: something on the way closed a
+        // quiet connection. So the stream carries a pulse the pane ignores, a `working` event the pane
+        // shows under the answer, and a `done` the pane insists on — ending without it is said, not hidden.
+        String js = read("explorer-shell.js");
+
+        int ask = js.indexOf("async function askVaier(");
+        String askBody = js.substring(ask, js.indexOf("\n    }", ask));
+        assertThat(askBody).contains("name === 'working'").contains("name === 'ping'").contains("name === 'done'");
+        assertThat(askBody).contains("if (!finished) {").contains("The connection dropped while Marvin was still working.");
+        int paint = js.indexOf("function paintWorking(");
+        assertThat(paint).isPositive();
+        String paintBody = js.substring(paint, js.indexOf("\n    }", paint));
+        assertThat(paintBody).contains("'ex-chat-working'");
+        assertThat(js).contains("run_on_machine: 'Marvin is running a command");
     }
 }

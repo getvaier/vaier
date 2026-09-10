@@ -7,6 +7,7 @@ import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ChatUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
+import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
@@ -40,6 +41,7 @@ import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
 import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
+import net.vaier.domain.ChatCapability;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ChatAvailability;
 import net.vaier.domain.ChatUnavailableException;
@@ -61,6 +63,7 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineReference;
+import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.Memory;
 import net.vaier.domain.MonthSpend;
 import net.vaier.domain.NoHostCredentialException;
@@ -88,6 +91,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
@@ -120,6 +126,10 @@ import java.util.function.Function;
 @RequestMapping("/chat")
 @Slf4j
 public class ChatRestController {
+
+    /** What the pane is told when the model's turn ended before a word was said. */
+    static final String NOTHING_SAID = "Marvin finished without a word. That usually means his turn was cut off "
+        + "before he could speak; ask again, or ask for less at once.";
 
     /** Long enough for a considered answer over a slow link; the pane says nothing while it waits. */
     private static final long ANSWER_TIMEOUT_MS = 300_000L;
@@ -156,6 +166,7 @@ public class ChatRestController {
     private final ForgetUseCase forgetUseCase;
     private final GetMemoryUseCase getMemoryUseCase;
     private final GetSpendUseCase getSpendUseCase;
+    private final EmailBundleUseCase emailBundleUseCase;
     private final ObjectMapper objectMapper;
 
     /**
@@ -164,6 +175,18 @@ public class ChatRestController {
      */
     private final ExecutorService answers = Executors.newSingleThreadExecutor(
         runnable -> new Thread(runnable, "vaier-ask"));
+
+    /**
+     * The pulse that keeps a quiet stream open: a tool call or a long think can leave it silent for a
+     * minute, and something on the way to the browser closes a quiet connection. Package-private so a test
+     * can make it quick.
+     */
+    long heartbeatMs = 15_000L;
+    private final ScheduledExecutorService pulse = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "vaier-ask-pulse");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public ChatRestController(ChatUseCase chatUseCase,
                              IsChatAvailableUseCase isChatAvailableUseCase,
@@ -197,6 +220,7 @@ public class ChatRestController {
                              ForgetUseCase forgetUseCase,
                              GetMemoryUseCase getMemoryUseCase,
                              GetSpendUseCase getSpendUseCase,
+                             EmailBundleUseCase emailBundleUseCase,
                              ObjectMapper objectMapper) {
         this.getLanServerReachabilityUseCase = getLanServerReachabilityUseCase;
         this.chatUseCase = chatUseCase;
@@ -230,6 +254,7 @@ public class ChatRestController {
         this.forgetUseCase = forgetUseCase;
         this.getMemoryUseCase = getMemoryUseCase;
         this.getSpendUseCase = getSpendUseCase;
+        this.emailBundleUseCase = emailBundleUseCase;
         this.objectMapper = objectMapper;
     }
 
@@ -237,6 +262,7 @@ public class ChatRestController {
     @PreDestroy
     void stopAnswering() {
         answers.shutdownNow();
+        pulse.shutdownNow();
     }
 
     /** Whether Chat is offered at all — the Explorer asks before drawing the pane in its menu. */
@@ -279,11 +305,25 @@ public class ChatRestController {
 
     /** The whole of one answer, start to finish. Package-private so a test can drive it without a thread. */
     void answer(SseEmitter emitter, Operator operator, String question) {
+        ScheduledFuture<?> beat = pulse.scheduleAtFixedRate(() -> send(emitter, "ping", ""),
+            heartbeatMs, heartbeatMs, TimeUnit.MILLISECONDS);
+        StringBuilder said = new StringBuilder();
         try {
-            chatUseCase.ask(operator, question, toolOffers(emitter),
-                text -> send(emitter, "text", text));
-            send(emitter, "done", "");
+            chatUseCase.ask(operator, question, toolOffers(emitter, operator), text -> {
+                said.append(text);
+                send(emitter, "text", text);
+            });
+            beat.cancel(false);
+            // An answer without a word is not an answer. It happens when the model's turn was cut off
+            // before it spoke — a tool call too long for the room it has — and a blank thread would leave
+            // the operator guessing.
+            if (said.toString().isBlank()) {
+                send(emitter, "error", NOTHING_SAID);
+            } else {
+                send(emitter, "done", "");
+            }
         } catch (Exception e) {
+            beat.cancel(false);
             log.warn("Chat could not answer: {}", e.toString());
             send(emitter, "error", messageFor(e));
         }
@@ -390,8 +430,10 @@ public class ChatRestController {
         try {
             emitter.send(SseEmitter.event().name(event).data(data));
         } catch (IOException | IllegalStateException e) {
-            // The pane closed mid-answer. Ordinary, and nothing to recover: the answer had nowhere to go.
-            log.debug("Chat stream closed before the answer finished ({})", e.toString());
+            // The pane closed mid-answer, or the connection to it did. Nothing to recover — the answer is
+            // still made and kept — but worth a line, since the operator will have watched the box come
+            // back before Marvin was done.
+            log.info("Chat: the stream to the pane closed before the answer finished ({})", e.toString());
         }
     }
 
@@ -401,7 +443,7 @@ public class ChatRestController {
      * One offer per catalogue entry, reads first, in the catalogues' order. An action's offer proposes on
      * {@code emitter} — the card rides the answer stream — and runs nothing.
      */
-    private List<ToolOffer> toolOffers(SseEmitter emitter) {
+    private List<ToolOffer> toolOffers(SseEmitter emitter, Operator operator) {
         Map<ChatTool, Function<Map<String, String>, String>> reads = new HashMap<>();
         reads.put(ChatTool.FLEET, arguments -> readFleet());
         reads.put(ChatTool.WAITING_TO_JOIN, arguments -> readWaitingToJoin());
@@ -412,17 +454,33 @@ public class ChatRestController {
         reads.put(ChatTool.SECURITY, arguments -> readSecurity());
         reads.put(ChatTool.RUN_ON_MACHINE, this::readRunOnMachine);
         reads.put(ChatTool.BUNDLE_FILES, arguments -> offerBundle(arguments, emitter));
+        reads.put(ChatTool.EMAIL_BUNDLE, arguments -> emailBundle(arguments, operator));
         reads.put(ChatTool.REMEMBER, this::remember);
         reads.put(ChatTool.FORGET, this::forget);
 
         List<ToolOffer> offers = new ArrayList<>();
         for (ChatTool tool : ChatTool.values()) {
-            offers.add(new ToolOffer(tool, reads.get(tool)));
+            offers.add(new ToolOffer(tool, announced(tool, reads.get(tool), emitter)));
         }
         for (ChatAction action : ChatAction.values()) {
-            offers.add(new ToolOffer(action, arguments -> propose(action, arguments, emitter)));
+            offers.add(new ToolOffer(action, announced(action, arguments -> propose(action, arguments, emitter), emitter)));
         }
         return offers;
+    }
+
+    /** The pane is told which tool is running before it runs, so a long wait says what it waits on. */
+    private Function<Map<String, String>, String> announced(ChatCapability tool,
+                                                            Function<Map<String, String>, String> read,
+                                                            SseEmitter emitter) {
+        return arguments -> {
+            send(emitter, "working", tool.toolName());
+            try {
+                return read.apply(arguments);
+            } catch (RuntimeException e) {
+                log.warn("Chat tool {} failed: {}", tool.toolName(), e.toString());
+                throw e;
+            }
+        };
     }
 
     // --- the actions, proposed ------------------------------------------------------------------------
@@ -565,6 +623,19 @@ public class ChatRestController {
         }
     }
 
+    /** The link by mail, to the operator who asked; every way it cannot go is a sentence back. */
+    private String emailBundle(Map<String, String> arguments, Operator operator) {
+        try {
+            String to = emailBundleUseCase.email(arguments.getOrDefault("id", "").trim(), operator);
+            return "Mailed a link to " + to + "; it works for a day.";
+        } catch (NotFoundException | IllegalArgumentException | MailNotSentException refused) {
+            return refused.getMessage();
+        } catch (RuntimeException e) {
+            log.warn("Chat could not mail a bundle: {}", e.toString());
+            return "Vaier could not send that mail.";
+        }
+    }
+
     /** One fact kept; the domain's refusal is the answer when it is not one. */
     private String remember(Map<String, String> arguments) {
         try {
@@ -608,11 +679,15 @@ public class ChatRestController {
     public ResponseEntity<StreamingResponseBody> bundle(@PathVariable String id) {
         Download download = openBundleUseCase.open(id);
         StreamingResponseBody body = download.writer()::accept;
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION,
                 "attachment; filename=\"" + download.filename().replaceAll("[\"\\\\\r\n]", "_") + "\"")
-            .contentType(MediaType.parseMediaType(download.contentType()))
-            .body(body);
+            .contentType(MediaType.parseMediaType(download.contentType()));
+        // A length the service knows is told, so the browser can show how far along the download is.
+        if (download.sizeBytes() >= 0) {
+            response = response.contentLength(download.sizeBytes());
+        }
+        return response.body(body);
     }
 
     /**

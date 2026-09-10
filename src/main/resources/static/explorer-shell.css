@@ -1576,8 +1576,15 @@ select.ex-input { cursor: pointer; }
 .ex-chat-intro { color: var(--text-muted); font-size: 15px; line-height: 1.5; }
 .ex-chat-brief { color: var(--text-dim); font-size: 14px; line-height: 1.5; font-style: italic; }
 .ex-chat-over { display: flex; justify-content: flex-end; }
-/* The month's Claude figure, under the pane's description. Quiet: a number, not a warning. */
-.ex-chat-spend { margin-top: 6px; font-size: 13px; color: var(--text-dim); }
+/* The Chat pane's own menu, and the two dialogs behind it. */
+.ex-chat-menu .ex-vmenu { min-width: 240px; }
+.ex-chat-menu-btn { gap: 5px; }
+.ex-chat-menu-chev { width: 13px; height: 13px; transform: rotate(90deg); color: var(--text-dim); }
+.ex-chat-menu-btn[aria-expanded="true"] .ex-chat-menu-chev { transform: rotate(-90deg); }
+.ex-chat-spend-figure { font-size: 22px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.ex-chat-spend-rows { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.ex-chat-spend-row { display: flex; justify-content: space-between; gap: 24px; font-size: 14px; color: var(--text-muted); }
+.ex-chat-spend-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
 .ex-chat-memory { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
 .ex-chat-memory-row { display: flex; align-items: center; gap: 10px; }
 .ex-chat-memory-text { flex: 1; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
@@ -1586,6 +1593,7 @@ select.ex-input { cursor: pointer; }
 .ex-chat-turn.is-vaier .ex-chat-who { color: var(--accent); }
 .ex-chat-text { font-size: 15px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
 .ex-chat-turn.is-you .ex-chat-text { color: var(--text-muted); }
+.ex-chat-working { margin-top: 4px; font-size: 13px; font-style: italic; color: var(--text-dim); }
 .ex-chat-row { display: flex; gap: 10px; align-items: flex-end; }
 /* A proposed action. The one thing in the thread that asks something of the operator, so it is the one
    thing with an edge — and once it is answered the edge says how: the accent for done, red for not. */

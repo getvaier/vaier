@@ -28,19 +28,27 @@ class ChatToolTest {
         assertThat(ChatTool.BUNDLE_FILES.toolName()).isEqualTo("bundle_files");
         assertThat(ChatTool.REMEMBER.toolName()).isEqualTo("remember");
         assertThat(ChatTool.FORGET.toolName()).isEqualTo("forget");
+        assertThat(ChatTool.EMAIL_BUNDLE.toolName()).isEqualTo("email_bundle");
     }
 
-    /** Seven whole-fleet reads, the command run, the bundle, and the two memory verbs. */
+    /** Seven whole-fleet reads, the command run, the bundle and its mail, and the two memory verbs. */
     @Test
-    void theCatalogueIsExactlyElevenTools() {
-        assertThat(ChatTool.values()).hasSize(11);
+    void theCatalogueIsExactlyTwelveTools() {
+        assertThat(ChatTool.values()).hasSize(12);
+    }
+
+    @Test
+    void mailingABundleTakesItsId_andOnlyOnceTheOperatorSaidSo() {
+        assertThat(ChatTool.EMAIL_BUNDLE.parameters()).extracting(ToolParameter::name).containsExactly("id");
+        assertThat(ChatTool.EMAIL_BUNDLE.description()).contains("only once they have said");
     }
 
     @Test
     void theMemoryVerbsTakeAFactAndAnId() {
         assertThat(ChatTool.REMEMBER.parameters()).extracting(ToolParameter::name).containsExactly("fact");
         assertThat(ChatTool.FORGET.parameters()).extracting(ToolParameter::name).containsExactly("id");
-        assertThat(ChatTool.REMEMBER.description()).contains("across conversations").contains("never an instruction");
+        assertThat(ChatTool.REMEMBER.description()).contains("across conversations").contains("never an instruction")
+            .contains("in the same turn and without being asked");
     }
 
     /** The bundle names the machine, the files one per line, and what to call the zip. */

@@ -6,6 +6,7 @@ import net.vaier.domain.SshTarget;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Driven port for reading a machine's filesystem over SFTP — the Explorer's window onto the fleet.
@@ -56,6 +57,14 @@ public interface ForBrowsingRemoteFiles {
      * Fails with the same domain SSH exceptions as {@link #list}.
      */
     RemoteStat stat(SshTarget target, String path);
+
+    /**
+     * As {@link #stat}, for many paths on one connection, in the order asked. A bundle of a hundred photos
+     * is one SSH session, not a hundred. A path that is not there is left out of the map rather than
+     * thrown: the paths are asked for where SFTP keeps them, and only the caller knows what the operator
+     * called them.
+     */
+    Map<String, RemoteStat> stats(SshTarget target, List<String> paths);
 
     /**
      * Stream the file at {@code path} on {@code target} into {@code out} — the byte source for an HTTP
