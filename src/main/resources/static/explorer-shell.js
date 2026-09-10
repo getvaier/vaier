@@ -146,7 +146,7 @@
 
     const S = {
         askAvailable: false,     // whether an Anthropic API key is stored — Ask exists only then
-        ask: { turns: [], busy: false, error: null, draft: '' },   // this visit's conversation: { role, text }, and the question being typed
+        ask: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '' },   // the kept conversation: { role, text }, and the question being typed
         enrolmentRequests: [],   // phones waiting on a join code: { code, name, publicKey, expiresAt }
         path: ['fleet'],                 // the selected entry, as its path
         machines: [],                    // GET /machines
@@ -6897,8 +6897,16 @@
             return;
         }
 
+        // The conversation is Vaier's to remember: read once on entry, drawn from here after.
+        if (!S.ask.loaded) loadConversation();
+
         const thread = el('div', 'ex-ask-thread');
-        if (!S.ask.turns.length) {
+        if (S.ask.summary) {
+            const brief = el('div', 'ex-ask-brief');
+            brief.textContent = 'Earlier, in brief: ' + S.ask.summary;
+            thread.appendChild(brief);
+        }
+        if (S.ask.loaded && !S.ask.turns.length && !S.ask.summary) {
             const intro = el('div', 'ex-ask-intro');
             intro.textContent = 'Ask about the fleet in your own words. Vaier answers from what it knows right now, and only that.';
             thread.appendChild(intro);
@@ -6913,6 +6921,14 @@
         }
         S.ask.turns.forEach((t) => thread.appendChild(askTurn(t)));
         if (S.ask.error) thread.appendChild(note(S.ask.error, true));
+        if (S.ask.turns.length || S.ask.summary) {
+            const over = el('div', 'ex-ask-over');
+            const forget = el('button', 'ex-btn'); forget.textContent = 'Start over';
+            forget.disabled = S.ask.busy;
+            forget.onclick = startOver;
+            over.appendChild(forget);
+            thread.appendChild(over);
+        }
         body.appendChild(thread);
 
         // The pane is rebuilt on every render, and the shell renders whenever a stream event lands. A fresh
@@ -6944,6 +6960,7 @@
     }
 
     function askTurn(t) {
+        if (t.kind === 'card') return askCard(t);
         const turn = el('div', 'ex-ask-turn ' + (t.role === 'OPERATOR' ? 'is-you' : 'is-vaier'));
         const who = el('div', 'ex-ask-who'); who.textContent = t.role === 'OPERATOR' ? 'You' : 'Vaier';
         const text = el('div', 'ex-ask-text'); text.textContent = t.text || (t.role === 'VAIER' ? '…' : '');
@@ -6951,11 +6968,91 @@
         return turn;
     }
 
-    // One question: append it, open a Vaier turn, then fill that turn as the stream arrives. The history
-    // sent is everything before this question, so a follow-up ("and Colina?") still knows what "and" means.
+    // The kept conversation, once per visit. Nothing here decides anything: what is kept, and for how
+    // long, is Vaier's; the pane only shows it.
+    async function loadConversation() {
+        S.ask.loaded = true;
+        try {
+            const res = await fetch('/ask/conversation', { cache: 'no-store' });
+            if (!res.ok) return;
+            const c = await res.json();
+            S.ask.turns = (c.turns || []).map((t) => ({ role: t.role, text: t.text }));
+            S.ask.summary = c.summary || null;
+        } catch (e) {
+            // Nothing kept, or nothing reachable: the pane starts empty either way.
+        }
+        if (kindOf(S.path) === 'ask') render();
+    }
+
+    // Start over: the one way to forget, and it is Vaier that forgets — a reload would bring it all back.
+    async function startOver() {
+        if (S.ask.busy) return;
+        try {
+            const res = await fetch('/ask/conversation', { method: 'DELETE' });
+            if (!res.ok) { toast('Vaier could not forget that conversation.'); return; }
+        } catch (e) { toast('Vaier could not forget that conversation.'); return; }
+        S.ask.turns = []; S.ask.summary = null; S.ask.error = null;
+        render();
+    }
+
+    // A proposed action, as a card. The sentence is what the operator reads; the button says the same
+    // thing, because it is what will happen. Nothing runs until it is clicked, and a card that was declined
+    // says so and runs nothing. A card is never the answer the stream paints into, so it carries none of
+    // the answer's classes.
+    function askCard(t) {
+        const card = el('div', 'ex-ask-card' + (t.state === 'proposed' ? '' : ' is-' + t.state));
+        const sentence = el('div', 'ex-ask-card-sentence');
+        sentence.textContent = t.state === 'proposed' ? 'Vaier proposes: ' + t.sentence : t.sentence;
+        card.appendChild(sentence);
+        if (t.state === 'proposed') {
+            const row = el('div', 'ex-ask-card-row');
+            const yes = el('button', 'ex-btn is-accent');
+            yes.textContent = t.sentence.replace(/\.$/, '');
+            yes.onclick = () => confirmAction(t);
+            const no = el('button', 'ex-btn'); no.textContent = 'Not now';
+            no.onclick = () => declineAction(t);
+            row.append(yes, no);
+            card.appendChild(row);
+        } else {
+            const outcome = el('div', 'ex-ask-card-outcome');
+            outcome.textContent = t.state === 'working' ? 'Doing it…' : (t.outcome || '');
+            card.appendChild(outcome);
+        }
+        return card;
+    }
+
+    // The click. The card is taken once on the server, so a second click cannot run it twice; what came of
+    // it is written into the card either way.
+    async function confirmAction(t) {
+        if (t.state !== 'proposed') return;
+        t.state = 'working'; render();
+        try {
+            const res = await fetch(`/ask/actions/${encodeURIComponent(t.id)}`, { method: 'POST' });
+            const body = await res.json().catch(() => ({}));
+            t.state = res.ok && body.done ? 'done' : 'failed';
+            t.outcome = body.text || 'Vaier could not do that.';
+        } catch (e) {
+            t.state = 'failed'; t.outcome = 'Vaier could not do that.';
+        }
+        render();
+    }
+
+    // "Not now". Told to the server, so the card can never run afterwards and Vaier remembers it was
+    // declined; the card says so either way.
+    async function declineAction(t) {
+        if (t.state !== 'proposed') return;
+        t.state = 'declined'; t.outcome = 'Not done.'; render();
+        try {
+            await fetch(`/ask/actions/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
+        } catch (e) {
+            // The card expires on its own in ten minutes; declining it is never urgent.
+        }
+    }
+
+    // One question: append it, open a Vaier turn, then fill that turn as the stream arrives. The
+    // conversation so far is Vaier's to remember, so only the question is sent.
     async function askVaier(question) {
         if (S.ask.busy) return;
-        const history = S.ask.turns.map((t) => ({ role: t.role, text: t.text }));
         S.ask.turns.push({ role: 'OPERATOR', text: question });
         const answer = { role: 'VAIER', text: '' };
         S.ask.turns.push(answer);
@@ -6964,7 +7061,7 @@
         try {
             const res = await fetch('/ask', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question, history: history }),
+                body: JSON.stringify({ question: question }),
             });
             if (!res.ok) {
                 const e = await res.json().catch(() => ({}));
@@ -6972,6 +7069,14 @@
             }
             await readAnswerStream(res.body, (name, data) => {
                 if (name === 'text') { answer.text += data; paintLastAnswer(answer.text); }
+                else if (name === 'confirm') {
+                    // The card goes before the answer being written, so the answer stays the last Vaier
+                    // turn and the streaming painter keeps writing into the right element.
+                    const c = JSON.parse(data);
+                    S.ask.turns.splice(S.ask.turns.length - 1, 0,
+                        { role: 'VAIER', kind: 'card', id: c.id, sentence: c.sentence, state: 'proposed' });
+                    render();
+                }
                 else if (name === 'error') throw new Error(data || 'Vaier could not answer.');
             });
         } catch (e) {
@@ -7056,7 +7161,7 @@
     // re-reads the whole config — a saved section already shows its new value.
     // A key saved or removed changes what the menu offers, so both are re-read before the next paint.
     async function afterKeyChange() {
-        S.ask = { turns: [], busy: false, error: null };
+        S.ask = { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '' };
         await Promise.all([loadAskAvailability(), loadSettings()]);
         renderVMenu();
     }

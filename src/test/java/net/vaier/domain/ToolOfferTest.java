@@ -30,6 +30,15 @@ class ToolOfferTest {
             .isEqualTo("Colina 27: uptime");
     }
 
+    /** An action is offered through the same shape; what it does when called is the offerer's business. */
+    @Test
+    void anActionMayBeOfferedLikeARead() {
+        ToolOffer offer = new ToolOffer(AskAction.RUN_BACKUP, args -> "proposed");
+
+        assertThat(offer.tool()).isEqualTo(AskAction.RUN_BACKUP);
+        assertThat(offer.read().apply(Map.of("machine", "Colina 27"))).isEqualTo("proposed");
+    }
+
     /** A tool with nothing behind it would be offered to the model and then fail when it was called. */
     @Test
     void anOfferMustCarryBoth() {

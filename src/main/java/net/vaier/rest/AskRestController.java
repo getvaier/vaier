@@ -3,10 +3,14 @@ package net.vaier.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.AskUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.ForgetConversationUseCase;
+import net.vaier.application.GetConversationUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
+import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetBackupRunsUseCase;
 import net.vaier.application.GetBlockDecisionsUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
@@ -17,17 +21,29 @@ import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.IsAskAvailableUseCase;
+import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
+import net.vaier.application.ProposeActionUseCase;
+import net.vaier.application.RefuseEnrolmentUseCase;
+import net.vaier.application.RememberActionOutcomeUseCase;
+import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
+import net.vaier.application.TakeActionProposalUseCase;
+import net.vaier.application.TrustAddressUseCase;
+import net.vaier.application.UpdateContainerImageUseCase;
+import net.vaier.domain.ActionProposal;
+import net.vaier.domain.AskAction;
 import net.vaier.domain.AskTool;
 import net.vaier.domain.AskAvailability;
 import net.vaier.domain.AskUnavailableException;
 import net.vaier.domain.BackupJob;
+import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.CommandOutcome;
+import net.vaier.domain.ConflictException;
+import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
-import net.vaier.domain.ConversationTurn.Role;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.LanAnchor;
@@ -35,15 +51,21 @@ import net.vaier.domain.Machine;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.MachineDiskStanding;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineReference;
 import net.vaier.domain.NoHostCredentialException;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.Operator;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -64,8 +86,18 @@ import java.util.function.Function;
  *
  * <p>The constructor is the point. Every read Ask may make is a {@code *UseCase} named in it, so what the
  * model can be told about this fleet is a list anyone can review — and it is a list of <em>reads</em>. There
- * is no verb here at all. The one use case that reaches a machine runs a <b>Read-only command</b>, and what
- * counts as one is the domain's decision ({@code ReadOnlyCommand}), taken before anything is connected.
+ * is no verb here that runs on the model's say-so. The one use case that reaches a machine runs a
+ * <b>Read-only command</b>, and what counts as one is the domain's decision ({@code ReadOnlyCommand}), taken
+ * before anything is connected.
+ *
+ * <p>Slice 2 adds the verbs, each behind a click. An <b>Ask action</b> the model calls only puts a
+ * <b>Confirmation</b> in front of the operator — a {@code confirm} event on the answer stream — and the
+ * click comes back to {@link #confirm}, which takes the card once and runs the same use case the
+ * Explorer's own button calls.
+ *
+ * <p>Slice 3 makes the conversation Vaier's to remember. Who is asking is the signed-in email oauth2-proxy
+ * forwards, as {@link Operator}; the pane reads the kept conversation, sends the question alone, and
+ * starts over with one DELETE.
  *
  * <p>The projections below are the whole of what leaves Vaier for the Claude API, and they are deliberately
  * small: what a person would say out loud about a machine, a service or a backup. No key, no preshared key,
@@ -94,6 +126,18 @@ public class AskRestController {
     private final DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
     private final GetBlockDecisionsUseCase getBlockDecisionsUseCase;
     private final RunReadOnlyCommandUseCase runReadOnlyCommandUseCase;
+    private final ProposeActionUseCase proposeActionUseCase;
+    private final TakeActionProposalUseCase takeActionProposalUseCase;
+    private final ApproveEnrolmentUseCase approveEnrolmentUseCase;
+    private final RefuseEnrolmentUseCase refuseEnrolmentUseCase;
+    private final RunBackupJobUseCase runBackupJobUseCase;
+    private final GetBackupRepositoriesUseCase getBackupRepositoriesUseCase;
+    private final UpdateContainerImageUseCase updateContainerImageUseCase;
+    private final LiftBlockUseCase liftBlockUseCase;
+    private final TrustAddressUseCase trustAddressUseCase;
+    private final GetConversationUseCase getConversationUseCase;
+    private final ForgetConversationUseCase forgetConversationUseCase;
+    private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     private final ObjectMapper objectMapper;
 
     /**
@@ -117,6 +161,18 @@ public class AskRestController {
                              GetBlockDecisionsUseCase getBlockDecisionsUseCase,
                              GetLanServerReachabilityUseCase getLanServerReachabilityUseCase,
                              RunReadOnlyCommandUseCase runReadOnlyCommandUseCase,
+                             ProposeActionUseCase proposeActionUseCase,
+                             TakeActionProposalUseCase takeActionProposalUseCase,
+                             ApproveEnrolmentUseCase approveEnrolmentUseCase,
+                             RefuseEnrolmentUseCase refuseEnrolmentUseCase,
+                             RunBackupJobUseCase runBackupJobUseCase,
+                             GetBackupRepositoriesUseCase getBackupRepositoriesUseCase,
+                             UpdateContainerImageUseCase updateContainerImageUseCase,
+                             LiftBlockUseCase liftBlockUseCase,
+                             TrustAddressUseCase trustAddressUseCase,
+                             GetConversationUseCase getConversationUseCase,
+                             ForgetConversationUseCase forgetConversationUseCase,
+                             RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
                              ObjectMapper objectMapper) {
         this.getLanServerReachabilityUseCase = getLanServerReachabilityUseCase;
         this.askUseCase = askUseCase;
@@ -132,6 +188,18 @@ public class AskRestController {
         this.discoverVaierServerContainersUseCase = discoverVaierServerContainersUseCase;
         this.getBlockDecisionsUseCase = getBlockDecisionsUseCase;
         this.runReadOnlyCommandUseCase = runReadOnlyCommandUseCase;
+        this.proposeActionUseCase = proposeActionUseCase;
+        this.takeActionProposalUseCase = takeActionProposalUseCase;
+        this.approveEnrolmentUseCase = approveEnrolmentUseCase;
+        this.refuseEnrolmentUseCase = refuseEnrolmentUseCase;
+        this.runBackupJobUseCase = runBackupJobUseCase;
+        this.getBackupRepositoriesUseCase = getBackupRepositoriesUseCase;
+        this.updateContainerImageUseCase = updateContainerImageUseCase;
+        this.liftBlockUseCase = liftBlockUseCase;
+        this.trustAddressUseCase = trustAddressUseCase;
+        this.getConversationUseCase = getConversationUseCase;
+        this.forgetConversationUseCase = forgetConversationUseCase;
+        this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
         this.objectMapper = objectMapper;
     }
 
@@ -149,24 +217,40 @@ public class AskRestController {
 
     /**
      * Ask one question. The answer arrives as {@code text} events, one per piece, then {@code done}; a
-     * refusal arrives as one {@code error} event carrying the sentence the operator can act on.
+     * refusal arrives as one {@code error} event carrying the sentence the operator can act on. The
+     * conversation so far is Vaier's to remember, so the request carries the question alone.
      */
     @PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter ask(@RequestBody AskRequest request) {
-        // Mapped here, on the request thread, so a malformed conversation is a plain 400 rather than an
-        // error event down a stream the browser has already started rendering.
-        List<ConversationTurn> history = turns(request.history());
-        // Refused here too, so a missing key is a 409 and not a stream that opens only to say no.
+    public SseEmitter ask(@RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
+                          @RequestBody AskRequest request) {
+        // Refused here, on the request thread, so a missing key is a 409 and not a stream that opens only
+        // to say no.
         new AskAvailability(isAskAvailableUseCase.isAvailable()).requireAvailable();
+        Operator operator = Operator.of(email);
         SseEmitter emitter = new SseEmitter(ANSWER_TIMEOUT_MS);
-        answers.submit(() -> answer(emitter, request.question(), history));
+        answers.submit(() -> answer(emitter, operator, request.question()));
         return emitter;
     }
 
+    /** The kept conversation, to draw the pane from. */
+    @GetMapping("/conversation")
+    public ResponseEntity<ConversationResponse> conversation(
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email) {
+        return ResponseEntity.ok(ConversationResponse.of(getConversationUseCase.get(Operator.of(email))));
+    }
+
+    /** Start over. */
+    @DeleteMapping("/conversation")
+    public ResponseEntity<Void> forget(
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email) {
+        forgetConversationUseCase.forget(Operator.of(email));
+        return ResponseEntity.noContent().build();
+    }
+
     /** The whole of one answer, start to finish. Package-private so a test can drive it without a thread. */
-    void answer(SseEmitter emitter, String question, List<ConversationTurn> history) {
+    void answer(SseEmitter emitter, Operator operator, String question) {
         try {
-            askUseCase.ask(question, history, toolOffers(),
+            askUseCase.ask(operator, question, toolOffers(emitter),
                 text -> send(emitter, "text", text));
             send(emitter, "done", "");
         } catch (Exception e) {
@@ -181,6 +265,90 @@ public class AskRestController {
      * unexpected failure's message can carry a host, a path or a credential — the same reason
      * {@link GlobalExceptionHandler} never returns one.
      */
+    /**
+     * The click. The card is taken once — gone or expired is refused, and nothing runs — then the same use
+     * case the Explorer's button calls runs, and the outcome is a sentence for the card. A refusal the
+     * domain worded is shown; an unexpected failure is answered in Vaier's words, for the reason
+     * {@link #messageFor} gives.
+     */
+    @PostMapping("/actions/{id}")
+    public ResponseEntity<ActionOutcome> confirm(
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
+            @PathVariable String id) {
+        ActionProposal proposal;
+        try {
+            proposal = takeActionProposalUseCase.take(id);
+        } catch (NotFoundException | IllegalArgumentException refused) {
+            return ResponseEntity.ok(new ActionOutcome(false, refused.getMessage()));
+        }
+        ActionOutcome outcome;
+        try {
+            outcome = new ActionOutcome(true, carryOut(proposal));
+        } catch (IllegalArgumentException | ConflictException | NotFoundException | NoHostCredentialException refused) {
+            outcome = new ActionOutcome(false, refused.getMessage());
+        } catch (RuntimeException e) {
+            log.warn("Ask could not carry out '{}': {}", proposal.sentence(), e.toString());
+            outcome = new ActionOutcome(false, "Vaier could not do that.");
+        }
+        // Remembered either way, so the next question knows what was started — or what was not.
+        rememberActionOutcomeUseCase.remember(Operator.of(email),
+            proposal.outcomeSentence(outcome.done(), outcome.text()));
+        return ResponseEntity.ok(outcome);
+    }
+
+    /** "Not now": the card is taken, so it can never run, and the refusal is remembered. */
+    @DeleteMapping("/actions/{id}")
+    public ResponseEntity<ActionOutcome> decline(
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String email,
+            @PathVariable String id) {
+        try {
+            ActionProposal proposal = takeActionProposalUseCase.take(id);
+            rememberActionOutcomeUseCase.remember(Operator.of(email), proposal.declinedSentence());
+        } catch (NotFoundException | IllegalArgumentException gone) {
+            // Already gone: nothing could run anyway, and there is nothing to remember about it.
+        }
+        return ResponseEntity.ok(new ActionOutcome(false, "Not done."));
+    }
+
+    /** One verb, one use case — the one the Explorer's own button calls. */
+    private String carryOut(ActionProposal proposal) {
+        Map<String, String> a = proposal.arguments();
+        return switch (proposal.action()) {
+            case LET_PHONE_IN -> {
+                approveEnrolmentUseCase.approve(a.get("code"));
+                yield "Let " + a.get("name") + " in.";
+            }
+            case REFUSE_PHONE -> {
+                refuseEnrolmentUseCase.refuse(a.get("code"));
+                yield "Refused " + a.get("name") + ".";
+            }
+            case RUN_BACKUP -> {
+                MachineId machineId = MachineId.of(a.get("machineId"));
+                BackupJob job = getBackupJobsUseCase.getBackupJobs().stream()
+                    .filter(j -> j.machineId().equals(machineId)).findFirst()
+                    .orElseThrow(() -> new NotFoundException(a.get("machine") + " has no backup job."));
+                BackupRepository repo = getBackupRepositoriesUseCase.getBackupRepositories().stream()
+                    .filter(r -> r.name().equals(job.repositoryName())).findFirst()
+                    .orElseThrow(() -> new NotFoundException(a.get("machine") + "'s backups have nowhere to go."));
+                runBackupJobUseCase.runJob(job, repo);
+                yield "Backing up " + a.get("machine") + " now. The Backups pane shows how it goes.";
+            }
+            case UPDATE_CONTAINER -> {
+                updateContainerImageUseCase.updateContainerImage(MachineId.of(a.get("machineId")), a.get("container"));
+                yield "Updating " + a.get("container") + " on " + a.get("machine")
+                    + ". It is down for a moment while it restarts.";
+            }
+            case LIFT_BLOCK -> {
+                liftBlockUseCase.liftBlock(a.get("address"));
+                yield "Lifted the block on " + a.get("address") + ".";
+            }
+            case TRUST_ADDRESS -> {
+                trustAddressUseCase.trustAddress(a.get("address"));
+                yield "Trusting " + a.get("address") + " from now on.";
+            }
+        };
+    }
+
     private static String messageFor(Exception e) {
         boolean worded = e instanceof AskUnavailableException || e instanceof IllegalArgumentException;
         return worded && e.getMessage() != null && !e.getMessage().isBlank()
@@ -197,25 +365,13 @@ public class AskRestController {
         }
     }
 
-    private static List<ConversationTurn> turns(List<TurnRequest> history) {
-        return history == null ? List.of() : history.stream()
-            .map(turn -> new ConversationTurn(roleOf(turn.role()), turn.text()))
-            .toList();
-    }
-
-    /** Only two things speak in a conversation; anything else is a malformed request, said as such. */
-    private static Role roleOf(String role) {
-        try {
-            return Role.valueOf(role);
-        } catch (IllegalArgumentException | NullPointerException e) {
-            throw new IllegalArgumentException("A conversation turn is spoken by OPERATOR or VAIER");
-        }
-    }
-
     // --- the tools ------------------------------------------------------------------------------------
 
-    /** One offer per catalogue entry, in the catalogue's order. Only the command run reads its arguments. */
-    private List<ToolOffer> toolOffers() {
+    /**
+     * One offer per catalogue entry, reads first, in the catalogues' order. An action's offer proposes on
+     * {@code emitter} — the card rides the answer stream — and runs nothing.
+     */
+    private List<ToolOffer> toolOffers(SseEmitter emitter) {
         Map<AskTool, Function<Map<String, String>, String>> reads = new HashMap<>();
         reads.put(AskTool.FLEET, arguments -> readFleet());
         reads.put(AskTool.WAITING_TO_JOIN, arguments -> readWaitingToJoin());
@@ -230,7 +386,48 @@ public class AskRestController {
         for (AskTool tool : AskTool.values()) {
             offers.add(new ToolOffer(tool, reads.get(tool)));
         }
+        for (AskAction action : AskAction.values()) {
+            offers.add(new ToolOffer(action, arguments -> propose(action, arguments, emitter)));
+        }
         return offers;
+    }
+
+    // --- the actions, proposed ------------------------------------------------------------------------
+
+    /**
+     * Resolve what the model named to what the card must say and the click must run — the machine's id
+     * beside its name, the phone's name beside its code — hold the proposal, hand the pane the card, and
+     * tell the model it is waiting. A name nothing has is refused in words, and no card is sent.
+     */
+    private String propose(AskAction action, Map<String, String> arguments, SseEmitter emitter) {
+        try {
+            ActionProposal proposal = proposeActionUseCase.propose(action, canonical(action, arguments));
+            send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.sentence())));
+            return proposal.toolResult();
+        } catch (IllegalArgumentException refused) {
+            return refused.getMessage();
+        }
+    }
+
+    private Map<String, String> canonical(AskAction action, Map<String, String> arguments) {
+        Map<String, String> canonical = new HashMap<>();
+        arguments.forEach((name, value) -> canonical.put(name, value == null ? null : value.trim()));
+        switch (action) {
+            case LET_PHONE_IN, REFUSE_PHONE -> {
+                EnrolmentRequest waiting = EnrolmentRequest.byCode(listEnrolmentRequestsUseCase.pending(),
+                    canonical.get("code"));
+                canonical.put("code", waiting.code());
+                canonical.put("name", waiting.name());
+            }
+            case RUN_BACKUP, UPDATE_CONTAINER -> {
+                Machine machine = new MachineReference(canonical.get("machine"))
+                    .resolve(getMachinesUseCase.getAllMachines());
+                canonical.put("machine", machine.name());
+                canonical.put("machineId", machine.id().value());
+            }
+            case LIFT_BLOCK, TRUST_ADDRESS -> { }
+        }
+        return canonical;
     }
 
     private String readFleet() {
@@ -357,9 +554,27 @@ public class AskRestController {
 
     record AvailabilityResponse(boolean available) {}
 
-    record AskRequest(String question, List<TurnRequest> history) {}
+    /** The card, as the answer stream carries it: enough to draw it and to click it. */
+    record ConfirmationEvent(String id, String sentence) {}
 
-    record TurnRequest(String role, String text) {}
+    /** What became of a click: whether it ran, and the sentence for the card either way. */
+    record ActionOutcome(boolean done, String text) {}
+
+    record AskRequest(String question) {}
+
+    /** The kept conversation as the pane draws it: a summary, when there is one, then the turns. */
+    record ConversationResponse(String summary, List<TurnResponse> turns) {
+        static ConversationResponse of(Conversation conversation) {
+            return new ConversationResponse(conversation.summary(),
+                conversation.turns().stream().map(TurnResponse::of).toList());
+        }
+    }
+
+    record TurnResponse(String role, String text) {
+        static TurnResponse of(ConversationTurn turn) {
+            return new TurnResponse(turn.role().name(), turn.text());
+        }
+    }
 
     /**
      * A machine as a person would describe it. No public key, no allowed IPs, no endpoint.

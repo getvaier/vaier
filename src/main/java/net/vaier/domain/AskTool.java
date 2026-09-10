@@ -15,7 +15,7 @@ import java.util.List;
  * offered. {@link #RUN_ON_MACHINE} is the one tool with arguments — which machine, what to run — and what it
  * may run is {@link ReadOnlyCommand}'s decision, not the model's.
  */
-public enum AskTool {
+public enum AskTool implements AskCapability {
 
     FLEET("fleet",
         "Every machine in the fleet, with its name, what kind of machine it is, "
@@ -46,33 +46,33 @@ public enum AskTool {
             + ". Anything that could change the machine, and anything under a path where secrets live, is "
             + "refused. Use it for what no other read answers: operating system updates (apt list "
             + "--upgradable, dnf check-update), uptime, logs, processes, a file's contents.",
-        new Parameter("machine", "The machine, named exactly as the fleet read names it, or its id."),
-        new Parameter("command", "The command line to run, for example: apt list --upgradable"));
-
-    /** One argument the model must give, in words that tell it what to put there. */
-    public record Parameter(String name, String description) {}
+        new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id."),
+        new ToolParameter("command", "The command line to run, for example: apt list --upgradable"));
 
     private final String toolName;
     private final String description;
-    private final List<Parameter> parameters;
+    private final List<ToolParameter> parameters;
 
-    AskTool(String toolName, String description, Parameter... parameters) {
+    AskTool(String toolName, String description, ToolParameter... parameters) {
         this.toolName = toolName;
         this.description = description;
         this.parameters = List.of(parameters);
     }
 
     /** What the model must say when it calls this tool; empty for every whole-fleet read. */
-    public List<Parameter> parameters() {
+    @Override
+    public List<ToolParameter> parameters() {
         return parameters;
     }
 
     /** The name the model calls this read by. Stable, lower-case snake_case, never a display label. */
+    @Override
     public String toolName() {
         return toolName;
     }
 
     /** One plain sentence saying what this read answers — how the model decides to call it at all. */
+    @Override
     public String description() {
         return description;
     }

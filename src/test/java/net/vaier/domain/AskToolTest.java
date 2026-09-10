@@ -44,7 +44,7 @@ class AskToolTest {
                 assertThat(tool.parameters()).as(tool.toolName()).isEmpty();
             }
         }
-        assertThat(AskTool.RUN_ON_MACHINE.parameters()).extracting(AskTool.Parameter::name)
+        assertThat(AskTool.RUN_ON_MACHINE.parameters()).extracting(ToolParameter::name)
             .containsExactly("machine", "command");
         assertThat(AskTool.RUN_ON_MACHINE.parameters()).allSatisfy(parameter ->
             assertThat(parameter.description()).isNotBlank());

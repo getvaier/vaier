@@ -1,7 +1,7 @@
 package net.vaier.application;
 
 import net.vaier.domain.AskUnavailableException;
-import net.vaier.domain.ConversationTurn;
+import net.vaier.domain.Operator;
 import net.vaier.domain.ToolOffer;
 
 import java.util.List;
@@ -20,6 +20,5 @@ public interface AskUseCase {
      *
      * @throws AskUnavailableException when no <b>Anthropic API key</b> is stored.
      */
-    void ask(String question, List<ConversationTurn> history, List<ToolOffer> tools,
-             Consumer<String> onText);
+    void ask(Operator operator, String question, List<ToolOffer> tools, Consumer<String> onText);
 }

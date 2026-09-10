@@ -1,6 +1,7 @@
 package net.vaier.domain;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.function.IntSupplier;
 
@@ -103,5 +104,20 @@ public record EnrolmentRequest(String code, String ticket, String name, String p
             return EnrolmentVerdict.gone();
         }
         return isApproved() ? EnrolmentVerdict.approved(configFile) : EnrolmentVerdict.pending();
+    }
+
+    /**
+     * The waiting phone showing {@code code}, for whoever names one by it — the operator, or the model
+     * proposing to let it in. A code nobody is showing is refused in words, never answered with nothing.
+     */
+    public static EnrolmentRequest byCode(List<EnrolmentRequest> pending, String code) {
+        String wanted = code == null ? "" : code.trim();
+        if (wanted.isEmpty()) {
+            throw new IllegalArgumentException("Say which code.");
+        }
+        return pending.stream()
+            .filter(request -> wanted.equals(request.code()))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("No phone is waiting with join code " + wanted + "."));
     }
 }

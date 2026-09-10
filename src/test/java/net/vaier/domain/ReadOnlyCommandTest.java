@@ -51,7 +51,7 @@ class ReadOnlyCommandTest {
     void aCommandThatCouldChangeTheMachineIsRefused(String line) {
         assertThatThrownBy(() -> ReadOnlyCommand.of(line))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("Ask can look, never change");
+            .hasMessageContaining("can look, never change");
     }
 
     /** The refusal names what was refused, so the model can say so rather than try another spelling. */

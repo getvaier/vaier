@@ -4062,7 +4062,9 @@ class ExplorerShellTest {
         int from = js.indexOf("async function askVaier(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(body).contains("fetch('/ask', {").contains("method: 'POST'").contains("history: history");
+        assertThat(body).contains("fetch('/ask', {").contains("method: 'POST'");
+        // Slice 3: the conversation is Vaier's to remember; the browser sends the question and nothing else.
+        assertThat(body).doesNotContain("history");
         assertThat(body).contains("readAnswerStream(res.body");
         assertThat(js).doesNotContain("EventSource('/ask");
         int reader = js.indexOf("function readAnswerStream(");
@@ -4098,7 +4100,7 @@ class ExplorerShellTest {
         // when it already had it or nothing else does, so a repaint never pulls the cursor out of a dialog.
         String js = read("explorer-shell.js");
 
-        assertThat(js).contains("ask: { turns: [], busy: false, error: null, draft: '' }");
+        assertThat(js).contains("ask: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '' }");
         int from = js.indexOf("function renderAsk(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
@@ -4107,5 +4109,61 @@ class ExplorerShellTest {
         assertThat(body).as("the caret goes back where it was").contains("box.setSelectionRange(");
         assertThat(body).as("focus is not taken from wherever the operator was").doesNotContain("if (!S.ask.busy) box.focus();");
         assertThat(body).contains("S.ask.draft = '';");
+    }
+
+    @Test
+    void aProposedAction_isACardInTheThread_thatRunsOnlyOnTheClick() throws IOException {
+        // #360 slice 2. The answer stream can carry a `confirm` event: one proposed action, as a card. The
+        // card is what the operator reads and clicks; the button says what will happen, and the click is
+        // the only thing that runs it — the model never does. A declined card says so and runs nothing.
+        String js = read("explorer-shell.js");
+
+        int ask = js.indexOf("async function askVaier(");
+        String askBody = js.substring(ask, js.indexOf("\n    }", ask));
+        assertThat(askBody).contains("name === 'confirm'");
+        // The card goes before the answer being written, so the answer stays the last Vaier turn and the
+        // streaming painter keeps writing into the right element.
+        assertThat(askBody).contains("S.ask.turns.splice(S.ask.turns.length - 1, 0,");
+
+        int card = js.indexOf("function askCard(");
+        assertThat(card).isPositive();
+        String cardBody = js.substring(card, js.indexOf("\n    }", card));
+        assertThat(cardBody).as("the button says what will happen").contains("yes.textContent = t.sentence");
+        assertThat(cardBody).contains("'Not now'");
+        assertThat(cardBody).as("a card is never the answer the stream paints into").doesNotContain("ex-ask-text");
+
+        int confirm = js.indexOf("async function confirmAction(");
+        assertThat(confirm).isPositive();
+        String confirmBody = js.substring(confirm, js.indexOf("\n    }", confirm));
+        assertThat(confirmBody).contains("fetch(`/ask/actions/").contains("method: 'POST'");
+
+        // What became of a card is Vaier's to remember (slice 3), so the browser narrates nothing.
+        assertThat(askBody).doesNotContain("cardAsText");
+        String css = read("explorer-shell.css");
+        assertThat(css).contains(".ex-ask-card");
+    }
+
+    @Test
+    void theConversation_isVaiersToRemember_andThePaneOnlyShowsIt() throws IOException {
+        // #360 slice 3. Opening Ask reads the kept conversation; asking sends the question alone; a card
+        // declined is told to the server, so it can never run and is remembered as declined; and "Start
+        // over" is the one way to forget — a DELETE, never a page reload.
+        String js = read("explorer-shell.js");
+
+        assertThat(js).contains("fetch('/ask/conversation', { cache: 'no-store' })");
+        int load = js.indexOf("async function loadConversation(");
+        assertThat(load).isPositive();
+        int card = js.indexOf("function askCard(");
+        String cardBody = js.substring(card, js.indexOf("\n    }", card));
+        assertThat(cardBody).contains("declineAction(t)");
+        int decline = js.indexOf("async function declineAction(");
+        assertThat(decline).isPositive();
+        String declineBody = js.substring(decline, js.indexOf("\n    }", decline));
+        assertThat(declineBody).contains("fetch(`/ask/actions/").contains("method: 'DELETE'");
+        int forget = js.indexOf("async function startOver(");
+        assertThat(forget).isPositive();
+        String forgetBody = js.substring(forget, js.indexOf("\n    }", forget));
+        assertThat(forgetBody).contains("fetch('/ask/conversation', { method: 'DELETE' })");
+        assertThat(js).contains("'Start over'");
     }
 }

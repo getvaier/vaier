@@ -3,9 +3,10 @@ package net.vaier.adapter.driven;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.domain.AskTool;
+import net.vaier.domain.AskCapability;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ToolOffer;
+import net.vaier.domain.ToolParameter;
 import net.vaier.domain.port.ForConversing;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -118,7 +119,7 @@ public class SpringAiConversationAdapter implements ForConversing {
      * hands them to the read by name, as strings — the domain reads nothing else.
      */
     private static ToolCallback asToolCallback(ToolOffer offer) {
-        AskTool tool = offer.tool();
+        AskCapability tool = offer.tool();
         if (tool.parameters().isEmpty()) {
             Supplier<String> read = () -> offer.read().apply(Map.of());
             return FunctionToolCallback.builder(tool.toolName(), read)
@@ -141,11 +142,11 @@ public class SpringAiConversationAdapter implements ForConversing {
         return strings;
     }
 
-    private static String schemaFor(AskTool tool) {
+    private static String schemaFor(AskCapability tool) {
         ObjectNode schema = JSON.createObjectNode();
         schema.put("type", "object");
         ObjectNode properties = schema.putObject("properties");
-        for (AskTool.Parameter parameter : tool.parameters()) {
+        for (ToolParameter parameter : tool.parameters()) {
             properties.putObject(parameter.name())
                 .put("type", "string")
                 .put("description", parameter.description());

@@ -225,7 +225,8 @@ public final class OperatorGlossary {
             new ConceptGroup("Ask", List.of(
                 Concept.of("Ask",
                     "The Explorer pane where you talk to Vaier in sentences and are answered from the "
-                        + "fleet's own facts. It can look, never change.",
+                        + "fleet's own facts. It can look, and it can propose; it changes nothing until "
+                        + "you click a confirmation.",
                     "It is the quickest way to a question that would otherwise mean opening three panes — "
                         + "which machine is red and why, who is waiting to join, how last night's backups "
                         + "went. It appears in the menu only once an Anthropic API key is stored."),
@@ -248,9 +249,22 @@ public final class OperatorGlossary {
                         + "a log, a process list. Only looking commands are allowed: anything that could "
                         + "change the machine, chain commands or read where secrets live is refused, which "
                         + "is what keeps \"Ask can look, never change\" true."),
+                Concept.of("Ask action",
+                    "One thing Vaier may propose while answering you: let a phone in or refuse it, back up "
+                        + "a machine, update a container, lift a block, trust an address.",
+                    "Each is a button the Explorer already has, so Ask can never do more than you could "
+                        + "by hand. Proposing runs nothing; it puts a confirmation in front of you."),
+                Concept.of("Confirmation",
+                    "The card a proposed action becomes in the Ask pane: one sentence saying exactly what "
+                        + "will happen, and a button that says the same.",
+                    "Your click is the only thing that runs it. A card lives ten minutes and runs once, "
+                        + "and \"Not now\" runs nothing — so nothing on this fleet ever changes on the "
+                        + "model's say-so."),
                 Concept.of("Conversation",
-                    "The turns of one visit to Ask: what you asked and what Vaier answered, in order.",
-                    "A follow-up like \"and Colina?\" works because the visit's earlier turns are sent "
-                        + "along. It lives in your browser for the visit; Vaier keeps none of it yet."))));
+                    "What you have asked in Ask and what Vaier answered, in order, kept by Vaier under "
+                        + "your login the way everything else is kept: a file.",
+                    "A follow-up like \"and Colina?\" works next week too, because the thread is still "
+                        + "there. Once it is long, the older turns are shortened into a summary that stands "
+                        + "in for them; Start over forgets the whole thread."))));
     }
 }

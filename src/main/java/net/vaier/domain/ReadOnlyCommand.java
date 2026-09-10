@@ -12,7 +12,7 @@ import java.util.Set;
 /**
  * A <b>Read-only command</b> (#360): one command line the model may run on a machine through <b>Ask</b>.
  *
- * <p>"Ask can look, never change" is a promise the prompt makes; this is the mechanism that keeps it. It is
+ * <p>"run_on_machine can look, never change" is the promise this tool makes; this is the mechanism that keeps it. It is
  * a list of what is allowed — never of what is forbidden — judged word by word: the first word of every
  * pipe stage must be a looking program, a program with verbs (apt, docker, systemctl) must be given a
  * looking verb, and a looking program's own writing flags ({@code find -delete}, {@code ip link set}) are
@@ -32,7 +32,7 @@ public record ReadOnlyCommand(String line) {
         + "zypper, rpm, snap), docker ps, images, logs, top and stats, systemctl status, wg show, and a pipe "
         + "between any of these";
 
-    private static final String LOOK_NEVER_CHANGE = "Ask can look, never change";
+    private static final String LOOK_NEVER_CHANGE = "run_on_machine can look, never change";
     private static final String ONE_AT_A_TIME = LOOK_NEVER_CHANGE + ", and it runs one command at a time: "
         + "no ;, &&, ||, &, redirects or subshells. A pipe between looking commands is fine.";
     private static final String CHAINING = ";&<>`\n\r";

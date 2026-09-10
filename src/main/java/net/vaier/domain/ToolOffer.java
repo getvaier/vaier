@@ -10,9 +10,10 @@ import java.util.function.Supplier;
  * read returned.
  *
  * <p>The read is given the model's arguments, by parameter name. A whole-fleet read takes none and ignores
- * the map; only {@link AskTool#RUN_ON_MACHINE} reads from it, and only what its parameters name.
+ * the map; {@link AskTool#RUN_ON_MACHINE} and every {@link AskAction} read only what their parameters name.
+ * An action's "read" proposes — it never runs the action.
  */
-public record ToolOffer(AskTool tool, Function<Map<String, String>, String> read) {
+public record ToolOffer(AskCapability tool, Function<Map<String, String>, String> read) {
 
     public ToolOffer {
         if (tool == null) {
@@ -24,7 +25,7 @@ public record ToolOffer(AskTool tool, Function<Map<String, String>, String> read
     }
 
     /** A whole-fleet read: it takes nothing, so it is offered as a supplier. */
-    public ToolOffer(AskTool tool, Supplier<String> read) {
+    public ToolOffer(AskCapability tool, Supplier<String> read) {
         this(tool, read == null ? null : arguments -> read.get());
     }
 }

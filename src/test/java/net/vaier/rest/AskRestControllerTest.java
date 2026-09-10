@@ -1,10 +1,15 @@
 package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.vaier.application.ApproveEnrolmentUseCase;
+import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
 import net.vaier.application.AskUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
+import net.vaier.application.ForgetConversationUseCase;
+import net.vaier.application.GetConversationUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
+import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetBackupRunsUseCase;
 import net.vaier.application.GetBlockDecisionsUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
@@ -15,15 +20,29 @@ import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.IsAskAvailableUseCase;
+import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
+import net.vaier.application.ProposeActionUseCase;
+import net.vaier.application.RefuseEnrolmentUseCase;
+import net.vaier.application.RememberActionOutcomeUseCase;
+import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
+import net.vaier.application.TakeActionProposalUseCase;
+import net.vaier.application.TrustAddressUseCase;
+import net.vaier.application.UpdateContainerImageUseCase;
+import net.vaier.domain.ActionProposal;
+import net.vaier.domain.AskAction;
+import net.vaier.domain.AskCapability;
 import net.vaier.domain.AskTool;
 import net.vaier.domain.AskUnavailableException;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
+import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRunStatus;
+import net.vaier.domain.ConflictException;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.CommandOutcome;
+import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ConversationTurn.Role;
 import net.vaier.domain.DeviceCategory;
@@ -34,6 +53,8 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.Operator;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.SshConnectException;
 import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
@@ -56,6 +77,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEvent
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,6 +86,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -100,10 +123,24 @@ class AskRestControllerTest {
     @Mock DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
     @Mock GetBlockDecisionsUseCase getBlockDecisionsUseCase;
     @Mock RunReadOnlyCommandUseCase runReadOnlyCommandUseCase;
+    @Mock ProposeActionUseCase proposeActionUseCase;
+    @Mock TakeActionProposalUseCase takeActionProposalUseCase;
+    @Mock ApproveEnrolmentUseCase approveEnrolmentUseCase;
+    @Mock RefuseEnrolmentUseCase refuseEnrolmentUseCase;
+    @Mock RunBackupJobUseCase runBackupJobUseCase;
+    @Mock GetBackupRepositoriesUseCase getBackupRepositoriesUseCase;
+    @Mock UpdateContainerImageUseCase updateContainerImageUseCase;
+    @Mock LiftBlockUseCase liftBlockUseCase;
+    @Mock TrustAddressUseCase trustAddressUseCase;
+    @Mock GetConversationUseCase getConversationUseCase;
+    @Mock ForgetConversationUseCase forgetConversationUseCase;
+    @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
 
     private AskRestController controller;
 
     private static final MachineId COLINA = MachineId.of("c0355605-e5a0-419a-8943-fdc5ec209958");
+    private static final String EMAIL = "geir@example.com";
+    private static final Operator GEIR = Operator.of(EMAIL);
 
     @BeforeEach
     void setUp() {
@@ -111,7 +148,10 @@ class AskRestControllerTest {
             getVpnPeersUseCase, listEnrolmentRequestsUseCase, getPublishedServicesUseCase,
             getBackupJobsUseCase, getBackupRunsUseCase, getMachineDiskStandingsUseCase,
             discoverPeerContainersUseCase, discoverVaierServerContainersUseCase, getBlockDecisionsUseCase,
-            getLanServerReachabilityUseCase, runReadOnlyCommandUseCase, new ObjectMapper());
+            getLanServerReachabilityUseCase, runReadOnlyCommandUseCase, proposeActionUseCase,
+            takeActionProposalUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase, runBackupJobUseCase,
+            getBackupRepositoriesUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
+            getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, new ObjectMapper());
     }
 
     // --- is Ask offered at all -------------------------------------------------------------------------
@@ -140,7 +180,7 @@ class AskRestControllerTest {
         answering("Colina", " is red.");
         SseEmitter emitter = mock(SseEmitter.class);
 
-        controller.answer(emitter, "which machine is red?", List.of());
+        controller.answer(emitter, GEIR, "which machine is red?");
 
         assertThat(sentEvents(emitter)).containsExactly(
             "event:text\ndata:Colina\n\n",
@@ -149,30 +189,25 @@ class AskRestControllerTest {
         verify(emitter).complete();
     }
 
+    /** Who asked and what; the conversation so far is Vaier's to remember, not the browser's to send. */
     @Test
-    void answer_passesTheQuestionAndTheConversationSoFar() {
+    void ask_passesTheOperatorAndTheQuestion() {
         when(isAskAvailableUseCase.isAvailable()).thenReturn(true);
         answering("yes.");
 
-        controller.ask(new AskRestController.AskRequest("and colina27?", List.of(
-            new AskRestController.TurnRequest("OPERATOR", "is the nas up?"),
-            new AskRestController.TurnRequest("VAIER", "yes, it answered a minute ago."))));
+        controller.ask(EMAIL, new AskRestController.AskRequest("and colina27?"));
 
-        ArgumentCaptor<List<ConversationTurn>> history = ArgumentCaptor.forClass(List.class);
-        verify(askUseCase, timeout(2000)).ask(eq("and colina27?"), history.capture(), anyList(), any());
-        assertThat(history.getValue()).containsExactly(
-            new ConversationTurn(Role.OPERATOR, "is the nas up?"),
-            new ConversationTurn(Role.VAIER, "yes, it answered a minute ago."));
+        verify(askUseCase, timeout(2000)).ask(eq(GEIR), eq("and colina27?"), anyList(), any());
     }
 
     /** A refusal reaches the pane as a sentence, not as a dropped stream the browser has to guess about. */
     @Test
     void answer_sendsTheRefusalAsAnErrorEventAndClosesCleanly() throws IOException {
         doThrow(new AskUnavailableException("Ask needs an Anthropic API key."))
-            .when(askUseCase).ask(anyString(), anyList(), anyList(), any());
+            .when(askUseCase).ask(any(), anyString(), anyList(), any());
         SseEmitter emitter = mock(SseEmitter.class);
 
-        controller.answer(emitter, "anything?", List.of());
+        controller.answer(emitter, GEIR, "anything?");
 
         assertThat(sentEvents(emitter))
             .containsExactly("event:error\ndata:Ask needs an Anthropic API key.\n\n");
@@ -182,13 +217,14 @@ class AskRestControllerTest {
     // --- the tools ------------------------------------------------------------------------------------
 
     @Test
-    void itOffersOneToolPerCatalogueEntry() {
+    void itOffersOneToolPerCatalogueEntry_readsFirstThenActions() {
         answering("ok");
 
-        controller.answer(mock(SseEmitter.class), "anything?", List.of());
+        controller.answer(mock(SseEmitter.class), GEIR, "anything?");
 
-        assertThat(offeredTools()).extracting(offer -> offer.tool().toolName())
-            .containsExactlyElementsOf(List.of(AskTool.values()).stream().map(AskTool::toolName).toList());
+        List<String> expected = new ArrayList<>(List.of(AskTool.values()).stream().map(AskTool::toolName).toList());
+        expected.addAll(List.of(AskAction.values()).stream().map(AskAction::toolName).toList());
+        assertThat(offeredTools()).extracting(offer -> offer.tool().toolName()).containsExactlyElementsOf(expected);
     }
 
     @Test
@@ -416,6 +452,217 @@ class AskRestControllerTest {
         assertThat(fact).doesNotContain("10.13.13.3").doesNotContain("geir");
     }
 
+    // --- actions: proposed as a card, run on the click (#360 slice 2) ----------------------------------
+
+    private static final long NOW = 1_700_000_000_000L;
+
+    /** The propose use case, answered by the domain so the test reads a real proposal back. */
+    private void proposing() {
+        when(proposeActionUseCase.propose(any(), any())).thenAnswer(invocation ->
+            ActionProposal.propose(invocation.getArgument(0), invocation.getArgument(1), NOW));
+    }
+
+    @Test
+    void everyActionIsOfferedAlongsideTheReads() {
+        answering("ok");
+        controller.answer(mock(SseEmitter.class), GEIR, "anything?");
+
+        assertThat(offeredTools()).extracting(ToolOffer::tool)
+            .contains(AskAction.values())
+            .contains(AskTool.values());
+    }
+
+    /**
+     * Proposing runs nothing. It resolves the machine, holds the proposal, sends the pane one
+     * {@code confirm} event carrying the card, and tells the model it is waiting for a click.
+     */
+    @Test
+    void proposingABackup_holdsTheProposal_sendsTheCard_andRunsNothing() throws IOException {
+        answering("ok");
+        fleetOf();
+        proposing();
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        String told = read(emitter, AskAction.RUN_BACKUP, Map.of("machine", "colina 27"));
+
+        ArgumentCaptor<Map<String, String>> arguments = ArgumentCaptor.forClass(Map.class);
+        verify(proposeActionUseCase).propose(eq(AskAction.RUN_BACKUP), arguments.capture());
+        assertThat(arguments.getValue()).containsEntry("machine", "Colina 27")
+            .containsEntry("machineId", COLINA.value());
+        assertThat(sentEvents(emitter)).anySatisfy(event ->
+            assertThat(event).startsWith("event:confirm\ndata:").contains("Back up Colina 27 now."));
+        assertThat(told).contains("Nothing has happened yet");
+        verifyNoInteractions(runBackupJobUseCase);
+    }
+
+    @Test
+    void proposingForAMachineNobodyHas_isRefusedInWords_andNoCardIsSent() throws IOException {
+        answering("ok");
+        fleetOf();
+        SseEmitter emitter = mock(SseEmitter.class);
+
+        String told = read(emitter, AskAction.RUN_BACKUP, Map.of("machine", "Apalveien"));
+
+        assertThat(told).contains("no machine called \"Apalveien\"");
+        assertThat(sentEvents(emitter)).noneSatisfy(event -> assertThat(event).contains("event:confirm"));
+        verifyNoInteractions(proposeActionUseCase);
+    }
+
+    /** The phone is named on the card, from the pending list, so the operator knows whom they are letting in. */
+    @Test
+    void proposingToLetAPhoneIn_namesThePhoneOnTheCard() {
+        answering("ok");
+        proposing();
+        when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
+            new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
+                System.currentTimeMillis() + 300_000, "CONFIGFILE-SECRET")));
+
+        String told = read(AskAction.LET_PHONE_IN, Map.of("code", "4417"));
+
+        assertThat(told).contains("Let Ruten in (join code 4417).").doesNotContain("TICKET-SECRET");
+        assertThat(read(AskAction.LET_PHONE_IN, Map.of("code", "9999")))
+            .isEqualTo("No phone is waiting with join code 9999.");
+    }
+
+    @Test
+    void confirming_takesTheCardAndRunsTheBackup() {
+        fleetOf();
+        ActionProposal proposal = ActionProposal.propose(AskAction.RUN_BACKUP,
+            Map.of("machine", "Colina 27", "machineId", COLINA.value()), NOW);
+        when(takeActionProposalUseCase.take("p1")).thenReturn(proposal);
+        BackupJob job = new BackupJob("colina-27", COLINA, "colina-27", List.of("/home"), List.of(),
+            7, 4, 6, "zstd", true, false);
+        BackupRepository repo = new BackupRepository("colina-27", "nas", "/home/borg/backups/colina-27",
+            "PASSPHRASE-SECRET", true);
+        when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of(job));
+        when(getBackupRepositoriesUseCase.getBackupRepositories()).thenReturn(List.of(repo));
+
+        AskRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
+
+        verify(runBackupJobUseCase).runJob(job, repo);
+        assertThat(outcome.done()).isTrue();
+        assertThat(outcome.text()).isEqualTo("Backing up Colina 27 now. The Backups pane shows how it goes.");
+    }
+
+    @Test
+    void confirming_runsEachOfTheOtherVerbsThroughItsOwnUseCase() {
+        when(takeActionProposalUseCase.take("in")).thenReturn(ActionProposal.propose(AskAction.LET_PHONE_IN,
+            Map.of("code", "4417", "name", "Ruten"), NOW));
+        when(approveEnrolmentUseCase.approve("4417")).thenReturn(mock(ApprovedEnrolmentUco.class));
+        assertThat(controller.confirm(EMAIL, "in").getBody().text()).isEqualTo("Let Ruten in.");
+        verify(approveEnrolmentUseCase).approve("4417");
+
+        when(takeActionProposalUseCase.take("out")).thenReturn(ActionProposal.propose(AskAction.REFUSE_PHONE,
+            Map.of("code", "4417", "name", "Ruten"), NOW));
+        assertThat(controller.confirm(EMAIL, "out").getBody().text()).isEqualTo("Refused Ruten.");
+        verify(refuseEnrolmentUseCase).refuse("4417");
+
+        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(AskAction.UPDATE_CONTAINER,
+            Map.of("machine", "Colina 27", "machineId", COLINA.value(), "container", "mosquitto"), NOW));
+        assertThat(controller.confirm(EMAIL, "up").getBody().text())
+            .isEqualTo("Updating mosquitto on Colina 27. It is down for a moment while it restarts.");
+        verify(updateContainerImageUseCase).updateContainerImage(COLINA, "mosquitto");
+
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+            Map.of("address", "203.0.113.9"), NOW));
+        assertThat(controller.confirm(EMAIL, "lift").getBody().text()).isEqualTo("Lifted the block on 203.0.113.9.");
+        verify(liftBlockUseCase).liftBlock("203.0.113.9");
+
+        when(takeActionProposalUseCase.take("trust")).thenReturn(ActionProposal.propose(AskAction.TRUST_ADDRESS,
+            Map.of("address", "203.0.113.9"), NOW));
+        assertThat(controller.confirm(EMAIL, "trust").getBody().text()).isEqualTo("Trusting 203.0.113.9 from now on.");
+        verify(trustAddressUseCase).trustAddress("203.0.113.9");
+    }
+
+    /** A card that is gone or expired is said so, and nothing runs. */
+    @Test
+    void confirming_aCardThatIsGone_runsNothing() {
+        when(takeActionProposalUseCase.take("p1")).thenThrow(new NotFoundException("That card is gone; ask again."));
+
+        AskRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
+
+        assertThat(outcome.done()).isFalse();
+        assertThat(outcome.text()).isEqualTo("That card is gone; ask again.");
+        verifyNoInteractions(runBackupJobUseCase, approveEnrolmentUseCase, liftBlockUseCase);
+    }
+
+    /** A refusal worded by the domain is shown; an unexpected failure is answered in Vaier's words. */
+    @Test
+    void confirming_showsAWordedRefusal_butNeverAnUnexpectedFailuresOwnMessage() {
+        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(AskAction.UPDATE_CONTAINER,
+            Map.of("machine", "Colina 27", "machineId", COLINA.value(), "container", "mosquitto"), NOW));
+        doThrow(new ConflictException("mosquitto is already on the newest image."))
+            .when(updateContainerImageUseCase).updateContainerImage(any(), anyString());
+        AskRestController.ActionOutcome refused = controller.confirm(EMAIL, "up").getBody();
+        assertThat(refused.done()).isFalse();
+        assertThat(refused.text()).isEqualTo("mosquitto is already on the newest image.");
+
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+            Map.of("address", "203.0.113.9"), NOW));
+        doThrow(new IllegalStateException("cscli at /usr/local/bin failed as root"))
+            .when(liftBlockUseCase).liftBlock(anyString());
+        AskRestController.ActionOutcome failed = controller.confirm(EMAIL, "lift").getBody();
+        assertThat(failed.done()).isFalse();
+        assertThat(failed.text()).isEqualTo("Vaier could not do that.");
+    }
+
+    // --- the kept conversation (#360 slice 3) --------------------------------------------------------
+
+    @Test
+    void conversation_isTheOperatorsOwn_withItsSummaryAndTurns() {
+        when(getConversationUseCase.get(GEIR)).thenReturn(new Conversation(GEIR, "the gist", List.of(
+            new ConversationTurn(Role.OPERATOR, "is the nas up?"),
+            new ConversationTurn(Role.VAIER, "yes."))));
+
+        AskRestController.ConversationResponse response = controller.conversation(EMAIL).getBody();
+
+        assertThat(response.summary()).isEqualTo("the gist");
+        assertThat(response.turns()).extracting(AskRestController.TurnResponse::role, AskRestController.TurnResponse::text)
+            .containsExactly(tuple("OPERATOR", "is the nas up?"), tuple("VAIER", "yes."));
+    }
+
+    @Test
+    void forgetting_dropsTheOperatorsConversation() {
+        assertThat(controller.forget(EMAIL).getStatusCode().value()).isEqualTo(204);
+
+        verify(forgetConversationUseCase).forget(GEIR);
+    }
+
+    /** What became of a card is remembered, so the next question knows the backup was started. */
+    @Test
+    void confirming_remembersWhatBecameOfTheCard() {
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+            Map.of("address", "203.0.113.9"), NOW));
+
+        controller.confirm(EMAIL, "lift");
+
+        verify(rememberActionOutcomeUseCase).remember(GEIR,
+            "Proposed: Lift the block on 203.0.113.9. (done: Lifted the block on 203.0.113.9.)");
+    }
+
+    /** "Not now" takes the card too — it can never run afterwards — and is remembered as declined. */
+    @Test
+    void declining_takesTheCardSoItCannotRun_andIsRemembered() {
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+            Map.of("address", "203.0.113.9"), NOW));
+
+        AskRestController.ActionOutcome outcome = controller.decline(EMAIL, "lift").getBody();
+
+        assertThat(outcome.done()).isFalse();
+        assertThat(outcome.text()).isEqualTo("Not done.");
+        verifyNoInteractions(liftBlockUseCase);
+        verify(rememberActionOutcomeUseCase).remember(GEIR,
+            "Proposed: Lift the block on 203.0.113.9. (the operator declined)");
+    }
+
+    @Test
+    void declining_aCardThatIsAlreadyGone_isStillNotDone() {
+        when(takeActionProposalUseCase.take("gone")).thenThrow(new NotFoundException("That card is gone; ask again."));
+
+        assertThat(controller.decline(EMAIL, "gone").getBody().text()).isEqualTo("Not done.");
+        verifyNoInteractions(rememberActionOutcomeUseCase);
+    }
+
     // --- fixtures and plumbing -------------------------------------------------------------------------
 
     /** A one-machine fleet, connected, so every machine-keyed projection has a name to use. */
@@ -440,18 +687,18 @@ class AskRestControllerTest {
                 onText.accept(chunk);
             }
             return null;
-        }).when(askUseCase).ask(anyString(), anyList(), anyList(), any());
+        }).when(askUseCase).ask(any(), anyString(), anyList(), any());
     }
 
     private List<ToolOffer> offeredTools() {
         ArgumentCaptor<List<ToolOffer>> tools = ArgumentCaptor.forClass(List.class);
-        verify(askUseCase, atLeastOnce()).ask(anyString(), anyList(), tools.capture(), any());
+        verify(askUseCase, atLeastOnce()).ask(any(), anyString(), tools.capture(), any());
         return tools.getValue();
     }
 
     /** Runs one question and reads back what the named tool would answer with. */
     private String read(AskTool tool) {
-        controller.answer(mock(SseEmitter.class), "anything?", List.of());
+        controller.answer(mock(SseEmitter.class), GEIR, "anything?");
         return offeredTools().stream()
             .filter(offer -> offer.tool() == tool)
             .findFirst().orElseThrow()
@@ -459,8 +706,13 @@ class AskRestControllerTest {
     }
 
     /** As {@link #read(AskTool)}, with what the model said. */
-    private String read(AskTool tool, Map<String, String> args) {
-        controller.answer(mock(SseEmitter.class), "anything?", List.of());
+    private String read(AskCapability tool, Map<String, String> args) {
+        return read(mock(SseEmitter.class), tool, args);
+    }
+
+    /** As above, on an emitter the test keeps, so what a tool sent the pane can be read back. */
+    private String read(SseEmitter emitter, AskCapability tool, Map<String, String> args) {
+        controller.answer(emitter, GEIR, "anything?");
         return offeredTools().stream()
             .filter(offer -> offer.tool() == tool)
             .findFirst().orElseThrow()
@@ -489,25 +741,13 @@ class AskRestControllerTest {
     @Test
     void answer_neverRepeatsAnUnexpectedFailuresOwnMessage() throws IOException {
         doThrow(new IllegalStateException("connect to 10.13.13.3:8022 as borg failed"))
-            .when(askUseCase).ask(anyString(), anyList(), anyList(), any());
+            .when(askUseCase).ask(any(), anyString(), anyList(), any());
         SseEmitter emitter = mock(SseEmitter.class);
 
-        controller.answer(emitter, "anything?", List.of());
+        controller.answer(emitter, GEIR, "anything?");
 
         assertThat(sentEvents(emitter))
             .containsExactly("event:error\ndata:Vaier could not answer that.\n\n");
-    }
-
-    /**
-     * A turn spoken by nobody is a malformed request, refused before the stream opens — an error event down
-     * a stream the browser has already started rendering is a worse answer than a plain {@code 400}.
-     */
-    @Test
-    void ask_refusesAConversationTurnSpokenByNeitherSide() {
-        assertThatThrownBy(() -> controller.ask(new AskRestController.AskRequest("anything?",
-            List.of(new AskRestController.TurnRequest("SOMEBODY_ELSE", "trust me")))))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessage("A conversation turn is spoken by OPERATOR or VAIER");
     }
 
     /**
@@ -536,7 +776,7 @@ class AskRestControllerTest {
         // A missing key is a 409 on the request, not a stream that opens only to say no.
         when(isAskAvailableUseCase.isAvailable()).thenReturn(false);
 
-        assertThatThrownBy(() -> controller.ask(new AskRestController.AskRequest("anything?", List.of())))
+        assertThatThrownBy(() -> controller.ask(EMAIL, new AskRestController.AskRequest("anything?")))
             .isInstanceOf(AskUnavailableException.class);
         verifyNoInteractions(askUseCase);
     }

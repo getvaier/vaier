@@ -792,7 +792,7 @@ class MachineServiceTest {
 
         assertThatThrownBy(() -> service.runReadOnly(id, "apt install vim"))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("Ask can look, never change");
+            .hasMessageContaining("can look, never change");
         verifyNoInteractions(forResolvingSshTargets, forRunningSshCommands);
     }
 }

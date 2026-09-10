@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -191,5 +192,26 @@ class EnrolmentRequestTest {
         assertThat(approved.expiresAtEpochMs()).isEqualTo(open().expiresAtEpochMs());
         assertThat(approved.isApproved()).isTrue();
         assertThat(open().isApproved()).isFalse();
+    }
+
+    // --- which phone the model or the operator meant (#360 slice 2) --------------------------------------
+
+    @Test
+    void aWaitingPhoneIsFoundByTheCodeItIsShowing() {
+        EnrolmentRequest ruten = new EnrolmentRequest("4417", "t1", "Ruten", "pk1", 1L, "cfg1");
+        EnrolmentRequest other = new EnrolmentRequest("9021", "t2", "Other", "pk2", 1L, "cfg2");
+
+        assertThat(EnrolmentRequest.byCode(List.of(other, ruten), "4417")).isSameAs(ruten);
+        assertThat(EnrolmentRequest.byCode(List.of(other, ruten), " 4417 ")).isSameAs(ruten);
+    }
+
+    @Test
+    void aCodeNoPhoneIsShowingIsRefusedInWords() {
+        assertThatThrownBy(() -> EnrolmentRequest.byCode(List.of(), "9999"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("No phone is waiting with join code 9999.");
+        assertThatThrownBy(() -> EnrolmentRequest.byCode(List.of(), null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Say which code.");
     }
 }

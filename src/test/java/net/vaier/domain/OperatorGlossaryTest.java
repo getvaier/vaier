@@ -103,12 +103,20 @@ class OperatorGlossaryTest {
             .orElseThrow(() -> new AssertionError("the Concepts page must have an Ask group"));
 
         assertThat(ask.concepts()).extracting(Concept::term)
-            .containsExactly("Ask", "Anthropic API key", "Ask tool", "Read-only command", "Conversation");
+            .containsExactly("Ask", "Anthropic API key", "Ask tool", "Read-only command", "Ask action",
+                "Confirmation", "Conversation");
         // The two promises an operator needs before pasting a key: the key never leaves for anywhere but
         // the Claude API, and the shell tool cannot change a machine.
         Concept key = ask.concepts().get(1);
         assertThat(key.definition() + " " + key.whyYouCare()).contains("Claude API");
         Concept command = ask.concepts().get(3);
         assertThat(command.definition() + " " + command.whyYouCare()).contains("sudo").contains("never change");
+        // And the one an operator needs before clicking a card: nothing ran until they did.
+        Concept confirmation = ask.concepts().get(5);
+        assertThat(confirmation.definition() + " " + confirmation.whyYouCare()).contains("click");
+        // Slice 3: the conversation is kept, per operator, and a long one is shortened by the model.
+        Concept conversation = ask.concepts().get(6);
+        assertThat(conversation.definition() + " " + conversation.whyYouCare())
+            .contains("kept").contains("summary").doesNotContain("keeps none of it");
     }
 }
