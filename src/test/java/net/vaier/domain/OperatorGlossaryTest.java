@@ -94,28 +94,33 @@ class OperatorGlossaryTest {
 
     @Test
     void explainsAsk_theOnePaneWhoseWordsCameFromNowhereElseInTheUi() {
-        // #360: Ask arrived with five terms an operator meets on its pane and in Settings — and none of them
+        // #360: Chat arrived with five terms an operator meets on its pane and in Settings — and none of them
         // was on the Concepts page, so the one place that explains Vaier's words had nothing to say about
         // the pane that talks. The group carries every term the glossary doc has for it, verbatim.
         ConceptGroup ask = OperatorGlossary.groups().stream()
-            .filter(g -> g.title().equals("Ask"))
+            .filter(g -> g.title().equals("Chat"))
             .findFirst()
-            .orElseThrow(() -> new AssertionError("the Concepts page must have an Ask group"));
+            .orElseThrow(() -> new AssertionError("the Concepts page must have a Chat group"));
 
         assertThat(ask.concepts()).extracting(Concept::term)
-            .containsExactly("Ask", "Anthropic API key", "Ask tool", "Read-only command", "Ask action",
-                "Confirmation", "Bundle", "Conversation");
+            .containsExactly("Chat", "Marvin", "Anthropic API key", "Chat tool", "Read-only command", "Chat action",
+                "Confirmation", "Bundle", "Conversation", "Memory", "Spend");
         // The two promises an operator needs before pasting a key: the key never leaves for anywhere but
         // the Claude API, and the shell tool cannot change a machine.
-        Concept key = ask.concepts().get(1);
+        Concept key = ask.concepts().get(2);
         assertThat(key.definition() + " " + key.whyYouCare()).contains("Claude API");
-        Concept command = ask.concepts().get(3);
+        Concept command = ask.concepts().get(4);
         assertThat(command.definition() + " " + command.whyYouCare()).contains("sudo").contains("never change");
         // And the one an operator needs before clicking a card: nothing ran until they did.
-        Concept confirmation = ask.concepts().get(5);
+        Concept confirmation = ask.concepts().get(6);
         assertThat(confirmation.definition() + " " + confirmation.whyYouCare()).contains("click");
         // Slice 3: the conversation is kept, per operator, and a long one is shortened by the model.
-        Concept conversation = ask.concepts().get(7);
+        Concept conversation = ask.concepts().get(8);
+        Concept memory = ask.concepts().get(9);
+        // And who answers: Marvin, gloomy but never wrong, and never in charge of anything.
+        Concept marvin = ask.concepts().get(1);
+        assertThat(marvin.definition() + " " + marvin.whyYouCare()).contains("Paranoid Android").contains("never wrong");
+        assertThat(memory.definition() + " " + memory.whyYouCare()).contains("across conversations").contains("remove");
         assertThat(conversation.definition() + " " + conversation.whyYouCare())
             .contains("kept").contains("summary").doesNotContain("keeps none of it");
     }

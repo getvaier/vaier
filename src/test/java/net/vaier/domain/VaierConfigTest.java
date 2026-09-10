@@ -223,7 +223,7 @@ class VaierConfigTest {
     // --- the Anthropic API key (#360) ------------------------------------------------------------------
 
     /**
-     * The one thing that makes <b>Ask</b> available. Stored like the SMTP password, and asked about the way
+     * The one thing that makes <b>Chat</b> available. Stored like the SMTP password, and asked about the way
      * the kit passphrase is: whether, never what.
      */
     @Test
@@ -236,7 +236,7 @@ class VaierConfigTest {
         assertThat(config.getDomain()).isEqualTo("example.com");
     }
 
-    /** A blank key is no key: the operator clearing the field is how Ask is turned off again. */
+    /** A blank key is no key: the operator clearing the field is how Chat is turned off again. */
     @Test
     void withAnthropicApiKey_clearsTheKeyWhenBlank() {
         VaierConfig stored = VaierConfig.builder().anthropicApiKey("sk-ant-secret").build();

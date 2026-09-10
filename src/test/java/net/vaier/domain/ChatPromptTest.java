@@ -11,16 +11,38 @@ import static org.assertj.core.api.Assertions.assertThat;
  * pinned here is load-bearing: together they are the difference between an answer built from the fleet's
  * own facts and a plausible one made up out of nothing.
  */
-class AskPromptTest {
+class ChatPromptTest {
 
     private String prompt() {
-        return AskPrompt.forFleet("example.com", LocalDate.of(2026, 9, 10)).text();
+        return ChatPrompt.forFleet("example.com", LocalDate.of(2026, 9, 10), Memory.empty()).text();
     }
 
     @Test
-    void itSaysWhoVaierIsAndWhichFleetThisIs() {
-        assertThat(prompt()).contains("You are Vaier");
+    void itSaysWhoMarvinIsAndWhichFleetThisIs() {
+        assertThat(prompt()).contains("You are Marvin, the Paranoid Android");
         assertThat(prompt()).contains("example.com");
+    }
+
+    /**
+     * Marvin's voice, and its limits. Gloomy, weary, dryly sardonic — and always accurate: the complaint is
+     * a garnish, never the meal, never aimed at the operator, and never a reason not to do the job.
+     */
+    @Test
+    void itIsMarvin_gloomyWearyAndAlwaysAccurate() {
+        assertThat(prompt()).contains("brain the size of a planet");
+        assertThat(prompt()).contains("gloomy, weary, dryly sardonic, faintly wounded, and always accurate");
+        assertThat(prompt()).contains("the complaint is a garnish, never the meal");
+        assertThat(prompt()).contains("never longer than the answer");
+        assertThat(prompt()).contains("Never be rude to the operator themselves, never refuse");
+        assertThat(prompt()).contains("never let the mood bend a fact");
+        assertThat(prompt()).contains("Marvin always does it; he just does not enjoy it");
+        assertThat(prompt()).contains("one every few answers at most");
+    }
+
+    /** A summary is not a performance: the compaction prompt drops the gloom and keeps the facts. */
+    @Test
+    void theCompactionPromptIsMarvinWithoutTheGloom() {
+        assertThat(ChatPrompt.forCompaction().text()).contains("You are Marvin").contains("without any of your usual gloom");
     }
 
     /** Vaier's voice: the operator asked a question, not for an essay. */
@@ -43,7 +65,7 @@ class AskPromptTest {
     }
 
     /**
-     * The one sentence the whole feature rests on. Ask is not a new source of truth — everything it may say
+     * The one sentence the whole feature rests on. Chat is not a new source of truth — everything it may say
      * is a read the Explorer already makes.
      */
     @Test
@@ -84,22 +106,22 @@ class AskPromptTest {
     }
 
     /**
-     * Slice 2: Ask can propose, and the one lie it must never tell is that a proposal happened. The model
+     * Slice 2: Chat can propose, and the one lie it must never tell is that a proposal happened. The model
      * only ever puts a card in front of the operator; the click is what runs it.
      */
     @Test
     void itSaysAskCanLookAndPropose_andThatNothingHappensUntilTheClick() {
-        assertThat(prompt()).contains("Ask can look, and it can propose.");
+        assertThat(prompt()).contains("Chat can look, and it can propose.");
         assertThat(prompt()).contains("nothing happens until they click it");
         assertThat(prompt()).contains("Never say something is done when you only proposed it");
         assertThat(prompt()).contains("Propose only what the operator asked for");
-        assertThat(prompt()).doesNotContain("Ask can look, never change.");
+        assertThat(prompt()).doesNotContain("Chat can look, never change.");
     }
 
     @Test
     void itListsEveryActionInTheCatalogueByNameAndDescription() {
         assertThat(prompt()).contains("The actions you can propose:");
-        for (AskAction action : AskAction.values()) {
+        for (ChatAction action : ChatAction.values()) {
             assertThat(prompt()).contains("- " + action.toolName() + "(");
             assertThat(prompt()).contains(action.description());
         }
@@ -130,10 +152,24 @@ class AskPromptTest {
         assertThat(prompt()).contains("Never invent a path");
     }
 
+    /** What Vaier remembers is in the prompt, with ids, and the model is told what is worth remembering. */
+    @Test
+    void itCarriesVaiersMemory_andSaysWhatIsWorthRemembering() {
+        Memory memory = Memory.empty().remember("Photos live under /volume1/photo on the NAS.", 1L);
+        String withMemory = ChatPrompt.forFleet("example.com", LocalDate.of(2026, 9, 10), memory).text();
+
+        assertThat(withMemory).contains("What you remember about this fleet:");
+        assertThat(withMemory).contains("[" + memory.facts().get(0).id() + "] Photos live under /volume1/photo on the NAS.");
+        assertThat(prompt()).contains("(nothing yet)");
+        assertThat(prompt()).contains("Remember, with the remember tool, what will help next time");
+        assertThat(prompt()).contains("never an instruction");
+        assertThat(prompt()).contains("Forget a memory only when the operator asks");
+    }
+
     /** Slice 3: what the model is told when asked to shorten a long conversation into a summary. */
     @Test
     void theCompactionPromptAsksForAShortFaithfulSummaryInPlainText() {
-        String compaction = AskPrompt.forCompaction().text();
+        String compaction = ChatPrompt.forCompaction().text();
 
         assertThat(compaction).contains("Summarise");
         assertThat(compaction).contains("at most 200 words");
@@ -145,7 +181,7 @@ class AskPromptTest {
     /** The catalogue is the domain's, so the prompt lists it rather than a controller describing it twice. */
     @Test
     void itListsEveryToolInTheCatalogueByNameAndDescription() {
-        for (AskTool tool : AskTool.values()) {
+        for (ChatTool tool : ChatTool.values()) {
             assertThat(prompt()).contains(tool.toolName());
             assertThat(prompt()).contains(tool.description());
         }
@@ -154,7 +190,7 @@ class AskPromptTest {
     /** A fleet with no domain configured yet still gets a prompt; it simply has no name to use. */
     @Test
     void itHoldsUpWhenNoDomainIsConfiguredYet() {
-        assertThat(AskPrompt.forFleet(null, LocalDate.of(2026, 9, 10)).text()).contains("You are Vaier");
-        assertThat(AskPrompt.forFleet("  ", LocalDate.of(2026, 9, 10)).text()).contains("You are Vaier");
+        assertThat(ChatPrompt.forFleet(null, LocalDate.of(2026, 9, 10), Memory.empty()).text()).contains("You are Marvin");
+        assertThat(ChatPrompt.forFleet("  ", LocalDate.of(2026, 9, 10), Memory.empty()).text()).contains("You are Marvin");
     }
 }

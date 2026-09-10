@@ -3,11 +3,14 @@ package net.vaier.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
-import net.vaier.application.AskUseCase;
+import net.vaier.application.ChatUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ForgetConversationUseCase;
+import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
+import net.vaier.application.GetMemoryUseCase;
+import net.vaier.application.GetSpendUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
@@ -20,7 +23,7 @@ import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
-import net.vaier.application.IsAskAvailableUseCase;
+import net.vaier.application.IsChatAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.OfferBundleUseCase;
@@ -28,16 +31,17 @@ import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RefuseEnrolmentUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
+import net.vaier.application.RememberUseCase;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
 import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
 import net.vaier.domain.ActionProposal;
-import net.vaier.domain.AskAction;
-import net.vaier.domain.AskCapability;
-import net.vaier.domain.AskTool;
-import net.vaier.domain.AskUnavailableException;
+import net.vaier.domain.ChatAction;
+import net.vaier.domain.ChatCapability;
+import net.vaier.domain.ChatTool;
+import net.vaier.domain.ChatUnavailableException;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRepository;
@@ -57,6 +61,9 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.Memory;
+import net.vaier.domain.ModelUsage;
+import net.vaier.domain.Spend;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
 import net.vaier.domain.NoHostCredentialException;
@@ -83,6 +90,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEvent
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -107,16 +115,16 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * The <b>Ask</b> endpoint (#360 slice 1). Its constructor is the honest list of everything Ask may read, and
+ * The <b>Chat</b> endpoint (#360 slice 1). Its constructor is the honest list of everything Chat may read, and
  * the projections here are the whole of what leaves Vaier for the Claude API — so the test that matters most
  * is the one that reads every one of them and finds no secret in any.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class AskRestControllerTest {
+class ChatRestControllerTest {
 
-    @Mock AskUseCase askUseCase;
-    @Mock IsAskAvailableUseCase isAskAvailableUseCase;
+    @Mock ChatUseCase chatUseCase;
+    @Mock IsChatAvailableUseCase isChatAvailableUseCase;
     @Mock GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     @Mock GetMachinesUseCase getMachinesUseCase;
     @Mock GetVpnPeersUseCase getVpnPeersUseCase;
@@ -143,8 +151,12 @@ class AskRestControllerTest {
     @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     @Mock OfferBundleUseCase offerBundleUseCase;
     @Mock OpenBundleUseCase openBundleUseCase;
+    @Mock RememberUseCase rememberUseCase;
+    @Mock ForgetUseCase forgetUseCase;
+    @Mock GetMemoryUseCase getMemoryUseCase;
+    @Mock GetSpendUseCase getSpendUseCase;
 
-    private AskRestController controller;
+    private ChatRestController controller;
 
     private static final MachineId COLINA = MachineId.of("c0355605-e5a0-419a-8943-fdc5ec209958");
     private static final String EMAIL = "geir@example.com";
@@ -152,7 +164,7 @@ class AskRestControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new AskRestController(askUseCase, isAskAvailableUseCase, getMachinesUseCase,
+        controller = new ChatRestController(chatUseCase, isChatAvailableUseCase, getMachinesUseCase,
             getVpnPeersUseCase, listEnrolmentRequestsUseCase, getPublishedServicesUseCase,
             getBackupJobsUseCase, getBackupRunsUseCase, getMachineDiskStandingsUseCase,
             discoverPeerContainersUseCase, discoverVaierServerContainersUseCase, getBlockDecisionsUseCase,
@@ -160,16 +172,16 @@ class AskRestControllerTest {
             takeActionProposalUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase, runBackupJobUseCase,
             getBackupRepositoriesUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
             getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, offerBundleUseCase,
-            openBundleUseCase, new ObjectMapper());
+            openBundleUseCase, rememberUseCase, forgetUseCase, getMemoryUseCase, getSpendUseCase, new ObjectMapper());
     }
 
     // --- is Ask offered at all -------------------------------------------------------------------------
 
     @Test
     void availability_answersWhetherAskMayBeUsed() {
-        when(isAskAvailableUseCase.isAvailable()).thenReturn(true);
+        when(isChatAvailableUseCase.isAvailable()).thenReturn(true);
 
-        ResponseEntity<AskRestController.AvailabilityResponse> response = controller.availability();
+        ResponseEntity<ChatRestController.AvailabilityResponse> response = controller.availability();
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().available()).isTrue();
@@ -177,7 +189,7 @@ class AskRestControllerTest {
 
     @Test
     void availability_saysNoWhenNoAnthropicApiKeyIsStored() {
-        when(isAskAvailableUseCase.isAvailable()).thenReturn(false);
+        when(isChatAvailableUseCase.isAvailable()).thenReturn(false);
 
         assertThat(controller.availability().getBody().available()).isFalse();
     }
@@ -201,25 +213,25 @@ class AskRestControllerTest {
     /** Who asked and what; the conversation so far is Vaier's to remember, not the browser's to send. */
     @Test
     void ask_passesTheOperatorAndTheQuestion() {
-        when(isAskAvailableUseCase.isAvailable()).thenReturn(true);
+        when(isChatAvailableUseCase.isAvailable()).thenReturn(true);
         answering("yes.");
 
-        controller.ask(EMAIL, new AskRestController.AskRequest("and colina27?"));
+        controller.ask(EMAIL, new ChatRestController.AskRequest("and colina27?"));
 
-        verify(askUseCase, timeout(2000)).ask(eq(GEIR), eq("and colina27?"), anyList(), any());
+        verify(chatUseCase, timeout(2000)).ask(eq(GEIR), eq("and colina27?"), anyList(), any());
     }
 
     /** A refusal reaches the pane as a sentence, not as a dropped stream the browser has to guess about. */
     @Test
     void answer_sendsTheRefusalAsAnErrorEventAndClosesCleanly() throws IOException {
-        doThrow(new AskUnavailableException("Ask needs an Anthropic API key."))
-            .when(askUseCase).ask(any(), anyString(), anyList(), any());
+        doThrow(new ChatUnavailableException("Chat needs an Anthropic API key."))
+            .when(chatUseCase).ask(any(), anyString(), anyList(), any());
         SseEmitter emitter = mock(SseEmitter.class);
 
         controller.answer(emitter, GEIR, "anything?");
 
         assertThat(sentEvents(emitter))
-            .containsExactly("event:error\ndata:Ask needs an Anthropic API key.\n\n");
+            .containsExactly("event:error\ndata:Chat needs an Anthropic API key.\n\n");
         verify(emitter).complete();
     }
 
@@ -231,8 +243,8 @@ class AskRestControllerTest {
 
         controller.answer(mock(SseEmitter.class), GEIR, "anything?");
 
-        List<String> expected = new ArrayList<>(List.of(AskTool.values()).stream().map(AskTool::toolName).toList());
-        expected.addAll(List.of(AskAction.values()).stream().map(AskAction::toolName).toList());
+        List<String> expected = new ArrayList<>(List.of(ChatTool.values()).stream().map(ChatTool::toolName).toList());
+        expected.addAll(List.of(ChatAction.values()).stream().map(ChatAction::toolName).toList());
         assertThat(offeredTools()).extracting(offer -> offer.tool().toolName()).containsExactlyElementsOf(expected);
     }
 
@@ -241,7 +253,7 @@ class AskRestControllerTest {
         answering("ok");
         fleetOf();
 
-        String fleet = read(AskTool.FLEET);
+        String fleet = read(ChatTool.FLEET);
 
         assertThat(fleet).contains("Colina 27").contains("10.13.13.3").contains("UBUNTU_SERVER");
         assertThat(fleet).contains("\"standing\":\"connected\"");
@@ -260,7 +272,7 @@ class AskRestControllerTest {
         when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of());
         when(getLanServerReachabilityUseCase.getReachability("192.168.3.3")).thenReturn(Reachability.OK);
 
-        String fleet = read(AskTool.FLEET);
+        String fleet = read(ChatTool.FLEET);
 
         assertThat(fleet).contains("\"name\":\"NAS\"").contains("\"standing\":\"reachable\"");
         assertThat(fleet).contains("\"standing\":\"this server, always reachable\"");
@@ -278,7 +290,7 @@ class AskRestControllerTest {
         when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of());
         when(getLanServerReachabilityUseCase.getReachability("192.168.3.3")).thenReturn(Reachability.UNKNOWN);
 
-        assertThat(read(AskTool.FLEET)).contains("\"standing\":\"not checked yet\"").doesNotContain("unreachable");
+        assertThat(read(ChatTool.FLEET)).contains("\"standing\":\"not checked yet\"").doesNotContain("unreachable");
     }
 
     @Test
@@ -289,7 +301,7 @@ class AskRestControllerTest {
                 "aGVsbG8td29ybGQtdGhpcy1pcy1hLXdnLWtleS0xMjM0NQ=", System.currentTimeMillis() + 300_000,
                 null)));
 
-        String waiting = read(AskTool.WAITING_TO_JOIN);
+        String waiting = read(ChatTool.WAITING_TO_JOIN);
 
         assertThat(waiting).contains("4417").contains("Ruten");
         assertThat(waiting).doesNotContain("a-32-byte-unguessable-ticket");
@@ -309,7 +321,7 @@ class AskRestControllerTest {
             Instant.parse("2026-09-08T02:00:00Z"), Instant.parse("2026-09-08T02:14:00Z"), 1,
             "colina27-{now}", "1 file vanished during the backup")));
 
-        String backups = read(AskTool.BACKUPS);
+        String backups = read(ChatTool.BACKUPS);
 
         assertThat(backups).contains("colina27-home").contains("WARNING").contains("Colina 27");
     }
@@ -323,7 +335,7 @@ class AskRestControllerTest {
                 .worstUsedPercent(86).worstThresholdPercent(85).breachingFilesystems(1)
                 .watchedFilesystems(3).build()));
 
-        String disks = read(AskTool.DISKS);
+        String disks = read(ChatTool.DISKS);
 
         assertThat(disks).contains("/volume1").contains("86").contains("Colina 27");
     }
@@ -340,7 +352,7 @@ class AskRestControllerTest {
                     List.of(), "running", "sha256:bbb", UpdateAvailability.UP_TO_DATE)),
             false, null)));
 
-        String updates = read(AskTool.CONTAINER_UPDATES);
+        String updates = read(ChatTool.CONTAINER_UPDATES);
 
         assertThat(updates).contains("grafana");
         assertThat(updates).doesNotContain("mosquitto");
@@ -353,7 +365,7 @@ class AskRestControllerTest {
             .id(11L).scenario("crowdsecurity/ssh-bf").sourceIp("203.0.113.7").type("ban")
             .duration("3h59m").country("RU").asnOrg("Example Telecom").build()));
 
-        String security = read(AskTool.SECURITY);
+        String security = read(ChatTool.SECURITY);
 
         assertThat(security).contains("203.0.113.7").contains("crowdsecurity/ssh-bf");
     }
@@ -366,7 +378,7 @@ class AskRestControllerTest {
                 ServiceLocation.PEER_SERVER, true, "grafana.example.com", "10.13.13.3", 3000, State.OK, true,
                 null, false, false, null, false, null, null, null, null, null, "social", false, null)));
 
-        String services = read(AskTool.PUBLISHED_SERVICES);
+        String services = read(ChatTool.PUBLISHED_SERVICES);
 
         assertThat(services).contains("Grafana").contains("Colina 27").contains("grafana.example.com");
     }
@@ -380,11 +392,12 @@ class AskRestControllerTest {
     void noToolEverRendersASecret() {
         answering("ok");
         fleetOf();
+        when(rememberUseCase.remember(any())).thenReturn(new Memory.Fact("ab12cd", "a fact", NOW));
         when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
             new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
                 System.currentTimeMillis() + 300_000, "CONFIGFILE-SECRET")));
 
-        String everything = List.of(AskTool.values()).stream()
+        String everything = List.of(ChatTool.values()).stream()
             .map(this::read)
             .collect(Collectors.joining("\n"));
 
@@ -404,7 +417,7 @@ class AskRestControllerTest {
         when(runReadOnlyCommandUseCase.runReadOnly(COLINA, "apt list --upgradable"))
             .thenReturn(new CommandOutcome(0, false, "curl/noble-updates 8.5.0 amd64 [upgradable from: 8.4.0]", false));
 
-        String fact = read(AskTool.RUN_ON_MACHINE, Map.of("machine", "colina 27", "command", "apt list --upgradable"));
+        String fact = read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "colina 27", "command", "apt list --upgradable"));
 
         assertThat(fact).contains("Colina 27").contains("apt list --upgradable").contains("curl/noble-updates")
             .contains("\"exitCode\":0");
@@ -416,10 +429,10 @@ class AskRestControllerTest {
         answering("ok");
         fleetOf();
         when(runReadOnlyCommandUseCase.runReadOnly(any(), anyString()))
-            .thenThrow(new IllegalArgumentException("Ask can look, never change: apt install is not a looking command."));
+            .thenThrow(new IllegalArgumentException("Chat can look, never change: apt install is not a looking command."));
 
-        assertThat(read(AskTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "apt install vim")))
-            .isEqualTo("Ask can look, never change: apt install is not a looking command.");
+        assertThat(read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "apt install vim")))
+            .isEqualTo("Chat can look, never change: apt install is not a looking command.");
     }
 
     @Test
@@ -427,7 +440,7 @@ class AskRestControllerTest {
         answering("ok");
         fleetOf();
 
-        assertThat(read(AskTool.RUN_ON_MACHINE, Map.of("machine", "Apalveien", "command", "uptime")))
+        assertThat(read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Apalveien", "command", "uptime")))
             .contains("no machine called \"Apalveien\"");
         verifyNoInteractions(runReadOnlyCommandUseCase);
     }
@@ -440,7 +453,7 @@ class AskRestControllerTest {
         when(runReadOnlyCommandUseCase.runReadOnly(any(), anyString()))
             .thenThrow(new NoHostCredentialException("Colina 27"));
 
-        assertThat(read(AskTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "uptime")))
+        assertThat(read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "uptime")))
             .isEqualTo("No SSH credential is stored for Colina 27, so Vaier cannot run anything there.");
     }
 
@@ -455,7 +468,7 @@ class AskRestControllerTest {
         when(runReadOnlyCommandUseCase.runReadOnly(any(), anyString()))
             .thenThrow(new SshConnectException("connect to 10.13.13.3:22 as geir failed"));
 
-        String fact = read(AskTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "uptime"));
+        String fact = read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "uptime"));
 
         assertThat(fact).isEqualTo("Colina 27 could not be reached over SSH.");
         assertThat(fact).doesNotContain("10.13.13.3").doesNotContain("geir");
@@ -477,8 +490,8 @@ class AskRestControllerTest {
         controller.answer(mock(SseEmitter.class), GEIR, "anything?");
 
         assertThat(offeredTools()).extracting(ToolOffer::tool)
-            .contains(AskAction.values())
-            .contains(AskTool.values());
+            .contains(ChatAction.values())
+            .contains(ChatTool.values());
     }
 
     /**
@@ -492,10 +505,10 @@ class AskRestControllerTest {
         proposing();
         SseEmitter emitter = mock(SseEmitter.class);
 
-        String told = read(emitter, AskAction.RUN_BACKUP, Map.of("machine", "colina 27"));
+        String told = read(emitter, ChatAction.RUN_BACKUP, Map.of("machine", "colina 27"));
 
         ArgumentCaptor<Map<String, String>> arguments = ArgumentCaptor.forClass(Map.class);
-        verify(proposeActionUseCase).propose(eq(AskAction.RUN_BACKUP), arguments.capture());
+        verify(proposeActionUseCase).propose(eq(ChatAction.RUN_BACKUP), arguments.capture());
         assertThat(arguments.getValue()).containsEntry("machine", "Colina 27")
             .containsEntry("machineId", COLINA.value());
         assertThat(sentEvents(emitter)).anySatisfy(event ->
@@ -510,7 +523,7 @@ class AskRestControllerTest {
         fleetOf();
         SseEmitter emitter = mock(SseEmitter.class);
 
-        String told = read(emitter, AskAction.RUN_BACKUP, Map.of("machine", "Apalveien"));
+        String told = read(emitter, ChatAction.RUN_BACKUP, Map.of("machine", "Apalveien"));
 
         assertThat(told).contains("no machine called \"Apalveien\"");
         assertThat(sentEvents(emitter)).noneSatisfy(event -> assertThat(event).contains("event:confirm"));
@@ -526,17 +539,17 @@ class AskRestControllerTest {
             new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
                 System.currentTimeMillis() + 300_000, "CONFIGFILE-SECRET")));
 
-        String told = read(AskAction.LET_PHONE_IN, Map.of("code", "4417"));
+        String told = read(ChatAction.LET_PHONE_IN, Map.of("code", "4417"));
 
         assertThat(told).contains("Let Ruten in (join code 4417).").doesNotContain("TICKET-SECRET");
-        assertThat(read(AskAction.LET_PHONE_IN, Map.of("code", "9999")))
+        assertThat(read(ChatAction.LET_PHONE_IN, Map.of("code", "9999")))
             .isEqualTo("No phone is waiting with join code 9999.");
     }
 
     @Test
     void confirming_takesTheCardAndRunsTheBackup() {
         fleetOf();
-        ActionProposal proposal = ActionProposal.propose(AskAction.RUN_BACKUP,
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP,
             Map.of("machine", "Colina 27", "machineId", COLINA.value()), NOW);
         when(takeActionProposalUseCase.take("p1")).thenReturn(proposal);
         BackupJob job = new BackupJob("colina-27", COLINA, "colina-27", List.of("/home"), List.of(),
@@ -546,7 +559,7 @@ class AskRestControllerTest {
         when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of(job));
         when(getBackupRepositoriesUseCase.getBackupRepositories()).thenReturn(List.of(repo));
 
-        AskRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
+        ChatRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
 
         verify(runBackupJobUseCase).runJob(job, repo);
         assertThat(outcome.done()).isTrue();
@@ -555,29 +568,29 @@ class AskRestControllerTest {
 
     @Test
     void confirming_runsEachOfTheOtherVerbsThroughItsOwnUseCase() {
-        when(takeActionProposalUseCase.take("in")).thenReturn(ActionProposal.propose(AskAction.LET_PHONE_IN,
+        when(takeActionProposalUseCase.take("in")).thenReturn(ActionProposal.propose(ChatAction.LET_PHONE_IN,
             Map.of("code", "4417", "name", "Ruten"), NOW));
         when(approveEnrolmentUseCase.approve("4417")).thenReturn(mock(ApprovedEnrolmentUco.class));
         assertThat(controller.confirm(EMAIL, "in").getBody().text()).isEqualTo("Let Ruten in.");
         verify(approveEnrolmentUseCase).approve("4417");
 
-        when(takeActionProposalUseCase.take("out")).thenReturn(ActionProposal.propose(AskAction.REFUSE_PHONE,
+        when(takeActionProposalUseCase.take("out")).thenReturn(ActionProposal.propose(ChatAction.REFUSE_PHONE,
             Map.of("code", "4417", "name", "Ruten"), NOW));
         assertThat(controller.confirm(EMAIL, "out").getBody().text()).isEqualTo("Refused Ruten.");
         verify(refuseEnrolmentUseCase).refuse("4417");
 
-        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(AskAction.UPDATE_CONTAINER,
+        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(ChatAction.UPDATE_CONTAINER,
             Map.of("machine", "Colina 27", "machineId", COLINA.value(), "container", "mosquitto"), NOW));
         assertThat(controller.confirm(EMAIL, "up").getBody().text())
             .isEqualTo("Updating mosquitto on Colina 27. It is down for a moment while it restarts.");
         verify(updateContainerImageUseCase).updateContainerImage(COLINA, "mosquitto");
 
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
             Map.of("address", "203.0.113.9"), NOW));
         assertThat(controller.confirm(EMAIL, "lift").getBody().text()).isEqualTo("Lifted the block on 203.0.113.9.");
         verify(liftBlockUseCase).liftBlock("203.0.113.9");
 
-        when(takeActionProposalUseCase.take("trust")).thenReturn(ActionProposal.propose(AskAction.TRUST_ADDRESS,
+        when(takeActionProposalUseCase.take("trust")).thenReturn(ActionProposal.propose(ChatAction.TRUST_ADDRESS,
             Map.of("address", "203.0.113.9"), NOW));
         assertThat(controller.confirm(EMAIL, "trust").getBody().text()).isEqualTo("Trusting 203.0.113.9 from now on.");
         verify(trustAddressUseCase).trustAddress("203.0.113.9");
@@ -588,7 +601,7 @@ class AskRestControllerTest {
     void confirming_aCardThatIsGone_runsNothing() {
         when(takeActionProposalUseCase.take("p1")).thenThrow(new NotFoundException("That card is gone; ask again."));
 
-        AskRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
+        ChatRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
 
         assertThat(outcome.done()).isFalse();
         assertThat(outcome.text()).isEqualTo("That card is gone; ask again.");
@@ -598,19 +611,19 @@ class AskRestControllerTest {
     /** A refusal worded by the domain is shown; an unexpected failure is answered in Vaier's words. */
     @Test
     void confirming_showsAWordedRefusal_butNeverAnUnexpectedFailuresOwnMessage() {
-        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(AskAction.UPDATE_CONTAINER,
+        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(ChatAction.UPDATE_CONTAINER,
             Map.of("machine", "Colina 27", "machineId", COLINA.value(), "container", "mosquitto"), NOW));
         doThrow(new ConflictException("mosquitto is already on the newest image."))
             .when(updateContainerImageUseCase).updateContainerImage(any(), anyString());
-        AskRestController.ActionOutcome refused = controller.confirm(EMAIL, "up").getBody();
+        ChatRestController.ActionOutcome refused = controller.confirm(EMAIL, "up").getBody();
         assertThat(refused.done()).isFalse();
         assertThat(refused.text()).isEqualTo("mosquitto is already on the newest image.");
 
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
             Map.of("address", "203.0.113.9"), NOW));
         doThrow(new IllegalStateException("cscli at /usr/local/bin failed as root"))
             .when(liftBlockUseCase).liftBlock(anyString());
-        AskRestController.ActionOutcome failed = controller.confirm(EMAIL, "lift").getBody();
+        ChatRestController.ActionOutcome failed = controller.confirm(EMAIL, "lift").getBody();
         assertThat(failed.done()).isFalse();
         assertThat(failed.text()).isEqualTo("Vaier could not do that.");
     }
@@ -623,10 +636,10 @@ class AskRestControllerTest {
             new ConversationTurn(Role.OPERATOR, "is the nas up?"),
             new ConversationTurn(Role.VAIER, "yes."))));
 
-        AskRestController.ConversationResponse response = controller.conversation(EMAIL).getBody();
+        ChatRestController.ConversationResponse response = controller.conversation(EMAIL).getBody();
 
         assertThat(response.summary()).isEqualTo("the gist");
-        assertThat(response.turns()).extracting(AskRestController.TurnResponse::role, AskRestController.TurnResponse::text)
+        assertThat(response.turns()).extracting(ChatRestController.TurnResponse::role, ChatRestController.TurnResponse::text)
             .containsExactly(tuple("OPERATOR", "is the nas up?"), tuple("VAIER", "yes."));
     }
 
@@ -640,7 +653,7 @@ class AskRestControllerTest {
     /** What became of a card is remembered, so the next question knows the backup was started. */
     @Test
     void confirming_remembersWhatBecameOfTheCard() {
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
             Map.of("address", "203.0.113.9"), NOW));
 
         controller.confirm(EMAIL, "lift");
@@ -652,10 +665,10 @@ class AskRestControllerTest {
     /** "Not now" takes the card too — it can never run afterwards — and is remembered as declined. */
     @Test
     void declining_takesTheCardSoItCannotRun_andIsRemembered() {
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(AskAction.LIFT_BLOCK,
+        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
             Map.of("address", "203.0.113.9"), NOW));
 
-        AskRestController.ActionOutcome outcome = controller.decline(EMAIL, "lift").getBody();
+        ChatRestController.ActionOutcome outcome = controller.decline(EMAIL, "lift").getBody();
 
         assertThat(outcome.done()).isFalse();
         assertThat(outcome.text()).isEqualTo("Not done.");
@@ -684,12 +697,12 @@ class AskRestControllerTest {
             "pictures-2025-09-10")).thenReturn(bundle);
         SseEmitter emitter = mock(SseEmitter.class);
 
-        String told = read(emitter, AskTool.BUNDLE_FILES, Map.of("machine", "colina 27",
+        String told = read(emitter, ChatTool.BUNDLE_FILES, Map.of("machine", "colina 27",
             "paths", "/home/geir/a.jpg\n/home/geir/b.jpg", "name", "pictures-2025-09-10"));
 
         assertThat(sentEvents(emitter)).anySatisfy(event -> assertThat(event)
             .startsWith("event:bundle\ndata:").contains("pictures-2025-09-10.zip").contains("2 files, 2.0 MB")
-            .contains("/ask/bundles/" + bundle.id()));
+            .contains("/chat/bundles/" + bundle.id()));
         assertThat(told).contains("pictures-2025-09-10.zip").contains("Nothing was copied or written");
     }
 
@@ -701,7 +714,7 @@ class AskRestControllerTest {
             .thenThrow(new NotFoundException("/home/geir/gone.jpg is not on Colina 27."));
         SseEmitter emitter = mock(SseEmitter.class);
 
-        String told = read(emitter, AskTool.BUNDLE_FILES, Map.of("machine", "Colina 27", "paths", "/home/geir/gone.jpg"));
+        String told = read(emitter, ChatTool.BUNDLE_FILES, Map.of("machine", "Colina 27", "paths", "/home/geir/gone.jpg"));
 
         assertThat(told).isEqualTo("/home/geir/gone.jpg is not on Colina 27.");
         assertThat(sentEvents(emitter)).noneSatisfy(event -> assertThat(event).contains("event:bundle"));
@@ -719,6 +732,69 @@ class AskRestControllerTest {
         assertThat(response.getHeaders().getFirst("Content-Disposition"))
             .isEqualTo("attachment; filename=\"pictures-2025-09-10.zip\"");
         assertThat(response.getHeaders().getContentType().toString()).isEqualTo("application/zip");
+    }
+
+    // --- memory: what Vaier keeps across conversations (#360) --------------------------------------------
+
+    @Test
+    void remembering_keepsTheFact_andTellsTheModelSo() {
+        answering("ok");
+        when(rememberUseCase.remember("Photos live under /volume1/photo.")).thenReturn(
+            new Memory.Fact("ab12cd", "Photos live under /volume1/photo.", NOW));
+
+        assertThat(read(ChatTool.REMEMBER, Map.of("fact", "Photos live under /volume1/photo.")))
+            .isEqualTo("Remembered [ab12cd]: Photos live under /volume1/photo.");
+    }
+
+    @Test
+    void remembering_nothing_isRefusedInTheDomainsWords() {
+        answering("ok");
+        when(rememberUseCase.remember(any())).thenThrow(new IllegalArgumentException("Say what to remember."));
+
+        assertThat(read(ChatTool.REMEMBER, Map.of("fact", " "))).isEqualTo("Say what to remember.");
+    }
+
+    @Test
+    void forgetting_dropsTheFact_orSaysItWasNeverThere() {
+        answering("ok");
+        assertThat(read(ChatTool.FORGET, Map.of("id", "ab12cd"))).isEqualTo("Forgotten.");
+        verify(forgetUseCase).forget("ab12cd");
+
+        doThrow(new NotFoundException("Vaier has no memory with the id nope.")).when(forgetUseCase).forget("nope");
+        assertThat(read(ChatTool.FORGET, Map.of("id", "nope"))).isEqualTo("Vaier has no memory with the id nope.");
+    }
+
+    /** The pane shows every memory, so nothing can be planted in it unseen; each one can be removed. */
+    @Test
+    void memory_isListedForThePane_andRemovableFromIt() {
+        when(getMemoryUseCase.getMemory()).thenReturn(Memory.empty().remember("Photos live under /volume1/photo.", NOW));
+
+        ChatRestController.MemoryResponse response = controller.memory().getBody();
+
+        assertThat(response.facts()).extracting(ChatRestController.FactResponse::text)
+            .containsExactly("Photos live under /volume1/photo.");
+        assertThat(response.facts().get(0).id()).matches("[a-z0-9]{6}");
+
+        assertThat(controller.forgetFact("ab12cd").getStatusCode().value()).isEqualTo(204);
+        verify(forgetUseCase).forget("ab12cd");
+    }
+
+    // --- spend: the figure in the top bar (#360) ---------------------------------------------------------
+
+    @Test
+    void spend_isThisMonthsFigure_withTheTokensBehindIt() {
+        when(getSpendUseCase.thisMonth()).thenReturn(Spend.empty()
+            .record(new ModelUsage("claude-opus-5", 1_000_000, 100_000, 200_000, 3_000_000), YearMonth.of(2026, 9))
+            .month(YearMonth.of(2026, 9)));
+
+        ChatRestController.SpendResponse response = controller.spend().getBody();
+
+        assertThat(response.month()).isEqualTo("2026-09");
+        assertThat(response.figure()).isEqualTo("$10.25");
+        assertThat(response.calls()).isEqualTo(1);
+        assertThat(response.inputTokens()).isEqualTo(1_000_000);
+        assertThat(response.outputTokens()).isEqualTo(100_000);
+        assertThat(response.cacheReadTokens()).isEqualTo(3_000_000);
     }
 
     // --- fixtures and plumbing -------------------------------------------------------------------------
@@ -745,17 +821,17 @@ class AskRestControllerTest {
                 onText.accept(chunk);
             }
             return null;
-        }).when(askUseCase).ask(any(), anyString(), anyList(), any());
+        }).when(chatUseCase).ask(any(), anyString(), anyList(), any());
     }
 
     private List<ToolOffer> offeredTools() {
         ArgumentCaptor<List<ToolOffer>> tools = ArgumentCaptor.forClass(List.class);
-        verify(askUseCase, atLeastOnce()).ask(any(), anyString(), tools.capture(), any());
+        verify(chatUseCase, atLeastOnce()).ask(any(), anyString(), tools.capture(), any());
         return tools.getValue();
     }
 
     /** Runs one question and reads back what the named tool would answer with. */
-    private String read(AskTool tool) {
+    private String read(ChatTool tool) {
         controller.answer(mock(SseEmitter.class), GEIR, "anything?");
         return offeredTools().stream()
             .filter(offer -> offer.tool() == tool)
@@ -763,13 +839,13 @@ class AskRestControllerTest {
             .read().apply(Map.of());
     }
 
-    /** As {@link #read(AskTool)}, with what the model said. */
-    private String read(AskCapability tool, Map<String, String> args) {
+    /** As {@link #read(ChatTool)}, with what the model said. */
+    private String read(ChatCapability tool, Map<String, String> args) {
         return read(mock(SseEmitter.class), tool, args);
     }
 
     /** As above, on an emitter the test keeps, so what a tool sent the pane can be read back. */
-    private String read(SseEmitter emitter, AskCapability tool, Map<String, String> args) {
+    private String read(SseEmitter emitter, ChatCapability tool, Map<String, String> args) {
         controller.answer(emitter, GEIR, "anything?");
         return offeredTools().stream()
             .filter(offer -> offer.tool() == tool)
@@ -781,7 +857,7 @@ class AskRestControllerTest {
     private List<String> sentEvents(SseEmitter emitter) throws IOException {
         ArgumentCaptor<SseEventBuilder> events = ArgumentCaptor.forClass(SseEventBuilder.class);
         verify(emitter, atLeastOnce()).send(events.capture());
-        return events.getAllValues().stream().map(AskRestControllerTest::render).toList();
+        return events.getAllValues().stream().map(ChatRestControllerTest::render).toList();
     }
 
     private static String render(SseEventBuilder event) {
@@ -799,7 +875,7 @@ class AskRestControllerTest {
     @Test
     void answer_neverRepeatsAnUnexpectedFailuresOwnMessage() throws IOException {
         doThrow(new IllegalStateException("connect to 10.13.13.3:8022 as borg failed"))
-            .when(askUseCase).ask(any(), anyString(), anyList(), any());
+            .when(chatUseCase).ask(any(), anyString(), anyList(), any());
         SseEmitter emitter = mock(SseEmitter.class);
 
         controller.answer(emitter, GEIR, "anything?");
@@ -811,7 +887,7 @@ class AskRestControllerTest {
     /**
      * The tunnel address comes from the peer view, which the domain derived — it is not re-derived from
      * {@code allowedIps} here. "Which entry of an allowedIps list is the tunnel address" is a rule with a
-     * relay-peer subtlety in it, and a second copy in a controller is how Ask would come to tell the model
+     * relay-peer subtlety in it, and a second copy in a controller is how Chat would come to tell the model
      * an address the peer pane disagrees with.
      */
     @Test
@@ -826,16 +902,16 @@ class AskRestControllerTest {
             .peerType(MachineType.UBUNTU_SERVER).connected(true)
             .deviceCategory(DeviceCategory.SERVER).build()));
 
-        assertThat(read(AskTool.FLEET)).contains("10.13.13.9").doesNotContain("10.13.13.3/32");
+        assertThat(read(ChatTool.FLEET)).contains("10.13.13.9").doesNotContain("10.13.13.3/32");
     }
 
     @Test
     void ask_withoutAKey_isRefusedBeforeAnyStreamOpens() {
         // A missing key is a 409 on the request, not a stream that opens only to say no.
-        when(isAskAvailableUseCase.isAvailable()).thenReturn(false);
+        when(isChatAvailableUseCase.isAvailable()).thenReturn(false);
 
-        assertThatThrownBy(() -> controller.ask(EMAIL, new AskRestController.AskRequest("anything?")))
-            .isInstanceOf(AskUnavailableException.class);
-        verifyNoInteractions(askUseCase);
+        assertThatThrownBy(() -> controller.ask(EMAIL, new ChatRestController.AskRequest("anything?")))
+            .isInstanceOf(ChatUnavailableException.class);
+        verifyNoInteractions(chatUseCase);
     }
 }

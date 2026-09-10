@@ -17,11 +17,11 @@ class ActionProposalTest {
 
     @Test
     void aProposalCarriesAnIdTheActionAndTheSentenceTheOperatorWillRead() {
-        ActionProposal proposal = ActionProposal.propose(AskAction.RUN_BACKUP, Map.of("machine", "Colina 27",
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27",
             "machineId", "c0355605-e5a0-419a-8943-fdc5ec209958"), NOW);
 
         assertThat(proposal.id()).isNotBlank();
-        assertThat(proposal.action()).isEqualTo(AskAction.RUN_BACKUP);
+        assertThat(proposal.action()).isEqualTo(ChatAction.RUN_BACKUP);
         assertThat(proposal.sentence()).isEqualTo("Back up Colina 27 now.");
         assertThat(proposal.arguments()).containsEntry("machineId", "c0355605-e5a0-419a-8943-fdc5ec209958");
         assertThat(proposal.proposedAtEpochMs()).isEqualTo(NOW);
@@ -29,8 +29,8 @@ class ActionProposalTest {
 
     @Test
     void twoProposalsNeverShareAnId() {
-        ActionProposal a = ActionProposal.propose(AskAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
-        ActionProposal b = ActionProposal.propose(AskAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        ActionProposal a = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        ActionProposal b = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
 
         assertThat(a.id()).isNotEqualTo(b.id());
     }
@@ -38,17 +38,17 @@ class ActionProposalTest {
     /** What the action needs must be there: a card that says "Back up  now." is a card nobody can judge. */
     @Test
     void aProposalMissingWhatTheActionNeedsIsRefusedInWords() {
-        assertThatThrownBy(() -> ActionProposal.propose(AskAction.RUN_BACKUP, Map.of(), NOW))
+        assertThatThrownBy(() -> ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of(), NOW))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Say which machine.");
-        assertThatThrownBy(() -> ActionProposal.propose(AskAction.LET_PHONE_IN, Map.of("code", " "), NOW))
+        assertThatThrownBy(() -> ActionProposal.propose(ChatAction.LET_PHONE_IN, Map.of("code", " "), NOW))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Say which code.");
     }
 
     @Test
     void aProposalLivesTenMinutes() {
-        ActionProposal proposal = ActionProposal.propose(AskAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        ActionProposal proposal = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
 
         assertThat(proposal.expired(NOW + ActionProposal.TTL.toMillis() - 1)).isFalse();
         assertThat(proposal.expired(NOW + ActionProposal.TTL.toMillis())).isTrue();
@@ -61,7 +61,7 @@ class ActionProposalTest {
     /** What Vaier remembers of a card, in the words the next question will read back. */
     @Test
     void whatBecameOfTheCardIsSaidInOneShape() {
-        ActionProposal proposal = ActionProposal.propose(AskAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        ActionProposal proposal = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
 
         assertThat(proposal.outcomeSentence(true, "Lifted the block on 203.0.113.9."))
             .isEqualTo("Proposed: Lift the block on 203.0.113.9. (done: Lifted the block on 203.0.113.9.)");
@@ -74,7 +74,7 @@ class ActionProposalTest {
     /** What the model is told: it proposed, and nothing happened. The one lie this must prevent is "done". */
     @Test
     void theToolResultSaysNothingHasHappened() {
-        ActionProposal proposal = ActionProposal.propose(AskAction.RUN_BACKUP, Map.of("machine", "Colina 27"), NOW);
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), NOW);
 
         assertThat(proposal.toolResult())
             .contains("Back up Colina 27 now.")

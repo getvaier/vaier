@@ -767,7 +767,7 @@ class MachineServiceTest {
         assertThat(service.getClaudeSignInStandings()).isEmpty();
     }
 
-    // --- a read-only command, for Ask (#360) ---------------------------------------------------------
+    // --- a read-only command, for Chat (#360) ---------------------------------------------------------
 
     /** Orchestration only: resolve the machine, run through the one exec port, hand back the outcome. */
     @Test

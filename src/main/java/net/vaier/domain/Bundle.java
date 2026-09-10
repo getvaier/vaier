@@ -11,7 +11,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * A <b>Bundle</b> (#360): files on one machine that Ask offers the operator as a download card. Nothing is
+ * A <b>Bundle</b> (#360): files on one machine that Chat offers the operator as a download card. Nothing is
  * copied or written anywhere — the download is the Explorer's own selection zip, built while it streams —
  * so the whole of what Vaier holds is the list of paths, what they add up to, and an hour.
  *

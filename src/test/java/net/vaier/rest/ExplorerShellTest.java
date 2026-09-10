@@ -190,7 +190,7 @@ class ExplorerShellTest {
                                        "/docker-services", "/published-services", "/access/services",
                                        "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
                                        "/settings", "/lan-scan", "/survival-kit", "/security",
-                                       "/fleet-credentials", "/vpn/enrolments", "/ask");
+                                       "/fleet-credentials", "/vpn/enrolments", "/chat");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;
@@ -4040,29 +4040,29 @@ class ExplorerShellTest {
         int from = js.indexOf("function offered(g)");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(body).contains("g.name !== 'ask' || S.askAvailable");
+        assertThat(body).contains("g.name !== 'chat' || S.chatAvailable");
         assertThat(js).contains("if (!offered(g)) return;");
         assertThat(js).contains("GLOBALS.filter(offered)");
-        assertThat(js).contains("fetch('/ask/availability'");
+        assertThat(js).contains("fetch('/chat/availability'");
         // The menu is drawn on the first frame, before that read has answered — so it is drawn once more
-        // after it has. The live bug: a stored key and no Ask in the menu until the key was saved again.
+        // after it has. The live bug: a stored key and no Chat in the menu until the key was saved again.
         int init = js.indexOf("async function init(");
         String initBody = js.substring(init, js.indexOf("\n    }", init));
-        int known = initBody.indexOf("loadAskAvailability()]);");
+        int known = initBody.indexOf("loadChatAvailability()]);");
         assertThat(known).isPositive();
-        assertThat(initBody.indexOf("renderVMenu();", known)).as("the menu is redrawn once Ask's availability is known").isPositive();
+        assertThat(initBody.indexOf("renderVMenu();", known)).as("the menu is redrawn once Chat's availability is known").isPositive();
     }
 
     @Test
     void ask_streamsItsAnswerOffOnePost_andNeverPolls() throws IOException {
         // One POST carries the question and the visit's history; the answer is read off that response as it
-        // streams. No EventSource for Ask, no timer, and the follow-up knows what "and" means.
+        // streams. No EventSource for Chat, no timer, and the follow-up knows what "and" means.
         String js = read("explorer-shell.js");
 
         int from = js.indexOf("async function askVaier(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(body).contains("fetch('/ask', {").contains("method: 'POST'");
+        assertThat(body).contains("fetch('/chat', {").contains("method: 'POST'");
         // Slice 3: the conversation is Vaier's to remember; the browser sends the question and nothing else.
         assertThat(body).doesNotContain("history");
         assertThat(body).contains("readAnswerStream(res.body");
@@ -4084,7 +4084,7 @@ class ExplorerShellTest {
         assertThat(js).contains("'/settings/anthropic-api-key'");
         assertThat(js).contains("c.hasAnthropicApiKey");
         assertThat(js).doesNotContain("c.anthropicApiKey");
-        int from = js.indexOf("const ask = sectionForm('Ask');");
+        int from = js.indexOf("const ask = sectionForm('Chat');");
         assertThat(from).isPositive();
         String body = js.substring(from, from + 1200);
         assertThat(body).contains("'password')");
@@ -4094,21 +4094,21 @@ class ExplorerShellTest {
     @Test
     void aHalfTypedQuestion_survivesTheRepaintsTheShellMakesOnItsOwn() throws IOException {
         // The pane is rebuilt on every render, and the shell renders whenever a stream event lands — a disk
-        // reading, a container flip. The live bug: the operator typed into Ask and the words vanished mid-
+        // reading, a container flip. The live bug: the operator typed into Chat and the words vanished mid-
         // sentence, because a fresh, empty textarea replaced the one they were writing in. So the draft is
         // state, put back into the box on every paint, along with the caret — and the box takes focus only
         // when it already had it or nothing else does, so a repaint never pulls the cursor out of a dialog.
         String js = read("explorer-shell.js");
 
-        assertThat(js).contains("ask: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '' }");
-        int from = js.indexOf("function renderAsk(");
+        assertThat(js).contains("chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], spend: null }");
+        int from = js.indexOf("function renderChat(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
-        assertThat(body).contains("box.value = S.ask.draft;");
-        assertThat(body).contains("box.oninput = () => { S.ask.draft = box.value; };");
+        assertThat(body).contains("box.value = S.chat.draft;");
+        assertThat(body).contains("box.oninput = () => { S.chat.draft = box.value; };");
         assertThat(body).as("the caret goes back where it was").contains("box.setSelectionRange(");
-        assertThat(body).as("focus is not taken from wherever the operator was").doesNotContain("if (!S.ask.busy) box.focus();");
-        assertThat(body).contains("S.ask.draft = '';");
+        assertThat(body).as("focus is not taken from wherever the operator was").doesNotContain("if (!S.chat.busy) box.focus();");
+        assertThat(body).contains("S.chat.draft = '';");
     }
 
     @Test
@@ -4123,47 +4123,47 @@ class ExplorerShellTest {
         assertThat(askBody).contains("name === 'confirm'");
         // The card goes before the answer being written, so the answer stays the last Vaier turn and the
         // streaming painter keeps writing into the right element.
-        assertThat(askBody).contains("S.ask.turns.splice(S.ask.turns.length - 1, 0,");
+        assertThat(askBody).contains("S.chat.turns.splice(S.chat.turns.length - 1, 0,");
 
-        int card = js.indexOf("function askCard(");
+        int card = js.indexOf("function chatCard(");
         assertThat(card).isPositive();
         String cardBody = js.substring(card, js.indexOf("\n    }", card));
         assertThat(cardBody).as("the button says what will happen").contains("yes.textContent = t.sentence");
         assertThat(cardBody).contains("'Not now'");
-        assertThat(cardBody).as("a card is never the answer the stream paints into").doesNotContain("ex-ask-text");
+        assertThat(cardBody).as("a card is never the answer the stream paints into").doesNotContain("ex-chat-text");
 
         int confirm = js.indexOf("async function confirmAction(");
         assertThat(confirm).isPositive();
         String confirmBody = js.substring(confirm, js.indexOf("\n    }", confirm));
-        assertThat(confirmBody).contains("fetch(`/ask/actions/").contains("method: 'POST'");
+        assertThat(confirmBody).contains("fetch(`/chat/actions/").contains("method: 'POST'");
 
         // What became of a card is Vaier's to remember (slice 3), so the browser narrates nothing.
         assertThat(askBody).doesNotContain("cardAsText");
         String css = read("explorer-shell.css");
-        assertThat(css).contains(".ex-ask-card");
+        assertThat(css).contains(".ex-chat-card");
     }
 
     @Test
     void theConversation_isVaiersToRemember_andThePaneOnlyShowsIt() throws IOException {
-        // #360 slice 3. Opening Ask reads the kept conversation; asking sends the question alone; a card
+        // #360 slice 3. Opening Chat reads the kept conversation; asking sends the question alone; a card
         // declined is told to the server, so it can never run and is remembered as declined; and "Start
         // over" is the one way to forget — a DELETE, never a page reload.
         String js = read("explorer-shell.js");
 
-        assertThat(js).contains("fetch('/ask/conversation', { cache: 'no-store' })");
+        assertThat(js).contains("fetch('/chat/conversation', { cache: 'no-store' })");
         int load = js.indexOf("async function loadConversation(");
         assertThat(load).isPositive();
-        int card = js.indexOf("function askCard(");
+        int card = js.indexOf("function chatCard(");
         String cardBody = js.substring(card, js.indexOf("\n    }", card));
         assertThat(cardBody).contains("declineAction(t)");
         int decline = js.indexOf("async function declineAction(");
         assertThat(decline).isPositive();
         String declineBody = js.substring(decline, js.indexOf("\n    }", decline));
-        assertThat(declineBody).contains("fetch(`/ask/actions/").contains("method: 'DELETE'");
+        assertThat(declineBody).contains("fetch(`/chat/actions/").contains("method: 'DELETE'");
         int forget = js.indexOf("async function startOver(");
         assertThat(forget).isPositive();
         String forgetBody = js.substring(forget, js.indexOf("\n    }", forget));
-        assertThat(forgetBody).contains("fetch('/ask/conversation', { method: 'DELETE' })");
+        assertThat(forgetBody).contains("fetch('/chat/conversation', { method: 'DELETE' })");
         assertThat(js).contains("'Start over'");
     }
 
@@ -4177,11 +4177,84 @@ class ExplorerShellTest {
         int ask = js.indexOf("async function askVaier(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("name === 'bundle'");
-        int card = js.indexOf("function askBundleCard(");
+        int card = js.indexOf("function chatBundleCard(");
         assertThat(card).isPositive();
         String cardBody = js.substring(card, js.indexOf("\n    }", card));
         assertThat(cardBody).contains("window.location.href = t.url");
         assertThat(cardBody).contains("'Download ' + t.name");
-        assertThat(cardBody).doesNotContain("ex-ask-text");
+        assertThat(cardBody).doesNotContain("ex-chat-text");
+    }
+
+    @Test
+    void whatVaierRemembers_isShownInThePane_andEachMemoryCanBeRemoved() throws IOException {
+        // #360: Vaier keeps facts across conversations. Every one of them is on the pane, folded but there,
+        // with a remove button — so nothing can be planted in Vaier's memory unseen, and the operator, not
+        // the model, has the last word on what stays.
+        String js = read("explorer-shell.js");
+
+        assertThat(js).contains("fetch('/chat/memory', { cache: 'no-store' })");
+        int forget = js.indexOf("async function forgetFact(");
+        assertThat(forget).isPositive();
+        String forgetBody = js.substring(forget, js.indexOf("\n    }", forget));
+        assertThat(forgetBody).contains("fetch(`/chat/memory/").contains("method: 'DELETE'");
+        assertThat(js).contains("disclosure('What Marvin remembers");
+        // Under the input, never between the thread and the box: it was in the way of typing there.
+        int chat = js.indexOf("function renderChat(");
+        String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
+        assertThat(chatBody.indexOf("disclosure('What Marvin remembers")).isGreaterThan(chatBody.indexOf("body.appendChild(row);"));
+        // Re-read after every answer, because the answer may have remembered something.
+        int ask = js.indexOf("async function askVaier(");
+        String askBody = js.substring(ask, js.indexOf("\n    }", ask));
+        assertThat(askBody).contains("loadMemory()");
+    }
+
+    @Test
+    void whatClaudeHasCostThisMonth_isInTheChatPanesHead_andNeverPolled() throws IOException {
+        // #360: the figure sits under the Chat pane's description, read at start and after each answer this
+        // browser asked for — the only moments it can change from here — and never on a timer. It is not in
+        // the top bar: it is a fact about Chat, and it belongs where Chat is.
+        String html = read("explorer.html");
+        String js = read("explorer-shell.js");
+
+        assertThat(html).doesNotContain("exSpend");
+        assertThat(js).contains("fetch('/chat/spend', { cache: 'no-store' })");
+        int chat = js.indexOf("function renderChat(");
+        String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
+        assertThat(chatBody).contains("'ex-chat-spend'").contains("S.chat.spend.figure");
+        int ask = js.indexOf("async function askVaier(");
+        String askBody = js.substring(ask, js.indexOf("\n    }", ask));
+        assertThat(askBody).contains("loadSpend()");
+        int init = js.indexOf("async function init(");
+        String initBody = js.substring(init, js.indexOf("\n    }", init));
+        assertThat(initBody).contains("loadSpend()");
+        assertThat(js).doesNotContain("setInterval(loadSpend");
+    }
+
+    @Test
+    void theChatEntry_saysWhatChatDoes_inTheMenuAndOnThePane() throws IOException {
+        // Renamed from Ask (2026-09-10): "Ask" named a verb, not the place. The menu entry carries one short
+        // line saying whom you ask; the pane opens under one short line saying what he does. Both were
+        // longer once, and the operator called that ugly. They were right.
+        String js = read("explorer-shell.js");
+
+        assertThat(js).contains("{ name: 'chat',     label: 'Chat',");
+        assertThat(js).contains("desc: 'Ask Marvin about your fleet' }");
+        assertThat(js).contains("function vMenuItem(icon, label, path, desc)");
+        assertThat(js).contains("paneHead('Chat', false, 'Marvin answers, looks, proposes, hands over files, and remembers.')");
+        assertThat(js).doesNotContain("label: 'Ask'");
+    }
+
+    @Test
+    void theOneWhoAnswersIsMarvin() throws IOException {
+        // 2026-09-10: the pane is Chat, the one who answers is Marvin — the Paranoid Android — everywhere the
+        // operator reads a name for him. Vaier stays the product: its own failures are still said as Vaier's.
+        String js = read("explorer-shell.js");
+
+        assertThat(js).contains("t.role === 'OPERATOR' ? 'You' : 'Marvin'");
+        assertThat(js).contains("box.placeholder = 'Ask Marvin…'");
+        assertThat(js).contains("'Marvin proposes: '");
+        assertThat(js).contains("disclosure('What Marvin remembers");
+        assertThat(js).contains("desc: 'Ask Marvin");
+        assertThat(js).doesNotContain("? 'You' : 'Vaier'").doesNotContain("'Vaier proposes: '");
     }
 }

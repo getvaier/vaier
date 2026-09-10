@@ -1,21 +1,27 @@
 package net.vaier.application.service;
 
 import net.vaier.domain.ActionProposal;
-import net.vaier.domain.AskAction;
+import net.vaier.domain.ChatAction;
 import net.vaier.domain.NotFoundException;
-import net.vaier.domain.AskPrompt;
-import net.vaier.domain.AskTool;
-import net.vaier.domain.AskUnavailableException;
+import net.vaier.domain.ChatPrompt;
+import net.vaier.domain.ChatTool;
+import net.vaier.domain.ChatUnavailableException;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.Operator;
 import net.vaier.domain.ConversationTurn;
+import net.vaier.domain.Memory;
+import net.vaier.domain.ModelUsage;
+import net.vaier.domain.Spend;
 import net.vaier.domain.ConversationTurn.Role;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.VaierConfig;
 import net.vaier.domain.port.ForConversing;
 import net.vaier.domain.port.ForPersistingConversations;
+import net.vaier.domain.port.ForPersistingMemory;
+import net.vaier.domain.port.ForPersistingSpend;
 import net.vaier.domain.port.ForHoldingActionProposals;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -24,6 +30,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -38,23 +45,32 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class AskServiceTest {
+class ChatServiceTest {
 
     @Mock ForPersistingAppConfiguration configPersistence;
     @Mock ForConversing forConversing;
     @Mock ForHoldingActionProposals forHoldingActionProposals;
     @Mock ForPersistingConversations forPersistingConversations;
+    @Mock ForPersistingMemory forPersistingMemory;
+    @Mock ForPersistingSpend forPersistingSpend;
 
-    @InjectMocks AskService service;
+    @InjectMocks ChatService service;
 
     private static final List<ToolOffer> TOOLS =
-        List.of(new ToolOffer(AskTool.FLEET, () -> "colina27 connected"));
+        List.of(new ToolOffer(ChatTool.FLEET, () -> "colina27 connected"));
+
+    @BeforeEach
+    void memoryIsEmptyUnlessSaidOtherwise() {
+        lenient().when(forPersistingMemory.load()).thenReturn(Memory.empty());
+        lenient().when(forPersistingSpend.load()).thenReturn(Spend.empty());
+    }
 
     private VaierConfig configuredWithAKey() {
         return VaierConfig.builder()
@@ -95,7 +111,7 @@ class AskServiceTest {
             for (String chunk : chunks) {
                 onText.accept(chunk);
             }
-            return null;
+            return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
         }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
     }
 
@@ -111,7 +127,7 @@ class AskServiceTest {
         service.ask(GEIR, "which machine is red?", TOOLS, received::add);
 
         verify(forConversing).converse(eq("sk-ant-api03-the-key"),
-            eq(AskPrompt.forFleet("example.com", LocalDate.now()).text()),
+            eq(ChatPrompt.forFleet("example.com", LocalDate.now(), Memory.empty()).text()),
             eq(kept.forModel()), eq("which machine is red?"), eq(TOOLS), any());
         assertThat(received).containsExactly("Colina.");
     }
@@ -163,8 +179,8 @@ class AskServiceTest {
         doAnswer(invocation -> {
             Consumer<String> onText = invocation.getArgument(5);
             String prompt = invocation.getArgument(1);
-            onText.accept(prompt.equals(AskPrompt.forCompaction().text()) ? "the gist" : "the answer");
-            return null;
+            onText.accept(prompt.equals(ChatPrompt.forCompaction().text()) ? "the gist" : "the answer");
+            return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
         }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
 
         service.ask(GEIR, "one more?", TOOLS, text -> { });
@@ -176,7 +192,7 @@ class AskServiceTest {
         assertThat(compacted.turns()).hasSize(Conversation.KEEP_VERBATIM);
         assertThat(compacted.turns().get(compacted.turns().size() - 1))
             .isEqualTo(new ConversationTurn(Role.VAIER, "the answer"));
-        verify(forConversing).converse(eq("sk-ant-api03-the-key"), eq(AskPrompt.forCompaction().text()),
+        verify(forConversing).converse(eq("sk-ant-api03-the-key"), eq(ChatPrompt.forCompaction().text()),
             anyList(), anyString(), eq(List.of()), any());
     }
 
@@ -191,12 +207,12 @@ class AskServiceTest {
         when(forPersistingConversations.load(GEIR)).thenReturn(Optional.of(longOne));
         doAnswer(invocation -> {
             String prompt = invocation.getArgument(1);
-            if (prompt.equals(AskPrompt.forCompaction().text())) {
+            if (prompt.equals(ChatPrompt.forCompaction().text())) {
                 throw new IllegalArgumentException("Vaier could not sign in to the Claude API; check the key in Settings.");
             }
             Consumer<String> onText = invocation.getArgument(5);
             onText.accept("the answer");
-            return null;
+            return new ModelUsage("claude-opus-5", 1000, 100, 0, 0);
         }).when(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
 
         service.ask(GEIR, "one more?", TOOLS, text -> { });
@@ -223,7 +239,7 @@ class AskServiceTest {
     }
 
     /**
-     * Asked again after the operator cleared the key, Ask refuses rather than reaching for a null key —
+     * Asked again after the operator cleared the key, Chat refuses rather than reaching for a null key —
      * availability is re-decided on every question, not remembered from when the pane was opened.
      */
     @Test
@@ -232,7 +248,7 @@ class AskServiceTest {
             VaierConfig.builder().domain("example.com").build()));
 
         assertThatThrownBy(() -> service.ask(GEIR, "which machine is red?", TOOLS, text -> { }))
-            .isInstanceOf(AskUnavailableException.class)
+            .isInstanceOf(ChatUnavailableException.class)
             .hasMessageContaining("Add one in Settings");
 
         verify(forConversing, never()).converse(any(), any(), any(), any(), any(), any());
@@ -276,7 +292,7 @@ class AskServiceTest {
 
     @Test
     void propose_buildsTheProposalAndHoldsIt() {
-        ActionProposal proposal = service.propose(AskAction.RUN_BACKUP, Map.of("machine", "Colina 27"));
+        ActionProposal proposal = service.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"));
 
         assertThat(proposal.sentence()).isEqualTo("Back up Colina 27 now.");
         verify(forHoldingActionProposals).hold(proposal);
@@ -284,7 +300,7 @@ class AskServiceTest {
 
     @Test
     void take_handsBackALiveProposalOnce() {
-        ActionProposal proposal = ActionProposal.propose(AskAction.RUN_BACKUP, Map.of("machine", "Colina 27"),
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"),
             System.currentTimeMillis());
         when(forHoldingActionProposals.take("p1")).thenReturn(Optional.of(proposal));
 
@@ -302,12 +318,86 @@ class AskServiceTest {
 
     @Test
     void take_refusesACardThatHasExpired() {
-        ActionProposal stale = ActionProposal.propose(AskAction.RUN_BACKUP, Map.of("machine", "Colina 27"),
+        ActionProposal stale = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"),
             System.currentTimeMillis() - ActionProposal.TTL.toMillis() - 1);
         when(forHoldingActionProposals.take("p1")).thenReturn(Optional.of(stale));
 
         assertThatThrownBy(() -> service.take("p1"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("That card has expired; ask again.");
+    }
+
+    // --- memory (#360) ------------------------------------------------------------------------------
+
+    /** What Vaier remembers rides in the prompt of every question. */
+    @Test
+    void ask_putsVaiersMemoryInThePrompt() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
+        Memory memory = Memory.empty().remember("Photos live under /volume1/photo.", 1L);
+        when(forPersistingMemory.load()).thenReturn(memory);
+
+        service.ask(GEIR, "anything?", TOOLS, text -> { });
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(forConversing).converse(anyString(), prompt.capture(), anyList(), anyString(), anyList(), any());
+        assertThat(prompt.getValue()).contains("Photos live under /volume1/photo.");
+    }
+
+    @Test
+    void remember_addsTheFactAndSaves() {
+        when(forPersistingMemory.load()).thenReturn(Memory.empty());
+
+        Memory.Fact fact = service.remember("Photos live under /volume1/photo.");
+
+        assertThat(fact.text()).isEqualTo("Photos live under /volume1/photo.");
+        ArgumentCaptor<Memory> saved = ArgumentCaptor.forClass(Memory.class);
+        verify(forPersistingMemory).save(saved.capture());
+        assertThat(saved.getValue().facts()).containsExactly(fact);
+    }
+
+    @Test
+    void forget_dropsTheFactAndSaves() {
+        Memory memory = Memory.empty().remember("a", 1L);
+        when(forPersistingMemory.load()).thenReturn(memory);
+
+        service.forget(memory.facts().get(0).id());
+
+        ArgumentCaptor<Memory> saved = ArgumentCaptor.forClass(Memory.class);
+        verify(forPersistingMemory).save(saved.capture());
+        assertThat(saved.getValue().facts()).isEmpty();
+    }
+
+    @Test
+    void getMemory_isWhatIsKept() {
+        Memory memory = Memory.empty().remember("a", 1L);
+        when(forPersistingMemory.load()).thenReturn(memory);
+
+        assertThat(service.getMemory()).isEqualTo(memory);
+    }
+
+    // --- spend (#360) -------------------------------------------------------------------------------
+
+    /** What an answer cost is counted the moment it is known, under this month. */
+    @Test
+    void ask_recordsWhatTheAnswerUsedAsThisMonthsSpend() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        when(forPersistingConversations.load(GEIR)).thenReturn(Optional.empty());
+        answering("Colina.");
+
+        service.ask(GEIR, "which machine is red?", TOOLS, text -> { });
+
+        ArgumentCaptor<Spend> saved = ArgumentCaptor.forClass(Spend.class);
+        verify(forPersistingSpend).save(saved.capture());
+        assertThat(saved.getValue().month(YearMonth.now()).calls()).isEqualTo(1);
+        assertThat(saved.getValue().month(YearMonth.now()).usage().inputTokens()).isEqualTo(1000);
+    }
+
+    @Test
+    void thisMonthsSpend_isReadFromWhatIsKept() {
+        when(forPersistingSpend.load()).thenReturn(Spend.empty()
+            .record(new ModelUsage("claude-opus-5", 1_000_000, 100_000, 0, 0), YearMonth.now()));
+
+        assertThat(service.thisMonth().figure()).isEqualTo("$7.50");
     }
 }

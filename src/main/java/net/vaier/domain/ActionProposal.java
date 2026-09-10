@@ -12,12 +12,12 @@ import java.util.UUID;
  * <p>The arguments are the canonical ones — the machine's id as well as its name, the phone's name as well
  * as its code — so the click runs against an identity and the card reads in names.
  */
-public record ActionProposal(String id, AskAction action, Map<String, String> arguments, String sentence,
+public record ActionProposal(String id, ChatAction action, Map<String, String> arguments, String sentence,
                              long proposedAtEpochMs) {
 
     public static final Duration TTL = Duration.ofMinutes(10);
 
-    public static ActionProposal propose(AskAction action, Map<String, String> arguments, long nowEpochMs) {
+    public static ActionProposal propose(ChatAction action, Map<String, String> arguments, long nowEpochMs) {
         for (ToolParameter parameter : action.parameters()) {
             String value = arguments.get(parameter.name());
             if (value == null || value.isBlank()) {

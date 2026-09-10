@@ -275,7 +275,7 @@ public class ExplorerService
     }
 
     /**
-     * A <b>Bundle</b> for Ask (#360): every path stat'd now — so a path that is not there is refused now,
+     * A <b>Bundle</b> for Chat (#360): every path stat'd now — so a path that is not there is refused now,
      * naming it, never at download time — then held for its hour. Nothing is copied or written anywhere.
      */
     @Override

@@ -168,6 +168,9 @@ body { height: 100vh; height: 100dvh; overflow: hidden; overscroll-behavior: non
 .ex-vmenu-item:hover { background: var(--bg-hover); color: var(--text); }
 .ex-vmenu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .ex-vmenu-item .ex-ico { flex: none; color: var(--text-dim); }
+.ex-vmenu-item.has-desc { align-items: flex-start; }
+.ex-vmenu-text { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.ex-vmenu-desc { font-size: 12px; line-height: 1.4; color: var(--text-dim); white-space: normal; max-width: 250px; }
 .ex-vmenu-item:hover .ex-ico { color: var(--text-muted); }
 /* The menu's groups. A rule between two halves said only "these are not those"; a named group says what
    each one is FOR, which is the question an operator opening this menu is actually asking. */
@@ -1567,22 +1570,26 @@ select.ex-input { cursor: pointer; }
 }
 .ex-pubkey-copy { flex: none; }
 /* A settings section's Save row: the button(s), then an inline note that turns green on save, red on error. */
-/* --- Ask: a conversation, set like prose, with one quiet input under it ------------------------------- */
-.ex-ask { max-width: 74ch; }
-.ex-ask-thread { display: flex; flex-direction: column; gap: 18px; margin-bottom: 22px; }
-.ex-ask-intro { color: var(--text-muted); font-size: 15px; line-height: 1.5; }
-.ex-ask-brief { color: var(--text-dim); font-size: 14px; line-height: 1.5; font-style: italic; }
-.ex-ask-over { display: flex; justify-content: flex-end; }
-.ex-ask-tries { display: flex; flex-wrap: wrap; gap: 8px; }
-.ex-ask-turn { display: flex; flex-direction: column; gap: 4px; }
-.ex-ask-who { font-size: 12.5px; color: var(--text-dim); }
-.ex-ask-turn.is-vaier .ex-ask-who { color: var(--accent); }
-.ex-ask-text { font-size: 15px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
-.ex-ask-turn.is-you .ex-ask-text { color: var(--text-muted); }
-.ex-ask-row { display: flex; gap: 10px; align-items: flex-end; }
+/* --- Chat: a conversation, set like prose, with one quiet input under it ------------------------------- */
+.ex-chat { max-width: 74ch; }
+.ex-chat-thread { display: flex; flex-direction: column; gap: 18px; margin-bottom: 22px; }
+.ex-chat-intro { color: var(--text-muted); font-size: 15px; line-height: 1.5; }
+.ex-chat-brief { color: var(--text-dim); font-size: 14px; line-height: 1.5; font-style: italic; }
+.ex-chat-over { display: flex; justify-content: flex-end; }
+/* The month's Claude figure, under the pane's description. Quiet: a number, not a warning. */
+.ex-chat-spend { margin-top: 6px; font-size: 13px; color: var(--text-dim); }
+.ex-chat-memory { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
+.ex-chat-memory-row { display: flex; align-items: center; gap: 10px; }
+.ex-chat-memory-text { flex: 1; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
+.ex-chat-turn { display: flex; flex-direction: column; gap: 4px; }
+.ex-chat-who { font-size: 12.5px; color: var(--text-dim); }
+.ex-chat-turn.is-vaier .ex-chat-who { color: var(--accent); }
+.ex-chat-text { font-size: 15px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
+.ex-chat-turn.is-you .ex-chat-text { color: var(--text-muted); }
+.ex-chat-row { display: flex; gap: 10px; align-items: flex-end; }
 /* A proposed action. The one thing in the thread that asks something of the operator, so it is the one
    thing with an edge — and once it is answered the edge says how: the accent for done, red for not. */
-.ex-ask-card {
+.ex-chat-card {
     display: flex; flex-direction: column; gap: 12px;
     padding: 14px 16px;
     background: var(--bg-panel);
@@ -1590,15 +1597,15 @@ select.ex-input { cursor: pointer; }
     border-left: 3px solid var(--accent);
     border-radius: var(--radius-1);
 }
-.ex-ask-card-sentence { font-size: 15px; line-height: 1.5; color: var(--text); }
-.ex-ask-card-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.ex-ask-card-outcome { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
-.ex-ask-card.is-done { border-left-color: var(--accent); }
-.ex-ask-card.is-done .ex-ask-card-outcome { color: var(--text); }
-.ex-ask-card.is-failed { border-left-color: var(--red); }
-.ex-ask-card.is-declined, .ex-ask-card.is-working { border-left-color: var(--border-hi); }
-.ex-ask-card.is-declined .ex-ask-card-sentence { color: var(--text-dim); }
-.ex-ask-box { resize: vertical; min-height: 44px; font: inherit; line-height: 1.45; }
+.ex-chat-card-sentence { font-size: 15px; line-height: 1.5; color: var(--text); }
+.ex-chat-card-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.ex-chat-card-outcome { font-size: 14px; line-height: 1.5; color: var(--text-muted); }
+.ex-chat-card.is-done { border-left-color: var(--accent); }
+.ex-chat-card.is-done .ex-chat-card-outcome { color: var(--text); }
+.ex-chat-card.is-failed { border-left-color: var(--red); }
+.ex-chat-card.is-declined, .ex-chat-card.is-working { border-left-color: var(--border-hi); }
+.ex-chat-card.is-declined .ex-chat-card-sentence { color: var(--text-dim); }
+.ex-chat-box { resize: vertical; min-height: 44px; font: inherit; line-height: 1.45; }
 .ex-set-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
 .ex-set-note { font-size: 13px; color: var(--text-dim); }
 .ex-set-note.is-ok { color: var(--green); }

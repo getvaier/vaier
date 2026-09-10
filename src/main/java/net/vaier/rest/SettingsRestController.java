@@ -166,7 +166,7 @@ public class SettingsRestController {
      * Store the <b>Anthropic API key</b>, or clear it by sending a blank one (#360). A {@code PUT} of the
      * value alone, answered {@code 204}: nothing is ever read back, so {@code GET /settings/config} carries
      * only {@code hasAnthropicApiKey}. Blank is not an error — clearing the field is how the operator turns
-     * <b>Ask</b> off again.
+     * <b>Chat</b> off again.
      */
     @PutMapping("/anthropic-api-key")
     public ResponseEntity<Void> setAnthropicApiKey(@RequestBody AnthropicApiKeyRequest request) {

@@ -43,7 +43,7 @@ public interface GetAppSettingsUseCase {
          */
         boolean hasSurvivalKitPassphrase,
         /**
-         * Whether an <b>Anthropic API key</b> is stored, and therefore whether <b>Ask</b> is offered at all.
+         * Whether an <b>Anthropic API key</b> is stored, and therefore whether <b>Chat</b> is offered at all.
          * Whether, never what — the key opens the operator's own Claude account and the browser has no use
          * for it (#360).
          */

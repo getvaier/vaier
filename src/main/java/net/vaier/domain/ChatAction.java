@@ -4,14 +4,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The <b>Ask action</b> catalogue (#360 slice 2): what the model may propose. Each is a verb the Explorer
+ * The <b>Chat action</b> catalogue (#360 slice 2): what the model may propose. Each is a verb the Explorer
  * already has a button for, and none of them runs on the model's say-so — calling one puts a
  * <b>Confirmation</b> in front of the operator, and their click is what runs it.
  *
  * <p>There is no restart here, deliberately: Vaier has no button to start, stop or restart a container,
- * and an action Ask can propose must be one the Explorer can already do.
+ * and an action Chat can propose must be one the Explorer can already do.
  */
-public enum AskAction implements AskCapability {
+public enum ChatAction implements ChatCapability {
 
     LET_PHONE_IN("let_phone_in",
         "Let a phone that is waiting to join into the fleet.",
@@ -45,7 +45,7 @@ public enum AskAction implements AskCapability {
     private final String description;
     private final List<ToolParameter> parameters;
 
-    AskAction(String toolName, String description, ToolParameter... parameters) {
+    ChatAction(String toolName, String description, ToolParameter... parameters) {
         this.toolName = toolName;
         this.description = description + ONLY_PROPOSES;
         this.parameters = List.of(parameters);

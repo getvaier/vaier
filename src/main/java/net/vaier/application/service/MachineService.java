@@ -301,7 +301,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
      * where they should have held an identity.
      */
     /**
-     * One <b>Read-only command</b> for Ask (#360). Orchestration only: the domain judges the command — and
+     * One <b>Read-only command</b> for Chat (#360). Orchestration only: the domain judges the command — and
      * does so first, so a refused command never so much as resolves a target — then runs it through the
      * one exec port every other remote command goes through, pinning on first use as they all do.
      */

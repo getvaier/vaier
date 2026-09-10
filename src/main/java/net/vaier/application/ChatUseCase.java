@@ -1,6 +1,6 @@
 package net.vaier.application;
 
-import net.vaier.domain.AskUnavailableException;
+import net.vaier.domain.ChatUnavailableException;
 import net.vaier.domain.Operator;
 import net.vaier.domain.ToolOffer;
 
@@ -12,13 +12,13 @@ import java.util.function.Consumer;
  *
  * <p>Read-only: the tools offered are reads, and there is no way from here to change anything.
  */
-public interface AskUseCase {
+public interface ChatUseCase {
 
     /**
      * Hold one turn of the <b>Conversation</b>, handing each piece of the answer to {@code onText} as it
      * arrives. Blocks until the answer is complete.
      *
-     * @throws AskUnavailableException when no <b>Anthropic API key</b> is stored.
+     * @throws ChatUnavailableException when no <b>Anthropic API key</b> is stored.
      */
     void ask(Operator operator, String question, List<ToolOffer> tools, Consumer<String> onText);
 }

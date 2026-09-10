@@ -1,12 +1,17 @@
 package net.vaier.adapter.driven;
 
-import net.vaier.domain.AskTool;
+import net.vaier.domain.ChatTool;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ConversationTurn.Role;
 import net.vaier.domain.ToolOffer;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
+import net.vaier.domain.ModelUsage;
+import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatModel;
@@ -28,7 +33,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * The one class in Vaier that knows Spring AI exists (#360). What is worth testing here is the translation:
- * that the prompt, the conversation and the <b>Ask tool</b> catalogue arrive at the model intact, and that
+ * that the prompt, the conversation and the <b>Chat tool</b> catalogue arrive at the model intact, and that
  * the answer comes back in pieces, in order.
  */
 class SpringAiConversationAdapterTest {
@@ -47,6 +52,57 @@ class SpringAiConversationAdapterTest {
         adapter().converse("sk-ant-api03-the-key", "you are Vaier", history, "which machine is red?",
             tools, received::add);
         return received;
+    }
+
+    /**
+     * What the answer cost, read off the stream the way Spring AI's tool loop actually shapes it: only the
+     * first call's chunks carry Anthropic's own usage with the cache split; after a tool result the chunks
+     * carry cumulative prompt and completion totals with no split. So the totals come from the last chunk,
+     * the cache split from the first call, and each later call is taken to have read the same prefix.
+     */
+    @Test
+    void itReportsTheTokensTheAnswerUsed_fromTheCumulativeTotals_withTheFirstCallsCacheSplit() {
+        model.responses = List.of(
+            chunk("", own(92, 25, 4651, 0), null),
+            chunk("", own(92, 53, 4651, 0), null),
+            chunk("Looking", cumulative(1406, 78), null),
+            chunk("Colina", cumulative(2757, 84), null),
+            chunk(" is red.", cumulative(2757, 219), "end_turn"));
+        List<String> received = new ArrayList<>();
+
+        ModelUsage used = adapter().converse("sk-ant-api03-the-key", "you are Vaier", List.of(), "which?",
+            List.of(), received::add);
+
+        // three calls: the first wrote 4651 to cache, the two after it each read that prefix back
+        assertThat(used).isEqualTo(new ModelUsage("claude-opus-5", 2757, 219, 4651, 9302));
+        assertThat(received).containsExactly("Looking", "Colina", " is red.");
+    }
+
+    /** One call, no tools: Anthropic's own usage is the whole answer. */
+    @Test
+    void aSingleCallIsCountedAsItsOwnUsageSays() {
+        model.responses = List.of(chunk("half", own(700, 9, 0, 1200), null), chunk("", own(700, 41, 0, 1200), "end_turn"));
+
+        ModelUsage used = adapter().converse("sk-ant-api03-the-key", "you are Vaier", List.of(), "which?",
+            List.of(), text -> { });
+
+        assertThat(used).isEqualTo(new ModelUsage("claude-opus-5", 700, 41, 0, 1200));
+    }
+
+    private static DefaultUsage own(int in, int out, int cacheWrite, int cacheRead) {
+        return new DefaultUsage(in, out, in + out, new AnthropicApi.Usage(in, out, cacheWrite, cacheRead));
+    }
+
+    private static DefaultUsage cumulative(int prompt, int completion) {
+        return new DefaultUsage(prompt, completion);
+    }
+
+    private static ChatResponse chunk(String text, DefaultUsage usage, String finishReason) {
+        ChatGenerationMetadata generationMetadata = finishReason == null
+            ? ChatGenerationMetadata.NULL
+            : ChatGenerationMetadata.builder().finishReason(finishReason).build();
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text), generationMetadata)),
+            ChatResponseMetadata.builder().usage(usage).build());
     }
 
     @Test
@@ -87,20 +143,20 @@ class SpringAiConversationAdapterTest {
     @Test
     void itOffersEachToolUnderTheCatalogueNameAndDescription() {
         converse(List.of(), List.of(
-            new ToolOffer(AskTool.FLEET, () -> "colina27 connected"),
-            new ToolOffer(AskTool.DISKS, () -> "colina27 /volume1 86%")));
+            new ToolOffer(ChatTool.FLEET, () -> "colina27 connected"),
+            new ToolOffer(ChatTool.DISKS, () -> "colina27 /volume1 86%")));
 
         List<ToolCallback> callbacks = ((ToolCallingChatOptions) model.prompt.getOptions()).getToolCallbacks();
         assertThat(callbacks).extracting(callback -> callback.getToolDefinition().name())
             .containsExactly("fleet", "disks");
         assertThat(callbacks).extracting(callback -> callback.getToolDefinition().description())
-            .containsExactly(AskTool.FLEET.description(), AskTool.DISKS.description());
+            .containsExactly(ChatTool.FLEET.description(), ChatTool.DISKS.description());
     }
 
     /** Calling the tool runs the read it was offered with, and nothing else. */
     @Test
     void callingAnOfferedToolPerformsTheReadBehindIt() {
-        converse(List.of(), List.of(new ToolOffer(AskTool.FLEET, () -> "colina27 connected")));
+        converse(List.of(), List.of(new ToolOffer(ChatTool.FLEET, () -> "colina27 connected")));
 
         ToolCallback fleet = ((ToolCallingChatOptions) model.prompt.getOptions()).getToolCallbacks().get(0);
         assertThat(fleet.call("{}")).contains("colina27 connected");
@@ -114,7 +170,7 @@ class SpringAiConversationAdapterTest {
     @Test
     void aToolWithParametersIsOfferedWithTheirSchema_andACallHandsThemToTheRead() {
         List<Map<String, String>> seen = new ArrayList<>();
-        converse(List.of(), List.of(new ToolOffer(AskTool.RUN_ON_MACHINE, args -> {
+        converse(List.of(), List.of(new ToolOffer(ChatTool.RUN_ON_MACHINE, args -> {
             seen.add(args);
             return "up 3 days";
         })));
@@ -130,7 +186,7 @@ class SpringAiConversationAdapterTest {
     @Test
     void aParameterThatTakesManyValues_isAnArrayInTheSchema_andArrivesOnePerLine() {
         List<Map<String, String>> seen = new ArrayList<>();
-        converse(List.of(), List.of(new ToolOffer(AskTool.BUNDLE_FILES, args -> {
+        converse(List.of(), List.of(new ToolOffer(ChatTool.BUNDLE_FILES, args -> {
             seen.add(args);
             return "offered";
         })));
@@ -154,7 +210,7 @@ class SpringAiConversationAdapterTest {
      */
     @Test
     void itPinsTheModelAndCachesTheStablePartOfTheRequest() {
-        AnthropicChatOptions options = SpringAiConversationAdapter.askOptions();
+        AnthropicChatOptions options = SpringAiConversationAdapter.chatOptions();
 
         assertThat(options.getModel()).isEqualTo("claude-opus-5");
         assertThat(options.getMaxTokens()).isEqualTo(4096);
@@ -164,7 +220,7 @@ class SpringAiConversationAdapterTest {
     /** Adaptive thinking is the model's own; a token budget is the old shape and Claude Opus 5 refuses it. */
     @Test
     void itSetsNoThinkingBudget() {
-        assertThat(SpringAiConversationAdapter.askOptions().getThinking()).isNull();
+        assertThat(SpringAiConversationAdapter.chatOptions().getThinking()).isNull();
     }
 
     /**
@@ -190,6 +246,7 @@ class SpringAiConversationAdapterTest {
         private String apiKey;
         private Prompt prompt;
         private List<String> chunks = List.of("Colina is red.");
+        private List<ChatResponse> responses;
 
         @Override
         public ChatResponse call(Prompt request) {
@@ -200,7 +257,8 @@ class SpringAiConversationAdapterTest {
         @Override
         public Flux<ChatResponse> stream(Prompt request) {
             this.prompt = request;
-            return Flux.fromIterable(chunks).map(RecordingChatModel::chunk);
+            return responses != null ? Flux.fromIterable(responses)
+                : Flux.fromIterable(chunks).map(RecordingChatModel::chunk);
         }
 
         @Override

@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * A <b>Bundle</b> (#360): files on one machine that Ask offers as a download card. Nothing is copied or
+ * A <b>Bundle</b> (#360): files on one machine that Chat offers as a download card. Nothing is copied or
  * written anywhere — the zip is built while it downloads — so the whole of what Vaier holds is the list of
  * paths, what they add up to, and an hour.
  */

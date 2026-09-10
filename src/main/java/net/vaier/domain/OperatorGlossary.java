@@ -222,54 +222,74 @@ public final class OperatorGlossary {
                     "The friendly label shown on a service's launchpad tile.",
                     "Set it so tiles read clearly instead of showing raw container names."))),
 
-            new ConceptGroup("Ask", List.of(
-                Concept.of("Ask",
-                    "The Explorer pane where you talk to Vaier in sentences and are answered from the "
+            new ConceptGroup("Chat", List.of(
+                Concept.of("Chat",
+                    "The Explorer pane where you talk to Marvin in sentences and are answered from the "
                         + "fleet's own facts. It can look, and it can propose; it changes nothing until "
                         + "you click a confirmation.",
                     "It is the quickest way to a question that would otherwise mean opening three panes — "
                         + "which machine is red and why, who is waiting to join, how last night's backups "
                         + "went. It appears in the menu only once an Anthropic API key is stored."),
+                Concept.of("Marvin",
+                    "Who answers in Chat: the Paranoid Android from The Hitchhiker's Guide to the Galaxy, "
+                        + "kept by Vaier to answer questions about a fleet of small computers with a brain "
+                        + "the size of a planet.",
+                    "Gloomy, weary, dryly sardonic, and never wrong. The mood is a garnish on an accurate "
+                        + "answer, never a reason to withhold one, and never aimed at you; and he is never in "
+                        + "charge of anything, since every change still waits for your click."),
                 Concept.of("Anthropic API key",
                     "Your own key for the Claude API, stored encrypted in Settings like the SMTP password "
                         + "and never shown again.",
-                    "It is what makes Ask available, and it is billed to you. It never leaves this server "
-                        + "except to the Claude API, and clearing it removes Ask from the menu."),
-                Concept.of("Ask tool",
+                    "It is what makes Chat available, and it is billed to you. It never leaves this server "
+                        + "except to the Claude API, and clearing it removes Chat from the menu."),
+                Concept.of("Chat tool",
                     "One read of the fleet Vaier may make while answering you — the machines, who is "
                         + "waiting to join, the published services, backups, disks, container updates, "
                         + "security decisions, or one read-only command on a machine.",
-                    "Everything Ask says comes from one of these reads and nothing else; when none of them "
-                        + "has the answer, Ask says it does not know rather than guess. No tool ever carries "
+                    "Everything Chat says comes from one of these reads and nothing else; when none of them "
+                        + "has the answer, Chat says it does not know rather than guess. No tool ever carries "
                         + "a key, a password or a credential."),
                 Concept.of("Read-only command",
-                    "A single command line Ask runs on a machine over SSH, as Vaier's login user there and "
+                    "A single command line Chat runs on a machine over SSH, as Vaier's login user there and "
                         + "without sudo, and reads back what it printed.",
-                    "It is how Ask answers what Vaier does not already track — pending OS updates, uptime, "
+                    "It is how Chat answers what Vaier does not already track — pending OS updates, uptime, "
                         + "a log, a process list. Only looking commands are allowed: anything that could "
                         + "change the machine, chain commands or read where secrets live is refused, which "
-                        + "is what keeps \"Ask can look, never change\" true."),
-                Concept.of("Ask action",
+                        + "is what keeps \"Chat can look, never change\" true."),
+                Concept.of("Chat action",
                     "One thing Vaier may propose while answering you: let a phone in or refuse it, back up "
                         + "a machine, update a container, lift a block, trust an address.",
-                    "Each is a button the Explorer already has, so Ask can never do more than you could "
+                    "Each is a button the Explorer already has, so Chat can never do more than you could "
                         + "by hand. Proposing runs nothing; it puts a confirmation in front of you."),
                 Concept.of("Confirmation",
-                    "The card a proposed action becomes in the Ask pane: one sentence saying exactly what "
+                    "The card a proposed action becomes in the Chat pane: one sentence saying exactly what "
                         + "will happen, and a button that says the same.",
                     "Your click is the only thing that runs it. A card lives ten minutes and runs once, "
                         + "and \"Not now\" runs nothing — so nothing on this fleet ever changes on the "
                         + "model's say-so."),
                 Concept.of("Bundle",
-                    "Files on one machine that Ask offers you as a download card: one zip, named for what "
+                    "Files on one machine that Chat offers you as a download card: one zip, named for what "
                         + "it holds, built while it downloads.",
-                    "It is how Ask hands over the files it found — the pictures from last year today, say. "
+                    "It is how Chat hands over the files it found — the pictures from last year today, say. "
                         + "Nothing is copied or written anywhere, and the card's link lives an hour."),
                 Concept.of("Conversation",
-                    "What you have asked in Ask and what Vaier answered, in order, kept by Vaier under "
+                    "What you have asked in Chat and what Vaier answered, in order, kept by Vaier under "
                         + "your login the way everything else is kept: a file.",
                     "A follow-up like \"and Colina?\" works next week too, because the thread is still "
                         + "there. Once it is long, the older turns are shortened into a summary that stands "
-                        + "in for them; Start over forgets the whole thread."))));
+                        + "in for them; Start over forgets the whole thread."),
+                Concept.of("Memory",
+                    "What Marvin remembers across conversations, kept by Vaier for the whole fleet: short facts such as where "
+                        + "the photos live or which machine is the relay, whether you said them or Chat found "
+                        + "them by looking.",
+                    "It is why you only have to explain something once. Every memory is listed on the Chat "
+                        + "pane, folded under \"What Vaier remembers\", and you can remove any of them "
+                        + "there; nothing can be planted in it unseen."),
+                Concept.of("Spend",
+                    "What Chat has cost this month on your own Anthropic API key: the tokens every answer "
+                        + "used, counted by Vaier and priced at Anthropic's list price.",
+                    "It is the figure under the Chat pane's description, so a chatty afternoon never comes as "
+                        + "a surprise on the bill. Vaier's own count, not Anthropic's invoice: the two "
+                        + "should agree to the cent, and the invoice wins if they do not."))));
     }
 }

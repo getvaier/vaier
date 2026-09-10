@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * A <b>Read-only command</b> (#360): one command line the model may run on a machine through <b>Ask</b>.
+ * A <b>Read-only command</b> (#360): one command line the model may run on a machine through <b>Chat</b>.
  *
  * <p>"run_on_machine can look, never change" is the promise this tool makes; this is the mechanism that keeps it. It is
  * a list of what is allowed — never of what is forbidden — judged word by word: the first word of every
@@ -198,7 +198,7 @@ public record ReadOnlyCommand(String line) {
         String lower = word.toLowerCase(Locale.ROOT);
         for (String home : SECRET_HOMES) {
             if (lower.contains(home)) {
-                throw new IllegalArgumentException("Ask never reads where secrets live, and " + word
+                throw new IllegalArgumentException("Chat never reads where secrets live, and " + word
                     + " looks like such a place.");
             }
         }
@@ -244,7 +244,7 @@ public record ReadOnlyCommand(String line) {
             }
         }
         if (quote != 0) {
-            throw new IllegalArgumentException("Ask could not read that command: a quote is not closed.");
+            throw new IllegalArgumentException("Chat could not read that command: a quote is not closed.");
         }
         stages.add(line.substring(start));
         return stages;

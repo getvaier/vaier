@@ -21,7 +21,7 @@
         file:    '<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>',
         shell:   '<rect x="2" y="3" width="12" height="10" rx="1"/><path d="M4.6 6.2l2 1.8-2 1.8M8.4 10h3"/>',
         chev:    '<path d="M6 4l4 4-4 4"/>',
-        ask:     '<path d="M2.5 3.5h11v7H7.5l-3 2.5v-2.5h-2z"/><path d="M6.6 6.4c0-.8.6-1.4 1.4-1.4s1.4.6 1.4 1.3c0 1-1.4 1.1-1.4 2.1M8 9.9v.1"/>',
+        chat:     '<path d="M2.5 3.5h11v7H7.5l-3 2.5v-2.5h-2z"/><path d="M6.6 6.4c0-.8.6-1.4 1.4-1.4s1.4.6 1.4 1.3c0 1-1.4 1.1-1.4 2.1M8 9.9v.1"/>',
         infra:   '<rect x="1" y="2" width="14" height="10" rx="1"/><path d="M5 15h6M8 12v3"/>',
         archive: '<path d="M2 5h12v8H2z"/><path d="M1.5 3h13v2h-13zM6.5 8h3"/>',
         users:   '<circle cx="6" cy="6" r="2.4"/><path d="M1.8 13.5c.3-2.4 2.2-3.8 4.2-3.8s3.9 1.4 4.2 3.8"/><path d="M11 4.2a2.2 2.2 0 0 1 0 4.3M12 9.9c1.4.5 2.3 1.8 2.5 3.6"/>',
@@ -110,7 +110,8 @@
         { name: 'credentials', label: 'Credentials', icon: 'key', native: true, group: 'Your fleet' },
         { name: 'users',    label: 'Users',    icon: 'users',  page: 'users.html', group: 'Who gets in' },
         { name: 'security', label: 'Security', icon: 'shield', native: true,      group: 'Who gets in' },
-        { name: 'ask',      label: 'Ask',      icon: 'ask',    native: true,      group: 'Vaier' },
+        { name: 'chat',     label: 'Chat',     icon: 'chat',   native: true,      group: 'Vaier',
+          desc: 'Ask Marvin about your fleet' },
         { name: 'settings', label: 'Settings', icon: 'gear',   native: true,      group: 'Vaier' },
         { name: 'concepts', label: 'Concepts', icon: 'book',   page: 'concepts.html', group: 'Vaier' },
     ];
@@ -145,8 +146,8 @@
     // --- state ----------------------------------------------------------------------------------------
 
     const S = {
-        askAvailable: false,     // whether an Anthropic API key is stored — Ask exists only then
-        ask: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '' },   // the kept conversation: { role, text }, and the question being typed
+        askAvailable: false,     // whether an Anthropic API key is stored — Chat exists only then
+        chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], spend: null },   // the kept conversation: { role, text }, the question being typed, and what Vaier remembers
         enrolmentRequests: [],   // phones waiting on a join code: { code, name, publicKey, expiresAt }
         path: ['fleet'],                 // the selected entry, as its path
         machines: [],                    // GET /machines
@@ -1169,7 +1170,7 @@
         const kind = kindOf(S.path);
         // Standing anywhere else ends the visit to the Map, so opening it again frames the fleet afresh.
         if (kind !== 'map') _mapFramed = false;
-        if (kind !== 'ask') _askOpen = false;
+        if (kind !== 'chat') _chatOpen = false;
         // The same reflex, for the same reason: leaving Credentials ends the visit, so opening it again
         // re-reads where every credential stands. Those standings age on the server — the reconcile runs
         // every five minutes — and a stale strip is the one thing this entry must never show.
@@ -1183,7 +1184,7 @@
         if (kind === 'fleet') return renderFleet(pane);
         if (kind === 'map') return renderMap(pane);
         if (kind === 'settings') return renderSettings(pane);
-        if (kind === 'ask') return renderAsk(pane);
+        if (kind === 'chat') return renderChat(pane);
         if (kind === 'security') return renderSecurity(pane);
         if (kind === 'credentials') return renderCredentials(pane);
         if (kind === 'gbridge') return renderGlobalBridge(pane);
@@ -6872,59 +6873,75 @@
     // lives here: it is the fleet-wide "when", the one backup knob that is the operator's to set — everything
     // else about a backup is Vaier's.
 
-    // Whether Ask may be offered — the one bit the menu needs before Settings has been opened.
-    async function loadAskAvailability() {
+    // What Chat has cost this month, shown in the Chat pane's head. Read at start and after each answer
+    // this browser asked for — the only moments it can change from here — never on a timer.
+    async function loadSpend() {
+        if (!S.chatAvailable) { S.chat.spend = null; return; }
         try {
-            const res = await fetch('/ask/availability', { cache: 'no-store' });
-            S.askAvailable = res.ok ? !!(await res.json()).available : false;
+            const res = await fetch('/chat/spend', { cache: 'no-store' });
+            S.chat.spend = res.ok ? await res.json() : null;
         } catch (e) {
-            S.askAvailable = false;
+            S.chat.spend = null;
+        }
+        if (kindOf(S.path) === 'chat') render();
+    }
+
+    // Whether Chat may be offered — the one bit the menu needs before Settings has been opened.
+    async function loadChatAvailability() {
+        try {
+            const res = await fetch('/chat/availability', { cache: 'no-store' });
+            S.chatAvailable = res.ok ? !!(await res.json()).available : false;
+        } catch (e) {
+            S.chatAvailable = false;
         }
     }
 
-    // ---- Ask: the fleet, answered in sentences ------------------------------------------------------------
+    // ---- Chat: the fleet, answered in sentences ------------------------------------------------------------
     // The conversation lives here for the visit; Vaier keeps none of it yet. Answers arrive as a stream
     // read off one POST — no EventSource, no timer — and are painted as they come.
-    let _askOpen = false;   // whether the Ask pane is the one being visited — the box takes focus once, on entry
+    let _chatOpen = false;   // whether the Chat pane is the one being visited — the box takes focus once, on entry
 
-    function renderAsk(pane) {
-        pane.appendChild(paneHead('Ask', false, 'The fleet, answered in sentences'));
-        const body = el('div', 'ex-pane-body ex-ask');
+    function renderChat(pane) {
+        const head = paneHead('Chat', false, 'Marvin answers, looks, proposes, hands over files, and remembers.');
+        // What Chat has cost this month, on the operator's own key: a quiet line under the description.
+        if (S.chat.spend) {
+            const spend = el('div', 'ex-chat-spend');
+            spend.textContent = 'Claude ' + S.chat.spend.figure + ' this month, ' + S.chat.spend.calls
+                + (S.chat.spend.calls === 1 ? ' answer' : ' answers') + '.';
+            spend.title = S.chat.spend.inputTokens.toLocaleString() + ' tokens in, '
+                + S.chat.spend.outputTokens.toLocaleString() + ' out, '
+                + S.chat.spend.cacheReadTokens.toLocaleString() + ' read from cache. List price on your own key; the invoice wins if they differ.';
+            head.appendChild(spend);
+        }
+        pane.appendChild(head);
+        const body = el('div', 'ex-pane-body ex-chat');
         pane.appendChild(body);
 
-        if (!S.askAvailable) {
-            body.appendChild(note('Ask needs your Anthropic API key. Add one under Settings and Ask appears here.', false));
+        if (!S.chatAvailable) {
+            body.appendChild(note('Chat needs your Anthropic API key. Add one under Settings and Chat appears here.', false));
             return;
         }
 
         // The conversation is Vaier's to remember: read once on entry, drawn from here after.
-        if (!S.ask.loaded) loadConversation();
+        if (!S.chat.loaded) loadConversation();
 
-        const thread = el('div', 'ex-ask-thread');
-        if (S.ask.summary) {
-            const brief = el('div', 'ex-ask-brief');
-            brief.textContent = 'Earlier, in brief: ' + S.ask.summary;
+        const thread = el('div', 'ex-chat-thread');
+        if (S.chat.summary) {
+            const brief = el('div', 'ex-chat-brief');
+            brief.textContent = 'Earlier, in brief: ' + S.chat.summary;
             thread.appendChild(brief);
         }
-        if (S.ask.loaded && !S.ask.turns.length && !S.ask.summary) {
-            const intro = el('div', 'ex-ask-intro');
-            intro.textContent = 'Ask about the fleet in your own words. Vaier answers from what it knows right now, and only that.';
+        if (S.chat.loaded && !S.chat.turns.length && !S.chat.summary) {
+            const intro = el('div', 'ex-chat-intro');
+            intro.textContent = 'Ask Marvin about the fleet in your own words. He answers from what Vaier knows right now, and only that, and he will let you know how he feels about it.';
             thread.appendChild(intro);
-            const tries = el('div', 'ex-ask-tries');
-            ['Which machines are not connected?', 'Is anyone waiting to join?', 'How did last night\'s backups go?']
-                .forEach((q) => {
-                    const b = el('button', 'ex-btn'); b.textContent = q;
-                    b.onclick = () => askVaier(q);
-                    tries.appendChild(b);
-                });
-            thread.appendChild(tries);
         }
-        S.ask.turns.forEach((t) => thread.appendChild(askTurn(t)));
-        if (S.ask.error) thread.appendChild(note(S.ask.error, true));
-        if (S.ask.turns.length || S.ask.summary) {
-            const over = el('div', 'ex-ask-over');
+        S.chat.turns.forEach((t) => thread.appendChild(chatTurn(t)));
+        if (S.chat.error) thread.appendChild(note(S.chat.error, true));
+        if (S.chat.turns.length || S.chat.summary) {
+            const over = el('div', 'ex-chat-over');
             const forget = el('button', 'ex-btn'); forget.textContent = 'Start over';
-            forget.disabled = S.ask.busy;
+            forget.disabled = S.chat.busy;
             forget.onclick = startOver;
             over.appendChild(forget);
             thread.appendChild(over);
@@ -6935,36 +6952,53 @@
         // textarea would drop the words being typed mid-sentence, so the draft is state and is put back
         // here — caret and all — and the box takes focus on entry, and after that only if it had it or
         // nothing else does, so a repaint never pulls the cursor out of a dialog.
-        const entering = !_askOpen; _askOpen = true;
+        const entering = !_chatOpen; _chatOpen = true;
         const was = document.activeElement;
-        const hadFocus = was && was.classList && was.classList.contains('ex-ask-box');
+        const hadFocus = was && was.classList && was.classList.contains('ex-chat-box');
         const caret = hadFocus ? [was.selectionStart, was.selectionEnd] : null;
-        const row = el('div', 'ex-ask-row');
-        const box = el('textarea', 'ex-input ex-ask-box');
-        box.rows = 2; box.placeholder = 'Ask Vaier…'; box.spellcheck = true;
-        box.disabled = S.ask.busy;
-        box.value = S.ask.draft;
-        box.oninput = () => { S.ask.draft = box.value; };
-        const send = el('button', 'ex-btn is-accent'); send.textContent = S.ask.busy ? 'Answering…' : 'Ask';
-        send.disabled = S.ask.busy;
-        const go = () => { const q = box.value.trim(); if (q) { box.value = ''; S.ask.draft = ''; askVaier(q); } };
+        const row = el('div', 'ex-chat-row');
+        const box = el('textarea', 'ex-input ex-chat-box');
+        box.rows = 2; box.placeholder = 'Ask Marvin…'; box.spellcheck = true;
+        box.disabled = S.chat.busy;
+        box.value = S.chat.draft;
+        box.oninput = () => { S.chat.draft = box.value; };
+        const send = el('button', 'ex-btn is-accent'); send.textContent = S.chat.busy ? 'Answering…' : 'Ask';
+        send.disabled = S.chat.busy;
+        const go = () => { const q = box.value.trim(); if (q) { box.value = ''; S.chat.draft = ''; askVaier(q); } };
         send.onclick = go;
         box.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } };
         row.append(box, send);
         body.appendChild(row);
-        if (!S.ask.busy && (entering || hadFocus || !was || was === document.body)) {
+        // Everything Marvin remembers, folded and under the input so it is never in the way of typing: nothing is planted in its memory unseen, and the
+        // remove button is the operator's last word on what stays.
+        if (S.chat.memory.length) {
+            const fold = disclosure('What Marvin remembers (' + S.chat.memory.length + ')');
+            const list = el('div', 'ex-chat-memory');
+            S.chat.memory.forEach((f) => {
+                const row = el('div', 'ex-chat-memory-row');
+                const text = el('div', 'ex-chat-memory-text'); text.textContent = f.text;
+                const rm = el('button', 'ex-iconbtn is-danger'); rm.innerHTML = svg('trash', 'ex-ico');
+                rm.title = 'Forget this'; rm.onclick = () => forgetFact(f);
+                row.append(text, rm);
+                list.appendChild(row);
+            });
+            fold.appendChild(list);
+            body.appendChild(fold);
+        }
+
+        if (!S.chat.busy && (entering || hadFocus || !was || was === document.body)) {
             box.focus();
             if (caret) box.setSelectionRange(caret[0], caret[1]);
         }
         pane.scrollTop = pane.scrollHeight;
     }
 
-    function askTurn(t) {
-        if (t.kind === 'card') return askCard(t);
-        if (t.kind === 'bundle') return askBundleCard(t);
-        const turn = el('div', 'ex-ask-turn ' + (t.role === 'OPERATOR' ? 'is-you' : 'is-vaier'));
-        const who = el('div', 'ex-ask-who'); who.textContent = t.role === 'OPERATOR' ? 'You' : 'Vaier';
-        const text = el('div', 'ex-ask-text'); text.textContent = t.text || (t.role === 'VAIER' ? '…' : '');
+    function chatTurn(t) {
+        if (t.kind === 'card') return chatCard(t);
+        if (t.kind === 'bundle') return chatBundleCard(t);
+        const turn = el('div', 'ex-chat-turn ' + (t.role === 'OPERATOR' ? 'is-you' : 'is-vaier'));
+        const who = el('div', 'ex-chat-who'); who.textContent = t.role === 'OPERATOR' ? 'You' : 'Marvin';
+        const text = el('div', 'ex-chat-text'); text.textContent = t.text || (t.role === 'VAIER' ? '…' : '');
         turn.append(who, text);
         return turn;
     }
@@ -6972,27 +7006,47 @@
     // The kept conversation, once per visit. Nothing here decides anything: what is kept, and for how
     // long, is Vaier's; the pane only shows it.
     async function loadConversation() {
-        S.ask.loaded = true;
+        S.chat.loaded = true;
         try {
-            const res = await fetch('/ask/conversation', { cache: 'no-store' });
+            const res = await fetch('/chat/conversation', { cache: 'no-store' });
             if (!res.ok) return;
             const c = await res.json();
-            S.ask.turns = (c.turns || []).map((t) => ({ role: t.role, text: t.text }));
-            S.ask.summary = c.summary || null;
+            S.chat.turns = (c.turns || []).map((t) => ({ role: t.role, text: t.text }));
+            S.chat.summary = c.summary || null;
+            loadMemory();
         } catch (e) {
             // Nothing kept, or nothing reachable: the pane starts empty either way.
         }
-        if (kindOf(S.path) === 'ask') render();
+        if (kindOf(S.path) === 'chat') render();
+    }
+
+    // What Marvin remembers. Re-read after every answer, because the answer may have remembered something.
+    async function loadMemory() {
+        try {
+            const res = await fetch('/chat/memory', { cache: 'no-store' });
+            if (res.ok) S.chat.memory = (await res.json()).facts || [];
+        } catch (e) {
+            // Shown as empty until the next read; nothing decided on it here.
+        }
+        if (kindOf(S.path) === 'chat') render();
+    }
+
+    async function forgetFact(f) {
+        try {
+            const res = await fetch(`/chat/memory/${encodeURIComponent(f.id)}`, { method: 'DELETE' });
+            if (!res.ok) { toast('Vaier could not forget that.'); return; }
+        } catch (e) { toast('Vaier could not forget that.'); return; }
+        await loadMemory();
     }
 
     // Start over: the one way to forget, and it is Vaier that forgets — a reload would bring it all back.
     async function startOver() {
-        if (S.ask.busy) return;
+        if (S.chat.busy) return;
         try {
-            const res = await fetch('/ask/conversation', { method: 'DELETE' });
+            const res = await fetch('/chat/conversation', { method: 'DELETE' });
             if (!res.ok) { toast('Vaier could not forget that conversation.'); return; }
         } catch (e) { toast('Vaier could not forget that conversation.'); return; }
-        S.ask.turns = []; S.ask.summary = null; S.ask.error = null;
+        S.chat.turns = []; S.chat.summary = null; S.chat.error = null;
         render();
     }
 
@@ -7000,13 +7054,13 @@
     // thing, because it is what will happen. Nothing runs until it is clicked, and a card that was declined
     // says so and runs nothing. A card is never the answer the stream paints into, so it carries none of
     // the answer's classes.
-    function askCard(t) {
-        const card = el('div', 'ex-ask-card' + (t.state === 'proposed' ? '' : ' is-' + t.state));
-        const sentence = el('div', 'ex-ask-card-sentence');
-        sentence.textContent = t.state === 'proposed' ? 'Vaier proposes: ' + t.sentence : t.sentence;
+    function chatCard(t) {
+        const card = el('div', 'ex-chat-card' + (t.state === 'proposed' ? '' : ' is-' + t.state));
+        const sentence = el('div', 'ex-chat-card-sentence');
+        sentence.textContent = t.state === 'proposed' ? 'Marvin proposes: ' + t.sentence : t.sentence;
         card.appendChild(sentence);
         if (t.state === 'proposed') {
-            const row = el('div', 'ex-ask-card-row');
+            const row = el('div', 'ex-chat-card-row');
             const yes = el('button', 'ex-btn is-accent');
             yes.textContent = t.sentence.replace(/\.$/, '');
             yes.onclick = () => confirmAction(t);
@@ -7015,7 +7069,7 @@
             row.append(yes, no);
             card.appendChild(row);
         } else {
-            const outcome = el('div', 'ex-ask-card-outcome');
+            const outcome = el('div', 'ex-chat-card-outcome');
             outcome.textContent = t.state === 'working' ? 'Doing it…' : (t.outcome || '');
             card.appendChild(outcome);
         }
@@ -7028,7 +7082,7 @@
         if (t.state !== 'proposed') return;
         t.state = 'working'; render();
         try {
-            const res = await fetch(`/ask/actions/${encodeURIComponent(t.id)}`, { method: 'POST' });
+            const res = await fetch(`/chat/actions/${encodeURIComponent(t.id)}`, { method: 'POST' });
             const body = await res.json().catch(() => ({}));
             t.state = res.ok && body.done ? 'done' : 'failed';
             t.outcome = body.text || 'Vaier could not do that.';
@@ -7040,11 +7094,11 @@
 
     // Files handed over, as a card whose button is the download. The browser follows the link and streams
     // the zip to disk, as every Explorer download does; the link lives an hour.
-    function askBundleCard(t) {
-        const card = el('div', 'ex-ask-card is-bundle');
-        const sentence = el('div', 'ex-ask-card-sentence');
+    function chatBundleCard(t) {
+        const card = el('div', 'ex-chat-card is-bundle');
+        const sentence = el('div', 'ex-chat-card-sentence');
         sentence.textContent = t.name + ' is ready: ' + t.size + '.';
-        const row = el('div', 'ex-ask-card-row');
+        const row = el('div', 'ex-chat-card-row');
         const get = el('button', 'ex-btn is-accent');
         get.innerHTML = svg('download', 'ex-ico');
         get.append(document.createTextNode('Download ' + t.name));
@@ -7060,7 +7114,7 @@
         if (t.state !== 'proposed') return;
         t.state = 'declined'; t.outcome = 'Not done.'; render();
         try {
-            await fetch(`/ask/actions/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
+            await fetch(`/chat/actions/${encodeURIComponent(t.id)}`, { method: 'DELETE' });
         } catch (e) {
             // The card expires on its own in ten minutes; declining it is never urgent.
         }
@@ -7069,14 +7123,14 @@
     // One question: append it, open a Vaier turn, then fill that turn as the stream arrives. The
     // conversation so far is Vaier's to remember, so only the question is sent.
     async function askVaier(question) {
-        if (S.ask.busy) return;
-        S.ask.turns.push({ role: 'OPERATOR', text: question });
+        if (S.chat.busy) return;
+        S.chat.turns.push({ role: 'OPERATOR', text: question });
         const answer = { role: 'VAIER', text: '' };
-        S.ask.turns.push(answer);
-        S.ask.busy = true; S.ask.error = null;
+        S.chat.turns.push(answer);
+        S.chat.busy = true; S.chat.error = null;
         render();
         try {
-            const res = await fetch('/ask', {
+            const res = await fetch('/chat', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question: question }),
             });
@@ -7088,7 +7142,7 @@
                 if (name === 'text') { answer.text += data; paintLastAnswer(answer.text); }
                 else if (name === 'bundle') {
                     const b = JSON.parse(data);
-                    S.ask.turns.splice(S.ask.turns.length - 1, 0,
+                    S.chat.turns.splice(S.chat.turns.length - 1, 0,
                         { role: 'VAIER', kind: 'bundle', id: b.id, name: b.name, size: b.size, url: b.url });
                     render();
                 }
@@ -7096,23 +7150,25 @@
                     // The card goes before the answer being written, so the answer stays the last Vaier
                     // turn and the streaming painter keeps writing into the right element.
                     const c = JSON.parse(data);
-                    S.ask.turns.splice(S.ask.turns.length - 1, 0,
+                    S.chat.turns.splice(S.chat.turns.length - 1, 0,
                         { role: 'VAIER', kind: 'card', id: c.id, sentence: c.sentence, state: 'proposed' });
                     render();
                 }
                 else if (name === 'error') throw new Error(data || 'Vaier could not answer.');
             });
         } catch (e) {
-            if (!answer.text) S.ask.turns.pop();
-            S.ask.error = e.message || 'Vaier could not answer.';
+            if (!answer.text) S.chat.turns.pop();
+            S.chat.error = e.message || 'Vaier could not answer.';
         }
-        S.ask.busy = false;
+        S.chat.busy = false;
         render();
+        loadMemory();
+        loadSpend();
     }
 
     // Repaint only the answer being written, so the page does not rebuild on every few words.
     function paintLastAnswer(text) {
-        const turns = document.querySelectorAll('.ex-ask-turn.is-vaier .ex-ask-text');
+        const turns = document.querySelectorAll('.ex-chat-turn.is-vaier .ex-chat-text');
         const last = turns[turns.length - 1];
         if (last) { last.textContent = text; const pane = $('exPane'); if (pane) pane.scrollTop = pane.scrollHeight; }
     }
@@ -7184,9 +7240,10 @@
     // re-reads the whole config — a saved section already shows its new value.
     // A key saved or removed changes what the menu offers, so both are re-read before the next paint.
     async function afterKeyChange() {
-        S.ask = { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '' };
-        await Promise.all([loadAskAvailability(), loadSettings()]);
+        S.chat = { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], spend: null };
+        await Promise.all([loadChatAvailability(), loadSettings()]);
         renderVMenu();
+        loadSpend();
     }
 
     async function saveSetting(url, method, body, noteEl, okText) {
@@ -7461,12 +7518,12 @@
         };
         smtp.querySelector('.ex-set-actions').insertBefore(testBtn, smtp.querySelector('.ex-set-note'));
 
-        // --- Ask: your own Anthropic API key, and nothing else about it ---
-        const ask = sectionForm('Ask');
+        // --- Chat: your own Anthropic API key, and nothing else about it ---
+        const ask = sectionForm('Chat');
         const keyState = el('div', 'ex-hint');
         keyState.textContent = c.hasAnthropicApiKey
-            ? 'A key is stored. Ask is in the menu.'
-            : 'No key stored. Ask appears in the menu once there is one.';
+            ? 'A key is stored. Chat is in the menu.'
+            : 'No key stored. Chat appears in the menu once there is one.';
         // Never prefilled: the key is written once and never read back to a browser.
         const key = input('', c.hasAnthropicApiKey ? 'Paste a new key to replace the stored one' : 'sk-ant-…', 'password');
         ask.append(keyState, field('Anthropic API key',
@@ -7474,12 +7531,12 @@
             key));
         const askNote = saveRow(ask, 'Save key', (n) => {
             if (!key.value.trim()) { n.className = 'ex-set-note is-err'; n.textContent = 'Paste a key first.'; return; }
-            saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: key.value.trim() }, n, 'Key saved. Ask is in the menu.')
+            saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: key.value.trim() }, n, 'Key saved. Chat is in the menu.')
                 .then((ok) => { key.value = ''; if (ok) afterKeyChange(); });
         });
         if (c.hasAnthropicApiKey) {
             const forget = el('button', 'ex-btn'); forget.textContent = 'Remove key';
-            forget.onclick = () => saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: '' }, askNote, 'Key removed. Ask has left the menu.')
+            forget.onclick = () => saveSetting('/settings/anthropic-api-key', 'PUT', { apiKey: '' }, askNote, 'Key removed. Chat has left the menu.')
                 .then((ok) => { if (ok) afterKeyChange(); });
             ask.querySelector('.ex-set-actions').insertBefore(forget, askNote);
         }
@@ -8498,7 +8555,7 @@
                     return resolve(true);
                 }
                 const said = refusal(xhr);
-                // 409 is the backend refusing to overwrite silently. Ask, and only on a yes send it again with
+                // 409 is the backend refusing to overwrite silently. Chat, and only on a yes send it again with
                 // the flag — and only once: a second 409 (a folder wears the name) is a refusal no replacement
                 // settles, so it is reported rather than asked about again.
                 if (xhr.status === 409 && !overwrite) {
@@ -9632,13 +9689,20 @@
         $('exVMenu').classList.toggle('is-open', open);
     }
 
-    function vMenuItem(icon, label, path) {
-        const item = el('button', 'ex-vmenu-item');
+    function vMenuItem(icon, label, path, desc) {
+        const item = el('button', 'ex-vmenu-item' + (desc ? ' has-desc' : ''));
         item.setAttribute('role', 'menuitem');
         item.innerHTML = svg(icon, 'ex-ico');
+        const text = el('span', 'ex-vmenu-text');
         const lbl = el('span');
         lbl.textContent = label;
-        item.appendChild(lbl);
+        text.appendChild(lbl);
+        if (desc) {
+            const d = el('span', 'ex-vmenu-desc');
+            d.textContent = desc;
+            text.appendChild(d);
+        }
+        item.appendChild(text);
         item.onclick = () => { setVMenu(false); go(path); };
         return item;
     }
@@ -9660,14 +9724,14 @@
                     menu.appendChild(vMenuItem('fleet', 'Fleet', ROUTE_DEFAULT.slice()));
                 }
             }
-            menu.appendChild(vMenuItem(g.icon, g.label, [g.name]));
+            menu.appendChild(vMenuItem(g.icon, g.label, [g.name], g.desc));
         });
     }
 
-    // Ask is in the menu only while an Anthropic API key is stored: without one there is nothing to ask,
+    // Chat is in the menu only while an Anthropic API key is stored: without one there is nothing to ask,
     // and an entry that opens onto "go to Settings first" is a door painted on a wall.
     function offered(g) {
-        return g.name !== 'ask' || S.askAvailable;
+        return g.name !== 'chat' || S.chatAvailable;
     }
 
     function vMenuGroup(text) {
@@ -9736,9 +9800,10 @@
         // only on a machine that actually publishes something, and an entry that grew a moment later would
         // have been lying for that moment.
         await Promise.all([loadFleet(), loadServices(), loadBackup(), loadMyDevice(), loadEnrolmentRequests(),
-            loadAskAvailability()]);
-        // The menu was drawn before Vaier had said whether Ask may be offered; now it has, draw it again.
+            loadChatAvailability()]);
+        // The menu was drawn before Vaier had said whether Chat may be offered; now it has, draw it again.
         renderVMenu();
+        loadSpend();
         // A link into a folder needs the chain above it read before remotePath can resolve where the machine's
         // tree begins. Standing anywhere else this is a no-op.
         if (S.path.length > 3) readPathChain(S.path[1]);

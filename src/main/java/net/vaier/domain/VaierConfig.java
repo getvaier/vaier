@@ -117,7 +117,7 @@ public class VaierConfig {
 
     /**
      * A copy with the <b>Anthropic API key</b> replaced; every other field carries over unchanged. A blank
-     * key is stored as none — clearing the field is how the operator turns <b>Ask</b> off again.
+     * key is stored as none — clearing the field is how the operator turns <b>Chat</b> off again.
      */
     public VaierConfig withAnthropicApiKey(String apiKey) {
         return toBuilder()
@@ -125,7 +125,7 @@ public class VaierConfig {
             .build();
     }
 
-    /** Whether an <b>Anthropic API key</b> is stored — the one thing that makes <b>Ask</b> available. */
+    /** Whether an <b>Anthropic API key</b> is stored — the one thing that makes <b>Chat</b> available. */
     public boolean hasAnthropicApiKey() {
         return anthropicApiKey != null && !anthropicApiKey.isBlank();
     }

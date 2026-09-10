@@ -3,8 +3,9 @@ package net.vaier.adapter.driven;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.domain.AskCapability;
+import net.vaier.domain.ChatCapability;
 import net.vaier.domain.ConversationTurn;
+import net.vaier.domain.ModelUsage;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.ToolParameter;
 import net.vaier.domain.port.ForConversing;
@@ -17,15 +18,20 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -33,8 +39,8 @@ import java.util.stream.Collectors;
 
 /**
  * The one class in Vaier that knows Spring AI exists (#360). It translates and nothing else: a
- * <b>Conversation</b> and a list of <b>Ask tool</b>s go in, the answer comes back in pieces. Which reads
- * exist, how they are worded and whether Ask may be used at all are all decided elsewhere.
+ * <b>Conversation</b> and a list of <b>Chat tool</b>s go in, the answer comes back in pieces. Which reads
+ * exist, how they are worded and whether Chat may be used at all are all decided elsewhere.
  *
  * <p>The model is built per call rather than once at startup, because the <b>Anthropic API key</b> comes
  * from Settings at runtime — an operator who pastes a new key must not have to restart Vaier for it to take.
@@ -66,8 +72,9 @@ public class SpringAiConversationAdapter implements ForConversing {
     }
 
     @Override
-    public void converse(String apiKey, String systemPrompt, List<ConversationTurn> history, String question,
-                         List<ToolOffer> tools, Consumer<String> onText) {
+    public ModelUsage converse(String apiKey, String systemPrompt, List<ConversationTurn> history, String question,
+                               List<ToolOffer> tools, Consumer<String> onText) {
+        UsageTally tally = new UsageTally();
         try {
             ChatClient.create(chatModels.apply(apiKey))
                 .prompt()
@@ -76,13 +83,20 @@ public class SpringAiConversationAdapter implements ForConversing {
                 .user(question)
                 .toolCallbacks(tools.stream().map(SpringAiConversationAdapter::asToolCallback).toList())
                 .stream()
-                .content()
-                .doOnNext(onText)
+                .chatResponse()
+                .doOnNext(response -> {
+                    String text = textOf(response);
+                    if (!text.isEmpty()) {
+                        onText.accept(text);
+                    }
+                    tally.see(response);
+                })
                 .blockLast();
+            return tally.total();
         } catch (Exception e) {
             // The raw text can carry the key verbatim — Anthropic echoes it in a 401 — so it is logged
             // here at the boundary and never returned.
-            log.warn("Ask could not hold the conversation: {}", e.toString());
+            log.warn("Chat could not hold the conversation: {}", e.toString());
             throw new IllegalArgumentException(COULD_NOT_SIGN_IN);
         }
     }
@@ -92,7 +106,7 @@ public class SpringAiConversationAdapter implements ForConversing {
      * turns, so they are the two things worth caching. No thinking budget is set: that builder offers only
      * the old token-budget shape, which Claude Opus 5 refuses — left out, it thinks adaptively by itself.
      */
-    static AnthropicChatOptions askOptions() {
+    static AnthropicChatOptions chatOptions() {
         return AnthropicChatOptions.builder()
             .model(MODEL)
             .maxTokens(MAX_TOKENS)
@@ -105,8 +119,62 @@ public class SpringAiConversationAdapter implements ForConversing {
     private static ChatModel anthropicModel(String apiKey) {
         return AnthropicChatModel.builder()
             .anthropicApi(AnthropicApi.builder().apiKey(apiKey).build())
-            .defaultOptions(askOptions())
+            .defaultOptions(chatOptions())
             .build();
+    }
+
+    private static String textOf(ChatResponse response) {
+        Generation result = response.getResult();
+        String text = result == null || result.getOutput() == null ? null : result.getOutput().getText();
+        return text == null ? "" : text;
+    }
+
+    /**
+     * What an answer cost. Spring AI's tool loop shapes the stream like this, and this is the whole reason
+     * the tally is not a sum: only the first call's chunks carry Anthropic's own usage with its cache split;
+     * every chunk after a tool result carries prompt and completion totals cumulative over the calls so far,
+     * with no cache split and no finish reason until the very end. So the totals are the last chunk's, the
+     * cache split is the first call's, and every later call — one per distinct cumulative prompt total — is
+     * taken to have read the same cached prefix the first call wrote or read. Vaier's own count, and it
+     * says so; the invoice wins if they differ.
+     */
+    private static final class UsageTally {
+        private long prompt;
+        private long completion;
+        private ModelUsage firstCall;
+        private final Set<Long> promptTotalsSeen = new LinkedHashSet<>();
+
+        void see(ChatResponse response) {
+            Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
+            if (usage == null) {
+                return;
+            }
+            if (usage.getPromptTokens() != null && usage.getPromptTokens() > 0) {
+                prompt = usage.getPromptTokens();
+                promptTotalsSeen.add(prompt);
+            }
+            if (usage.getCompletionTokens() != null && usage.getCompletionTokens() > 0) {
+                completion = usage.getCompletionTokens();
+            }
+            if (usage.getNativeUsage() instanceof AnthropicApi.Usage own && promptTotalsSeen.size() <= 1) {
+                firstCall = new ModelUsage(MODEL, orZero(own.inputTokens()), orZero(own.outputTokens()),
+                    orZero(own.cacheCreationInputTokens()), orZero(own.cacheReadInputTokens()));
+            }
+        }
+
+        ModelUsage total() {
+            long cacheWrite = firstCall == null ? 0 : firstCall.cacheWriteTokens();
+            long cacheRead = firstCall == null ? 0 : firstCall.cacheReadTokens();
+            int laterCalls = Math.max(0, promptTotalsSeen.size() - 1);
+            ModelUsage total = new ModelUsage(MODEL, prompt, completion, cacheWrite,
+                cacheRead + laterCalls * (cacheWrite + cacheRead));
+            log.debug("Chat usage: {} over {} call(s)", total, promptTotalsSeen.size());
+            return total;
+        }
+
+        private static long orZero(Integer value) {
+            return value == null ? 0 : value;
+        }
     }
 
     private static Message asMessage(ConversationTurn turn) {
@@ -121,7 +189,7 @@ public class SpringAiConversationAdapter implements ForConversing {
      * hands them to the read by name, as strings — the domain reads nothing else.
      */
     private static ToolCallback asToolCallback(ToolOffer offer) {
-        AskCapability tool = offer.tool();
+        ChatCapability tool = offer.tool();
         if (tool.parameters().isEmpty()) {
             Supplier<String> read = () -> offer.read().apply(Map.of());
             return FunctionToolCallback.builder(tool.toolName(), read)
@@ -147,7 +215,7 @@ public class SpringAiConversationAdapter implements ForConversing {
         return strings;
     }
 
-    private static String schemaFor(AskCapability tool) {
+    private static String schemaFor(ChatCapability tool) {
         ObjectNode schema = JSON.createObjectNode();
         schema.put("type", "object");
         ObjectNode properties = schema.putObject("properties");

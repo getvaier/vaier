@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.ApproveEnrolmentUseCase;
-import net.vaier.application.AskUseCase;
+import net.vaier.application.ChatUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.ForgetConversationUseCase;
+import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
+import net.vaier.application.GetMemoryUseCase;
+import net.vaier.application.GetSpendUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
@@ -21,7 +24,7 @@ import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
-import net.vaier.application.IsAskAvailableUseCase;
+import net.vaier.application.IsChatAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.OfferBundleUseCase;
@@ -29,16 +32,17 @@ import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RefuseEnrolmentUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
+import net.vaier.application.RememberUseCase;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
 import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
 import net.vaier.domain.ActionProposal;
-import net.vaier.domain.AskAction;
-import net.vaier.domain.AskTool;
-import net.vaier.domain.AskAvailability;
-import net.vaier.domain.AskUnavailableException;
+import net.vaier.domain.ChatAction;
+import net.vaier.domain.ChatTool;
+import net.vaier.domain.ChatAvailability;
+import net.vaier.domain.ChatUnavailableException;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.BackupRun;
@@ -57,6 +61,8 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineReference;
+import net.vaier.domain.Memory;
+import net.vaier.domain.MonthSpend;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
@@ -87,16 +93,16 @@ import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 /**
- * <b>Ask</b> (#360 slice 1): the operator's questions, answered from the fleet's own facts and streamed back
+ * <b>Chat</b> (#360 slice 1): the operator's questions, answered from the fleet's own facts and streamed back
  * as they are written.
  *
- * <p>The constructor is the point. Every read Ask may make is a {@code *UseCase} named in it, so what the
+ * <p>The constructor is the point. Every read Chat may make is a {@code *UseCase} named in it, so what the
  * model can be told about this fleet is a list anyone can review — and it is a list of <em>reads</em>. There
  * is no verb here that runs on the model's say-so. The one use case that reaches a machine runs a
  * <b>Read-only command</b>, and what counts as one is the domain's decision ({@code ReadOnlyCommand}), taken
  * before anything is connected.
  *
- * <p>Slice 2 adds the verbs, each behind a click. An <b>Ask action</b> the model calls only puts a
+ * <p>Slice 2 adds the verbs, each behind a click. An <b>Chat action</b> the model calls only puts a
  * <b>Confirmation</b> in front of the operator — a {@code confirm} event on the answer stream — and the
  * click comes back to {@link #confirm}, which takes the card once and runs the same use case the
  * Explorer's own button calls.
@@ -108,18 +114,18 @@ import java.util.function.Function;
  * <p>The projections below are the whole of what leaves Vaier for the Claude API, and they are deliberately
  * small: what a person would say out loud about a machine, a service or a backup. No key, no preshared key,
  * no config text, no credential, no passphrase, no token and no <b>Enrolment ticket</b> is in any of them,
- * and {@code AskRestControllerTest} reads every one of them back to prove it.
+ * and {@code ChatRestControllerTest} reads every one of them back to prove it.
  */
 @RestController
-@RequestMapping("/ask")
+@RequestMapping("/chat")
 @Slf4j
-public class AskRestController {
+public class ChatRestController {
 
     /** Long enough for a considered answer over a slow link; the pane says nothing while it waits. */
     private static final long ANSWER_TIMEOUT_MS = 300_000L;
 
-    private final AskUseCase askUseCase;
-    private final IsAskAvailableUseCase isAskAvailableUseCase;
+    private final ChatUseCase chatUseCase;
+    private final IsChatAvailableUseCase isChatAvailableUseCase;
     private final GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     private final GetMachinesUseCase getMachinesUseCase;
     private final GetVpnPeersUseCase getVpnPeersUseCase;
@@ -146,6 +152,10 @@ public class AskRestController {
     private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     private final OfferBundleUseCase offerBundleUseCase;
     private final OpenBundleUseCase openBundleUseCase;
+    private final RememberUseCase rememberUseCase;
+    private final ForgetUseCase forgetUseCase;
+    private final GetMemoryUseCase getMemoryUseCase;
+    private final GetSpendUseCase getSpendUseCase;
     private final ObjectMapper objectMapper;
 
     /**
@@ -155,8 +165,8 @@ public class AskRestController {
     private final ExecutorService answers = Executors.newSingleThreadExecutor(
         runnable -> new Thread(runnable, "vaier-ask"));
 
-    public AskRestController(AskUseCase askUseCase,
-                             IsAskAvailableUseCase isAskAvailableUseCase,
+    public ChatRestController(ChatUseCase chatUseCase,
+                             IsChatAvailableUseCase isChatAvailableUseCase,
                              GetMachinesUseCase getMachinesUseCase,
                              GetVpnPeersUseCase getVpnPeersUseCase,
                              ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase,
@@ -183,10 +193,14 @@ public class AskRestController {
                              RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
                              OfferBundleUseCase offerBundleUseCase,
                              OpenBundleUseCase openBundleUseCase,
+                             RememberUseCase rememberUseCase,
+                             ForgetUseCase forgetUseCase,
+                             GetMemoryUseCase getMemoryUseCase,
+                             GetSpendUseCase getSpendUseCase,
                              ObjectMapper objectMapper) {
         this.getLanServerReachabilityUseCase = getLanServerReachabilityUseCase;
-        this.askUseCase = askUseCase;
-        this.isAskAvailableUseCase = isAskAvailableUseCase;
+        this.chatUseCase = chatUseCase;
+        this.isChatAvailableUseCase = isChatAvailableUseCase;
         this.getMachinesUseCase = getMachinesUseCase;
         this.getVpnPeersUseCase = getVpnPeersUseCase;
         this.listEnrolmentRequestsUseCase = listEnrolmentRequestsUseCase;
@@ -212,6 +226,10 @@ public class AskRestController {
         this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
         this.offerBundleUseCase = offerBundleUseCase;
         this.openBundleUseCase = openBundleUseCase;
+        this.rememberUseCase = rememberUseCase;
+        this.forgetUseCase = forgetUseCase;
+        this.getMemoryUseCase = getMemoryUseCase;
+        this.getSpendUseCase = getSpendUseCase;
         this.objectMapper = objectMapper;
     }
 
@@ -221,10 +239,10 @@ public class AskRestController {
         answers.shutdownNow();
     }
 
-    /** Whether Ask is offered at all — the Explorer asks before drawing the pane in its menu. */
+    /** Whether Chat is offered at all — the Explorer asks before drawing the pane in its menu. */
     @GetMapping("/availability")
     public ResponseEntity<AvailabilityResponse> availability() {
-        return ResponseEntity.ok(new AvailabilityResponse(isAskAvailableUseCase.isAvailable()));
+        return ResponseEntity.ok(new AvailabilityResponse(isChatAvailableUseCase.isAvailable()));
     }
 
     /**
@@ -237,7 +255,7 @@ public class AskRestController {
                           @RequestBody AskRequest request) {
         // Refused here, on the request thread, so a missing key is a 409 and not a stream that opens only
         // to say no.
-        new AskAvailability(isAskAvailableUseCase.isAvailable()).requireAvailable();
+        new ChatAvailability(isChatAvailableUseCase.isAvailable()).requireAvailable();
         Operator operator = Operator.of(email);
         SseEmitter emitter = new SseEmitter(ANSWER_TIMEOUT_MS);
         answers.submit(() -> answer(emitter, operator, request.question()));
@@ -262,11 +280,11 @@ public class AskRestController {
     /** The whole of one answer, start to finish. Package-private so a test can drive it without a thread. */
     void answer(SseEmitter emitter, Operator operator, String question) {
         try {
-            askUseCase.ask(operator, question, toolOffers(emitter),
+            chatUseCase.ask(operator, question, toolOffers(emitter),
                 text -> send(emitter, "text", text));
             send(emitter, "done", "");
         } catch (Exception e) {
-            log.warn("Ask could not answer: {}", e.toString());
+            log.warn("Chat could not answer: {}", e.toString());
             send(emitter, "error", messageFor(e));
         }
         emitter.complete();
@@ -299,7 +317,7 @@ public class AskRestController {
         } catch (IllegalArgumentException | ConflictException | NotFoundException | NoHostCredentialException refused) {
             outcome = new ActionOutcome(false, refused.getMessage());
         } catch (RuntimeException e) {
-            log.warn("Ask could not carry out '{}': {}", proposal.sentence(), e.toString());
+            log.warn("Chat could not carry out '{}': {}", proposal.sentence(), e.toString());
             outcome = new ActionOutcome(false, "Vaier could not do that.");
         }
         // Remembered either way, so the next question knows what was started — or what was not.
@@ -362,7 +380,7 @@ public class AskRestController {
     }
 
     private static String messageFor(Exception e) {
-        boolean worded = e instanceof AskUnavailableException || e instanceof IllegalArgumentException;
+        boolean worded = e instanceof ChatUnavailableException || e instanceof IllegalArgumentException;
         return worded && e.getMessage() != null && !e.getMessage().isBlank()
             ? e.getMessage()
             : "Vaier could not answer that.";
@@ -373,7 +391,7 @@ public class AskRestController {
             emitter.send(SseEmitter.event().name(event).data(data));
         } catch (IOException | IllegalStateException e) {
             // The pane closed mid-answer. Ordinary, and nothing to recover: the answer had nowhere to go.
-            log.debug("Ask stream closed before the answer finished ({})", e.toString());
+            log.debug("Chat stream closed before the answer finished ({})", e.toString());
         }
     }
 
@@ -384,22 +402,24 @@ public class AskRestController {
      * {@code emitter} — the card rides the answer stream — and runs nothing.
      */
     private List<ToolOffer> toolOffers(SseEmitter emitter) {
-        Map<AskTool, Function<Map<String, String>, String>> reads = new HashMap<>();
-        reads.put(AskTool.FLEET, arguments -> readFleet());
-        reads.put(AskTool.WAITING_TO_JOIN, arguments -> readWaitingToJoin());
-        reads.put(AskTool.PUBLISHED_SERVICES, arguments -> readPublishedServices());
-        reads.put(AskTool.BACKUPS, arguments -> readBackups());
-        reads.put(AskTool.DISKS, arguments -> readDisks());
-        reads.put(AskTool.CONTAINER_UPDATES, arguments -> readContainerUpdates());
-        reads.put(AskTool.SECURITY, arguments -> readSecurity());
-        reads.put(AskTool.RUN_ON_MACHINE, this::readRunOnMachine);
-        reads.put(AskTool.BUNDLE_FILES, arguments -> offerBundle(arguments, emitter));
+        Map<ChatTool, Function<Map<String, String>, String>> reads = new HashMap<>();
+        reads.put(ChatTool.FLEET, arguments -> readFleet());
+        reads.put(ChatTool.WAITING_TO_JOIN, arguments -> readWaitingToJoin());
+        reads.put(ChatTool.PUBLISHED_SERVICES, arguments -> readPublishedServices());
+        reads.put(ChatTool.BACKUPS, arguments -> readBackups());
+        reads.put(ChatTool.DISKS, arguments -> readDisks());
+        reads.put(ChatTool.CONTAINER_UPDATES, arguments -> readContainerUpdates());
+        reads.put(ChatTool.SECURITY, arguments -> readSecurity());
+        reads.put(ChatTool.RUN_ON_MACHINE, this::readRunOnMachine);
+        reads.put(ChatTool.BUNDLE_FILES, arguments -> offerBundle(arguments, emitter));
+        reads.put(ChatTool.REMEMBER, this::remember);
+        reads.put(ChatTool.FORGET, this::forget);
 
         List<ToolOffer> offers = new ArrayList<>();
-        for (AskTool tool : AskTool.values()) {
+        for (ChatTool tool : ChatTool.values()) {
             offers.add(new ToolOffer(tool, reads.get(tool)));
         }
-        for (AskAction action : AskAction.values()) {
+        for (ChatAction action : ChatAction.values()) {
             offers.add(new ToolOffer(action, arguments -> propose(action, arguments, emitter)));
         }
         return offers;
@@ -412,7 +432,7 @@ public class AskRestController {
      * beside its name, the phone's name beside its code — hold the proposal, hand the pane the card, and
      * tell the model it is waiting. A name nothing has is refused in words, and no card is sent.
      */
-    private String propose(AskAction action, Map<String, String> arguments, SseEmitter emitter) {
+    private String propose(ChatAction action, Map<String, String> arguments, SseEmitter emitter) {
         try {
             ActionProposal proposal = proposeActionUseCase.propose(action, canonical(action, arguments));
             send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.sentence())));
@@ -422,7 +442,7 @@ public class AskRestController {
         }
     }
 
-    private Map<String, String> canonical(AskAction action, Map<String, String> arguments) {
+    private Map<String, String> canonical(ChatAction action, Map<String, String> arguments) {
         Map<String, String> canonical = new HashMap<>();
         arguments.forEach((name, value) -> canonical.put(name, value == null ? null : value.trim()));
         switch (action) {
@@ -540,9 +560,47 @@ public class AskRestController {
         } catch (NoHostCredentialException e) {
             return "No SSH credential is stored for " + machine.name() + ", so Vaier cannot read anything there.";
         } catch (RuntimeException e) {
-            log.warn("Ask could not bundle files on {}: {}", machine.name(), e.toString());
+            log.warn("Chat could not bundle files on {}: {}", machine.name(), e.toString());
             return machine.name() + " could not be reached over SSH.";
         }
+    }
+
+    /** One fact kept; the domain's refusal is the answer when it is not one. */
+    private String remember(Map<String, String> arguments) {
+        try {
+            Memory.Fact fact = rememberUseCase.remember(arguments.get("fact"));
+            return "Remembered [" + fact.id() + "]: " + fact.text();
+        } catch (IllegalArgumentException refused) {
+            return refused.getMessage();
+        }
+    }
+
+    private String forget(Map<String, String> arguments) {
+        try {
+            forgetUseCase.forget(arguments.getOrDefault("id", "").trim());
+            return "Forgotten.";
+        } catch (NotFoundException | IllegalArgumentException refused) {
+            return refused.getMessage();
+        }
+    }
+
+    /** What Chat has cost this month, for the figure in the top bar. */
+    @GetMapping("/spend")
+    public ResponseEntity<SpendResponse> spend() {
+        return ResponseEntity.ok(SpendResponse.of(getSpendUseCase.thisMonth()));
+    }
+
+    /** Everything Vaier remembers, for the pane that shows it. */
+    @GetMapping("/memory")
+    public ResponseEntity<MemoryResponse> memory() {
+        return ResponseEntity.ok(MemoryResponse.of(getMemoryUseCase.getMemory()));
+    }
+
+    /** The operator's last word on what stays. */
+    @DeleteMapping("/memory/{id}")
+    public ResponseEntity<Void> forgetFact(@PathVariable String id) {
+        forgetUseCase.forget(id);
+        return ResponseEntity.noContent().build();
     }
 
     /** The card's link: the bundle streamed as one zip, exactly as an Explorer selection download is. */
@@ -579,7 +637,7 @@ public class AskRestController {
         } catch (NoHostCredentialException e) {
             return "No SSH credential is stored for " + machine.name() + ", so Vaier cannot run anything there.";
         } catch (RuntimeException e) {
-            log.warn("Ask could not run a command on {}: {}", machine.name(), e.toString());
+            log.warn("Chat could not run a command on {}: {}", machine.name(), e.toString());
             return machine.name() + " could not be reached over SSH.";
         }
     }
@@ -597,7 +655,7 @@ public class AskRestController {
         try {
             return objectMapper.writeValueAsString(projection);
         } catch (Exception e) {
-            log.warn("Ask could not render a tool result", e);
+            log.warn("Chat could not render a tool result", e);
             return "Vaier could not read that.";
         }
     }
@@ -612,7 +670,7 @@ public class AskRestController {
     /** The download card: the zip's name, what it holds, and where the click goes. */
     record BundleEvent(String id, String name, String size, String url) {
         static BundleEvent of(Bundle bundle) {
-            return new BundleEvent(bundle.id(), bundle.name(), bundle.describe(), "/ask/bundles/" + bundle.id());
+            return new BundleEvent(bundle.id(), bundle.name(), bundle.describe(), "/chat/bundles/" + bundle.id());
         }
     }
 
@@ -620,6 +678,29 @@ public class AskRestController {
     record ActionOutcome(boolean done, String text) {}
 
     record AskRequest(String question) {}
+
+    /** This month's figure, and the tokens behind it for the tooltip. */
+    record SpendResponse(String month, String figure, int calls, long inputTokens, long outputTokens,
+                         long cacheWriteTokens, long cacheReadTokens) {
+        static SpendResponse of(MonthSpend spend) {
+            return new SpendResponse(spend.month().toString(), spend.figure(), spend.calls(),
+                spend.usage().inputTokens(), spend.usage().outputTokens(),
+                spend.usage().cacheWriteTokens(), spend.usage().cacheReadTokens());
+        }
+    }
+
+    /** What Vaier remembers, as the pane lists it. */
+    record MemoryResponse(List<FactResponse> facts) {
+        static MemoryResponse of(Memory memory) {
+            return new MemoryResponse(memory.facts().stream().map(FactResponse::of).toList());
+        }
+    }
+
+    record FactResponse(String id, String text, long rememberedAt) {
+        static FactResponse of(Memory.Fact fact) {
+            return new FactResponse(fact.id(), fact.text(), fact.rememberedAtEpochMs());
+        }
+    }
 
     /** The kept conversation as the pane draws it: a summary, when there is one, then the turns. */
     record ConversationResponse(String summary, List<TurnResponse> turns) {

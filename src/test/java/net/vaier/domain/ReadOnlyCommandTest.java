@@ -15,8 +15,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * A <b>Read-only command</b> (#360): what the model may run on a machine through Ask, decided here and
- * nowhere else. "Ask can look, never change" is a promise the prompt makes; this is the mechanism that keeps
+ * A <b>Read-only command</b> (#360): what the model may run on a machine through Chat, decided here and
+ * nowhere else. "Chat can look, never change" is a promise the prompt makes; this is the mechanism that keeps
  * it, and it is a list of what is allowed, never a list of what is not.
  */
 class ReadOnlyCommandTest {
