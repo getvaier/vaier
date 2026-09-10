@@ -42,7 +42,7 @@ Your answers resolve to one of the four peer types, and each has its own handoff
 | A personal device / Phone · Mac · Linux | Mobile client | All traffic | QR code + `.conf` |
 | A personal device / Windows PC | Windows client | All traffic | `.conf` + WireGuard-app import steps |
 
-The handoff is shown **once**, in the same modal, and each variant shows a live "waiting for first handshake — turns green on its own" indicator. A server's routed LAN isn't asked here — set it later from the machine's pane once the peer is up.
+The handoff is shown **once**, in the same modal, and each variant shows a live "waiting for first handshake — turns green on its own" indicator. A server's routed LAN isn't asked here — set it later from the machine's pane once the peer is up. When you do, you're never asked for a CIDR: Vaier reads the network the machine sits on — over the SSH connection it already has — and asks only whether the fleet should reach it, naming the machine and the interface it read it from.
 
 **A full-tunnel client can't reach a LAN it is sitting on.** A personal device routes *all traffic* into the tunnel, and the WireGuard clients pair that with a kill-switch: untunneled traffic is blocked outright. But the operating system still prefers its own on-link route for the local subnet, so packets aimed at a machine on the network the device is physically plugged into leave *outside* the tunnel — and the kill-switch drops them. The device reaches the whole fleet and loses only the LAN under its feet. On Windows the signature is unmistakable: `tracert` to the local address reports `General failure` on the first hop, meaning the packet never left the machine, where a genuinely unreachable host would time out instead.
 
@@ -70,6 +70,16 @@ To get a fresh config for an existing peer, the machine's pane in the **Explorer
 - **Regenerate** — deletes and recreates the peer with the same name, **rotating the keypair** as a side effect. Use this if the key may be compromised; the old config stops working immediately.
 
 Why show-once: WireGuard has no session concept, no server-side revocation, and the same config works on any number of devices. A leaked screenshot or `.conf` would otherwise be a permanent backdoor.
+
+### Enrolment from the Vaier app
+
+A phone running the **Vaier app** joins without meeting the WireGuard app at all. It makes its own key on the phone and asks to join, showing a four-digit **join code** on screen while it waits — you let it in from wherever you're already signed in, your own laptop or the phone itself, and the moment you do, the phone connects on its own. You don't have to be watching the fleet page to catch it: admins get a mail with the code and the one link that lets it in. The private half of the key never leaves the phone — Vaier only ever sees the public half — so there is no config to save, no QR to photograph, and nothing to download for that phone ever again.
+
+**Get the app from your own Vaier.** Open the launchpad on the phone and an **Install card** offers it — no store and no account. The card appears only on an Android phone, and only when your Vaier is actually carrying a copy. The copy you download has your Vaier's own address written into it, so the app already knows where it came from and never asks you to type one.
+
+**Leaving is just as self-contained.** The phone removes itself from the fleet for good, not just from that handset. A phone you remove from the fleet notices on its own, too: it goes quiet, checks in over ordinary internet a few minutes later, and if it's no longer wanted it forgets itself, tells whoever's holding it, and offers to join again — you never have to touch the handset yourself.
+
+*Presence from the app and key rotation are still to come.*
 
 ---
 
@@ -152,6 +162,8 @@ A CrowdSec Security Engine and bouncer sit ahead of everything else on the entry
 Every address currently blocked is listed in the Explorer's **Security** view: the source address, where CrowdSec places it (country and network operator), the scenario that caught it, and how long the block lasts — live, and drawn on the fleet's **Map** as well when the address can be placed. Each row carries the two things you can do about it: **Lift the block** lets that address back in now (one-off — the next scenario it trips blocks it again), and **Trust this address** says never block it again, folding it into your **trusted networks** as a single host.
 
 The Security view also lists what you have already trusted, with an **Untrust** verb on each — trusting stands until you take it back, and taking it back blocks nobody. Only the addresses you trusted by hand appear there: the structural parts of your **trusted networks** (your VPN, the container network, the networks behind your machines) are what stop CrowdSec turning away your own traffic, so they are named as covered and never offered for removal.
+
+The other direction is on the **Map** too: every place someone has been *let in* from, one green dot per city, with the count and the people allowed from there, kept for a month. Accesses from your own LAN or VPN have no place on a map and are shown as a plain count beside it rather than quietly dropped — and so is a request from a full-tunnel device, which comes back to Vaier wearing the server's own address and would otherwise draw a dot wherever the server happens to be hosted.
 
 One honest caveat, and it cuts both ways: CrowdSec re-reads its allowlist only when it restarts. So trusting an address lifts its block immediately, but the allowlist entry itself takes effect at CrowdSec's next restart — and an untrust likewise doesn't reach CrowdSec until then. Vaier deliberately won't restart the engine for you — bouncing the thing guarding the door is how an operator ends up locked out. And if one ever does lock you out, `docker exec crowdsec cscli decisions delete --all` clears every active block from the host's shell.
 

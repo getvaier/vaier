@@ -114,7 +114,7 @@ Never write implementation code without a corresponding test written first. PRs 
 
 After any change to the feature set — new features, changed behaviour, removed functionality, renamed concepts — update `README.md`, `PRD.md`, `UBIQUITOUS_LANGUAGE.md`, and `web/index.html` before committing:
 
-- **README.md** — user-facing; update feature tables, workflow descriptions, and any affected quick-start steps
+- **README.md** — user-facing, and **the short version only**: every feature-table row is one to three sentences, under about 50 words, ending with a link to the `docs/` page that owns the feature. Never append a sentence to a row to record a change; rewrite the row if it must change, and put the mechanism, caveats and reasons on the owning `docs/*.md` page (`NETWORKING`, `AUTH`, `EXPLORER`, `MONITORING`, `BACKUP`, `CHAT`, `ADVANCED`). The README was rebuilt on 2026-09-10 after 200 commits had each added a sentence to a cell, and it is not to grow back
 - **PRD.md** — planning document; mark implemented items ✅, update planned items, and add backlog entries for anything new that was discussed
 - **UBIQUITOUS_LANGUAGE.md** — vocabulary; add new terms, update definitions when behaviour changes, retire terms that no longer apply
 - **web/index.html** — the public promo page (deployed to GitHub Pages via `.github/workflows/pages.yml` on every push to `main` that touches `web/**`); update its feature cards, architecture diagram, and quick-start steps to match. It isn't linked from anywhere else in the repo, which is exactly why it drifts silently if skipped — treat it as a fourth living doc, not a one-off page.

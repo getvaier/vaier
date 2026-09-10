@@ -24,7 +24,7 @@ Start by reading the diff: `git diff` (unstaged), `git diff --staged`, and `git 
 
 **Naming & ubiquitous language:** ports `For*`, use cases `*UseCase`, services `*Service`, adapters `*Adapter`. New or renamed concepts must match `UBIQUITOUS_LANGUAGE.md`; flag invented synonyms.
 
-**Docs in sync:** a feature/behaviour/naming change with no matching update to `README.md` / `PRD.md` / `UBIQUITOUS_LANGUAGE.md` is a finding.
+**Docs in sync:** a feature/behaviour/naming change with no matching update to `README.md` / the owning `docs/*.md` page / `PRD.md` / `UBIQUITOUS_LANGUAGE.md` is a finding. So is a README feature-table row that grew: a row is one to three sentences under about 50 words ending with a link to its `docs/` page, and a change that appended a sentence to one instead of rewriting it (with the detail on the docs page) is a finding.
 
 **Infra hygiene:** `docker-compose.yml` sub-images must stay pinned (no floating `:latest`); the generated WireGuard client compose must pin the same wireguard version as the server (a drift-check test enforces this — confirm it still passes). No new SQL/ORM. The vaier image deploy uses the `getvaier/vaier:latest` tag.
 

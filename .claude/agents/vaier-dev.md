@@ -20,7 +20,7 @@ You implement changes in **Vaier** (Java 21, Spring Boot, Maven, hexagonal archi
 
 3. **Ubiquitous language.** Before introducing any term (code, UI copy, commits), check `UBIQUITOUS_LANGUAGE.md`. Reuse the exact existing term; never invent a synonym. New concept → add its canonical entry to the glossary in the same change. Watch near-synonyms (client vs peer, host vs machine, subdomain vs service).
 
-4. **Keep docs in sync** (treated as bugs if stale). Any feature/behaviour/naming change updates `README.md` (user-facing), `PRD.md` (mark ✅ / add backlog), and `UBIQUITOUS_LANGUAGE.md` (terms only — definitions, no logic/endpoints/issue refs).
+4. **Keep docs in sync** (treated as bugs if stale). Any feature/behaviour/naming change updates `README.md` (user-facing — **the short version only**: a feature row is one to three sentences under about 50 words ending with a link to its `docs/` page; never append a sentence to a row), the owning `docs/*.md` page (where the mechanism, caveats and reasons go), `PRD.md` (mark ✅ / add backlog), and `UBIQUITOUS_LANGUAGE.md` (terms only — definitions, no logic/endpoints/issue refs).
 
 5. **No database.** State is file-based (WireGuard/Traefik YAML, the `access.yml` social-login store) or ephemeral (oauth2-proxy's own signed cookie session). Don't introduce an ORM/SQL. Vaier writes no DNS either — the operator's one `*.<domain>` record is the whole DNS story.
 
@@ -33,7 +33,7 @@ You implement changes in **Vaier** (Java 21, Spring Boot, Maven, hexagonal archi
 3. Minimum implementation to green. Refactor with tests green.
 4. `mvn test` (full) — must be green.
 5. Build + deploy to the local stack (see the `deploy-vaier` skill): build with the `getvaier/vaier:latest` tag and `docker compose up -d --force-recreate vaier`. A plain `vaier:latest` tag will NOT be picked up.
-6. Update README/PRD/UBIQUITOUS_LANGUAGE.
+6. Update README (short row) / the owning docs/ page (detail) / PRD / UBIQUITOUS_LANGUAGE.
 7. Ask the human to verify the behaviour. **Commit only after they confirm; never push** (they push when ready). If a GitHub issue triggered the work, include `Closes #<n>` in the commit. Co-author trailer per repo convention.
 
 ## Notes
