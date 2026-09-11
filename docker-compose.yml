@@ -706,7 +706,7 @@ services:
       # Tier 1 — PUBLIC router (no auth): serves the viewer-adaptive launchpad SHELL and its assets
       # plus the public data feed, so a logged-out visitor gets the dashboard instead of the Google
       # sign-in. Precisely whitelisted: the launchpad page + its static assets (styles.css, icons),
-      # the anonymous services feed, and the LAN docker-setup script. Never admin.html or any admin
+      # the anonymous services feed, and the LAN docker-setup script. Never the Explorer or any admin
       # API — those fall through to the Tier 3 catch-all below.
       # The PathRegexp alternatives are the SURGICAL token-gated exemptions: they serve the per-peer
       # (Slice 4b) and per-LAN-server setup scripts to a bare box being onboarded, which has no oauth2
@@ -752,7 +752,7 @@ services:
       - traefik.http.routers.vaier-identity.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-identity.middlewares=oauth2-authn@file,vaier-down,vaier-frame-guard@file
       - traefik.http.routers.vaier-identity.priority=250
-      # Tier 3 — ADMIN catch-all: everything else (admin.html, all admin APIs). Gated by the full
+      # Tier 3 — ADMIN catch-all: everything else (the Explorer, all admin APIs). Gated by the full
       # Social chain, and vaier-authz enforces admin for the console — non-admins get 403.
       - traefik.http.routers.vaier.rule=Host(`vaier.${VAIER_DOMAIN}`)
       - traefik.http.routers.vaier.entrypoints=websecure

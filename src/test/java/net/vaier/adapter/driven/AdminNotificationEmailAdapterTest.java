@@ -173,7 +173,7 @@ class AdminNotificationEmailAdapterTest {
         assertThat(recipients.getValue()).containsExactly("alice@example.com");
         assertThat(subject.getValue()).isEqualTo("[Vaier] New access request awaiting approval");
         assertThat(body.getValue()).contains("newcomer@example.com");
-        assertThat(body.getValue()).contains("vaier.example.com/admin.html#users");
+        assertThat(body.getValue()).contains("vaier.example.com/explorer.html#/users");
     }
 
     @Test

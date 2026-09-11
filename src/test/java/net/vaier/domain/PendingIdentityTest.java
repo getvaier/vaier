@@ -21,7 +21,7 @@ class PendingIdentityTest {
 
         assertThat(body).contains("newcomer@example.com");
         assertThat(body).contains("awaiting approval");
-        assertThat(body).contains("https://vaier.example.com/admin.html#users");
+        assertThat(body).contains("https://vaier.example.com/explorer.html#/users");
     }
 
     @Test

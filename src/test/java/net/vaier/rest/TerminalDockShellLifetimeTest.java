@@ -131,7 +131,6 @@ class TerminalDockShellLifetimeTest {
         // systems is two places for session ownership to drift, which is the bug terminal-panes.js exists
         // to prevent.
         assertThat(Path.of("src/main/resources/static/terminal-dock.js")).doesNotExist();
-        assertThat(read("admin.html")).doesNotContain("TerminalDock").doesNotContain("term-panel");
         assertThat(read("styles.css")).as("its styles went with it").doesNotContain("term-");
     }
 }

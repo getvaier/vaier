@@ -31,16 +31,20 @@ class ExplorerShellTest {
         return Files.readString(STATIC.resolve(name));
     }
 
-    // --- 1. the name is freed --------------------------------------------------------------------------
+    // --- 1. the console is gone ----------------------------------------------------------------------
 
     @Test
-    void theAdminExplorerTab_opensTheFileBrowserAtItsNewName() throws IOException {
-        // explorer.html is now the shell. The file browser shipped in #321 keeps working under its own name,
-        // as the backup while the shell is built — so admin.html must point at that name, not at the shell.
-        String admin = read("admin.html");
-        assertThat(admin).contains("data-page=\"explorer-files.html\"");
-        assertThat(admin).doesNotContain("data-page=\"explorer.html\"");
-        assertThat(Files.exists(STATIC.resolve("explorer-files.html"))).isTrue();
+    void theAdminConsole_isGone_andNothingLinksToIt() throws IOException {
+        // admin.html framed the old pages in an iframe and survived #323 as a redirect for old links. Deleted
+        // in #363: the Explorer is the only UI, and a redirect page is a second front door to keep honest.
+        assertThat(Files.exists(STATIC.resolve("admin.html"))).isFalse();
+        try (var pages = Files.list(STATIC)) {
+            for (Path page : pages.filter(f -> f.toString().matches(".*\\.(html|js)$")).toList()) {
+                assertThat(Files.readString(page)).as("%s links to the old console", page.getFileName())
+                    .doesNotContainPattern("href=[\"']/?admin\\.html")
+                    .doesNotContainPattern("location(\\.href)?\\s*=\\s*[\"']/?admin\\.html");
+            }
+        }
     }
 
     @Test
@@ -48,17 +52,6 @@ class ExplorerShellTest {
         String files = read("explorer-files.html");
         assertThat(files).contains("explorer.css");
         assertThat(files).contains("explorer.js");
-    }
-
-    @Test
-    void everyAdminSection_stillResolvesToAPageThatExists() throws IOException {
-        // The old pages are the backup while the shell is built; a tab pointing at a page that no longer
-        // exists would be a silent hole in it.
-        Matcher m = Pattern.compile("data-page=\"([^\"]+)\"").matcher(read("admin.html"));
-        while (m.find()) {
-            assertThat(Files.exists(STATIC.resolve(m.group(1))))
-                .as("admin.html section %s", m.group(1)).isTrue();
-        }
     }
 
     // --- 2. the shell is a page, not a fragment --------------------------------------------------------
@@ -72,25 +65,13 @@ class ExplorerShellTest {
         assertThat(shell).contains("class=\"topbar\"");
     }
 
-    @Test
-    void theShell_isNeverLoadedIntoTheAdminIframe() throws IOException {
-        // If the shell were a section of admin.html it would be inside the very iframe it exists to retire. A
-        // top-level redirect to it (a stale #infrastructure bookmark leaving admin for the shell, now that
-        // Infrastructure is native) is the opposite of embedding, and allowed — so the guard is against
-        // embedding the shell as a section, not against naming it in a navigation.
-        String admin = read("admin.html");
-        assertThat(admin).doesNotContain("data-page=\"explorer.html\"");
-        assertThat(admin).doesNotContain("src=\"explorer.html\"");
-        assertThat(admin).doesNotContain("src='explorer.html'");
-    }
-
     // --- 3. one shell model: pop-out windows, no embedded dock ------------------------------------------
 
     @Test
     void theExplorer_hasNoEmbeddedDock_shellsAreWindowsOnly() throws IOException {
         // The Explorer opens a machine's shell in its own pop-out window (terminal-window.js), the single shell
         // model. The old embedded dock is gone from here entirely — its script, its mount points, and its
-        // wiring — so there are never two shell systems to confuse. (terminal-dock.js itself stays for admin.html.)
+        // wiring — so there are never two shell systems to confuse. (terminal-dock.js is gone too.)
         String shell = read("explorer.html");
         assertThat(shell).doesNotContain("terminal-dock.js");
         assertThat(shell).doesNotContain("id=\"terminalPanel\"");

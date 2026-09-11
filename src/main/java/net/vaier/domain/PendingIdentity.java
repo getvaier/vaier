@@ -13,8 +13,8 @@ public record PendingIdentity(String email) {
     }
 
     /**
-     * Body for the admin access-request email. {@code baseDomain} builds the link to the Users
-     * &rarr; Access page; when it is null or blank the link is omitted.
+     * Body for the admin access-request email. {@code baseDomain} builds the link to the Explorer's Users
+     * entry; when it is null or blank the link is omitted.
      */
     public String notificationBody(String baseDomain) {
         StringBuilder body = new StringBuilder();
@@ -22,9 +22,9 @@ public record PendingIdentity(String email) {
             .append(" has signed in for the first time and is awaiting approval.\n");
         body.append("Until an admin approves it, this identity cannot reach Vaier or any published service.\n");
         if (baseDomain != null && !baseDomain.isBlank()) {
-            body.append("\nApprove or deny it on the Users → Access page: https://")
+            body.append("\nApprove or deny it under Users in the Explorer: https://")
                 .append(new VaierHostnames(baseDomain).vaierServerFqdn())
-                .append("/admin.html#users\n");
+                .append("/explorer.html#/users\n");
         }
         return body.toString();
     }

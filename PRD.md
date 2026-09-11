@@ -1693,7 +1693,7 @@ job**'s source paths against the tree and would have reported a backed-up direct
 
 ---
 
-### 6.21 Explorer becomes Vaier's only UI ✅ (epic [#323](https://github.com/getvaier/vaier/issues/323), closed 2026-09-11; the last crumb — deleting `admin.html` and re-pointing the pending-identity mail — is [#363](https://github.com/getvaier/vaier/issues/363))
+### 6.21 Explorer becomes Vaier's only UI ✅ (epic [#323](https://github.com/getvaier/vaier/issues/323), closed 2026-09-11; the last crumb — `admin.html` deleted and the pending-identity mail pointed at the Explorer's Users entry — landed the same day, [#363](https://github.com/getvaier/vaier/issues/363))
 
 The **Explorer** (§6.20) stops being *a page for files* and becomes **the tree that is Vaier's operator UI**.
 Every page we have today collapses into a renderer for whatever is selected in it — one explorer, many
