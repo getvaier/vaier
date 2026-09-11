@@ -1693,7 +1693,7 @@ job**'s source paths against the tree and would have reported a backed-up direct
 
 ---
 
-### 6.21 Explorer becomes Vaier's only UI ✅ (epic [#323](https://github.com/getvaier/vaier/issues/323), closed 2026-09-11; the last crumb — `admin.html` deleted and the pending-identity mail pointed at the Explorer's Users entry — landed the same day, [#363](https://github.com/getvaier/vaier/issues/363))
+### 6.21 Explorer becomes Vaier's only UI ✅ (epic [#323](https://github.com/getvaier/vaier/issues/323), closed 2026-09-11; the last crumbs — `admin.html` deleted and the pending-identity mail pointed at the Explorer's Users entry ([#363](https://github.com/getvaier/vaier/issues/363)), then the orphaned #321 file browser and its two assets — landed the same day)
 
 The **Explorer** (§6.20) stops being *a page for files* and becomes **the tree that is Vaier's operator UI**.
 Every page we have today collapses into a renderer for whatever is selected in it — one explorer, many
@@ -1725,8 +1725,9 @@ Three things this buys that a set of pages structurally cannot:
   persistent tmux session. `terminal-dock.js` survives only for `admin.html`. See "One shell model in the
   Explorer ✅" below.)* Machine
   liveness arrives on the existing `vpn-peers` SSE topic (the frontend never polls). The file browser shipped
-  in §6.20 slice 1 keeps working under its own name (`explorer-files.html`) as the backup, and both read a
-  directory through one shared `explorer-listing.js`. Sections not yet ported (Infrastructure, Backups, Users,
+  in §6.20 slice 1 kept working under its own name (`explorer-files.html`) as the backup, both reading a
+  directory through one shared `explorer-listing.js` — the backup and its two assets were deleted on
+  2026-09-11 once the old console, its last door, was gone. Sections not yet ported (Infrastructure, Backups, Users,
   Settings, Concepts) are **bridged**: they are entries in the tree whose Inspector is the existing page,
   framed whole — explicitly transitional scaffolding that each later slice deletes. Token additions: `--rail`
   (depth hairlines), `--radius-1` / `--radius-2` (there were seven raw radii and no token). Also fixes the

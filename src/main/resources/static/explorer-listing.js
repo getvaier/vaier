@@ -3,8 +3,8 @@
 // A machine is addressed by its identity here, because that is what the tree stands on and what every
 // /machines path is keyed by. Its name appears only in what a person reads, and is asked for at that moment.
 //
-// Two Explorers now read the fleet's filesystems: the file browser shipped in #321 (explorer-files.html) and
-// the tree shell that is replacing it (explorer.html). A second copy of this would be a second place the size
+// One module reads the fleet's filesystems for the Explorer (explorer.html); it began life shared with the
+// #321 file browser the shell replaced. A second copy of this would be a second place the size
 // humanising, the clock format, the newest-listing-wins guard and the server's own error message could quietly
 // drift apart — so both read a directory through here.
 //

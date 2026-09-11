@@ -48,10 +48,19 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theOldFileBrowser_stillCarriesItsOwnAssets() throws IOException {
-        String files = read("explorer-files.html");
-        assertThat(files).contains("explorer.css");
-        assertThat(files).contains("explorer.js");
+    void theOldFileBrowser_isGone_andNothingNamesIt() throws IOException {
+        // The #321 file browser (explorer-files.html + explorer.js + explorer.css) was the shell's backup while
+        // the shell was built, and the deleted console's Explorer tab was its last door. One Explorer now.
+        for (String gone : List.of("explorer-files.html", "explorer.js", "explorer.css")) {
+            assertThat(Files.exists(STATIC.resolve(gone))).as("%s still exists", gone).isFalse();
+        }
+        try (var pages = Files.list(STATIC)) {
+            for (Path page : pages.filter(f -> f.toString().matches(".*\\.(html|js)$")).toList()) {
+                assertThat(Files.readString(page)).as("%s names the old browser", page.getFileName())
+                    .doesNotContain("explorer-files.html")
+                    .doesNotContainPattern("[\"'/]explorer\\.(js|css)[\"'?]");
+            }
+        }
     }
 
     // --- 2. the shell is a page, not a fragment --------------------------------------------------------
@@ -315,10 +324,9 @@ class ExplorerShellTest {
     // --- 7. the listing is lifted, not rewritten --------------------------------------------------------
 
     @Test
-    void bothExplorers_readADirectoryThroughTheSameCode() throws IOException {
-        // Two copies of "list a directory over SFTP" would be two places the size humanising, the clock
-        // format, the newest-listing-wins guard and the server's own error message could drift apart.
-        assertThat(read("explorer-files.html")).contains("explorer-listing.js");
+    void theShell_readsADirectoryThroughTheSharedListing() throws IOException {
+        // "List a directory over SFTP" lives in one module: the size humanising, the clock format, the
+        // newest-listing-wins guard and the server's own error message have exactly one home.
         assertThat(read("explorer.html")).contains("explorer-listing.js");
 
         String shared = read("explorer-listing.js");
@@ -327,12 +335,10 @@ class ExplorerShellTest {
         assertThat(shared).contains("ticket !== inFlight");     // one newest-listing-wins guard
         assertThat(shared).contains("err.message");             // the server's message, verbatim
 
-        // and neither page keeps a second copy of any of it
-        for (String asset : List.of("explorer.js", "explorer-shell.js")) {
-            assertThat(read(asset)).as("a second copy in %s", asset)
-                .doesNotContain("hour12: false")
-                .doesNotContain("['B', 'K', 'M', 'G', 'T']");
-        }
+        // and the shell keeps no second copy of any of it
+        assertThat(read("explorer-shell.js")).as("a second copy in the shell")
+            .doesNotContain("hour12: false")
+            .doesNotContain("['B', 'K', 'M', 'G', 'T']");
     }
 
     /**
@@ -389,15 +395,6 @@ class ExplorerShellTest {
         assertThat(js).contains("/authorize/");
         assertThat(js).contains("/setup.sh");
         assertThat(js).contains("Server operations");
-    }
-
-    // --- 9. the latent height bug (#321) ---------------------------------------------------------------
-
-    @Test
-    void theFileBrowser_doesNotSubtractATopbarItDoesNotHave() throws IOException {
-        // explorer.css subtracted 35px for a topbar that is neither in the page nor 35px tall (the real one
-        // is 48px, and it lives in the shell around the frame, not in the frame).
-        assertThat(read("explorer.css")).doesNotContain("100vh - 35px");
     }
 
     // --- 10. tokens -------------------------------------------------------------------------------------
@@ -1239,16 +1236,6 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theFileBrowser_opensAMachineAtItsOwnRoot_notAtASlashItAssumed() throws IOException {
-        String js = read("explorer.js");
-
-        // The backup file browser must keep working, and it must not keep the assumption that broke: no
-        // hardcoded root constant, and the root it paints its crumbs from is the one the machine reported.
-        assertThat(js).doesNotContain("const ROOT = '/'");
-        assertThat(js).contains("result.root");
-    }
-
-    @Test
     void theShell_opensAMachineAtItsOwnRoot_andRemembersWhereEachMachinesTreeBegins() throws IOException {
         String js = read("explorer-shell.js");
 
@@ -1264,11 +1251,10 @@ class ExplorerShellTest {
     void aPathOutsideTheJail_isShownAsTheServersOwnSentence_neverAsAnEmptyFolder() throws IOException {
         // The reader already passes Vaier's ApiError message through verbatim, and that is exactly what must
         // happen to "/volume2 is not reachable over SFTP...". No asset may turn a refusal into an empty
-        // listing — so neither Explorer is allowed to paint entries when the read came back an error.
+        // listing — so the Explorer is not allowed to paint entries when the read came back an error.
         String listing = read("explorer-listing.js");
         assertThat(listing).contains("err.message");
 
-        assertThat(read("explorer.js")).contains("result.error");
         assertThat(read("explorer-shell.js")).contains("entry.error");
     }
 
@@ -2104,8 +2090,7 @@ class ExplorerShellTest {
         // listing lost its layout while every neighbouring rule still applied — a page that looked
         // catastrophically broken with every test green. A stylesheet that cannot be parsed is a bug the
         // suite should catch, not the operator.
-        for (String sheet : List.of("explorer-shell.css", "explorer.css", "styles.css",
-                                    "terminal-window.css")) {
+        for (String sheet : List.of("explorer-shell.css", "styles.css", "terminal-window.css")) {
             String css = read(sheet);
             int opens = css.split("/\\*", -1).length - 1;
             int closes = css.split("\\*/", -1).length - 1;
