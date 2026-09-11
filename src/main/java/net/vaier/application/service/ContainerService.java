@@ -4,13 +4,17 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DiscoverLanServerContainersUseCase;
 import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DiscoverVaierServerContainersUseCase;
+import net.vaier.application.GetContainerStandingsUseCase;
 import net.vaier.application.GetVaierServerDockerServicesUseCase;
+import net.vaier.application.JudgeContainerStandingsUseCase;
 import net.vaier.application.GetServerInfoUseCase;
 import net.vaier.domain.PublishableService;
 import net.vaier.application.CheckForImageUpdatesUseCase;
 import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.SweepImageUpdatesUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
+import net.vaier.domain.ContainerObservation;
+import net.vaier.domain.ContainerStandingTracker;
 import net.vaier.domain.ContainerUpdate;
 import net.vaier.domain.ContainerUpdate.Settlement;
 import net.vaier.domain.DockerCommandAccess;
@@ -19,6 +23,7 @@ import net.vaier.domain.ImageUpdateSweep;
 import net.vaier.domain.ImageUpdateSweep.MachineContainers;
 import net.vaier.domain.ImageUpdateTracker;
 import net.vaier.domain.LanAnchor;
+import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.ScopedImage;
@@ -43,6 +48,7 @@ import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingServerInfo;
 import net.vaier.domain.port.ForGettingVaierServerDockerServices;
 import net.vaier.domain.port.ForGettingVpnClients;
+import net.vaier.domain.port.ForPersistingContainerStandings;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingPeerIds;
 import net.vaier.domain.port.ForResolvingRegistryDigest;
@@ -55,6 +61,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +77,8 @@ public class ContainerService implements
     GetServerInfoUseCase,
     GetVaierServerDockerServicesUseCase,
     RefreshContainerStateUseCase,
+    JudgeContainerStandingsUseCase,
+    GetContainerStandingsUseCase,
     SweepImageUpdatesUseCase,
     UpdateContainerImageUseCase,
     CheckForImageUpdatesUseCase {
@@ -107,6 +116,12 @@ public class ContainerService implements
     // What the disk sweep last saw of each machine's Docker access — read at scrape time, so a container
     // on a machine Vaier cannot drive Docker on is never offered an update that would die on it.
     private final ForCheckingDockerCommandAccess dockerAccess;
+    /**
+     * What was running when Vaier last looked (#356). The domain owns the port call; this service only
+     * hands the port in and passes the tracker what each scrape found.
+     */
+    private final ContainerStandingTracker containerStandings;
+    private final ForPersistingContainerStandings containerStandingMemory;
 
     /**
      * Where a settled update-available verdict is pushed. The container payloads already ride this
@@ -117,6 +132,14 @@ public class ContainerService implements
     private static final String SSE_TOPIC = "published-services";
     private static final String SSE_EVENT = "service-updated";
     private static final String SSE_DATA = "image-updates-checked";
+
+    /**
+     * Where a moved container standing is pushed. The fleet page already holds the {@code vpn-peers}
+     * stream open for peer, LAN and disk liveness, so this travels the road that exists — no second
+     * connection, no timer, and nothing at all on a fleet where nothing moved.
+     */
+    private static final String STANDING_SSE_TOPIC = "vpn-peers";
+    private static final String STANDING_SSE_EVENT = "container-standing-changed";
 
     @Autowired
     public ContainerService(ForGettingServerInfo forGettingServerInfo,
@@ -137,13 +160,15 @@ public class ContainerService implements
                             ForResolvingSshTargets sshTargets,
                             ForRunningSshCommands sshCommands,
                             ForTrackingHostKeys hostKeys,
-                            ForCheckingDockerCommandAccess dockerAccess) {
+                            ForCheckingDockerCommandAccess dockerAccess,
+                            ForPersistingContainerStandings containerStandings) {
         // A single thread: updates on one Vaier are serialised rather than piling several multi-minute
         // pulls onto a fleet's bandwidth at once, and no request thread ever waits on one.
         this(forGettingServerInfo, forGettingVpnClients, forResolvingPeerIds, forGettingPeerConfigurations,
             forResolvingRegistryDigest, forPublishingEvents, imageUpdateTracker, clock, snapshotStore,
             vaierServerContainers, peerContainers, vaierServerDockerServices, lanServerContainers,
             vaierServerIdentity, lanServerScrape, sshTargets, sshCommands, hostKeys, dockerAccess,
+            containerStandings,
             Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r, "container-update");
                 thread.setDaemon(true);
@@ -170,6 +195,7 @@ public class ContainerService implements
                      ForRunningSshCommands sshCommands,
                      ForTrackingHostKeys hostKeys,
                      ForCheckingDockerCommandAccess dockerAccess,
+                     ForPersistingContainerStandings containerStandings,
                      Executor updateExecutor) {
         this.forGettingServerInfo = forGettingServerInfo;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -197,6 +223,8 @@ public class ContainerService implements
         this.sshCommands = sshCommands;
         this.hostKeys = hostKeys;
         this.dockerAccess = dockerAccess;
+        this.containerStandingMemory = containerStandings;
+        this.containerStandings = new ContainerStandingTracker(containerStandings);
         this.updateExecutor = updateExecutor;
     }
 
@@ -327,6 +355,46 @@ public class ContainerService implements
         } catch (Exception e) {
             log.warn("Vaier-server container scrape failed, keeping previous snapshot: {}", e.getMessage());
         }
+    }
+
+    /**
+     * What this round's scrape means for every container Vaier watches (#356).
+     *
+     * <p>The service decides nothing: it turns each scrape — the Vaier server's own stack, every server
+     * peer's, every LAN server's — into a {@link ContainerObservation} that says whether the machine
+     * actually answered, hands each to the domain, and keeps the verdicts. Whether a stopped container is
+     * news, how many misses it takes, and what to forget are all the tracker's.
+     *
+     * <p>It reads the caches the scheduler has just refreshed rather than scraping again: this is the
+     * second thing that reading says, not a second round of asking.
+     *
+     * <p>Pushes on the same domain decision the update sweep uses — only a moved standing is worth
+     * repainting — so a fleet where everything that was up is still up costs an open Explorer nothing.
+     */
+    @Override
+    public List<ContainerStandingTracker.Verdict> judgeContainerStandings() {
+        Instant now = clock.instant();
+        List<ContainerStandingTracker.Verdict> verdicts = new ArrayList<>();
+        verdicts.addAll(containerStandings.observe(
+            ContainerObservation.ofVaierServer(vaierServerIdentity.identity(),
+                vaierServerContainers.discover()), now));
+        peerContainers.discoverAll().forEach(peer ->
+            ContainerObservation.of(peer.machineId(), peer.status(), peer.containers())
+                .ifPresent(observation -> verdicts.addAll(containerStandings.observe(observation, now))));
+        lanServerScrape.getLanServerContainers().forEach(lanServer ->
+            ContainerObservation.of(lanServer.machineId(), lanServer.status(), lanServer.containers())
+                .ifPresent(observation -> verdicts.addAll(containerStandings.observe(observation, now))));
+
+        if (ContainerStandingTracker.Verdict.worthPublishing(verdicts)) {
+            forPublishingEvents.publish(STANDING_SSE_TOPIC, STANDING_SSE_EVENT, "");
+        }
+        return List.copyOf(verdicts);
+    }
+
+    /** Memory read — the standings the rounds above have already worked out. Reaches no machine. */
+    @Override
+    public List<MachineContainerStanding> getContainerStandings() {
+        return containerStandingMemory.all();
     }
 
     /**

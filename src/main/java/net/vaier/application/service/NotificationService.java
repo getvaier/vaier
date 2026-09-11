@@ -9,6 +9,7 @@ import net.vaier.application.NotifyAdminsOfEnrolmentRequestUseCase;
 import net.vaier.application.NotifyAdminsOfLockoutWarningUseCase;
 import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
+import net.vaier.application.NotifyAdminsOfContainerGoneUseCase;
 import net.vaier.application.NotifyAdminsOfMissingDefaultRouteUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
@@ -23,6 +24,7 @@ import net.vaier.domain.ImageUpdateRollup;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.BundleMailNotice;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.Operator;
 import net.vaier.domain.EnrolmentRequest;
@@ -37,6 +39,8 @@ import net.vaier.domain.port.ForSendingAdminNotification;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+
 @Service
 @Slf4j
 public class NotificationService implements
@@ -44,6 +48,7 @@ public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
         NotifyAdminsOfMissingDefaultRouteUseCase,
+        NotifyAdminsOfContainerGoneUseCase,
         NotifyAdminsOfDiskFillForecastUseCase,
         NotifyAdminsOfBackupFailureUseCase,
         NotifyAdminsOfBackupServerDownUseCase,
@@ -56,13 +61,18 @@ public class NotificationService implements
     private final ForSendingAdminNotification adminNotifier;
     private final ConfigResolver configResolver;
     private final ForHoldingBundles forHoldingBundles;
+    // Read for its zone alone: the one an operator's mail is written in. The domain renders the times and
+    // must not go asking the environment which zone that is, so the edge hands it in.
+    private final Clock clock;
 
     public NotificationService(ForSendingAdminNotification adminNotifier,
                                ConfigResolver configResolver,
-                               ForHoldingBundles forHoldingBundles) {
+                               ForHoldingBundles forHoldingBundles,
+                               Clock clock) {
         this.adminNotifier = adminNotifier;
         this.configResolver = configResolver;
         this.forHoldingBundles = forHoldingBundles;
+        this.clock = clock;
     }
 
     @Override
@@ -116,6 +126,18 @@ public class NotificationService implements
         adminNotifier.sendToAdmins(networks.defaultRouteRestoredSubject(machineName),
                 networks.defaultRouteBody(machineName, configResolver.getDomain()),
                 "default route restored on " + machineName);
+    }
+
+    @Override
+    public void notifyAdminsOfContainerGone(String machineName, MachineContainerStanding standing) {
+        adminNotifier.sendToAdmins(standing.goneSubject(machineName), standing.goneBody(machineName, clock.getZone()),
+                "container " + standing.containerName() + " gone on " + machineName);
+    }
+
+    @Override
+    public void notifyAdminsOfContainerBack(String machineName, MachineContainerStanding standing) {
+        adminNotifier.sendToAdmins(standing.backSubject(machineName), standing.backBody(machineName, clock.getZone()),
+                "container " + standing.containerName() + " back on " + machineName);
     }
 
     @Override

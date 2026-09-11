@@ -2,6 +2,9 @@ package net.vaier.domain;
 
 import lombok.Builder;
 
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -27,16 +30,21 @@ import java.util.Optional;
  * @param networks            what Vaier last read off this machine's own interfaces (#333)
  * @param routingHostNetworks what Vaier last read off the host that would install a LAN route — the
  *                            Vaier server — so a network that would sever its uplink is never offered
+ * @param containerStandings  where each container Vaier has watched run on this machine stands (#356)
+ * @param zone                the zone the operator reads times in; UTC when nobody said
  */
 @Builder
 public record MachineSignals(int publishableCount, boolean reachable, boolean hasCredential,
                              Optional<BackupJob> job, Optional<BackupRun> latestRun, BackupFleet fleet,
-                             MachineNetworks networks, MachineNetworks routingHostNetworks) {
+                             MachineNetworks networks, MachineNetworks routingHostNetworks,
+                             List<MachineContainerStanding> containerStandings, ZoneId zone) {
 
     public MachineSignals {
         job = job == null ? Optional.empty() : job;
         latestRun = latestRun == null ? Optional.empty() : latestRun;
         networks = networks == null ? MachineNetworks.unknown() : networks;
         routingHostNetworks = routingHostNetworks == null ? MachineNetworks.unknown() : routingHostNetworks;
+        containerStandings = containerStandings == null ? List.of() : List.copyOf(containerStandings);
+        zone = zone == null ? ZoneOffset.UTC : zone;
     }
 }

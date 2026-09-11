@@ -30,6 +30,18 @@ class InMemoryContainerSnapshotStoreTest {
     }
 
     @Test
+    void aStoppedVaierServerContainerIsNotOfferedForPublishing() {
+        // A stopped container keeps its published bindings, so since #356 it reaches the scrape. Offering
+        // it would point a public hostname at a port nothing answers on.
+        store.storeVaierServerContainers(List.of(
+            new DockerService("id-webtrees", "webtrees", "ghcr.io/webtrees:2.1", "v",
+                List.of(new PortMapping(80, 8080, "tcp", "0.0.0.0")), List.of("vaier-network"),
+                "exited")));
+
+        assertThat(store.getUnpublishedVaierServerServices(List.of())).isEmpty();
+    }
+
+    @Test
     void aVaierServerServiceNamesItsOwnerByIdentity() {
         // The publishable feed's owner used to be a NAME, matched against a machine's name to work out
         // which card the "publish me" nudge belonged to. The Vaier server is the one machine with no

@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import lombok.Builder;
 
+import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,8 +14,9 @@ import java.util.Optional;
  * (the "why" Vaier is suggesting it, drawn from already-cached state), and an {@link #action} hint
  * describing what happens on "yes".
  *
- * <p>Mostly an invitation, with one exception: {@link Kind#NO_DEFAULT_ROUTE} (#357) is trouble Vaier can
- * see and cannot fix, so it carries no action to take and the shell draws it without a button.
+ * <p>Mostly an invitation, with two exceptions: {@link Kind#NO_DEFAULT_ROUTE} (#357) and
+ * {@link Kind#CONTAINER_GONE} (#356) are trouble Vaier can see and cannot fix, so they carry no action to
+ * take and the shell draws them without a button.
  *
  * <p>Pure domain: the "should we suggest X?" decision for each kind is a static factory here, composed
  * from domain predicates ({@link BackupFleet#needsBackupServer()}, {@link DeviceCategory#isStorageClass()},
@@ -42,7 +45,9 @@ public record MachineNudge(String machineName, Kind kind, String title, String e
         /** Vaier read a network off the machine that nothing else in the fleet can reach yet. */
         ROUTE_LAN,
         /** The machine answered with no default route: it cannot reach the internet at all (#357). */
-        NO_DEFAULT_ROUTE
+        NO_DEFAULT_ROUTE,
+        /** A container that was running on the machine is not running any more (#356). */
+        CONTAINER_GONE
     }
 
     /**
@@ -217,6 +222,37 @@ public record MachineNudge(String machineName, Kind kind, String title, String e
             .action("Route that network through this machine, so the fleet can reach what is on it")
             .value(cidr)
             .build());
+    }
+
+    /**
+     * CONTAINER_GONE (#356) — trouble rather than an invitation, like {@link Kind#NO_DEFAULT_ROUTE}: a
+     * container that was running on this machine is not running any more.
+     *
+     * <p>One card per such container, and <b>only</b> for containers Vaier has actually watched run. A
+     * great many containers are stopped on purpose and forever — one-shot init containers, a retired
+     * stack — and a card for each of those would bury the one that matters. A container that has been
+     * removed outright is no longer remembered at all, so a deliberate removal leaves no card behind.
+     *
+     * <p>No button, because there is nothing honest to put on one: Vaier reads the fleet's containers over
+     * the Docker API and has no endpoint that starts or stops one. The action sentence says so plainly
+     * rather than offering something that would fail.
+     *
+     * @param standings every container standing Vaier holds for this machine
+     * @param zone      the zone the operator reads times in
+     */
+    public static List<MachineNudge> containersGone(String machineName,
+                                                    List<MachineContainerStanding> standings, ZoneId zone) {
+        if (standings == null) {
+            return List.of();
+        }
+        return standings.stream()
+            .filter(MachineContainerStanding::isGone)
+            .map(standing -> new MachineNudge(machineName, Kind.CONTAINER_GONE,
+                standing.containerName() + " is not running",
+                standing.evidence(zone),
+                "Vaier watched this container run and now finds it stopped. It reads the fleet's "
+                    + "containers and cannot start it: bring it back on the machine."))
+            .toList();
     }
 
     /**

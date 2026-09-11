@@ -27,7 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -660,5 +662,138 @@ class DockerServerAdapterTest {
         when(p.getType()).thenReturn("tcp");
         when(p.getIp()).thenReturn("0.0.0.0");
         return p;
+    }
+
+    // --- a container that is stopped but still publishes ports (#356) -------------------------------
+    //
+    // Docker reports NO port mappings at all for a stopped container, so keeping only containers with
+    // mappings dropped every exited container from every scrape. Nothing downstream could tell "stopped"
+    // from "removed" — which is exactly the distinction the container standing is built on — and the
+    // Explorer's own DOWN badge could never have been drawn either.
+
+    /** A bridge-network container the daemon lists in whatever state the test wants. */
+    private static Container bridgeContainer(String name, String state, ContainerPort[] ports) {
+        Container container = mock(Container.class);
+        // Lenient: a container that publishes nothing never makes it far enough to be named.
+        lenient().when(container.getNames()).thenReturn(new String[]{"/" + name});
+        when(container.getState()).thenReturn(state);
+        when(container.getPorts()).thenReturn(ports);
+        ContainerHostConfig hostConfig = mock(ContainerHostConfig.class);
+        when(hostConfig.getNetworkMode()).thenReturn("bridge");
+        when(container.getHostConfig()).thenReturn(hostConfig);
+        return container;
+    }
+
+    private static void answersInspectWith(DockerHttpClient dockerHttpClient, String json) {
+        DockerHttpClient.Response httpResponse = mock(DockerHttpClient.Response.class);
+        when(httpResponse.getBody())
+            .thenReturn(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
+        when(dockerHttpClient.execute(any(DockerHttpClient.Request.class))).thenReturn(httpResponse);
+    }
+
+    @Test
+    void getServicesWithExposedPorts_stoppedContainerThatPublishesPorts_isStillDiscovered() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        // What the daemon actually reports for a stopped container: no port mappings whatsoever.
+        Container container = bridgeContainer("webtrees", "exited", new ContainerPort[]{});
+        when(container.getId()).thenReturn("abc123");
+        when(container.getImage()).thenReturn("ghcr.io/webtrees:2.1");
+        when(container.getImageId()).thenReturn("sha256:abc");
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        // The published bindings survive the stop — they are what the container WAS published on.
+        answersInspectWith(dockerHttpClient, """
+            {"Config":{"ExposedPorts":{"9999/tcp":{}}},
+             "HostConfig":{"PortBindings":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8081"}]}}}
+            """);
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:abc")).thenReturn(inspectImageCmd);
+        when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
+
+        assertThat(services).singleElement().satisfies(service -> {
+            assertThat(service.containerName()).isEqualTo("webtrees");
+            // The real state, never smoothed over: the domain is what decides what "exited" means.
+            assertThat(service.state()).isEqualTo("exited");
+            assertThat(service.isRunning()).isFalse();
+            assertThat(service.ports()).singleElement().satisfies(port -> {
+                assertThat(port.privatePort()).isEqualTo(80);
+                assertThat(port.publicPort()).isEqualTo(8081);
+                assertThat(port.type()).isEqualTo("tcp");
+            });
+        });
+        // Deliberately NOT Config.ExposedPorts: that is the image's own EXPOSE list, and 9999 was never
+        // published. Reading it would invent published ports nobody ever asked for.
+        assertThat(services.get(0).ports())
+            .noneMatch(port -> port.privatePort() == 9999);
+    }
+
+    @Test
+    void getServicesWithExposedPorts_stoppedContainerThatPublishedNothing_staysOutOfTheScrape() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = bridgeContainer("dex-init", "exited", new ContainerPort[]{});
+        when(container.getId()).thenReturn("def456");
+        when(listCmd.exec()).thenReturn(List.of(container));
+        answersInspectWith(dockerHttpClient, """
+            {"Config":{"ExposedPorts":{"5556/tcp":{}}},"HostConfig":{"PortBindings":{}}}
+            """);
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+
+        // This scrape has always been "containers with published ports"; a one-shot init container that
+        // published nothing is no more interesting stopped than it was running.
+        assertThat(adapter.getServicesWithExposedPorts(Server.vaierServer())).isEmpty();
+    }
+
+    @Test
+    void getServicesWithExposedPorts_runningContainer_isNeverInspectedForItsPorts() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = bridgeContainer("vaultwarden", "running",
+            new ContainerPort[]{containerPort(80, 8080, "tcp", "0.0.0.0")});
+        when(container.getId()).thenReturn("ghi789");
+        when(container.getImage()).thenReturn("vaultwarden/server:latest");
+        when(container.getImageId()).thenReturn("sha256:vw");
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:vw")).thenReturn(inspectImageCmd);
+        when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        assertThat(adapter.getServicesWithExposedPorts(Server.vaierServer())).hasSize(1);
+
+        // The running path is unchanged: the daemon's own listing already carries every mapping, so a
+        // fleet-wide scrape must not grow one inspect per running container.
+        verifyNoInteractions(dockerHttpClient);
+    }
+
+    private static ContainerPort containerPort(int privatePort, Integer publicPort, String type, String ip) {
+        ContainerPort port = mock(ContainerPort.class);
+        when(port.getPrivatePort()).thenReturn(privatePort);
+        when(port.getPublicPort()).thenReturn(publicPort);
+        when(port.getType()).thenReturn(type);
+        when(port.getIp()).thenReturn(ip);
+        return port;
     }
 }

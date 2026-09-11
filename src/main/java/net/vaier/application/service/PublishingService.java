@@ -682,6 +682,9 @@ public class PublishingService implements
         forDiscoveringPeerContainers.discoverAll().stream()
             .filter(peer -> "OK".equals(peer.status()))
             .flatMap(peer -> peer.containers().stream()
+                // Stopped containers reach the scrape too since #356, because their published bindings
+                // survive a stop. Publishing one would route a hostname at a port nothing answers on.
+                .filter(DockerService::isRunning)
                 .flatMap(container -> container.ports().stream()
                     .filter(p -> "tcp".equals(p.type()))
                     .filter(p -> !p.isRange())
@@ -698,6 +701,7 @@ public class PublishingService implements
         forGettingLanServerScrape.getLanServerContainers().stream()
             .filter(host -> "OK".equals(host.status()))
             .flatMap(host -> host.containers().stream()
+                .filter(DockerService::isRunning)
                 .flatMap(container -> container.ports().stream()
                     .filter(p -> "tcp".equals(p.type()))
                     .filter(p -> !p.isRange())

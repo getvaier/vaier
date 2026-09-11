@@ -89,6 +89,9 @@ public class InMemoryContainerSnapshotStore implements
         vaierServerContainersSnapshot.forEach(container -> {
             String name = container.containerName();
             if (VaierServerCatalogue.isExcluded(name)) return;
+            // A stopped container keeps its published bindings and so reaches the scrape since #356.
+            // Nothing answers on its port, so it is not a candidate — the domain says what running means.
+            if (!container.isRunning()) return;
 
             container.ports().stream()
                 .filter(p -> "tcp".equals(p.type()))

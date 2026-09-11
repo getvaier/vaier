@@ -187,24 +187,96 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                 }
             }
         }
+        if (portMappings.isEmpty() && !DockerService.isRunningState(container.getState())) {
+            return publishedBindings(container, dockerClient);
+        }
         return portMappings;
     }
 
-    private List<DockerService.PortMapping> extractHostNetworkPortMappings(Container container, DockerClient dockerClient) {
+    /**
+     * The ports a <b>stopped</b> container was published on, read from its own {@code HostConfig.PortBindings}.
+     *
+     * <p>Docker reports no port mappings at all for a container that is not running, so a scrape that keeps
+     * only containers with mappings drops every exited container on every machine. That silently cost two
+     * things: nothing downstream could tell a container that is <em>stopped</em> from one that has been
+     * <em>removed</em> — the distinction the container standing (#356) is built on — and the Explorer's own
+     * DOWN badge could never be drawn for a stopped container either.
+     *
+     * <p>{@code PortBindings} and deliberately not {@code Config.ExposedPorts}: bindings are what the
+     * operator actually published and they survive a stop, while {@code ExposedPorts} is the image's own
+     * {@code EXPOSE} list and would invent ports nobody ever published. Only for containers that are not
+     * running — a running one's mappings already come down with the listing, and a fleet-wide scrape must
+     * not grow one inspect per running container.
+     */
+    private List<DockerService.PortMapping> publishedBindings(Container container, DockerClient dockerClient) {
+        JsonNode inspected = inspect(container, dockerClient);
+        if (inspected == null) {
+            return List.of();
+        }
+        List<DockerService.PortMapping> portMappings = new ArrayList<>();
+        JsonNode bindings = inspected.path("HostConfig").path("PortBindings");
+        bindings.fields().forEachRemaining(binding -> {
+            String[] parts = binding.getKey().split("/");
+            if (parts.length != 2) {
+                return;
+            }
+            for (JsonNode bound : binding.getValue()) {
+                portMappings.add(boundPort(Integer.parseInt(parts[0]), parts[1], bound));
+            }
+        });
+        return portMappings;
+    }
+
+    /** One {@code HostPort}/{@code HostIp} pair as a mapping. An unparseable host port is simply unbound. */
+    private static DockerService.PortMapping boundPort(int privatePort, String type, JsonNode bound) {
+        String hostIp = bound.path("HostIp").asText("");
+        Integer publicPort;
+        try {
+            publicPort = Integer.valueOf(bound.path("HostPort").asText(""));
+        } catch (NumberFormatException e) {
+            publicPort = null;
+        }
+        return new DockerService.PortMapping(privatePort, publicPort, type,
+            hostIp.isBlank() ? "0.0.0.0" : hostIp);
+    }
+
+    private List<DockerService.PortMapping> extractHostNetworkPortMappings(Container container,
+                                                                           DockerClient dockerClient) {
+        JsonNode inspected = inspect(container, dockerClient);
+        if (inspected == null) {
+            return List.of();
+        }
+        JsonNode exposedPorts = inspected.path("Config").path("ExposedPorts");
+        List<DockerService.PortMapping> portMappings = new ArrayList<>();
+        exposedPorts.fieldNames().forEachRemaining(portSpec -> {
+            String[] parts = portSpec.split("/");
+            if (parts.length == 2) {
+                int port = Integer.parseInt(parts[0]);
+                portMappings.add(new DockerService.PortMapping(port, port, parts[1], "0.0.0.0"));
+            }
+        });
+        return DockerService.PortMapping.collapseContiguous(portMappings);
+    }
+
+    /**
+     * One container's inspect, over raw HTTP to avoid the docker-java Capability enum deserialization bug,
+     * and null when it could not be read. Shared by the host-network port read and the stopped-container
+     * binding read, which want different fields out of the same document.
+     */
+    private JsonNode inspect(Container container, DockerClient dockerClient) {
         String cacheKey = dockerClientCache.entrySet().stream()
             .filter(e -> e.getValue() == dockerClient)
             .map(Map.Entry::getKey)
             .findFirst().orElse(null);
         Server server = cacheKey != null ? serverCache.get(cacheKey) : null;
+        boolean isLocal = server == null || server.getAddress().startsWith("/")
+            || server.getAddress().startsWith("unix://");
 
-        boolean isLocal = server == null || server.getAddress().startsWith("/") || server.getAddress().startsWith("unix://");
-
-        // Use raw HTTP to avoid docker-java Capability enum deserialization bug
         try {
             String jsonResponse;
             if (isLocal) {
                 DockerHttpClient dockerHttpClient = httpClientCache.get(cacheKey);
-                if (dockerHttpClient == null) return List.of();
+                if (dockerHttpClient == null) return null;
                 DockerHttpClient.Request request = DockerHttpClient.Request.builder()
                     .method(DockerHttpClient.Request.Method.GET)
                     .path("/containers/" + container.getId() + "/json")
@@ -214,26 +286,19 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                 }
             } else {
                 int dockerPort = server.getPort() != null ? server.getPort() : 2375;
-                String url = "http://" + server.getAddress() + ":" + dockerPort + "/containers/" + container.getId() + "/json";
-                HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+                String url = "http://" + server.getAddress() + ":" + dockerPort
+                    + "/containers/" + container.getId() + "/json";
+                HttpClient httpClient =
+                    HttpClient.newBuilder().connectTimeout(CONNECTION_TIMEOUT).build();
                 HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> response =
+                    httpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 jsonResponse = response.body();
             }
-
-            JsonNode exposedPorts = objectMapper.readTree(jsonResponse).path("Config").path("ExposedPorts");
-            List<DockerService.PortMapping> portMappings = new ArrayList<>();
-            exposedPorts.fieldNames().forEachRemaining(portSpec -> {
-                String[] parts = portSpec.split("/");
-                if (parts.length == 2) {
-                    int port = Integer.parseInt(parts[0]);
-                    portMappings.add(new DockerService.PortMapping(port, port, parts[1], "0.0.0.0"));
-                }
-            });
-            return DockerService.PortMapping.collapseContiguous(portMappings);
+            return objectMapper.readTree(jsonResponse);
         } catch (Exception e) {
-            log.warn("Failed to get exposed ports for host-network container {}: {}", container.getNames()[0], e.getMessage());
-            return List.of();
+            log.warn("Failed to inspect container {}: {}", container.getId(), e.getMessage());
+            return null;
         }
     }
 

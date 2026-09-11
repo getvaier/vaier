@@ -1050,6 +1050,22 @@ class PublishingServiceTest {
     }
 
     @Test
+    void getPublishableServices_aStoppedContainerIsNotOffered_onAPeerOrALanServer() {
+        // #356 made stopped containers visible to the scrape at last (they keep their published bindings),
+        // and that must not turn into an offer to publish one. Nothing answers on that port.
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
+        when(discoverPeerContainers.discoverAll()).thenReturn(List.of(
+            okPeer("alice", "10.13.13.2", List.of(stoppedContainer("my-app", 8080)))
+        ));
+        when(getLanServerScrape.getLanServerContainers()).thenReturn(List.of(
+            okLanHost("nas", "192.168.3.50", 2375, "apalveien5", List.of(stoppedContainer("webtrees", 8081)))
+        ));
+        when(getVaierServerDockerServices.getUnpublishedVaierServerServices(any())).thenReturn(List.of());
+
+        assertThat(service.getPublishableServices()).isEmpty();
+    }
+
+    @Test
     void getPublishableServices_peerPortAlreadyPublished_excluded() {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(
             routeForPublishable("10.13.13.2", 8080)
@@ -1490,6 +1506,12 @@ class PublishingServiceTest {
     private DockerService peerContainer(String name, int port, String type) {
         return new DockerService("id", name, "image", "latest",
             List.of(new PortMapping(port, port, type, "0.0.0.0")), List.of(), "running");
+    }
+
+    /** A container that published a port and is not running — visible to the scrape since #356. */
+    private DockerService stoppedContainer(String name, int port) {
+        return new DockerService("id", name, "image", "latest",
+            List.of(new PortMapping(port, port, "tcp", "0.0.0.0")), List.of(), "exited");
     }
 
     private DockerService peerContainerWithNullPublicPort(String name, int privatePort, String type) {

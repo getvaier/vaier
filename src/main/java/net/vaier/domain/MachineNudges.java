@@ -20,8 +20,9 @@ public final class MachineNudges {
     }
 
     /**
-     * The nudges that apply to {@code machine}, in a stable order (publish, back-up, designate-backup-server,
-     * back-up-as-root, route-LAN). Each is included only when its factory says so.
+     * The nudges that apply to {@code machine}, trouble first (no-default-route, containers gone) and then
+     * the invitations in a stable order (publish, back-up, designate-backup-server, back-up-as-root,
+     * route-LAN). Each is included only when its factory says so.
      *
      * <p>The machine's backup job arrives as the job itself rather than as a pre-computed
      * "already protected" flag: whether a machine is protected <em>is</em> whether it has a job, and that is
@@ -36,6 +37,8 @@ public final class MachineNudges {
         // #357 leads: it is the only card that is trouble rather than an invitation, and every invitation
         // below it is worth less on a machine that cannot reach the internet.
         MachineNudge.noDefaultRoute(machine.name(), signals.networks()).ifPresent(nudges::add);
+        // #356 sits with it, for the same reason: a service that is simply gone is not an invitation.
+        nudges.addAll(MachineNudge.containersGone(machine.name(), signals.containerStandings(), signals.zone()));
         MachineNudge.publish(machine.name(), signals.publishableCount()).ifPresent(nudges::add);
         MachineNudge.backUp(machine.name(), signals.reachable(), signals.hasCredential(),
             signals.job().isPresent()).ifPresent(nudges::add);

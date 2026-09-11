@@ -3,6 +3,7 @@ package net.vaier.domain;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,7 +46,9 @@ class MachineNudgesTest {
             .latestRun(Optional.empty())
             .fleet(new BackupFleet(List.of()))
             .networks(MachineNetworks.unknown())
-            .routingHostNetworks(MachineNetworks.unknown());
+            .routingHostNetworks(MachineNetworks.unknown())
+            .containerStandings(List.of())
+            .zone(ZoneId.of("Europe/Oslo"));
     }
 
     @Test
@@ -138,5 +141,33 @@ class MachineNudgesTest {
 
         assertThat(nudges).extracting(MachineNudge::kind)
             .doesNotContain(MachineNudge.Kind.NO_DEFAULT_ROUTE);
+    }
+
+    @Test
+    void aContainerThatWasRunningAndIsNotIsSaidAmongTheTrouble() {
+        // #356: trouble, not an invitation, so it sits with the missing route above every "you could
+        // also…" card. One card per container, from what the 30-second scrape already saw.
+        MachineContainerStanding gone = MachineContainerStanding.builder()
+            .machineId(TestMachineIds.of("nas")).containerName("webtrees")
+            .standing(ContainerStanding.GONE)
+            .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
+            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .build();
+
+        List<MachineNudge> nudges = MachineNudges.forMachine(machine(DeviceCategory.SERVER),
+            signals().publishableCount(1).containerStandings(List.of(gone)).build());
+
+        assertThat(nudges).extracting(MachineNudge::kind).containsExactly(
+            MachineNudge.Kind.CONTAINER_GONE, MachineNudge.Kind.PUBLISH,
+            MachineNudge.Kind.DESIGNATE_BACKUP_SERVER);
+    }
+
+    @Test
+    void aMachineWhoseContainersAreAllUpWearsNoContainerCard() {
+        List<MachineNudge> nudges = MachineNudges.forMachine(machine(DeviceCategory.SERVER),
+            signals().build());
+
+        assertThat(nudges).extracting(MachineNudge::kind)
+            .doesNotContain(MachineNudge.Kind.CONTAINER_GONE);
     }
 }

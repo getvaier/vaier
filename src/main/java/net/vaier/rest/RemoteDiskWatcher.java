@@ -20,6 +20,7 @@ import net.vaier.domain.DiskWatch;
 import net.vaier.domain.DiskWatches;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineDiskStanding;
+import net.vaier.domain.MachineBoot;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MissingDefaultRouteTracker;
@@ -34,6 +35,7 @@ import net.vaier.domain.port.ForHoldingClaudeSignInStandings;
 import net.vaier.domain.port.ForHoldingMachineDiskStandings;
 import net.vaier.domain.port.ForPersistingDiskFillTrends;
 import net.vaier.domain.port.ForPersistingDiskPressureState;
+import net.vaier.domain.port.ForPersistingContainerStandings;
 import net.vaier.domain.port.ForPersistingMissingDefaultRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRecordingDockerCommandAccess;
@@ -163,6 +165,9 @@ public class RemoteDiskWatcher {
     private final NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier;
     private final RemoteDiskPressureTracker tracker;
     private final MissingDefaultRouteTracker missingRouteTracker;
+    // Where the machine's boot instant is kept (#356) — the same memory the container standings live in,
+    // because the two are only ever read together: the reboot is what explains the missing container.
+    private final ForPersistingContainerStandings containerStandings;
     private final RemoteDiskForecastTracker forecastTracker;
 
     // The stream the Explorer already holds open for fleet liveness (peers, LAN reachability) — piggybacking
@@ -191,7 +196,8 @@ public class RemoteDiskWatcher {
                              AuditReverseProxyConfigUseCase reverseProxyAudit,
                              NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier,
                              ForPersistingMissingDefaultRoutes missingDefaultRoutes,
-                             NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier) {
+                             NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier,
+                             ForPersistingContainerStandings containerStandings) {
         this.machines = machines;
         this.credentials = credentials;
         this.remoteCommand = remoteCommand;
@@ -218,6 +224,7 @@ public class RemoteDiskWatcher {
         this.tracker = new RemoteDiskPressureTracker(diskPressureState);
         this.forecastTracker = new RemoteDiskForecastTracker(diskFillTrends);
         this.missingRouteTracker = new MissingDefaultRouteTracker(missingDefaultRoutes);
+        this.containerStandings = containerStandings;
     }
 
     @Scheduled(fixedDelay = 300000)
@@ -316,6 +323,26 @@ public class RemoteDiskWatcher {
     }
 
     /**
+     * Keeps when the machine last booted (#356), from the same output the disk reading came in.
+     *
+     * <p>On its own it is barely a fact. Its whole job is to be there when a container that was running
+     * stops being: <b>the machine rebooted at 09:40</b> is what makes that legible, and an unexplained
+     * reboot is worth a line in its own right. It costs no extra sign-in — it rides in front of {@code df}
+     * exactly as the Docker probe does.
+     *
+     * <p>In its own try/catch for the same reason every other rider here is, and the domain decides what
+     * the answer means — including that a trip which learned nothing leaves the last good boot instant
+     * standing rather than erasing it.
+     */
+    private void retainMachineBoot(Machine machine, CommandResult result) {
+        try {
+            MachineBoot.retain(machine.id(), result, containerStandings, clock.instant());
+        } catch (Exception e) {
+            log.debug("Could not keep when {} last booted: {}", machine.name(), e.getMessage());
+        }
+    }
+
+    /**
      * Reads the network the machine is on and caches it (#333), so the Explorer can offer to route it
      * without ever reaching the machine itself.
      *
@@ -363,8 +390,10 @@ public class RemoteDiskWatcher {
             // Two questions, one sign-in. The Docker probe rides in FRONT of df and prints its exit status
             // on a marker line df's parser cannot mistake for a filesystem, so the disk reading below is
             // exactly what it was — same stdout, same exit code, same failure paths.
-            CommandResult result =
-                remoteCommand.run(machine.id(), DockerCommandAccess.probeAheadOf(RemoteDiskUsage.DF_COMMAND));
+            // Three questions, one sign-in: when the machine booted, whether Vaier can drive Docker there,
+            // and how full its disks are — each printed where the next one's parser cannot mistake it.
+            CommandResult result = remoteCommand.run(machine.id(),
+                MachineBoot.readAheadOf(DockerCommandAccess.probeAheadOf(RemoteDiskUsage.DF_COMMAND)));
             // Reaching a CommandResult at all — whatever df itself said — already proves the SSH session
             // connected and authenticated, so the server is present regardless of df's own exit status.
             recordSshServerPresent(machine);
@@ -372,6 +401,7 @@ public class RemoteDiskWatcher {
             // this trip established even when df itself had nothing useful to say. The domain decides
             // whether anything was learned at all, and a trip that learned nothing records nothing.
             DockerCommandAccess.retain(machine.id(), result, dockerAccessRecorder);
+            retainMachineBoot(machine, result);
             if (result.timedOut() || result.exitCode() != 0) {
                 log.debug("Remote df on {} failed (exit={}, timedOut={}); skipping",
                         machine.name(), result.exitCode(), result.timedOut());

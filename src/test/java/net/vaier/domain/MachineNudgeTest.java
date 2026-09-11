@@ -3,6 +3,7 @@ package net.vaier.domain;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -307,5 +308,53 @@ class MachineNudgeTest {
         // have — it is the whole reason the standing is three-valued.
         assertThat(MachineNudge.noDefaultRoute("nas", MachineNetworks.unknown())).isEmpty();
         assertThat(MachineNudge.noDefaultRoute("nas", readingOf("sh: ip: command not found"))).isEmpty();
+    }
+
+    // --- CONTAINER_GONE predicate (#356) ---
+
+    private static final ZoneId OSLO = ZoneId.of("Europe/Oslo");
+
+    private static MachineContainerStanding standing(String containerName, ContainerStanding where) {
+        return MachineContainerStanding.builder()
+            .machineId(TestMachineIds.of("apalveien"))
+            .containerName(containerName)
+            .standing(where)
+            .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
+            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .build();
+    }
+
+    @Test
+    void containersGone_oneCardPerContainerThatWasRunningAndIsNot() {
+        List<MachineNudge> nudges = MachineNudge.containersGone("Apalveien 5",
+            List.of(standing("webtrees", ContainerStanding.GONE),
+                standing("mariadb", ContainerStanding.RUNNING)), OSLO);
+
+        assertThat(nudges).singleElement().satisfies(nudge -> {
+            assertThat(nudge.kind()).isEqualTo(MachineNudge.Kind.CONTAINER_GONE);
+            assertThat(nudge.title()).contains("webtrees");
+            // The evidence is what Vaier actually saw: when it was last up, and when it stopped being —
+            // said in the zone the operator reads it in, not the instant's own.
+            assertThat(nudge.evidence()).contains("11:15 (Europe/Oslo)").contains("11:47 (Europe/Oslo)");
+            // And the honest part: Vaier reads containers, it never starts one.
+            assertThat(nudge.action()).contains("cannot start it");
+            assertThat(nudge.value()).isNull();
+        });
+    }
+
+    @Test
+    void containersGone_silentAboutAContainerVaierNeverSawRunning() {
+        // No standing at all is the state of every container that is stopped on purpose, forever.
+        assertThat(MachineNudge.containersGone("Apalveien 5", List.of(), OSLO)).isEmpty();
+    }
+
+    @Test
+    void containersGone_carriesTheRebootThatExplainsIt() {
+        MachineContainerStanding rebooted = standing("webtrees", ContainerStanding.GONE)
+            .withMachineBootedAt(Instant.parse("2026-09-11T09:40:00Z"));
+
+        assertThat(MachineNudge.containersGone("Apalveien 5", List.of(rebooted), OSLO))
+            .singleElement()
+            .satisfies(nudge -> assertThat(nudge.evidence()).contains("rebooted at"));
     }
 }

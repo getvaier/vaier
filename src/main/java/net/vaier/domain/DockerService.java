@@ -122,6 +122,16 @@ public record DockerService(
     }
 
     public boolean isRunning() {
+        return isRunningState(state);
+    }
+
+    /**
+     * Whether a raw Docker state string means the container is running. The same rule {@link #isRunning()}
+     * answers by, reachable before a {@code DockerService} exists — a scrape has to know which containers
+     * are running to decide whether it may trust the port mappings the daemon handed it, and that question
+     * is the domain's to answer rather than each adapter's to re-spell.
+     */
+    public static boolean isRunningState(String state) {
         return "running".equalsIgnoreCase(state);
     }
 

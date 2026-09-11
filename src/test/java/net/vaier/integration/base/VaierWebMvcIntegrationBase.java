@@ -1,5 +1,7 @@
 package net.vaier.integration.base;
 
+import java.time.Clock;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.*;
 import net.vaier.config.ConfigResolver;
@@ -397,6 +399,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetMachineNetworksUseCase getMachineNetworksUseCase;
 
+    @MockBean
+    protected GetContainerStandingsUseCase getContainerStandingsUseCase;
+
     // --- Host credential (web terminal, credential vault) use cases ---
     @MockBean
     protected SaveHostCredentialUseCase saveHostCredentialUseCase;
@@ -618,4 +623,8 @@ public abstract class VaierWebMvcIntegrationBase {
     // --- Concepts (operator glossary) ---
     @MockBean
     protected GetConceptsUseCase getConceptsUseCase;
+
+    // --- The zone controllers say times in; a mock's null zone falls back to UTC in the domain ---
+    @MockBean
+    protected Clock clock;
 }

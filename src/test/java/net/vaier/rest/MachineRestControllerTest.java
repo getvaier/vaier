@@ -1,5 +1,8 @@
 package net.vaier.rest;
 
+import java.time.Clock;
+import java.time.ZoneId;
+
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.MachineId;
 import net.vaier.application.ClearHostKeyUseCase;
@@ -7,6 +10,7 @@ import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRunsUseCase;
 import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetClaudeSignInStandingsUseCase;
+import net.vaier.application.GetContainerStandingsUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
@@ -31,6 +35,8 @@ import net.vaier.domain.ClaudeAccount;
 import net.vaier.domain.ClaudeSignInState;
 import net.vaier.domain.ClaudeSignInStatus;
 import net.vaier.domain.EffectiveUser;
+import net.vaier.domain.ContainerStanding;
+import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineNudge;
@@ -85,7 +91,9 @@ class MachineRestControllerTest {
     @Mock GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     @Mock GetSshServerPresenceUseCase getSshServerPresenceUseCase;
     @Mock GetMachineNetworksUseCase getMachineNetworksUseCase;
+    @Mock GetContainerStandingsUseCase getContainerStandingsUseCase;
 
+    @Mock Clock clock;
     @InjectMocks MachineRestController controller;
 
     @BeforeEach
@@ -567,6 +575,55 @@ class MachineRestControllerTest {
         assertThat(response.get(0).title()).contains("No default route");
         assertThat(response.get(0).evidence()).contains("eno1").contains("192.168.3.20");
         assertThat(response.get(0).value()).isNull();
+    }
+
+    @Test
+    void nudges_aContainerThatWasRunningAndIsNotIsACardOnTheMachine() {
+        // #356: the standings the 30-second scrape already worked out, read here and handed to the domain.
+        Machine apalveien = new Machine(mid("apalveien"), "Apalveien 5", MachineType.UBUNTU_SERVER, "pk",
+            "10.13.13.6/32", "1.2.3.4", "51820", "1", "1", "1", null, null, true, null,
+            DeviceCategory.SERVER, null);
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(apalveien));
+        when(getPublishableServicesUseCase.getPublishableServices()).thenReturn(List.of());
+        when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of());
+        when(getBackupServersUseCase.getBackupServers()).thenReturn(List.of(
+            new BackupServer("nas-borg", mid("nas"), "192.168.3.50", 8022, "borg", null, "/vol", true)));
+        when(getContainerStandingsUseCase.getContainerStandings()).thenReturn(List.of(
+            goneOn(mid("apalveien"), "webtrees"), goneOn(mid("nas"), "roon")));
+        when(clock.getZone()).thenReturn(ZoneId.of("Europe/Oslo"));
+
+        var response = controller.nudges(mid("apalveien").value());
+
+        assertThat(response).extracting(MachineRestController.NudgeResponse::kind)
+            .containsExactly(MachineNudge.Kind.CONTAINER_GONE.name());
+        // Only this machine's: the fleet-wide read is filtered by identity, never by container name.
+        assertThat(response.get(0).title()).contains("webtrees");
+        // The card's times are written in the server's own zone, the same one the mail about it uses —
+        // this is what holds the edge's hand-off of clock.getZone() into the signals.
+        assertThat(response.get(0).evidence()).contains("(Europe/Oslo)");
+    }
+
+    @Test
+    void containerStandings_areWhatTheScrapeAlreadyWorkedOut_reachingNoMachine() {
+        when(getContainerStandingsUseCase.getContainerStandings())
+            .thenReturn(List.of(goneOn(mid("apalveien"), "webtrees")));
+
+        var response = controller.containerStandings();
+
+        assertThat(response).singleElement().satisfies(standing -> {
+            assertThat(standing.machineId()).isEqualTo(mid("apalveien").value());
+            assertThat(standing.containerName()).isEqualTo("webtrees");
+            assertThat(standing.standing()).isEqualTo("GONE");
+            assertThat(standing.lastSeenRunning()).isEqualTo("2026-09-11T09:15:00Z");
+        });
+    }
+
+    private static MachineContainerStanding goneOn(MachineId machineId, String containerName) {
+        return MachineContainerStanding.builder()
+            .machineId(machineId).containerName(containerName).standing(ContainerStanding.GONE)
+            .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
+            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .build();
     }
 
     @Test

@@ -58,6 +58,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import net.vaier.adapter.driven.InMemoryContainerStandingAdapter;
+import net.vaier.domain.ContainerStanding;
+import net.vaier.domain.ContainerStandingTracker;
+import net.vaier.domain.MachineContainerStanding;
 import org.slf4j.LoggerFactory;
 
 import java.time.Clock;
@@ -112,6 +116,8 @@ class ContainerServiceTest {
     InMemoryDockerCommandAccessCache dockerAccessCache;
     // The real store, so a test can seed the verdict a pre-#353 Vaier would already be holding.
     InMemoryContainerSnapshotStore snapshotStore;
+    // Real memory, as in production: what Vaier has seen running survives a scrape that fails.
+    InMemoryContainerStandingAdapter containerStandings;
     ImageUpdateTracker tracker;
     MutableClock clock;
     DeferredExecutor updateExecutor;
@@ -159,13 +165,14 @@ class ContainerServiceTest {
         var lanServerDiscovery =
             new LanServerContainerDiscoveryAdapter(forGettingLanServers, forGettingServerInfo, dockerAccessCache);
         updateExecutor = new DeferredExecutor();
+        containerStandings = new InMemoryContainerStandingAdapter();
         service = new ContainerService(forGettingServerInfo, forGettingVpnClients,
             forResolvingPeerIds, forGettingPeerConfigurations,
             forResolvingRegistryDigest, forPublishingEvents, tracker, clock,
             snapshotStore, snapshotStore, snapshotStore, snapshotStore, lanServerDiscovery,
             () -> TestMachineIds.of("Vaier server"), forGettingLanServerScrape,
             forResolvingSshTargets, forRunningSshCommands, forTrackingHostKeys, dockerAccessCache,
-            updateExecutor);
+            containerStandings, updateExecutor);
     }
 
     // --- Update available (#57) ---
@@ -1723,5 +1730,127 @@ class ContainerServiceTest {
     private List<PublishableService> refreshThenGetUnpublished(List<ReverseProxyRoute> routes) {
         service.refresh();
         return service.getUnpublishedVaierServerServices(routes);
+    }
+
+    // --- container standings: what was running and is not any more (#356) ---
+
+    private static DockerService named(String name, String state) {
+        return new DockerService("id-" + name, name, "ghcr.io/" + name + ":latest", "v",
+            List.of(), List.of(VAIER_NETWORK), state);
+    }
+
+    /** A connected server peer whose Docker daemon answers with exactly these containers. */
+    private void peerRunning(DockerService... containers) {
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(client("10.13.13.5/32")));
+        lenient().when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.5")).thenReturn("apalveien5");
+        when(forGettingPeerConfigurations.getPeerConfigByIp("10.13.13.5"))
+            .thenReturn(Optional.of(peerConfig("apalveien5", "10.13.13.5", MachineType.UBUNTU_SERVER)));
+        when(forGettingServerInfo.getServicesWithExposedPorts(
+                argThat(server -> server != null && "10.13.13.5".equals(server.getAddress()))))
+            .thenReturn(List.of(containers));
+        // Vaier's own host answers with nothing, which is read as a scrape that did not answer rather
+        // than as a host with no containers — the rule that keeps a failed local scrape quiet.
+        lenient().when(forGettingServerInfo.getServicesWithExposedPorts(
+                argThat(server -> server == null || !"10.13.13.5".equals(server.getAddress()))))
+            .thenReturn(List.of());
+    }
+
+    /** One round of the scheduler's tick: scrape, then judge what the scrape found. */
+    private List<ContainerStandingTracker.Verdict> scrapeAndJudge() {
+        service.refresh();
+        return service.judgeContainerStandings();
+    }
+
+    @Test
+    void judgeContainerStandings_isSilentWhileEverythingThatWasRunningStillIs() {
+        peerRunning(named("webtrees", "running"));
+
+        assertThat(scrapeAndJudge()).isEmpty();
+        assertThat(scrapeAndJudge()).isEmpty();
+        verify(forPublishingEvents, never()).publish(eq("vpn-peers"), anyString(), any());
+    }
+
+    @Test
+    void judgeContainerStandings_alertsWhenAContainerOnAPeerStops_andWakesTheExplorer() {
+        peerRunning(named("webtrees", "running"));
+        scrapeAndJudge();
+
+        // The machine rebooted; the container with `restart: no` did not come back with it.
+        peerRunning(named("webtrees", "exited"));
+        assertThat(scrapeAndJudge()).isEmpty();
+        List<ContainerStandingTracker.Verdict> verdicts = scrapeAndJudge();
+
+        assertThat(verdicts).singleElement().satisfies(verdict -> {
+            assertThat(verdict.outcome()).isEqualTo(ContainerStandingTracker.Outcome.ALERT);
+            assertThat(verdict.standing().containerName()).isEqualTo("webtrees");
+            assertThat(verdict.standing().machineId()).isEqualTo(TestMachineIds.of("apalveien5"));
+        });
+        verify(forPublishingEvents).publish("vpn-peers", "container-standing-changed", "");
+    }
+
+    @Test
+    void judgeContainerStandings_aPeerThatDidNotAnswerMovesNothing() {
+        peerRunning(named("webtrees", "running"));
+        scrapeAndJudge();
+
+        // The peer goes quiet: the scrape reports UNREACHABLE and no containers at all.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(disconnectedClient("10.13.13.5/32")));
+        assertThat(scrapeAndJudge()).isEmpty();
+        assertThat(scrapeAndJudge()).isEmpty();
+
+        assertThat(containerStandings.standingsFor(TestMachineIds.of("apalveien5"))).singleElement()
+            .satisfies(standing -> assertThat(standing.standing()).isEqualTo(ContainerStanding.RUNNING));
+    }
+
+    @Test
+    void judgeContainerStandings_watchesVaiersOwnStackToo() {
+        // The masquerade sidecar dying after a deploy is exactly this bug on Vaier's own host.
+        when(forGettingVpnClients.getClients()).thenReturn(List.of());
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(named("wireguard-masquerade", "running")));
+        scrapeAndJudge();
+
+        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+            .thenReturn(List.of(named("wireguard-masquerade", "exited")));
+        scrapeAndJudge();
+
+        assertThat(scrapeAndJudge()).singleElement().satisfies(verdict -> {
+            assertThat(verdict.outcome()).isEqualTo(ContainerStandingTracker.Outcome.ALERT);
+            assertThat(verdict.standing().machineId()).isEqualTo(TestMachineIds.of("Vaier server"));
+        });
+    }
+
+    @Test
+    void judgeContainerStandings_aStoppedContainerStaysInTheScrape_soItCanRecover() {
+        // The live gap this pins: a stopped container keeps its published bindings and so stays in the
+        // scrape, present-but-not-running. Before that, every exited container vanished from the scrape,
+        // read as REMOVED, was forgotten after its one alert — and starting it again said nothing at all.
+        peerRunning(named("busybox-probe", "running"));
+        scrapeAndJudge();
+
+        peerRunning(named("busybox-probe", "exited"));
+        scrapeAndJudge();
+        assertThat(scrapeAndJudge()).singleElement().satisfies(verdict ->
+            assertThat(verdict.outcome()).isEqualTo(ContainerStandingTracker.Outcome.ALERT));
+
+        // The standing is KEPT, because the container is still there — so the machine's card goes on
+        // saying so, and there is something for a recovery to cancel.
+        assertThat(containerStandings.standingsFor(TestMachineIds.of("apalveien5"))).singleElement()
+            .satisfies(standing -> assertThat(standing.standing()).isEqualTo(ContainerStanding.GONE));
+
+        peerRunning(named("busybox-probe", "running"));
+        assertThat(scrapeAndJudge()).singleElement().satisfies(verdict ->
+            assertThat(verdict.outcome()).isEqualTo(ContainerStandingTracker.Outcome.RECOVERED));
+        assertThat(scrapeAndJudge()).isEmpty();
+    }
+
+    @Test
+    void getContainerStandings_isEveryStandingVaierHolds() {
+        peerRunning(named("webtrees", "running"));
+        scrapeAndJudge();
+
+        assertThat(service.getContainerStandings())
+            .extracting(MachineContainerStanding::containerName)
+            .containsExactly("webtrees");
     }
 }

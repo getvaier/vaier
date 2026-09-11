@@ -2,13 +2,13 @@
 
 Back to [README](../README.md).
 
-Disk-pressure watching and its early-warning forecast, the machines that have lost their way out to the internet, container image drift detection, what the edge blocks, and the email notifications that tie them together.
+Disk-pressure watching and its early-warning forecast, the machines that have lost their way out to the internet, the containers that were running and are not any more, container image drift detection, what the edge blocks, and the email notifications that tie them together.
 
 ---
 
 ## Email notifications
 
-SMTP-powered admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when a filesystem on any SSH-reachable machine behind the VPN — including the Vaier host itself — fills past its threshold, when a machine turns out to have [no default route](#a-machine-with-no-way-out), when a container's image newly has an **update available**, when someone signs in for the first time and lands as a pending access request awaiting approval, or when the [edge's CrowdSec bouncer](NETWORKING.md#edge-hardening) blocks either a **credential attack** or one of your **own networks**.
+SMTP-powered admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when a filesystem on any SSH-reachable machine behind the VPN — including the Vaier host itself — fills past its threshold, when a machine turns out to have [no default route](#a-machine-with-no-way-out), when a container that was running [stops and stays stopped](#a-container-that-was-running-and-is-not), when a container's image newly has an **update available**, when someone signs in for the first time and lands as a pending access request awaiting approval, or when the [edge's CrowdSec bouncer](NETWORKING.md#edge-hardening) blocks either a **credential attack** or one of your **own networks**.
 
 It will *not* mail you about the routine bans, and that is deliberate — see [What the edge blocks](#what-the-edge-blocks) below.
 
@@ -38,7 +38,7 @@ This reuses the same SMTP configuration as the up/down machine alerts (Settings 
 
 **Seen without going looking** — every machine's card in the **Explorer**'s fleet listing carries its worst watched filesystem as a tinted disk mark: the same reading and the same verdict as the email, taken on the rounds Vaier already makes, so nothing is asked of a sleeping machine to draw it. Green when there's room, amber when the worst filesystem is closing on its threshold, red when one is over it, with the percentage shown only when there's something to see and the filesystem, its fullness and its threshold named on hover. A machine Vaier hasn't read yet draws **no mark at all** — an unread disk is not a disk with room on it. Every reading refreshes the mark, the sweep's and the one taken when you open a machine's disk list alike, so muting a filesystem or changing its threshold lands on the card immediately instead of waiting out the sweep.
 
-**One trip, more than one answer.** These rounds are also where Vaier learns whether it can reach a machine's SSH server at all, what network the machine sits on, whether that machine [has a way out to the internet](#a-machine-with-no-way-out), and whether the user it signs in as can drive that machine's Docker (which decides whether an **Update** is offered — see above). All of it rides on the same five-minute sign-in the `df` needs, so knowing more costs no extra connection to any machine.
+**One trip, more than one answer.** These rounds are also where Vaier learns whether it can reach a machine's SSH server at all, what network the machine sits on, whether that machine [has a way out to the internet](#a-machine-with-no-way-out), when it last booted, and whether the user it signs in as can drive that machine's Docker (which decides whether an **Update** is offered — see above). All of it rides on the same five-minute sign-in the `df` needs, so knowing more costs no extra connection to any machine.
 
 **Requirements** — a machine is watched only once it has a stored **host credential** (the same vault the web terminal uses) and SSH access enabled. A host that's unreachable or whose `df` fails is quietly skipped — never mistaken for a full disk. Machines without a stored credential or with SSH access turned off are left alone, so there's no failed-auth noise. To have the Vaier host itself watched, store a host credential for it just like any other machine.
 
@@ -73,6 +73,30 @@ So the five-minute rounds now read the machine's **default-route standing**. No 
 **What you're mailed.** One email when the route goes, one when it comes back, and nothing in between — no "still broken" on a timer. The **first** observation speaks: a machine that had already lost its route before Vaier started is the normal case, not the exception, so treating a first sighting as a silent baseline would mean never reporting it. That is only safe because the latch is persisted, in `vaier/config/missing-default-routes.yml`, exactly like the disk one and for the same reason — the operator deploys several times a day, and a latch in memory would either re-mail on every deploy or go quiet forever. A sweep that *fails* moves nothing in either direction: it can't raise the alert, and — the half that matters more — it can't send the all-clear for a machine that is still broken.
 
 **What it does not do.** Vaier does not try to fix the route, and does not test real egress by reaching out from the machine. The routing table is unambiguous, costs no traffic, and asks nothing of a sleeping machine; the observed fault had a DHCP lease that *did* supply a router, with `systemd-networkd` installing host routes via that gateway while never installing the default route itself — so the configuration was not wrong and a config audit would not have caught it. Reading the live routing table is what finds this class of fault.
+
+---
+
+## A container that was running and is not
+
+A machine here rebooted. The containers with a restart policy came back; one with `restart: no` did not. Vaier reported that machine green on every axis it watched — reachable, disk fine, backups green — because every one of those things was true. The service was simply gone, and it was noticed by a person trying to use it.
+
+Vaier already knew. It scrapes every machine's containers every 30 seconds for the Explorer's container lists, so it had watched that container run and could see it stopped. Nothing acted on the difference.
+
+**Stopped containers had to become visible first.** Docker reports no port mappings at all for a container that is not running, and the scrape kept only containers that had some — so every exited container silently dropped out of every machine's list. Vaier now reads a stopped container's own published bindings (what it *was* published on, which survives the stop — not the image's `EXPOSE` list, which would invent ports nobody ever published), so a stopped container is listed where it always should have been, reading **DOWN**. That is also what lets Vaier tell a container that is *stopped* from one that has been *removed*. A stopped container is never offered as a **+ Publish** candidate and is never an update target: nothing answers on its port.
+
+**The trigger is "was up, now isn't"** — never "a container is stopped". Plenty of containers are stopped on purpose and forever: one-shot init containers, a stack you retired last year. Vaier only ever remembers a container it has actually seen running, and says nothing at all about the rest. **Exit code is not the filter either.** The container that prompted this exited `255` with `OOMKilled: false`, an empty `Error` and a clean shutdown in its log — that was a JVM being stopped, not a crash, and a rule keyed on "non-zero exit" would have called it one and been wrong.
+
+**Two scrapes, not one.** A container has to be found not running on two consecutive answered scrapes before anything is said. One is a Vaier-driven **Update** recreating it, or a restart in progress, and an alert that fires on those is an alert people learn to ignore.
+
+**A machine that did not answer moves nothing.** The scrape already knows whether it reached a machine's Docker daemon, and a machine that is merely asleep must never mail you about every container on it. On Vaier's own host an empty reading counts as no answer too — Vaier itself runs in a container there, so "no containers" can only mean the local scrape failed.
+
+**What you see.** A container Vaier watched run and now finds stopped reads **gone** in the machine's container list, rather than the `exited` that a deliberately stopped container shows too. The machine's pane gains a card under *What to do next* per gone container, with what Vaier saw as the evidence — when it was last running, and when it stopped being. Like the missing-route card it has **no button**: Vaier reads the fleet's containers over the Docker API and has no endpoint that starts one, so the card says so instead of offering something that would fail.
+
+**What you're mailed.** One email when a container goes, one when it comes back, and nothing in between. A container that is *removed* rather than stopped earns the same single mail and is then forgotten entirely, so tearing down a stack you meant to tear down costs one message and leaves no card behind. The memory lives in `vaier/config/container-standings.yml`, persisted for the same reason the disk latch is: the operator deploys several times a day, and a container that stopped during a deploy would otherwise look like one Vaier had never seen run.
+
+**Times are in your zone.** Every instant in the mail and on the card is written in the Vaier server's own time zone, named in full — "2026-09-11 11:47 (Europe/Oslo)" — so nothing asks you to convert from UTC while working out whether a service has been down since before breakfast. The stored values stay UTC instants; only the words move.
+
+**And why it happened.** The five-minute rounds also read each machine's boot time — one more line in front of the `df` they already run, so it costs no extra connection. When a machine booted *after* Vaier last saw a container running, the mail and the card both say so: *the machine rebooted at 09:40, after Vaier last saw this container running — that is what explains it*. When Vaier has never managed to read a boot time, the sentence is simply absent rather than guessed at.
 
 ---
 

@@ -171,6 +171,9 @@
         claudeStandings: new Map(),      // machine identity -> where it stands on Claude sign-in, as that same
                                          //   sweep last read it. A machine that is absent has NOT been asked —
                                          //   never one that is signed out (GET /machines/claude-standings)
+        containerStandings: new Map(),   // "machine identity\u0000container name" -> its standing, as the 30-second
+                                         //   scrape last judged it. A container that is absent has never been
+                                         //   seen running — never one that is fine (GET /machines/container-standings)
         roots: new Map(),                // (machine identity, at) -> where a file tree begins (its SFTP root, #326)
         at: null,                        // the archive being browsed, or null for the present — the live filesystem
         archives: new Map(),             // machine identity -> { state, list, error }: its archives, the rail's stops
@@ -592,6 +595,28 @@
         }
         S.claudeStandings = next;
     }
+
+    // Where every container Vaier has watched run currently stands, in ONE request — the word on a stopped
+    // container's row.
+    //
+    // The same exception the two loaders above earn. It reaches no machine: this is the 30-second container
+    // scrape's own verdict, retained in memory and served back, and the backend pushes
+    // `container-standing-changed` when one actually moves. A container Vaier has never seen running is
+    // absent, which is exactly how the many containers that are stopped on purpose stay unremarked.
+    async function loadContainerStandings() {
+        const next = new Map();
+        try {
+            const res = await fetch('/machines/container-standings', { cache: 'no-store' });
+            if (res.ok) for (const s of await res.json()) next.set(standingKey(s.machineId, s.containerName), s);
+        } catch (e) {
+            // A read that failed leaves every container reading as whatever Docker says it is. "Vaier could
+            // not ask" is never drawn as a verdict.
+        }
+        S.containerStandings = next;
+    }
+
+    // One key for the pair a standing belongs to. Two machines really can run a container of the same name.
+    function standingKey(machineId, containerName) { return machineId + '\u0000' + containerName; }
 
     // One machine's filesystems, read when they are looked at (#323 slice C, every filesystem since #325).
     // Vaier has computed this on a schedule since the disk alerts shipped and only ever emailed about it;
@@ -2178,6 +2203,9 @@
         // route has to come back on the machine. No label means no button; the domain's action sentence is
         // shown in its place.
         NO_DEFAULT_ROUTE:        () => ({ icon: 'warn' }),
+        // #356: the same, and for the same reason — Vaier reads the fleet's containers and has no endpoint
+        // that starts one. No label, no button, and the domain's sentence in its place.
+        CONTAINER_GONE:          () => ({ icon: 'warn' }),
     };
 
     // One nudge, rendered as a quiet invitation: an accent glyph for its kind, the domain's title and the
@@ -3892,11 +3920,16 @@
         rows.className = 'ex-listing is-wide';
         rows.appendChild(listHead(['Name', 'Image', 'State']));
         found.forEach((c) => {
+            // `exited` is what a container stopped on purpose says too, and those are the many. A container
+            // the backend has watched run and now finds stopped reads `gone` instead — its standing is the
+            // server's own verdict (#356), never re-decided here.
+            const gone = S.containerStandings.get(standingKey(machineId, c.containerName));
+            const isGone = gone && gone.standing === 'GONE';
             rows.appendChild(listRow(
                 entryIco('container'), c.containerName,
                 () => go(['fleet', machineId, 'containers', c.containerName]),
-                [c.image || '—', c.state || 'unknown'],
-                c.state === 'running' ? 'OK' : 'DOWN', updateMark(c)));
+                [c.image || '—', isGone ? 'gone' : (c.state || 'unknown')],
+                c.state === 'running' ? 'OK' : (isGone ? 'GONE' : 'DOWN'), updateMark(c)));
         });
         body.appendChild(rows);
 
@@ -9787,7 +9820,7 @@
                 // honest answer about what is actually running.
                 _updating.clear();
                 Promise.all([loadFleet(), loadLanServers(), loadDiskStandings(),
-                    loadClaudeStandings(), loadContainers()])
+                    loadClaudeStandings(), loadContainers(), loadContainerStandings()])
                     .then(render);
             }
             opened = true;
@@ -9829,6 +9862,10 @@
         // And where a machine stands on Claude, learned on that same trip and published the same way: only on
         // a change, empty body, one re-read of the one memory-backed endpoint.
         events.addEventListener('claude-standing-changed', () => loadClaudeStandings().then(render));
+        // And a container that was running and is not any more (#356), learned on the 30-second scrape and
+        // published the same way: only on the change, empty body, one re-read of the one memory-backed
+        // endpoint. A fleet where everything that was up still is sends nothing at all.
+        events.addEventListener('container-standing-changed', () => loadContainerStandings().then(render));
         // An update this browser (or another one) asked for has settled. It rides on this stream rather than
         // one of its own for the same reason everything else here does — the fleet already holds it open — and
         // it is what ends the wait: a pull is minutes, so the request returned 202 and nothing has been asking
@@ -10073,6 +10110,9 @@
         // And where the fleet stands on Claude, for the same reason and at the same cost: memory-backed,
         // nothing woken, and a mark a machine card carries whether or not anyone opens that machine.
         loadClaudeStandings().then(render);
+        // And which containers were running and are not any more (#356) — the word on a stopped container's
+        // row, and the cards on its machine. Memory-backed too: the scrape has already done the asking.
+        loadContainerStandings().then(render);
 
         watchFleet();
         watchServices();

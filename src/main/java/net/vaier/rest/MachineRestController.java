@@ -7,6 +7,7 @@ import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRunsUseCase;
 import net.vaier.application.GetBackupServersUseCase;
 import net.vaier.application.GetClaudeSignInStandingsUseCase;
+import net.vaier.application.GetContainerStandingsUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetMachineDiskStandingsUseCase;
@@ -24,6 +25,7 @@ import net.vaier.domain.BackupRun;
 import net.vaier.domain.EffectiveUser;
 import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.Machine;
+import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineNudge;
@@ -42,6 +44,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -68,6 +71,10 @@ public class MachineRestController {
     private final GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     private final GetSshServerPresenceUseCase getSshServerPresenceUseCase;
     private final GetMachineNetworksUseCase getMachineNetworksUseCase;
+    private final GetContainerStandingsUseCase getContainerStandingsUseCase;
+    // Read for its zone alone: the one a machine's cards write their times in, so the domain never has to
+    // ask the environment where the operator is.
+    private final Clock clock;
 
     /**
      * Every machine Vaier knows. Each carries {@code hasCredential} — whether Vaier actually holds an SSH
@@ -210,6 +217,13 @@ public class MachineRestController {
         MachineNetworks routingHostNetworks = vaierServer == null ? MachineNetworks.unknown()
             : getMachineNetworksUseCase.getMachineNetworks(vaierServer);
 
+        // #356: where each container Vaier has watched run on THIS machine stands, filtered by identity
+        // out of the one fleet-wide read. The domain decides which of them is worth a card.
+        List<MachineContainerStanding> containerStandings =
+            getContainerStandingsUseCase.getContainerStandings().stream()
+                .filter(standing -> target.id().equals(standing.machineId()))
+                .toList();
+
         MachineSignals signals = MachineSignals.builder()
             .publishableCount(publishableCount)
             .reachable(reachable)
@@ -219,6 +233,8 @@ public class MachineRestController {
             .fleet(fleet)
             .networks(networks)
             .routingHostNetworks(routingHostNetworks)
+            .containerStandings(containerStandings)
+            .zone(clock.getZone())
             .build();
 
         return MachineNudges.forMachine(target, signals).stream()
@@ -236,6 +252,43 @@ public class MachineRestController {
         static NudgeResponse from(MachineNudge n) {
             return new NudgeResponse(n.kind().name(), n.title(), n.evidence(), n.action(), n.value());
         }
+    }
+
+    /**
+     * Where every container Vaier has watched run currently stands (#356), for the whole fleet in one
+     * request — so the Explorer can mark a container <b>gone</b> rather than merely stopped.
+     *
+     * <p>It reaches no machine and scrapes nothing. These are the standings the 30-second container scrape
+     * has already worked out, retained in memory; per-machine reads would have been N requests for one
+     * badge, so this is deliberately one, exactly as {@code /machines/disk-standings} is.
+     *
+     * <p>A container Vaier has never seen running is simply <b>absent</b>. That absence is the feature: a
+     * great many containers are stopped on purpose and forever, and the client's contract is to draw
+     * nothing for a container that is not here.
+     *
+     * <p>A literal path segment under {@code /machines}, so it is admin-gated with the rest of them.
+     */
+    @GetMapping("/container-standings")
+    public List<ContainerStandingResponse> containerStandings() {
+        return getContainerStandingsUseCase.getContainerStandings().stream()
+            .map(standing -> new ContainerStandingResponse(standing.machineId().value(),
+                standing.containerName(), standing.standing().name(),
+                standing.lastSeenRunning() == null ? null : standing.lastSeenRunning().toString()))
+            .toList();
+    }
+
+    /**
+     * One container's standing, flattened for the browser.
+     *
+     * @param machineId       whose container this is — identity, never a name
+     * @param containerName   what the container is called on that machine
+     * @param standing        the domain's own {@code ContainerStanding}, travelling as a name rather than
+     *                        being recomputed in the browser from a state string and a memory it does not
+     *                        have. Two surfaces deciding what "gone" means is how they come to disagree.
+     * @param lastSeenRunning when Vaier last saw it running, ISO-8601, null when it never has
+     */
+    record ContainerStandingResponse(String machineId, String containerName, String standing,
+                                     String lastSeenRunning) {
     }
 
     /**

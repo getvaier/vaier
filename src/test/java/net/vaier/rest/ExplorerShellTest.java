@@ -1843,6 +1843,79 @@ class ExplorerShellTest {
     }
 
     @Test
+    void theContainerGoneNudge_showsNoButton_becauseVaierNeverStartsAContainer() throws IOException {
+        // #356 joins #357 as trouble rather than an invitation. Vaier reads the fleet's containers over the
+        // Docker API and has no endpoint that starts one, so the card ends in a sentence. The generic
+        // fallback would have drawn a dead button promising something that does not exist.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("const NUDGE_ACTION = {");
+        assertThat(from).isPositive();
+        String table = js.substring(from, js.indexOf("};", from));
+        assertThat(table).contains("CONTAINER_GONE:");
+        assertThat(table).as("trouble wears the warning glyph, not a capability's own").contains("'warn'");
+    }
+
+    // --- a container that was running and is not any more (#356) ---------------------------------------
+    //
+    // The same shape as the disk standings above, one level finer: the 30-second container scrape already
+    // saw this container running and now sees it stopped, and until #356 nothing drew the difference. A
+    // container Vaier has never watched run is absent from this read entirely, which is what keeps the
+    // many containers that are stopped on purpose out of it.
+
+    @Test
+    void theFleetsContainerStandings_areReadOnce_fromWhatTheScrapeAlreadyWorkedOut() throws IOException {
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("'/machines/container-standings'");
+
+        int from = js.indexOf("async function loadContainerStandings(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        // One request for the whole fleet. A per-machine loop here would be a scrape in disguise.
+        assertThat(body.split("fetch\\(", -1).length - 1).as("exactly one request").isEqualTo(1);
+        assertThat(body).contains("new Map()");
+
+        // Read at boot, alongside the other fleet loads — never from render().
+        int init = js.indexOf("async function init(");
+        assertThat(js.substring(init)).contains("loadContainerStandings()");
+        int render = js.indexOf("\n    function render(");
+        assertThat(js.substring(render, js.indexOf("\n    function", render + 10)))
+            .as("render() must never fetch").doesNotContain("loadContainerStandings(");
+    }
+
+    @Test
+    void aContainerThatWasRunningAndIsNot_readsAsGone_notMerelyExited() throws IOException {
+        // The word in the state column is the whole point: "exited" is what a container stopped on purpose
+        // says too, and the operator cannot tell those apart. The verdict is the server's own standing —
+        // the browser is never a second place deciding what "gone" means.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderContainers(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    function renderContainer(", from));
+
+        assertThat(body).contains("'GONE'");
+        assertThat(body).contains("'gone'");
+        // No re-deciding: nothing here compares timestamps or infers a standing from the docker state.
+        assertThat(body).doesNotContain("lastSeenRunning <").doesNotContain("Date.now()");
+    }
+
+    @Test
+    void aChangedContainerStanding_arrivesOnTheStreamTheFleetPageAlreadyHoldsOpen() throws IOException {
+        // Same shape as disk-standing-changed: published on the `vpn-peers` topic only when a standing
+        // actually moved, with an empty body, and the browser re-reads the one endpoint. No second
+        // connection, no timer, and nothing at all for a fleet where everything that was up still is.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function watchFleet(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    // The fleet's second stream", from));
+        assertThat(body).contains("'container-standing-changed'");
+        assertThat(body).contains("loadContainerStandings()");
+        // A dropped stream re-syncs the standings with the rest of the fleet, or a row would sit on a
+        // verdict that moved while the browser was disconnected.
+        assertThat(body).contains("loadContainers(), loadContainerStandings()");
+        assertThat(js).doesNotContain("setInterval");
+    }
+
+    @Test
     void theEditFormFoldsTheHandTypedCidr_underAFoldThatNamesIt() throws IOException {
         // The CIDR field stays — a machine can front more than one subnet, and nothing detects that — but
         // it is no longer the way an operator is expected to answer. It is the escape hatch, so it lives

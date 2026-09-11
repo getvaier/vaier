@@ -1,19 +1,23 @@
 package net.vaier.application.service;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupServer;
 import net.vaier.domain.BlockDecision;
+import net.vaier.domain.ContainerStanding;
 import net.vaier.domain.BreachAttemptRollup;
 import net.vaier.domain.DiskFillForecast;
 import net.vaier.domain.DiskFillForecastCleared;
 import net.vaier.domain.EnrolmentRequest;
 import org.springframework.scheduling.annotation.Async;
 import net.vaier.domain.LockoutWarning;
+import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineType;
@@ -56,6 +60,8 @@ class NotificationServiceTest {
     @Mock ForSendingAdminNotification adminNotifier;
     @Mock ForHoldingBundles forHoldingBundles;
     @Mock ConfigResolver configResolver;
+    /** Read for its zone alone: the one an operator's mail is written in. */
+    @Mock Clock clock;
 
     @InjectMocks NotificationService service;
 
@@ -194,6 +200,51 @@ class NotificationServiceTest {
         assertThat(subject.getValue()).isEqualTo(restored.defaultRouteRestoredSubject("Apalveien 5"));
         // The all-clear carries the fresh reading, so it never repeats the warning it is cancelling.
         assertThat(body.getValue()).contains("via eno1").doesNotContain("cannot fix it");
+    }
+
+    // --- a container that was running and is not any more (#356) ---
+
+    /** Where the operator reads their mail — the Vaier server's own zone, off its Clock. */
+    private static final ZoneId OSLO = ZoneId.of("Europe/Oslo");
+
+    /** The container that prompted the issue: up when Vaier last looked, down after a reboot. */
+    private static final MachineContainerStanding WEBTREES_GONE = MachineContainerStanding.builder()
+            .machineId(TestMachineIds.of("apalveien"))
+            .containerName("webtrees")
+            .standing(ContainerStanding.GONE)
+            .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
+            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .misses(2)
+            .build();
+
+    @Test
+    void notifyAdminsOfContainerGone_carriesTheDomainsWordsAndTheEvidence() {
+        when(clock.getZone()).thenReturn(OSLO);
+
+        service.notifyAdminsOfContainerGone("Apalveien 5", WEBTREES_GONE);
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
+        assertThat(subject.getValue()).isEqualTo(WEBTREES_GONE.goneSubject("Apalveien 5"));
+        assertThat(body.getValue()).isEqualTo(WEBTREES_GONE.goneBody("Apalveien 5", OSLO));
+    }
+
+    @Test
+    void notifyAdminsOfContainerBack_isTheAllClear() {
+        MachineContainerStanding back = MachineContainerStanding.seenRunning(
+                TestMachineIds.of("apalveien"), "webtrees",
+                Instant.parse("2026-09-11T10:02:00Z"), null);
+
+        when(clock.getZone()).thenReturn(OSLO);
+
+        service.notifyAdminsOfContainerBack("Apalveien 5", back);
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
+        assertThat(subject.getValue()).isEqualTo(back.backSubject("Apalveien 5"));
+        assertThat(body.getValue()).doesNotContain("cannot start it");
     }
 
     // --- fleet-backup failure / recovery alerts ---

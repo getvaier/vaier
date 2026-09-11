@@ -8,6 +8,7 @@ import net.vaier.adapter.driven.InMemoryDiskFillTrendAdapter;
 import net.vaier.adapter.driven.InMemoryDiskPressureStateAdapter;
 import net.vaier.adapter.driven.InMemoryClaudeSignInStandingCache;
 import net.vaier.adapter.driven.InMemoryMachineDiskStandingCache;
+import net.vaier.adapter.driven.InMemoryContainerStandingAdapter;
 import net.vaier.adapter.driven.InMemoryMissingDefaultRouteAdapter;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineNetworks;
@@ -107,6 +108,7 @@ class RemoteDiskWatcherTest {
     ForPublishingEvents eventPublisher;
     ForPersistingDiskPressureState pressureState;
     ForPersistingMissingDefaultRoutes missingRoutes;
+    InMemoryContainerStandingAdapter containerStandings;
     NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier;
     ForPersistingDiskFillTrends fillTrends;
     InMemoryMachineDiskStandingCache standings;
@@ -144,6 +146,7 @@ class RemoteDiskWatcherTest {
         eventPublisher = mock(ForPublishingEvents.class);
         pressureState = new InMemoryDiskPressureStateAdapter();
         missingRoutes = new InMemoryMissingDefaultRouteAdapter();
+        containerStandings = new InMemoryContainerStandingAdapter();
         missingRouteNotifier = mock(NotifyAdminsOfMissingDefaultRouteUseCase.class);
         fillTrends = new InMemoryDiskFillTrendAdapter();
         standings = new InMemoryMachineDiskStandingCache();
@@ -173,7 +176,7 @@ class RemoteDiskWatcherTest {
             diskWatches, configResolver, clock, sshPresenceRecorder, eventPublisher, pressureState,
             detectMachineNetworks, forgetMachineNetworks, standings, dockerAccessRecorder, fillTrends,
             claudeSignIn, claudeStandings, reverseProxyAudit, reverseProxyAuditNotifier,
-            missingRoutes, missingRouteNotifier);
+            missingRoutes, missingRouteNotifier, containerStandings);
     }
 
     /** 1024-blocks in a GiB, and a 100 GiB filesystem to spend them on. */
@@ -1476,5 +1479,55 @@ class RemoteDiskWatcherTest {
             .thenThrow(new RuntimeException("config unreadable"));
 
         assertThatCode(() -> watcher.checkRemoteDiskUsage()).doesNotThrowAnyException();
+    }
+
+    // --- when each machine last booted (#356) ---
+
+    /** What the sweep's output looks like with the uptime marker riding in front of {@code df}. */
+    private CommandResult dfAfterUptime(int usedPercent, String secondsUp) {
+        CommandResult disk = df(usedPercent);
+        return new CommandResult(disk.exitCode(), "VAIER-UPTIME=" + secondsUp + "\n" + disk.stdout(),
+            disk.stderr(), disk.timedOut(), disk.hostKeyFingerprint());
+    }
+
+    @Test
+    void theSweepLearnsWhenEachMachineLastBooted_onTheTripItAlreadyMakes() {
+        // The context that makes a missing container legible, and it costs no second sign-in.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("nas")));
+        hasCredential("nas");
+        when(runner.run(eq(mid("nas")), any())).thenReturn(dfAfterUptime(50, "600.0"));
+
+        watcher.checkRemoteDiskUsage();
+
+        assertThat(containerStandings.bootOf(mid("nas"))).contains(clock.instant().minusSeconds(600));
+        verify(runner, times(1)).run(eq(mid("nas")), any());
+    }
+
+    @Test
+    void theUptimeReadRidesInFrontOfTheDiskReading_andChangesNeither() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("nas")));
+        hasCredential("nas");
+        when(runner.run(eq(mid("nas")), any())).thenReturn(dfAfterUptime(90, "600.0"));
+
+        watcher.checkRemoteDiskUsage();
+
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(runner).run(eq(mid("nas")), command.capture());
+        assertThat(command.getValue()).contains("/proc/uptime").endsWith(RemoteDiskUsage.DF_COMMAND);
+        // And the marker line is not mistaken for a filesystem: the disk alert is exactly as it was.
+        verify(notifier).notifyAdminsOfRemoteDiskPressure(any(), eq(85));
+    }
+
+    @Test
+    void aMachineThatSaysNothingAboutItsUptimeIsSimplyNotKnownToHaveRebooted() {
+        // A trip that came back without the marker is not evidence of anything. Unknown is not a story.
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("nas")));
+        hasCredential("nas");
+        when(runner.run(eq(mid("nas")), any())).thenReturn(df(90));
+
+        watcher.checkRemoteDiskUsage();
+
+        verify(notifier).notifyAdminsOfRemoteDiskPressure(any(), eq(85));
+        assertThat(containerStandings.bootOf(mid("nas"))).isEmpty();
     }
 }
