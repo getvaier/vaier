@@ -8,10 +8,13 @@ import net.vaier.adapter.driven.InMemoryDiskFillTrendAdapter;
 import net.vaier.adapter.driven.InMemoryDiskPressureStateAdapter;
 import net.vaier.adapter.driven.InMemoryClaudeSignInStandingCache;
 import net.vaier.adapter.driven.InMemoryMachineDiskStandingCache;
+import net.vaier.adapter.driven.InMemoryMissingDefaultRouteAdapter;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.port.ForPersistingDiskFillTrends;
 import net.vaier.domain.port.ForPersistingDiskPressureState;
+import net.vaier.domain.port.ForPersistingMissingDefaultRoutes;
 import net.vaier.application.GetClaudeSignInStatusUseCase;
 import net.vaier.application.GetDiskWatchesUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
@@ -21,6 +24,7 @@ import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.ForgetMachineNetworksUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
+import net.vaier.application.NotifyAdminsOfMissingDefaultRouteUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.config.ConfigResolver;
@@ -69,12 +73,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class RemoteDiskWatcherTest {
@@ -100,6 +106,8 @@ class RemoteDiskWatcherTest {
     ForgetMachineNetworksUseCase forgetMachineNetworks;
     ForPublishingEvents eventPublisher;
     ForPersistingDiskPressureState pressureState;
+    ForPersistingMissingDefaultRoutes missingRoutes;
+    NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier;
     ForPersistingDiskFillTrends fillTrends;
     InMemoryMachineDiskStandingCache standings;
     ForRecordingDockerCommandAccess dockerAccessRecorder;
@@ -135,6 +143,8 @@ class RemoteDiskWatcherTest {
         forgetMachineNetworks = mock(ForgetMachineNetworksUseCase.class);
         eventPublisher = mock(ForPublishingEvents.class);
         pressureState = new InMemoryDiskPressureStateAdapter();
+        missingRoutes = new InMemoryMissingDefaultRouteAdapter();
+        missingRouteNotifier = mock(NotifyAdminsOfMissingDefaultRouteUseCase.class);
         fillTrends = new InMemoryDiskFillTrendAdapter();
         standings = new InMemoryMachineDiskStandingCache();
         dockerAccessRecorder = mock(ForRecordingDockerCommandAccess.class);
@@ -162,7 +172,8 @@ class RemoteDiskWatcherTest {
         return new RemoteDiskWatcher(machines, credentials, runner, notifier, forecastNotifier,
             diskWatches, configResolver, clock, sshPresenceRecorder, eventPublisher, pressureState,
             detectMachineNetworks, forgetMachineNetworks, standings, dockerAccessRecorder, fillTrends,
-            claudeSignIn, claudeStandings, reverseProxyAudit, reverseProxyAuditNotifier);
+            claudeSignIn, claudeStandings, reverseProxyAudit, reverseProxyAuditNotifier,
+            missingRoutes, missingRouteNotifier);
     }
 
     /** 1024-blocks in a GiB, and a 100 GiB filesystem to spend them on. */
@@ -1136,6 +1147,106 @@ class RemoteDiskWatcherTest {
 
         verify(notifier).notifyAdminsOfRemoteDiskPressure(any(RemoteDiskUsage.class), eq(85));
         verify(sshPresenceRecorder).record(mid("nas"), SshServerPresence.PRESENT);
+    }
+
+    // --- a machine with no way out (#357) --------------------------------------------------------------
+    //
+    // The same reading that offers to route a LAN also says whether the machine can reach the internet at
+    // all. Nothing extra is asked of the machine; the fact was already on the wire and thrown away.
+
+    /** What the observed fault looks like: an address, an on-link route, and no default route. */
+    private static final String NO_WAY_OUT =
+        "2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1";
+
+    private static final String WAY_OUT = """
+        2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1
+        default via 192.168.3.1 dev eno1 proto dhcp metric 100
+        """;
+
+    private void sweepReads(String machineName, String ipOutput) {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine(machineName)));
+        hasCredential(machineName);
+        when(runner.run(eq(mid(machineName)), any())).thenReturn(df(10));
+        when(detectMachineNetworks.detectMachineNetworks(mid(machineName)))
+            .thenReturn(MachineNetworks.parse(ipOutput));
+    }
+
+    @Test
+    void aMachineThatAnswersWithNoDefaultRoute_isMailedAboutOnce() {
+        sweepReads("apalveien", NO_WAY_OUT);
+
+        watcher.checkRemoteDiskUsage();
+        watcher.checkRemoteDiskUsage();   // and every five minutes after — nothing new has happened
+
+        verify(missingRouteNotifier).notifyAdminsOfMissingDefaultRoute(eq("apalveien"),
+            any(MachineNetworks.class));
+        verifyNoMoreInteractions(missingRouteNotifier);
+    }
+
+    @Test
+    void theLatchOutlivesARedeploy_soADeployStormNeverRepeatsTheSameMail() {
+        // The exact failure the disk work was fixed for, in its other direction: several deploys a day, and
+        // a latch in a field would mail on every one of them.
+        sweepReads("apalveien", NO_WAY_OUT);
+        watcher.checkRemoteDiskUsage();
+
+        watcher = newWatcher();
+        watcher.checkRemoteDiskUsage();
+
+        verify(missingRouteNotifier, times(1)).notifyAdminsOfMissingDefaultRoute(any(), any());
+    }
+
+    @Test
+    void theRouteComingBack_sendsTheAllClearOnce() {
+        sweepReads("apalveien", NO_WAY_OUT);
+        watcher.checkRemoteDiskUsage();
+
+        when(detectMachineNetworks.detectMachineNetworks(mid("apalveien")))
+            .thenReturn(MachineNetworks.parse(WAY_OUT));
+        watcher.checkRemoteDiskUsage();
+        watcher.checkRemoteDiskUsage();
+
+        verify(missingRouteNotifier, times(1)).notifyAdminsOfDefaultRouteRestored(eq("apalveien"),
+            any(MachineNetworks.class));
+    }
+
+    @Test
+    void aHealthyMachineIsNeverMailedAbout() {
+        sweepReads("colina", WAY_OUT);
+
+        watcher.checkRemoteDiskUsage();
+
+        verifyNoInteractions(missingRouteNotifier);
+    }
+
+    @Test
+    void aMachineVaierCouldNotRead_neitherAlertsNorCancelsAnAlert() {
+        // Unknown is not "no" — and it is not "all clear" either: a sweep that failed must never mail the
+        // recovery for a machine that is still broken.
+        sweepReads("apalveien", NO_WAY_OUT);
+        watcher.checkRemoteDiskUsage();
+
+        when(detectMachineNetworks.detectMachineNetworks(mid("apalveien")))
+            .thenReturn(MachineNetworks.unknown());
+        watcher.checkRemoteDiskUsage();
+
+        verify(missingRouteNotifier, never()).notifyAdminsOfDefaultRouteRestored(any(), any());
+    }
+
+    @Test
+    void aMailThatBlowsUp_neverStopsTheSweep() {
+        when(machines.getAllMachines()).thenReturn(List.of(sshMachine("apalveien")));
+        hasCredential("apalveien");
+        when(runner.run(eq(mid("apalveien")), any())).thenReturn(df(99));
+        when(detectMachineNetworks.detectMachineNetworks(mid("apalveien")))
+            .thenReturn(MachineNetworks.parse(NO_WAY_OUT));
+        doThrow(new RuntimeException("smtp is down"))
+            .when(missingRouteNotifier).notifyAdminsOfMissingDefaultRoute(any(), any());
+
+        watcher.checkRemoteDiskUsage();
+
+        verify(notifier).notifyAdminsOfRemoteDiskPressure(any(RemoteDiskUsage.class), eq(85));
+        verify(forgetMachineNetworks).forgetMachineNetworksExcept(Set.of(mid("apalveien")));
     }
 
     @Test

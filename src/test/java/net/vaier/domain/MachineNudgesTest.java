@@ -115,4 +115,28 @@ class MachineNudgesTest {
 
         assertThat(nudges).extracting(MachineNudge::kind).doesNotContain(MachineNudge.Kind.ROUTE_LAN);
     }
+
+    @Test
+    void aMachineWithNoWayOutIsSaidFirst(){
+        // #357: the only card here that is trouble rather than an invitation, so it leads. It rides in on
+        // the same already-read networks the route-LAN nudge uses — nothing new is asked of the machine.
+        MachineNetworks noWayOut = MachineNetworks.parse(
+            "2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1");
+
+        List<MachineNudge> nudges = MachineNudges.forMachine(machine(DeviceCategory.SERVER),
+            signals().publishableCount(1).networks(noWayOut).build());
+
+        assertThat(nudges).extracting(MachineNudge::kind).containsExactly(
+            MachineNudge.Kind.NO_DEFAULT_ROUTE, MachineNudge.Kind.PUBLISH,
+            MachineNudge.Kind.DESIGNATE_BACKUP_SERVER);
+    }
+
+    @Test
+    void aMachineVaierHasNotReadWearsNoMissingRoute() {
+        List<MachineNudge> nudges = MachineNudges.forMachine(machine(DeviceCategory.SERVER),
+            signals().build());
+
+        assertThat(nudges).extracting(MachineNudge::kind)
+            .doesNotContain(MachineNudge.Kind.NO_DEFAULT_ROUTE);
+    }
 }

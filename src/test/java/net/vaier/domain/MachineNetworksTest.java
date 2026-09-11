@@ -85,6 +85,83 @@ class MachineNetworksTest {
         assertThat(networks.lanCandidate()).isEmpty();
     }
 
+    // --- whether the machine can reach the world at all (#357) -----------------------------------------
+    //
+    // A LAN server lost its default route. It kept its address, its on-link LAN route and the relay routes
+    // Vaier installs, so every probe Vaier makes — reachable, disk, backups — still passed: all of them are
+    // answerable from inside the LAN. The machine could not pull an image or reach anything on the internet,
+    // and Vaier read it as fully healthy. The distinction was already parsed here and thrown away.
+
+    @Test
+    void defaultRoute_whenTheMachineNamesTheInterfaceItLeavesBy_isPresent() {
+        assertThat(MachineNetworks.parse(RELAY_OUTPUT).defaultRoute())
+            .isEqualTo(DefaultRouteStanding.PRESENT);
+    }
+
+    @Test
+    void defaultRoute_whenTheMachineAnsweredWithNoDefaultRouteAtAll_isAbsent() {
+        // The fault itself: addresses, an on-link route, and no `default via` line anywhere. The machine
+        // answered — this is a reading, not a failure — and what it said is that it has no way out.
+        MachineNetworks networks = MachineNetworks.parse("""
+            1: lo    inet 127.0.0.1/8 scope host lo
+            2: eth0    inet 192.168.3.20/24 brd 192.168.3.255 scope global eth0
+            """);
+
+        assertThat(networks.defaultRouteInterface()).isNull();
+        assertThat(networks.defaultRoute()).isEqualTo(DefaultRouteStanding.ABSENT);
+    }
+
+    @Test
+    void defaultRoute_whenVaierHasNeverManagedToReadTheMachine_isUnknown() {
+        // Unknown is not "no", the lesson the disk work already learned: a machine that could not be read, a
+        // shell that said `command not found`, a truncated run — none of them prove a missing route.
+        assertThat(MachineNetworks.unknown().defaultRoute()).isEqualTo(DefaultRouteStanding.UNKNOWN);
+        assertThat(MachineNetworks.parse("sh: ip: command not found").defaultRoute())
+            .isEqualTo(DefaultRouteStanding.UNKNOWN);
+        assertThat(MachineNetworks.parse(null).defaultRoute()).isEqualTo(DefaultRouteStanding.UNKNOWN);
+    }
+
+    @Test
+    void defaultRoute_leavingByATunnelIsStillARouteOut() {
+        // A full-tunnel peer routes by wg0. lanCandidate() says nothing about that — the VPN is not a LAN
+        // Vaier would offer to route — but the machine can plainly reach the world, so it is PRESENT. The
+        // two questions are different, and this is where they part company.
+        MachineNetworks networks = MachineNetworks.parse("""
+            2: eth0    inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0
+            6: wg0    inet 10.13.13.7/32 scope global wg0
+            default dev wg0 scope link
+            """);
+
+        assertThat(networks.lanCandidate()).isEmpty();
+        assertThat(networks.defaultRoute()).isEqualTo(DefaultRouteStanding.PRESENT);
+    }
+
+    @Test
+    void theEmailWordsAreTheDomains_subjectNamesTheMachineAndBodySaysWhatItCosts() {
+        MachineNetworks networks = MachineNetworks.parse(
+            "2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1");
+
+        assertThat(networks.missingDefaultRouteSubject("Apalveien 5"))
+            .isEqualTo("[Vaier] Apalveien 5 has no default route — it cannot reach the internet");
+        assertThat(networks.defaultRouteRestoredSubject("Apalveien 5"))
+            .isEqualTo("[Vaier] Apalveien 5 can reach the internet again");
+
+        String body = networks.defaultRouteBody("Apalveien 5", "example.com");
+        assertThat(body).contains("Apalveien 5");
+        // The evidence, so the mail stands on its own: what Vaier read, and what it could not find.
+        assertThat(body).contains("eno1 192.168.3.20/24");
+        assertThat(body).contains("Image pulls and updates will fail");
+        // Said plainly, because nothing Vaier can do fixes this one.
+        assertThat(body).contains("Vaier can see this, but cannot fix it");
+        assertThat(body).contains("vaier.example.com");
+    }
+
+    @Test
+    void theEmailBodyOmitsTheLinkWhenThereIsNoDomainToLinkTo() {
+        assertThat(MachineNetworks.unknown().defaultRouteBody("nas", null)).doesNotContain("https://");
+        assertThat(MachineNetworks.unknown().defaultRouteBody("nas", " ")).doesNotContain("https://");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"lo", "wg0", "wg-home", "docker0", "br-9f2c1a", "veth3a1b", "tailscale0",
         "virbr0", "tun0", "tap0", "zt0", "cni0"})

@@ -271,4 +271,41 @@ class MachineNudgeTest {
         assertThat(MachineNudge.routeLan(lanServer, readingOf(COLINA), EC2)).isEmpty();
         assertThat(MachineNudge.routeLan(laptop, readingOf(COLINA), EC2)).isEmpty();
     }
+
+    // --- NO_DEFAULT_ROUTE predicate (#357) ---
+
+    /** What the observed fault looks like: an address, an on-link route, and no way out. */
+    private static final String NO_WAY_OUT = """
+        1: lo    inet 127.0.0.1/8 scope host lo
+        2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1
+        """;
+
+    @Test
+    void noDefaultRoute_saysWhatItCostsAndWhatVaierCanDoAboutIt() {
+        Optional<MachineNudge> nudge = MachineNudge.noDefaultRoute("Apalveien 5", readingOf(NO_WAY_OUT));
+
+        assertThat(nudge).isPresent();
+        assertThat(nudge.get().kind()).isEqualTo(MachineNudge.Kind.NO_DEFAULT_ROUTE);
+        assertThat(nudge.get().title()).contains("No default route");
+        // The evidence is what Vaier actually read off the machine — the interface and the address it holds
+        // — so the operator can see where the verdict came from without leaving the pane.
+        assertThat(nudge.get().evidence()).contains("eno1").contains("192.168.3.20");
+        // And the honest part: this one is not a capability to adopt. Vaier can see it and cannot fix it.
+        assertThat(nudge.get().action()).contains("cannot reach the internet");
+        assertThat(nudge.get().action()).contains("Vaier can see this");
+        assertThat(nudge.get().value()).isNull();
+    }
+
+    @Test
+    void noDefaultRoute_silentWhenTheMachineHasAWayOut() {
+        assertThat(MachineNudge.noDefaultRoute("Colina 27", readingOf(COLINA))).isEmpty();
+    }
+
+    @Test
+    void noDefaultRoute_silentWhenVaierHasNotReadTheMachine() {
+        // Unknown is not "no". A machine nobody has asked must never wear a fault it was never observed to
+        // have — it is the whole reason the standing is three-valued.
+        assertThat(MachineNudge.noDefaultRoute("nas", MachineNetworks.unknown())).isEmpty();
+        assertThat(MachineNudge.noDefaultRoute("nas", readingOf("sh: ip: command not found"))).isEmpty();
+    }
 }

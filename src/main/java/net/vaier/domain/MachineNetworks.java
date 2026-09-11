@@ -7,14 +7,16 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * A point-in-time reading of <b>the IPv4 networks a machine sits on</b>, parsed from
  * {@link #IP_COMMAND} run over SSH — the same channel, and the same 5-minute sweep, that already takes
  * the machine's {@link RemoteDiskUsage disk reading}. It owns the business decisions of how that output
  * is read ({@link #parse(String)}), which interfaces could never be an operator's LAN
- * ({@link #isPseudoInterface(String)}), and which single network is <em>the network behind this
- * machine</em> ({@link #lanCandidate()}).
+ * ({@link #isPseudoInterface(String)}), which single network is <em>the network behind this
+ * machine</em> ({@link #lanCandidate()}), and whether the machine has a way out to the internet at all
+ * ({@link #defaultRoute()}, #357).
  *
  * <p><b>#333.</b> This exists so an operator is never asked for a CIDR. Typing one asks a homelab user to
  * know CIDR notation, to know which subnet their router hands out, and to understand that getting it
@@ -115,6 +117,75 @@ public record MachineNetworks(List<Network> networks, String defaultRouteInterfa
      */
     public boolean isUnknown() {
         return networks.isEmpty();
+    }
+
+    /**
+     * Whether this machine has <b>a way out to the internet</b> (#357) — the three-valued reading of the
+     * default-route half of {@link #IP_COMMAND}, which was parsed and then thrown away.
+     *
+     * <p>Deliberately not {@link #lanCandidate()}: that asks which of the machine's networks Vaier could
+     * offer to route, and is empty for a full-tunnel peer whose default route leaves by {@code wg0}. Such a
+     * machine reaches the world perfectly well. This asks only whether there is a route out at all.
+     *
+     * <p>A reading that {@link #isUnknown() says nothing} is {@link DefaultRouteStanding#UNKNOWN}, never
+     * {@link DefaultRouteStanding#ABSENT} — a machine Vaier could not read has not told it anything, and
+     * treating silence as a verdict is how a monitor starts crying wolf.
+     */
+    public DefaultRouteStanding defaultRoute() {
+        if (isUnknown()) {
+            return DefaultRouteStanding.UNKNOWN;
+        }
+        return defaultRouteInterface == null ? DefaultRouteStanding.ABSENT : DefaultRouteStanding.PRESENT;
+    }
+
+    /**
+     * The interfaces and addresses this reading holds, as one line — the <b>evidence</b> behind anything
+     * Vaier says about a machine's networks, in the nudge card and in the email alike. Blank when the
+     * reading says nothing.
+     */
+    public String addressesInOneLine() {
+        return networks.stream()
+            .map(n -> n.interfaceName() + " " + n.address() + "/" + n.prefixLength())
+            .collect(Collectors.joining(", "));
+    }
+
+    /** Subject for the missing-default-route alert (#357), sent once when a machine loses its way out. */
+    public String missingDefaultRouteSubject(String machineName) {
+        return "[Vaier] " + machineName + " has no default route — it cannot reach the internet";
+    }
+
+    /** Subject for the all-clear, sent once the machine has a default route again. */
+    public String defaultRouteRestoredSubject(String machineName) {
+        return "[Vaier] " + machineName + " can reach the internet again";
+    }
+
+    /**
+     * Body for both the missing-default-route alert and its all-clear. One body, whose words follow the
+     * reading it is given — the alert carries the reading that found nothing, the all-clear the fresh one
+     * that found a route — so the two mails can never drift apart in how they describe the same machine.
+     * {@code baseDomain} builds the Vaier UI link, omitted when it is null or blank.
+     */
+    public String defaultRouteBody(String machineName, String baseDomain) {
+        StringBuilder body = new StringBuilder();
+        body.append("Machine: ").append(machineName).append("\n");
+        String addresses = addressesInOneLine();
+        body.append("Read from the machine: ")
+            .append(addresses.isBlank() ? "nothing Vaier could parse" : addresses).append("\n");
+        body.append("Default route: ")
+            .append(defaultRouteInterface == null ? "none" : "via " + defaultRouteInterface).append("\n");
+        if (defaultRoute() == DefaultRouteStanding.ABSENT) {
+            body.append("\nImage pulls and updates will fail, and so will anything else on this machine "
+                + "that reaches the internet. Everything inside its own network keeps working, which is "
+                + "why nothing else here noticed.\n");
+            body.append("Vaier can see this, but cannot fix it: the route has to come back on the "
+                + "machine.\n");
+        }
+        if (baseDomain != null && !baseDomain.isBlank()) {
+            body.append("\nVaier UI: https://")
+                .append(new VaierHostnames(baseDomain).vaierServerFqdn())
+                .append("/\n");
+        }
+        return body.toString();
     }
 
     /** An address row: {@code 2: eth0    inet 192.168.1.10/24 brd … scope global eth0}. */

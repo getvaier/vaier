@@ -9,6 +9,7 @@ import net.vaier.application.NotifyAdminsOfEnrolmentRequestUseCase;
 import net.vaier.application.NotifyAdminsOfLockoutWarningUseCase;
 import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
+import net.vaier.application.NotifyAdminsOfMissingDefaultRouteUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
@@ -22,6 +23,7 @@ import net.vaier.domain.ImageUpdateRollup;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.BundleMailNotice;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.Operator;
 import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.JoinRequestNotice;
@@ -41,6 +43,7 @@ public class NotificationService implements
         EmailBundleUseCase,
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
+        NotifyAdminsOfMissingDefaultRouteUseCase,
         NotifyAdminsOfDiskFillForecastUseCase,
         NotifyAdminsOfBackupFailureUseCase,
         NotifyAdminsOfBackupServerDownUseCase,
@@ -99,6 +102,20 @@ public class NotificationService implements
         adminNotifier.sendToAdmins(audit.recoverySubject(),
                 audit.recoveryBody(configResolver.getDomain()),
                 "reverse proxy audit cleared");
+    }
+
+    @Override
+    public void notifyAdminsOfMissingDefaultRoute(String machineName, MachineNetworks networks) {
+        adminNotifier.sendToAdmins(networks.missingDefaultRouteSubject(machineName),
+                networks.defaultRouteBody(machineName, configResolver.getDomain()),
+                "missing default route on " + machineName);
+    }
+
+    @Override
+    public void notifyAdminsOfDefaultRouteRestored(String machineName, MachineNetworks networks) {
+        adminNotifier.sendToAdmins(networks.defaultRouteRestoredSubject(machineName),
+                networks.defaultRouteBody(machineName, configResolver.getDomain()),
+                "default route restored on " + machineName);
     }
 
     @Override

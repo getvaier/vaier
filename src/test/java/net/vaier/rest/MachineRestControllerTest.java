@@ -545,6 +545,31 @@ class MachineRestControllerTest {
     }
 
     @Test
+    void nudges_noDefaultRoute_ridesTheSameCachedReadingTheRouteLanNudgeDoes() {
+        // #357: nothing new is asked of the machine or of this endpoint — the networks the sweep already
+        // cached answer a second question, and the domain decides which cards that produces.
+        Machine apalveien = new Machine(mid("apalveien"), "Apalveien 5", MachineType.UBUNTU_SERVER, "pk",
+            "10.13.13.6/32", "1.2.3.4", "51820", "1", "1", "1", "192.168.3.0/24", null, true, null,
+            DeviceCategory.SERVER, null);
+        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(apalveien));
+        when(getPublishableServicesUseCase.getPublishableServices()).thenReturn(List.of());
+        when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of());
+        when(getBackupServersUseCase.getBackupServers()).thenReturn(List.of(
+            new BackupServer("nas-borg", mid("nas"), "192.168.3.50", 8022, "borg", null, "/vol", true)));
+        when(getMachineNetworksUseCase.getMachineNetworks(mid("apalveien"))).thenReturn(
+            MachineNetworks.parse(
+                "2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1"));
+
+        var response = controller.nudges(mid("apalveien").value());
+
+        assertThat(response).extracting(MachineRestController.NudgeResponse::kind)
+            .containsExactly(MachineNudge.Kind.NO_DEFAULT_ROUTE.name());
+        assertThat(response.get(0).title()).contains("No default route");
+        assertThat(response.get(0).evidence()).contains("eno1").contains("192.168.3.20");
+        assertThat(response.get(0).value()).isNull();
+    }
+
+    @Test
     void nudges_unknownMachine_404() {
         when(getMachinesUseCase.getAllMachines()).thenReturn(List.of());
 

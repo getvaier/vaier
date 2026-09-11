@@ -2,13 +2,13 @@
 
 Back to [README](../README.md).
 
-Disk-pressure watching and its early-warning forecast, container image drift detection, what the edge blocks, and the email notifications that tie them together.
+Disk-pressure watching and its early-warning forecast, the machines that have lost their way out to the internet, container image drift detection, what the edge blocks, and the email notifications that tie them together.
 
 ---
 
 ## Email notifications
 
-SMTP-powered admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when a filesystem on any SSH-reachable machine behind the VPN — including the Vaier host itself — fills past its threshold, when a container's image newly has an **update available**, when someone signs in for the first time and lands as a pending access request awaiting approval, or when the [edge's CrowdSec bouncer](NETWORKING.md#edge-hardening) blocks either a **credential attack** or one of your **own networks**.
+SMTP-powered admin alerts when any server-type machine (VPN server peers and LAN servers) goes up or down, when a filesystem on any SSH-reachable machine behind the VPN — including the Vaier host itself — fills past its threshold, when a machine turns out to have [no default route](#a-machine-with-no-way-out), when a container's image newly has an **update available**, when someone signs in for the first time and lands as a pending access request awaiting approval, or when the [edge's CrowdSec bouncer](NETWORKING.md#edge-hardening) blocks either a **credential attack** or one of your **own networks**.
 
 It will *not* mail you about the routine bans, and that is deliberate — see [What the edge blocks](#what-the-edge-blocks) below.
 
@@ -38,7 +38,7 @@ This reuses the same SMTP configuration as the up/down machine alerts (Settings 
 
 **Seen without going looking** — every machine's card in the **Explorer**'s fleet listing carries its worst watched filesystem as a tinted disk mark: the same reading and the same verdict as the email, taken on the rounds Vaier already makes, so nothing is asked of a sleeping machine to draw it. Green when there's room, amber when the worst filesystem is closing on its threshold, red when one is over it, with the percentage shown only when there's something to see and the filesystem, its fullness and its threshold named on hover. A machine Vaier hasn't read yet draws **no mark at all** — an unread disk is not a disk with room on it. Every reading refreshes the mark, the sweep's and the one taken when you open a machine's disk list alike, so muting a filesystem or changing its threshold lands on the card immediately instead of waiting out the sweep.
 
-**One trip, more than one answer.** These rounds are also where Vaier learns whether it can reach a machine's SSH server at all, what network the machine sits on, and whether the user it signs in as can drive that machine's Docker (which decides whether an **Update** is offered — see above). All of it rides on the same five-minute sign-in the `df` needs, so knowing more costs no extra connection to any machine.
+**One trip, more than one answer.** These rounds are also where Vaier learns whether it can reach a machine's SSH server at all, what network the machine sits on, whether that machine [has a way out to the internet](#a-machine-with-no-way-out), and whether the user it signs in as can drive that machine's Docker (which decides whether an **Update** is offered — see above). All of it rides on the same five-minute sign-in the `df` needs, so knowing more costs no extra connection to any machine.
 
 **Requirements** — a machine is watched only once it has a stored **host credential** (the same vault the web terminal uses) and SSH access enabled. A host that's unreachable or whose `df` fails is quietly skipped — never mistaken for a full disk. Machines without a stored credential or with SSH access turned off are left alone, so there's no failed-auth noise. To have the Vaier host itself watched, store a host credential for it just like any other machine.
 
@@ -53,6 +53,26 @@ Beyond the level threshold above, Vaier keeps each *filesystem's* **disk-fill tr
 **It survives your builds.** A machine that builds images gains and loses gigabytes on a daily rhythm, and a short window reads the build as a disk about to fill. Vaier needs at least three days of history and fits over whole days, so a daily cycle cancels out instead of tilting the line — and it projects from the fitted trend, not the dip a build happens to be in when the sweep lands. The first forecast for a filesystem therefore arrives a few days after Vaier first sees it, which is the point: there is nothing honest to say before then.
 
 It's a trend alarm ("this filesystem *will be* full"), distinct from the level alarm above ("this filesystem *is* full"): a filling filesystem pages once as a forecast and then, when it crosses the threshold, the disk-pressure alert takes over — never both at once. An all-clear follows on a *genuine recovery* — it drains, or its fill slows so far that the projected runway rises well clear of the horizon, all while still below the threshold. A runway merely grazing back over the line is not a recovery and raises nothing, so a disk sitting near the horizon isn't cleared and re-warned every few days. The hand-off case (it simply climbs past the threshold) raises **no** all-clear: the disk-pressure alert already speaks for it, so you're never sent a contradictory "cleared" and "is full" at the same poll. A flat or draining filesystem has no forecast, a muted one is never forecast at all, and a failed `df` records no sample, so a transient blip can't fabricate a warning.
+
+---
+
+## A machine with no way out
+
+A LAN server here lost its default route and Vaier called it perfectly healthy for as long as nobody looked. It was right to, given what it was asking: it reaches a LAN server *through that server's relay peer*, which is same-subnet traffic; the disk read came back over the same path; and the backup server sits on the same LAN, so the backups kept succeeding. Every probe passed. The machine could not pull an image, reach an API, or talk to anything outside the house at all, and it was found by a human whose own tooling on the box could not connect.
+
+That is a blind spot rather than an oversight — **everything else Vaier asks a machine is answerable from inside that machine's network** — and it is the blind spot most likely to bite, because a machine with no egress keeps serving local traffic and looks entirely normal. It also breaks something Vaier itself offers: the [container update](#update-available) pulls an image, and on a machine in this state it fails with nothing useful to say.
+
+So the five-minute rounds now read the machine's **default-route standing**. No new connection and no new command: the `ip` reading that already offers to [route a relay's LAN](NETWORKING.md) carries the routing table's `default` line, and until now that half was parsed and thrown away. Three answers, never two:
+
+- **present** — the machine named the interface its default route leaves by. Any interface counts: a full-tunnel peer routing by `wg0` reaches the world perfectly well.
+- **absent** — the machine answered, and named no default route at all. This is the fault.
+- **unknown** — Vaier has never managed to read this machine, or the last read told it nothing. **Unknown is not "no."** A machine nobody has asked never wears a fault it was never observed to have.
+
+**What you see.** The machine's pane gains a card under *What to do next* — "No default route", with the interfaces and addresses Vaier actually read as the evidence, and a plain sentence saying the machine cannot reach the internet, that image pulls and updates will fail, and that **Vaier can see this but cannot fix it**: the route has to come back on the machine. It is the only card there with no button, because a button would promise an action that does not exist. A machine with a route, or one Vaier has not read, shows nothing and reserves no space.
+
+**What you're mailed.** One email when the route goes, one when it comes back, and nothing in between — no "still broken" on a timer. The **first** observation speaks: a machine that had already lost its route before Vaier started is the normal case, not the exception, so treating a first sighting as a silent baseline would mean never reporting it. That is only safe because the latch is persisted, in `vaier/config/missing-default-routes.yml`, exactly like the disk one and for the same reason — the operator deploys several times a day, and a latch in memory would either re-mail on every deploy or go quiet forever. A sweep that *fails* moves nothing in either direction: it can't raise the alert, and — the half that matters more — it can't send the all-clear for a machine that is still broken.
+
+**What it does not do.** Vaier does not try to fix the route, and does not test real egress by reaching out from the machine. The routing table is unambiguous, costs no traffic, and asks nothing of a sleeping machine; the observed fault had a DHCP lease that *did* supply a router, with `systemd-networkd` installing host routes via that gateway while never installing the default route itself — so the configuration was not wrong and a config audit would not have caught it. Reading the live routing table is what finds this class of fault.
 
 ---
 

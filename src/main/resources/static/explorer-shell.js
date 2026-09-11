@@ -2174,6 +2174,10 @@
         // answering whether the fleet should reach it. The CIDR travels on the nudge, so the shell never
         // has to recover it from the sentence it was rendered into.
         ROUTE_LAN:               (m, n) => ({ icon: 'relay',   label: 'Route this network', run: () => routeDetectedLan(m, n.value) }),
+        // #357: the one kind that is trouble, not an invitation — and the one with no button, because the
+        // route has to come back on the machine. No label means no button; the domain's action sentence is
+        // shown in its place.
+        NO_DEFAULT_ROUTE:        () => ({ icon: 'warn' }),
     };
 
     // One nudge, rendered as a quiet invitation: an accent glyph for its kind, the domain's title and the
@@ -2197,9 +2201,17 @@
             more.textContent = 'What that means \u203a';
             text.appendChild(more);
         }
+        // A nudge Vaier cannot act on carries no label, and so no button — a dead button would promise an
+        // action that does not exist. What it says instead is the domain's own action sentence.
+        if (!a.label) {
+            const what = el('div', 'ex-nudge-why'); what.textContent = n.action;
+            text.appendChild(what);
+        }
         row.appendChild(text);
-        const btn = el('button', 'ex-btn'); btn.textContent = a.label; btn.onclick = a.run;
-        row.appendChild(btn);
+        if (a.label) {
+            const btn = el('button', 'ex-btn'); btn.textContent = a.label; btn.onclick = a.run;
+            row.appendChild(btn);
+        }
         return row;
     }
 

@@ -33,6 +33,9 @@ public final class MachineNudges {
      */
     public static List<MachineNudge> forMachine(Machine machine, MachineSignals signals) {
         List<MachineNudge> nudges = new ArrayList<>();
+        // #357 leads: it is the only card that is trouble rather than an invitation, and every invitation
+        // below it is worth less on a machine that cannot reach the internet.
+        MachineNudge.noDefaultRoute(machine.name(), signals.networks()).ifPresent(nudges::add);
         MachineNudge.publish(machine.name(), signals.publishableCount()).ifPresent(nudges::add);
         MachineNudge.backUp(machine.name(), signals.reachable(), signals.hasCredential(),
             signals.job().isPresent()).ifPresent(nudges::add);

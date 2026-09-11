@@ -12,6 +12,9 @@ import java.util.Optional;
  * (the "why" Vaier is suggesting it, drawn from already-cached state), and an {@link #action} hint
  * describing what happens on "yes".
  *
+ * <p>Mostly an invitation, with one exception: {@link Kind#NO_DEFAULT_ROUTE} (#357) is trouble Vaier can
+ * see and cannot fix, so it carries no action to take and the shell draws it without a button.
+ *
  * <p>Pure domain: the "should we suggest X?" decision for each kind is a static factory here, composed
  * from domain predicates ({@link BackupFleet#needsBackupServer()}, {@link DeviceCategory#isStorageClass()},
  * a machine's reachability, whether it is already protected). A factory returns {@link Optional#empty()}
@@ -37,7 +40,9 @@ public record MachineNudge(String machineName, Kind kind, String title, String e
         /** The machine's last backup lost files to permissions, and reading them as root would get them. */
         BACK_UP_AS_ROOT,
         /** Vaier read a network off the machine that nothing else in the fleet can reach yet. */
-        ROUTE_LAN
+        ROUTE_LAN,
+        /** The machine answered with no default route: it cannot reach the internet at all (#357). */
+        NO_DEFAULT_ROUTE
     }
 
     /**
@@ -212,5 +217,34 @@ public record MachineNudge(String machineName, Kind kind, String title, String e
             .action("Route that network through this machine, so the fleet can reach what is on it")
             .value(cidr)
             .build());
+    }
+
+    /**
+     * NO_DEFAULT_ROUTE (#357) — the one card here that is <b>trouble rather than an invitation</b>: the
+     * machine answered, and what it said is that it holds no default route, so it cannot reach the internet
+     * at all.
+     *
+     * <p>It exists because every other question Vaier asks a machine is answerable from inside that
+     * machine's LAN — it is reached through its relay peer, its disks read over that same path, its backups
+     * go to a backup server on the same LAN — so a machine in this state passes every probe and reads as
+     * fully healthy while being unable to pull an image or reach anything outside the house. It was found
+     * by a human whose own tooling on the box could not connect.
+     *
+     * <p>Only on {@link DefaultRouteStanding#ABSENT}: {@link DefaultRouteStanding#UNKNOWN} is a machine
+     * Vaier has never managed to read, and a monitor that turns silence into a verdict is a monitor nobody
+     * believes. The {@code action} says plainly that Vaier cannot fix this — offering a button here would
+     * promise something Vaier has no way to deliver, since restoring the route means touching the machine's
+     * own network configuration.
+     */
+    public static Optional<MachineNudge> noDefaultRoute(String machineName, MachineNetworks networks) {
+        if (networks.defaultRoute() != DefaultRouteStanding.ABSENT) {
+            return Optional.empty();
+        }
+        return Optional.of(new MachineNudge(machineName, Kind.NO_DEFAULT_ROUTE,
+            "No default route",
+            "Read from the machine itself: " + networks.addressesInOneLine() + ", and no default route "
+                + "anywhere in its routing table",
+            "This machine cannot reach the internet — image pulls and updates will fail. Vaier can see "
+                + "this, but cannot fix it: the route has to come back on the machine."));
     }
 }

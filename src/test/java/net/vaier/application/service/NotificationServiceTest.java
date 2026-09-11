@@ -15,6 +15,7 @@ import net.vaier.domain.EnrolmentRequest;
 import org.springframework.scheduling.annotation.Async;
 import net.vaier.domain.LockoutWarning;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineType;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
@@ -157,6 +158,42 @@ class NotificationServiceTest {
         verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
         assertThat(subject.getValue()).contains("nas");
         assertThat(body.getValue()).contains("60%");
+    }
+
+    // --- a machine with no way out (#357) ---
+
+    /** What the observed fault looks like: an address, an on-link route, and no way out. */
+    private static final MachineNetworks NO_WAY_OUT = MachineNetworks.parse(
+            "2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1");
+
+    @Test
+    void notifyAdminsOfMissingDefaultRoute_carriesTheDomainsWordsAndTheEvidence() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfMissingDefaultRoute("Apalveien 5", NO_WAY_OUT);
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
+        assertThat(subject.getValue()).isEqualTo(NO_WAY_OUT.missingDefaultRouteSubject("Apalveien 5"));
+        assertThat(body.getValue()).contains("eno1 192.168.3.20/24").contains("vaier.example.com");
+    }
+
+    @Test
+    void notifyAdminsOfDefaultRouteRestored_isTheAllClear() {
+        MachineNetworks restored = MachineNetworks.parse("""
+                2: eno1    inet 192.168.3.20/24 brd 192.168.3.255 scope global eno1
+                default via 192.168.3.1 dev eno1 proto dhcp metric 100
+                """);
+
+        service.notifyAdminsOfDefaultRouteRestored("Apalveien 5", restored);
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
+        assertThat(subject.getValue()).isEqualTo(restored.defaultRouteRestoredSubject("Apalveien 5"));
+        // The all-clear carries the fresh reading, so it never repeats the warning it is cancelling.
+        assertThat(body.getValue()).contains("via eno1").doesNotContain("cannot fix it");
     }
 
     // --- fleet-backup failure / recovery alerts ---

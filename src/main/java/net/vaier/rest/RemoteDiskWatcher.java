@@ -9,6 +9,7 @@ import net.vaier.application.GetDiskWatchesUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
+import net.vaier.application.NotifyAdminsOfMissingDefaultRouteUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.RunRemoteCommandUseCase;
@@ -20,6 +21,8 @@ import net.vaier.domain.DiskWatches;
 import net.vaier.domain.Machine;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.MachineNetworks;
+import net.vaier.domain.MissingDefaultRouteTracker;
 import net.vaier.domain.NoSshServerException;
 import net.vaier.domain.RemoteDiskForecastTracker;
 import net.vaier.domain.RemoteDiskPressureTracker;
@@ -31,6 +34,7 @@ import net.vaier.domain.port.ForHoldingClaudeSignInStandings;
 import net.vaier.domain.port.ForHoldingMachineDiskStandings;
 import net.vaier.domain.port.ForPersistingDiskFillTrends;
 import net.vaier.domain.port.ForPersistingDiskPressureState;
+import net.vaier.domain.port.ForPersistingMissingDefaultRoutes;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRecordingDockerCommandAccess;
 import net.vaier.domain.port.ForRecordingSshServerPresence;
@@ -110,6 +114,12 @@ import java.util.stream.Collectors;
  * free. Detecting here and serving from cache is what keeps it that way, and it self-heals — a machine
  * that moves house is re-read within five minutes.
  *
+ * <p>That same reading answers a second question for free (#357): whether the machine has <b>a default
+ * route at all</b>. Everything else Vaier asks a machine is answerable from inside its own LAN, so one that
+ * has lost its way out keeps passing every probe here while being unable to pull an image. A
+ * {@link MissingDefaultRouteTracker} decides what admins hear — once when it goes, once when it comes back,
+ * never on a timer — and its latch is persisted for the same reason the pressure tracker's is.
+ *
  * <p>Both extra consumers sit behind {@code checkMachine}'s two existing guards (SSH access, a stored
  * credential), which is precisely why "a machine Vaier cannot read is simply not nudged" needs no rule of
  * its own.
@@ -150,7 +160,9 @@ public class RemoteDiskWatcher {
     // sessions, and because a config can rot between restarts — Vaier's are rare.
     private final AuditReverseProxyConfigUseCase reverseProxyAudit;
     private final NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
+    private final NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier;
     private final RemoteDiskPressureTracker tracker;
+    private final MissingDefaultRouteTracker missingRouteTracker;
     private final RemoteDiskForecastTracker forecastTracker;
 
     // The stream the Explorer already holds open for fleet liveness (peers, LAN reachability) — piggybacking
@@ -177,7 +189,9 @@ public class RemoteDiskWatcher {
                              GetClaudeSignInStatusUseCase claudeSignIn,
                              ForHoldingClaudeSignInStandings claudeStandings,
                              AuditReverseProxyConfigUseCase reverseProxyAudit,
-                             NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier) {
+                             NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier,
+                             ForPersistingMissingDefaultRoutes missingDefaultRoutes,
+                             NotifyAdminsOfMissingDefaultRouteUseCase missingRouteNotifier) {
         this.machines = machines;
         this.credentials = credentials;
         this.remoteCommand = remoteCommand;
@@ -197,11 +211,13 @@ public class RemoteDiskWatcher {
         this.claudeStandings = claudeStandings;
         this.reverseProxyAudit = reverseProxyAudit;
         this.reverseProxyAuditNotifier = reverseProxyAuditNotifier;
+        this.missingRouteNotifier = missingRouteNotifier;
         // The domain owns the port call; this watcher only hands it in. Both trackers' state is on disk
         // precisely so that a redeploy — several a day here — no longer wipes what admins have already been
         // told, nor the week of samples the forecast projects from.
         this.tracker = new RemoteDiskPressureTracker(diskPressureState);
         this.forecastTracker = new RemoteDiskForecastTracker(diskFillTrends);
+        this.missingRouteTracker = new MissingDefaultRouteTracker(missingDefaultRoutes);
     }
 
     @Scheduled(fixedDelay = 300000)
@@ -309,10 +325,36 @@ public class RemoteDiskWatcher {
      * presence that {@code df} has already earned on this very trip.
      */
     private void detectNetworks(Machine machine) {
+        MachineNetworks detected = null;
         try {
-            detectMachineNetworks.detectMachineNetworks(machine.id());
+            detected = detectMachineNetworks.detectMachineNetworks(machine.id());
         } catch (Exception e) {
             log.debug("Could not read the networks on {}: {}", machine.name(), e.getMessage());
+        }
+        judgeDefaultRoute(machine, detected == null ? MachineNetworks.unknown() : detected);
+    }
+
+    /**
+     * The second thing that same reading says (#357): whether the machine can reach the internet at all.
+     * Everything else on this trip is answerable from inside the machine's own LAN — it is reached through
+     * its relay peer, its disks read over that path, its backups go to a backup server on the same LAN — so
+     * a machine that has lost its default route passes every probe and reads as fully healthy. The domain
+     * owns the latch and the transition rule; this only decides whom to tell.
+     *
+     * <p>Its own try/catch, so a mail that will not go out can never take the sweep down with it.
+     */
+    private void judgeDefaultRoute(Machine machine, MachineNetworks networks) {
+        try {
+            switch (missingRouteTracker.observe(machine.id(), networks.defaultRoute())) {
+                case ALERT -> missingRouteNotifier
+                    .notifyAdminsOfMissingDefaultRoute(machine.name(), networks);
+                case RECOVERED -> missingRouteNotifier
+                    .notifyAdminsOfDefaultRouteRestored(machine.name(), networks);
+                case QUIET -> { }
+            }
+        } catch (Exception e) {
+            log.warn("Could not tell admins where {} stands on its default route: {}", machine.name(),
+                e.getMessage());
         }
     }
 

@@ -1823,6 +1823,26 @@ class ExplorerShellTest {
     }
 
     @Test
+    void theNoDefaultRouteNudge_showsNoButton_becauseVaierCannotFixIt() throws IOException {
+        // #357 is the one card here that is trouble rather than an invitation. Every other kind ends in an
+        // action; this one ends in a sentence, because offering a button would promise something Vaier has
+        // no way to deliver — the route has to come back on the machine itself. The generic fallback would
+        // have drawn a dead "Open" button, which is worse than none.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("const NUDGE_ACTION = {");
+        assertThat(from).isPositive();
+        String table = js.substring(from, js.indexOf("};", from));
+        assertThat(table).contains("NO_DEFAULT_ROUTE:");
+        assertThat(table).as("trouble wears the warning glyph, not a capability's own").contains("'warn'");
+
+        int card = js.indexOf("function nudgeCard(");
+        String cardBody = js.substring(card, js.indexOf("\n    }\n", card));
+        assertThat(cardBody).as("a nudge with no label draws no button at all")
+            .contains("if (a.label)");
+        assertThat(cardBody).as("and says what the operator has to do instead").contains("n.action");
+    }
+
+    @Test
     void theEditFormFoldsTheHandTypedCidr_underAFoldThatNamesIt() throws IOException {
         // The CIDR field stays — a machine can front more than one subnet, and nothing detects that — but
         // it is no longer the way an operator is expected to answer. It is the escape hatch, so it lives
