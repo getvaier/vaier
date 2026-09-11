@@ -1059,8 +1059,8 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   forever; hanging the menu off one named tab also means an action always belongs to a single shell, with no
   ambiguity about which pane a click meant.
 - **#309 — Managed ed25519 keypair generation ✅** (the `managed` flag, now read as well as written) — see §6.34.
-- **#310 — Saved snippets.** 🔲
-- **#313 — Remote SSH exec → host telemetry & alerts** (umbrella). Turn the SSH capability into a
+- **#310 — Saved snippets.** ❌ Closed 2026-09-11 as won't do: nobody reached for them since the terminal shipped, and Chat's read-only command covers "run the thing I always run".
+- **#313 — Remote SSH exec → host telemetry & alerts** (umbrella) ✅ closed 2026-09-11 — every slice done (#314–#317; #318 stands alone as backlog). Turn the SSH capability into a
   remote-sensing input for the alerting pipeline: run a command on a host, read the result in code, and
   feed threshold-crossing alerts. Reuses the credential vault, host-key TOFU, and SSH-address resolution.
   - **#314 — Non-interactive SSH exec port ✅ (keystone).** New driven port
@@ -1112,7 +1112,7 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
 interactive shell plus saved snippets. (Vaier does speak SFTP now, but as its own feature: see **6.20
 Explorer**, which browses a machine's files over a separate SFTP connection sharing the terminal's
 credential vault and host-key trust.) Further remote-telemetry watchers (reboot detection, systemd service
-health, load/temperature) are backlog under #313.
+health, load/temperature) are backlog under #318; reboot detection was struck there on 2026-09-11 since the sweep already reads each machine's boot instant (§6.9, #356).
 
 **Fleet credential ✅ (shipped; issue TBD).** #307 gave Vaier one **host credential** per machine: a
 secret *Vaier* uses to reach a machine. The mirror image of that — a secret the *operator* needs to exist
@@ -1253,7 +1253,7 @@ Domain: `BackupServer`, `BackupRepository`, `BackupJob`, `BackupRun` + `BackupRu
 
 ---
 
-### 6.20 Explorer 🟡 (in progress — epic [#321](https://github.com/getvaier/vaier/issues/321))
+### 6.20 Explorer ✅ (epic [#321](https://github.com/getvaier/vaier/issues/321), closed 2026-09-11 — shipped: the fleet-wide file browser, the time rail, and clipboard-and-paste for copy, restore and download)
 
 One file browser across the fleet. A file has a coordinate — a **machine**, a **path**, and a point in
 time — and Vaier is the only node with SSH to every machine, so it is the only place a fleet-wide file
@@ -1693,7 +1693,7 @@ job**'s source paths against the tree and would have reported a backed-up direct
 
 ---
 
-### 6.21 Explorer becomes Vaier's only UI 🟡 (in progress — epic [#323](https://github.com/getvaier/vaier/issues/323))
+### 6.21 Explorer becomes Vaier's only UI ✅ (epic [#323](https://github.com/getvaier/vaier/issues/323), closed 2026-09-11; the last crumb — deleting `admin.html` and re-pointing the pending-identity mail — is [#363](https://github.com/getvaier/vaier/issues/363))
 
 The **Explorer** (§6.20) stops being *a page for files* and becomes **the tree that is Vaier's operator UI**.
 Every page we have today collapses into a renderer for whatever is selected in it — one explorer, many
