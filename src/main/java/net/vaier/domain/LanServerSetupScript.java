@@ -113,7 +113,7 @@ public final class LanServerSetupScript {
         // Ahead of the root check: telling someone to re-run with sudo is the wrong advice when they
         // are on the wrong machine altogether.
         sb.append(SetupScriptGuard.preamble(machineName, routeCidrs == null ? List.of() : routeCidrs,
-            expectedAddress));
+            expectedAddress, doRoutes));
         sb.append("\n");
         sb.append("if [ \"$(id -u)\" -ne 0 ]; then\n");
         sb.append("    echo \"ERROR: run this script as root (sudo bash $0)\" >&2\n");

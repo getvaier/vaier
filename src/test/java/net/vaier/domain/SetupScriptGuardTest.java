@@ -79,6 +79,28 @@ class SetupScriptGuardTest {
         assertThat(s).doesNotContain("ip route show default");
     }
 
+    // --- check 5: never beside a WireGuard client (#355) ---
+
+    @Test
+    void preamble_routingViaARelay_refusesAHostThatRunsAWireGuardClient() {
+        String s = SetupScriptGuard.preamble("NAS", List.of("10.13.13.0/24"), null, true);
+
+        // The route to the VPN subnet this script installs is the one wg-quick then fails to add
+        // ("File exists") — and it deletes the interface on the way out. Three ways a client shows.
+        assertThat(s).contains("ip link show type wireguard");
+        assertThat(s).contains("/etc/wireguard/");
+        assertThat(s).contains("docker ps -a");
+        assertThat(s).contains("a peer or a LAN server, never both");
+    }
+
+    @Test
+    void preamble_notRoutingViaARelay_omitsTheWireGuardClientCheck() {
+        String s = SetupScriptGuard.preamble("NAS", List.of(), null, false);
+
+        assertThat(s).doesNotContain("ip link show type wireguard");
+        assertThat(s).doesNotContain("never both");
+    }
+
     // --- check 4: the address Vaier recorded for this machine ---
 
     @Test

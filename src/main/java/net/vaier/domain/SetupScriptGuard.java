@@ -17,7 +17,7 @@ import java.util.List;
  * exposed the Docker API, and routed the host's own subnet into a tunnel that could never come up —
  * severing the box from its own default gateway.
  *
- * <p>Four refusals, each earning its place from a distinct way the accident could happen:
+ * <p>Five refusals, each earning its place from a distinct way the accident could happen:
  * <ol>
  *   <li><b>Never on a Vaier server.</b> Vaier's own host is never a target of a machine setup script.</li>
  *   <li><b>Never on a machine stamped as a different one.</b> Every successful run records its machine
@@ -27,6 +27,10 @@ import java.util.List;
  *       blackhole its own uplink. This one is a real bug on <em>every</em> target, not only a misfire:
  *       a peer created for a machine that shares the Vaier server's subnet hits it legitimately.</li>
  *   <li><b>Never on a host lacking the address Vaier recorded</b>, when Vaier knows one.</li>
+ *   <li><b>Never install relay routes beside a WireGuard client.</b> A LAN server's route to the VPN
+ *       subnet is the one {@code wg-quick} then fails to add ("File exists") — and it deletes the
+ *       interface on the way out, on every boot, while the container stays "running" (#355). A machine
+ *       is a peer or a LAN server, never both.</li>
  * </ol>
  *
  * <p>The checks are non-interactive by necessity — the script arrives on stdin through a pipe, so
@@ -51,6 +55,15 @@ public final class SetupScriptGuard {
      *                        Vaier cannot know it yet (a peer being set up for the first time)
      */
     public static String preamble(String machineName, List<String> tunneledCidrs, String expectedAddress) {
+        return preamble(machineName, tunneledCidrs, expectedAddress, false);
+    }
+
+    /**
+     * As {@link #preamble(String, List, String)}, and when {@code installsRelayRoutes} the fifth refusal
+     * too: a host already running a WireGuard client cannot also carry a LAN server's relay routes.
+     */
+    public static String preamble(String machineName, List<String> tunneledCidrs, String expectedAddress,
+                                  boolean installsRelayRoutes) {
         String machine = shellQuote(machineName);
         boolean checkRoutes = tunneledCidrs != null && !tunneledCidrs.isEmpty();
 
@@ -103,6 +116,18 @@ public final class SetupScriptGuard {
             sb.append("            | grep -qx ").append(shellQuote(address)).append("; then\n");
             sb.append("        vaier_refuse \"this host does not hold the address ").append(address);
             sb.append(" that Vaier has recorded for \\\"$VAIER_MACHINE\\\".\"\n");
+            sb.append("    fi\n");
+        }
+
+        // 5 — relay routes and a WireGuard client cannot share a host: three ways a client shows itself
+        // (a live interface, a native wg-quick config, a container — running or not, since a tunnel that
+        // failed to come up leaves its container behind).
+        if (installsRelayRoutes) {
+            sb.append("    if ip link show type wireguard 2>/dev/null | grep -q . \\\n");
+            sb.append("            || ls /etc/wireguard/*.conf >/dev/null 2>&1 \\\n");
+            sb.append("            || { command -v docker >/dev/null 2>&1 \\\n");
+            sb.append("                 && docker ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -qi wireguard; }; then\n");
+            sb.append("        vaier_refuse \"this host runs a WireGuard client, and the routes this script installs would stop its tunnel from ever coming up. A machine is a peer or a LAN server, never both.\"\n");
             sb.append("    fi\n");
         }
 

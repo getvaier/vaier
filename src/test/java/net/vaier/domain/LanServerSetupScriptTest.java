@@ -72,6 +72,24 @@ class LanServerSetupScriptTest {
         assertThat(s).contains("for vaier_cidr in '172.31.32.0/20'");
     }
 
+    @Test
+    void generate_withRoutes_refusesAHostThatRunsAWireGuardClient() {
+        String s = LanServerSetupScript.generate("NAS", null, null, "192.168.3.121",
+            List.of("10.13.13.0/24"));
+
+        int refusal = s.indexOf("a peer or a LAN server, never both");
+        assertThat(refusal).isPositive();
+        assertThat(refusal).isLessThan(s.indexOf("ip route replace"));
+    }
+
+    @Test
+    void generate_dockerOnly_doesNotMindAWireGuardClient() {
+        String s = LanServerSetupScript.generate("NAS", null, 2375, null, List.of());
+
+        // No route to collide with a tunnel, so a Docker host that is also a peer is fine.
+        assertThat(s).doesNotContain("never both");
+    }
+
     // --- generate: adaptive blocks ---
 
     @Test
