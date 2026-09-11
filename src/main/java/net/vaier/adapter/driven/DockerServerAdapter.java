@@ -25,10 +25,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -42,9 +42,10 @@ public class DockerServerAdapter implements ForGettingServerInfo {
     private static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(15);
 
-    private final Map<String, DockerClient> dockerClientCache = new HashMap<>();
-    private final Map<String, DockerHttpClient> httpClientCache = new HashMap<>();
-    private final Map<String, Server> serverCache = new HashMap<>();
+    // Concurrent: the scheduler and a request thread can both be the first to ask about a server.
+    private final Map<String, DockerClient> dockerClientCache = new ConcurrentHashMap<>();
+    private final Map<String, DockerHttpClient> httpClientCache = new ConcurrentHashMap<>();
+    private final Map<String, Server> serverCache = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public DockerServerAdapter() {
@@ -149,9 +150,14 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                 .withDockerTlsVerify(server.isTlsEnabled())
                 .build();
 
+            // One pooled connection, on purpose. The socket proxy closes an idle keep-alive after 10 s and
+            // the scrape comes round every 30 s or more, so every pooled connection is dead by the next
+            // tick; docker-java never checks one before reusing it and retries exactly once. One connection
+            // is one dead socket, which the one retry survives — a pool of them was a scrape lost after
+            // every burst (an Explorer page load), with no failure the operator could see.
             DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
                 .dockerHost(config.getDockerHost())
-                .maxConnections(100)
+                .maxConnections(1)
                 .connectionTimeout(CONNECTION_TIMEOUT)
                 .responseTimeout(RESPONSE_TIMEOUT)
                 .build();
