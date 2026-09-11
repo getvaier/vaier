@@ -151,14 +151,14 @@ class MachineNudgesTest {
             .machineId(TestMachineIds.of("nas")).containerName("webtrees")
             .standing(ContainerStanding.GONE)
             .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
-            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .troubledSince(Instant.parse("2026-09-11T09:47:00Z"))
             .build();
 
         List<MachineNudge> nudges = MachineNudges.forMachine(machine(DeviceCategory.SERVER),
             signals().publishableCount(1).containerStandings(List.of(gone)).build());
 
         assertThat(nudges).extracting(MachineNudge::kind).containsExactly(
-            MachineNudge.Kind.CONTAINER_GONE, MachineNudge.Kind.PUBLISH,
+            MachineNudge.Kind.CONTAINER_TROUBLE, MachineNudge.Kind.PUBLISH,
             MachineNudge.Kind.DESIGNATE_BACKUP_SERVER);
     }
 
@@ -168,6 +168,6 @@ class MachineNudgesTest {
             signals().build());
 
         assertThat(nudges).extracting(MachineNudge::kind)
-            .doesNotContain(MachineNudge.Kind.CONTAINER_GONE);
+            .doesNotContain(MachineNudge.Kind.CONTAINER_TROUBLE);
     }
 }

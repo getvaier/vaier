@@ -213,21 +213,36 @@ class NotificationServiceTest {
             .containerName("webtrees")
             .standing(ContainerStanding.GONE)
             .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
-            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .troubledSince(Instant.parse("2026-09-11T09:47:00Z"))
             .misses(2)
             .build();
 
     @Test
-    void notifyAdminsOfContainerGone_carriesTheDomainsWordsAndTheEvidence() {
+    void notifyAdminsOfContainerTrouble_carriesTheDomainsWordsAndTheEvidence() {
         when(clock.getZone()).thenReturn(OSLO);
 
-        service.notifyAdminsOfContainerGone("Apalveien 5", WEBTREES_GONE);
+        service.notifyAdminsOfContainerTrouble("Apalveien 5", WEBTREES_GONE);
 
         ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
-        assertThat(subject.getValue()).isEqualTo(WEBTREES_GONE.goneSubject("Apalveien 5"));
-        assertThat(body.getValue()).isEqualTo(WEBTREES_GONE.goneBody("Apalveien 5", OSLO));
+        assertThat(subject.getValue()).isEqualTo(WEBTREES_GONE.troubleSubject("Apalveien 5"));
+        assertThat(body.getValue()).isEqualTo(WEBTREES_GONE.troubleBody("Apalveien 5", OSLO));
+    }
+
+    @Test
+    void notifyAdminsOfContainerTrouble_saysWhichTroubleItIs() {
+        // #317: one route, three troubles. The subject has to name the one the operator is looking at,
+        // or three different problems all read as "something is wrong with webtrees".
+        MachineContainerStanding unhealthy = WEBTREES_GONE.toBuilder()
+                .standing(ContainerStanding.UNHEALTHY).reading(ContainerStanding.UNHEALTHY).build();
+        when(clock.getZone()).thenReturn(OSLO);
+
+        service.notifyAdminsOfContainerTrouble("Apalveien 5", unhealthy);
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), any(), any());
+        assertThat(subject.getValue()).isEqualTo("[Vaier] webtrees is unhealthy on Apalveien 5");
     }
 
     @Test

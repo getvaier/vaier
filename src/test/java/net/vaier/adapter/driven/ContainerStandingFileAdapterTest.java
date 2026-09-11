@@ -33,7 +33,7 @@ class ContainerStandingFileAdapterTest {
             .containerName(containerName)
             .standing(ContainerStanding.GONE)
             .lastSeenRunning(NOON)
-            .notRunningSince(NOON.plusSeconds(60))
+            .troubledSince(NOON.plusSeconds(60))
             .misses(2)
             .build();
     }
@@ -56,7 +56,7 @@ class ContainerStandingFileAdapterTest {
             assertThat(standing.containerName()).isEqualTo("webtrees");
             assertThat(standing.standing()).isEqualTo(ContainerStanding.GONE);
             assertThat(standing.lastSeenRunning()).isEqualTo(NOON);
-            assertThat(standing.notRunningSince()).isEqualTo(NOON.plusSeconds(60));
+            assertThat(standing.troubledSince()).isEqualTo(NOON.plusSeconds(60));
             assertThat(standing.misses()).isEqualTo(2);
         });
     }
@@ -102,5 +102,82 @@ class ContainerStandingFileAdapterTest {
         Files.writeString(configDir.resolve("container-standings.yml"), "\t: not: yaml: at: all\n[");
 
         assertThat(adapter().standingsFor(APALVEIEN)).isEmpty();
+    }
+
+    // --- the other two troubles, and the file that already holds one shape (#317) -----------------------
+
+    @Test
+    void anUnhealthyContainerIsRememberedAsUnhealthy_notMerelyAsTrouble() {
+        // The standing is what the mail was sent on and what the badge draws. Flattening the three
+        // troubles into one on the way to disk would lose which one the operator was told about.
+        MachineContainerStanding unhealthy = gone(APALVEIEN, "webtrees").toBuilder()
+            .standing(ContainerStanding.UNHEALTHY)
+            .reading(ContainerStanding.UNHEALTHY)
+            .build();
+
+        adapter().record(APALVEIEN, List.of(unhealthy));
+
+        assertThat(adapter().standingsFor(APALVEIEN)).singleElement().satisfies(standing -> {
+            assertThat(standing.standing()).isEqualTo(ContainerStanding.UNHEALTHY);
+            assertThat(standing.reading()).isEqualTo(ContainerStanding.UNHEALTHY);
+        });
+    }
+
+    @Test
+    void theTroubleBeingCountedSurvivesARedeployToo() {
+        // A deploy lands in the middle of the two-scrape window often enough. Without the reading, the
+        // count that comes back would belong to no particular trouble.
+        MachineContainerStanding counting = MachineContainerStanding
+            .seenRunning(APALVEIEN, "webtrees", NOON, null)
+            .troubled(ContainerStanding.RESTARTING, NOON.plusSeconds(30), null);
+
+        adapter().record(APALVEIEN, List.of(counting));
+
+        assertThat(adapter().standingsFor(APALVEIEN)).singleElement().satisfies(standing -> {
+            assertThat(standing.standing()).isEqualTo(ContainerStanding.RUNNING);
+            assertThat(standing.reading()).isEqualTo(ContainerStanding.RESTARTING);
+            assertThat(standing.misses()).isEqualTo(1);
+            assertThat(standing.troubledSince()).isEqualTo(NOON.plusSeconds(30));
+        });
+    }
+
+    @Test
+    void aFileWrittenBeforeThereWereThreeTroubles_isStillRead() throws Exception {
+        // #356 wrote `notRunningSince`, and there is one of these on every deployed Vaier. Upgrading must
+        // not lose what it has watched run — that memory is the whole feature.
+        Files.writeString(configDir.resolve("container-standings.yml"), """
+            machines:
+              %s:
+                bootedAt: '2026-09-11T11:30:00Z'
+                containers:
+                  webtrees:
+                    standing: GONE
+                    lastSeenRunning: '2026-09-11T12:00:00Z'
+                    notRunningSince: '2026-09-11T12:01:00Z'
+                    misses: 2
+            """.formatted(APALVEIEN.value()));
+
+        assertThat(adapter().standingsFor(APALVEIEN)).singleElement().satisfies(standing -> {
+            assertThat(standing.standing()).isEqualTo(ContainerStanding.GONE);
+            assertThat(standing.troubledSince()).isEqualTo(NOON.plusSeconds(60));
+            assertThat(standing.misses()).isEqualTo(2);
+            // Nothing said about what was being read, so the standing itself is the honest answer.
+            assertThat(standing.reading()).isEqualTo(ContainerStanding.GONE);
+        });
+    }
+
+    @Test
+    void aStandingThisVaierDoesNotKnow_readsAsRunning_neverAsAnAlert() throws Exception {
+        Files.writeString(configDir.resolve("container-standings.yml"), """
+            machines:
+              %s:
+                containers:
+                  webtrees:
+                    standing: SOMETHING_ELSE
+                    lastSeenRunning: '2026-09-11T12:00:00Z'
+            """.formatted(APALVEIEN.value()));
+
+        assertThat(adapter().standingsFor(APALVEIEN)).singleElement()
+            .satisfies(standing -> assertThat(standing.standing()).isEqualTo(ContainerStanding.RUNNING));
     }
 }

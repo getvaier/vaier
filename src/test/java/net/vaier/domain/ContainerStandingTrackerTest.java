@@ -34,8 +34,21 @@ class ContainerStandingTrackerTest {
     }
 
     private static DockerService container(String name, String state) {
-        return new DockerService("id-" + name, name, "ghcr.io/" + name + ":latest", "v",
-            List.of(), List.of(), state);
+        return container(name, state, ContainerHealth.NONE);
+    }
+
+    /** A container as one scrape found it: the state Docker reports, and what its health check said. */
+    private static DockerService container(String name, String state, ContainerHealth health) {
+        return DockerService.builder()
+            .containerId("id-" + name)
+            .containerName(name)
+            .image("ghcr.io/" + name + ":latest")
+            .version("v")
+            .ports(List.of())
+            .networks(List.of())
+            .state(state)
+            .health(health)
+            .build();
     }
 
     private List<Verdict> scrape(MachineId machineId, Instant at, DockerService... containers) {
@@ -86,7 +99,7 @@ class ContainerStandingTrackerTest {
             assertThat(verdict.standing().standing()).isEqualTo(ContainerStanding.GONE);
             // What the mail and the card both say: when Vaier last saw it up, and when it stopped being.
             assertThat(verdict.standing().lastSeenRunning()).isEqualTo(NOON);
-            assertThat(verdict.standing().notRunningSince()).isEqualTo(minutesAfterNoon(1));
+            assertThat(verdict.standing().troubledSince()).isEqualTo(minutesAfterNoon(1));
         });
     }
 
@@ -212,5 +225,163 @@ class ContainerStandingTrackerTest {
     void nothingToSayIsNothingToPublish() {
         assertThat(Verdict.worthPublishing(List.of())).isFalse();
         assertThat(Verdict.worthPublishing(scrape(NOON, container("webtrees", "running")))).isFalse();
+    }
+
+    // --- the two other troubles the same scrape can already see (#317) ---------------------------------
+    //
+    // #356 taught this one word: gone. A container can be in trouble long before that, and the listing
+    // Vaier already reads says so — its own health check has failed, or Docker is restarting it over and
+    // over. Same memory, same two-miss rule, same silence about anything never seen healthy.
+
+    @Test
+    void oneFailedHealthCheckIsNeverNews() {
+        // A health check fails on a slow start-up, a moment of load, a database reconnecting. One is noise.
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.UNHEALTHY)))
+            .isEmpty();
+    }
+
+    @Test
+    void twoFailedHealthChecksAreTheUnhealthyAlert() {
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+        scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+
+        List<Verdict> verdicts =
+            scrape(minutesAfterNoon(2), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+
+        assertThat(verdicts).singleElement().satisfies(verdict -> {
+            assertThat(verdict.outcome()).isEqualTo(Outcome.ALERT);
+            assertThat(verdict.standing().standing()).isEqualTo(ContainerStanding.UNHEALTHY);
+            // Last seen HEALTHY, not last seen running: it is running the whole time, and "when was it
+            // last actually well" is the fact the mail needs.
+            assertThat(verdict.standing().lastSeenRunning()).isEqualTo(NOON);
+            assertThat(verdict.standing().troubledSince()).isEqualTo(minutesAfterNoon(1));
+        });
+    }
+
+    @Test
+    void anUnhealthyContainerIsNotToldAboutTwice() {
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+        scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+        scrape(minutesAfterNoon(2), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(3), container("webtrees", "running", ContainerHealth.UNHEALTHY)))
+            .isEmpty();
+        assertThat(scrape(minutesAfterNoon(4), container("webtrees", "running", ContainerHealth.UNHEALTHY)))
+            .isEmpty();
+    }
+
+    @Test
+    void aHealthyContainerAgainIsTheAllClear_once() {
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+        scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+        scrape(minutesAfterNoon(2), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(3), container("webtrees", "running", ContainerHealth.HEALTHY)))
+            .singleElement()
+            .satisfies(verdict -> assertThat(verdict.outcome()).isEqualTo(Outcome.RECOVERED));
+        assertThat(scrape(minutesAfterNoon(4), container("webtrees", "running", ContainerHealth.HEALTHY)))
+            .isEmpty();
+    }
+
+    @Test
+    void aHealthCheckThatHasNotConcludedIsNotAMiss() {
+        // `health: starting` is the minute after a container comes up. Counting it would turn every
+        // restart into half an alert, and two restarts into a whole one.
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.STARTING)))
+            .isEmpty();
+        assertThat(scrape(minutesAfterNoon(2), container("webtrees", "running", ContainerHealth.STARTING)))
+            .isEmpty();
+        assertThat(scrape(minutesAfterNoon(3), container("webtrees", "running", ContainerHealth.STARTING)))
+            .isEmpty();
+
+        // And it holds the standing exactly where it was: still running, still last seen well at noon.
+        assertThat(standings.standingsFor(APALVEIEN)).singleElement().satisfies(standing -> {
+            assertThat(standing.standing()).isEqualTo(ContainerStanding.RUNNING);
+            assertThat(standing.lastSeenRunning()).isEqualTo(NOON);
+        });
+    }
+
+    @Test
+    void twoScrapesFindingItRestartingAreTheRestartLoopAlert() {
+        // The predictive case: a container on `restart: always` that dies on start-up never becomes
+        // "gone" at all — Docker keeps bringing it back — so this is the only alert it will ever earn.
+        scrape(NOON, container("webtrees", "running"));
+        scrape(minutesAfterNoon(1), container("webtrees", "restarting"));
+
+        assertThat(scrape(minutesAfterNoon(2), container("webtrees", "restarting")))
+            .singleElement()
+            .satisfies(verdict -> {
+                assertThat(verdict.outcome()).isEqualTo(Outcome.ALERT);
+                assertThat(verdict.standing().standing()).isEqualTo(ContainerStanding.RESTARTING);
+                assertThat(verdict.standing().troubledSince()).isEqualTo(minutesAfterNoon(1));
+            });
+    }
+
+    @Test
+    void anUnhealthyContainerThatThenExitsIsGone_andWorseNewsIsNews() {
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+        scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+        scrape(minutesAfterNoon(2), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+
+        scrape(minutesAfterNoon(3), container("webtrees", "exited"));
+        assertThat(scrape(minutesAfterNoon(4), container("webtrees", "exited")))
+            .singleElement()
+            .satisfies(verdict -> {
+                assertThat(verdict.outcome()).isEqualTo(Outcome.ALERT);
+                assertThat(verdict.standing().standing()).isEqualTo(ContainerStanding.GONE);
+                // It stopped being unhealthy and started being gone at this scrape — the mail says when
+                // that happened, not when the health check first failed half an hour ago.
+                assertThat(verdict.standing().troubledSince()).isEqualTo(minutesAfterNoon(3));
+            });
+    }
+
+    @Test
+    void aGoneContainerThatComesBackUnhealthyIsNotASecondAlert() {
+        // Better news is not news. It was gone, it is back — badly, but back — and the only thing worth
+        // an email is the all-clear when it is finally well. The card is honest about it in the meantime.
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+        scrape(minutesAfterNoon(1), container("webtrees", "exited"));
+        scrape(minutesAfterNoon(2), container("webtrees", "exited"));
+
+        assertThat(scrape(minutesAfterNoon(3), container("webtrees", "running", ContainerHealth.UNHEALTHY)))
+            .isEmpty();
+        assertThat(scrape(minutesAfterNoon(4), container("webtrees", "running", ContainerHealth.UNHEALTHY)))
+            .isEmpty();
+        assertThat(standings.standingsFor(APALVEIEN)).singleElement()
+            .satisfies(standing -> assertThat(standing.standing()).isEqualTo(ContainerStanding.UNHEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(5), container("webtrees", "running", ContainerHealth.HEALTHY)))
+            .singleElement()
+            .satisfies(verdict -> assertThat(verdict.outcome()).isEqualTo(Outcome.RECOVERED));
+    }
+
+    @Test
+    void aTroubleThatChangesStartsItsOwnCount() {
+        // One unhealthy scrape and then one restarting scrape is not two misses of anything. Each trouble
+        // has to be seen twice in a row before it is worth saying.
+        scrape(NOON, container("webtrees", "running", ContainerHealth.HEALTHY));
+        scrape(minutesAfterNoon(1), container("webtrees", "running", ContainerHealth.UNHEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(2), container("webtrees", "restarting"))).isEmpty();
+        assertThat(scrape(minutesAfterNoon(3), container("webtrees", "restarting")))
+            .singleElement()
+            .satisfies(verdict ->
+                assertThat(verdict.standing().standing()).isEqualTo(ContainerStanding.RESTARTING));
+    }
+
+    @Test
+    void aContainerNeverSeenWellIsNeverNews_howeverBadlyItIsDoing() {
+        // The same rule that keeps this quiet about everything stopped on purpose. A container that has
+        // only ever been unhealthy, or only ever restarting, is something Vaier has no "before" for.
+        scrape(NOON, container("probe", "running", ContainerHealth.UNHEALTHY));
+        scrape(minutesAfterNoon(1), container("probe", "running", ContainerHealth.UNHEALTHY));
+
+        assertThat(scrape(minutesAfterNoon(2), container("probe", "running", ContainerHealth.UNHEALTHY)))
+            .isEmpty();
+        assertThat(standings.standingsFor(APALVEIEN)).isEmpty();
     }
 }

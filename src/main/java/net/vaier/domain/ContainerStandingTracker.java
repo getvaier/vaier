@@ -7,10 +7,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * Decides, per container, whether admins should hear that something which was running is not running any
- * more (#356). It owns the whole rule — what counts as evidence, how many misses are news, what a
+ * Decides, per container, whether admins should hear that something which was running is in trouble now
+ * (#356, widened in #317). It owns the whole rule — what counts as evidence, how many misses are news, what a
  * recovery is, and when to stop remembering a container at all — and reaches its own memory through
  * {@link ForPersistingContainerStandings}; the scheduler hands the port in and then only decides whom to
  * tell.
@@ -98,37 +99,52 @@ public class ContainerStandingTracker {
         return List.copyOf(verdicts);
     }
 
-    /** A container the scrape actually saw, running or not. */
+    /** A container the scrape actually saw — running well, running badly, restarting, or stopped. */
     private void judgeSeen(MachineId machineId, DockerService container, MachineContainerStanding prior,
                            Instant at, Instant bootedAt, List<MachineContainerStanding> next,
                            List<Verdict> verdicts) {
-        if (container.isRunning()) {
+        Optional<ContainerStanding> reading = ContainerStanding.read(container);
+        if (reading.isEmpty()) {
+            // The health check has not concluded. Vaier has taken no verdict, so nothing moves — the
+            // standing is held exactly where it was rather than counted either way.
+            if (prior != null) {
+                next.add(prior.withMachineBootedAt(bootedAt));
+            }
+            return;
+        }
+        ContainerStanding read = reading.get();
+        if (read == ContainerStanding.RUNNING) {
             MachineContainerStanding running =
                 MachineContainerStanding.seenRunning(machineId, container.containerName(), at, bootedAt);
             next.add(running);
-            if (prior != null && prior.isGone()) {
+            if (prior != null && prior.isTrouble()) {
                 verdicts.add(new Verdict(Outcome.RECOVERED, running));
             }
             return;
         }
         if (prior == null) {
-            // Never seen running. Nothing to compare it against, so nothing to say — ever.
+            // Never seen running and well. Nothing to compare it against, so nothing to say — ever.
             return;
         }
-        if (prior.isGone()) {
-            // Still stopped, still present, and already said. It keeps its standing so the machine's card
-            // goes on saying so, and the inbox stays quiet.
+        if (prior.standing() == read) {
+            // The same trouble, already said. It keeps its standing so the machine's card goes on saying
+            // so, and the inbox stays quiet.
             next.add(prior.withMachineBootedAt(bootedAt));
             return;
         }
-        MachineContainerStanding missed = prior.missed(at, bootedAt);
+        MachineContainerStanding missed = prior.troubled(read, at, bootedAt);
         if (missed.misses() < MISSES_BEFORE_ALERT) {
             next.add(missed);
             return;
         }
-        MachineContainerStanding gone = missed.gone();
-        next.add(gone);
-        verdicts.add(new Verdict(Outcome.ALERT, gone));
+        // Said twice running: the standing moves, so the card and the badge are honest about what is
+        // happening now. Whether it is also worth an email is the separate, stricter question.
+        boolean escalation = missed.isEscalation();
+        MachineContainerStanding announced = missed.announce();
+        next.add(announced);
+        if (escalation) {
+            verdicts.add(new Verdict(Outcome.ALERT, announced));
+        }
     }
 
     /**
@@ -143,12 +159,16 @@ public class ContainerStandingTracker {
         if (absent.isGone()) {
             return;
         }
-        MachineContainerStanding missed = absent.missed(at, bootedAt);
+        MachineContainerStanding missed = absent.troubled(ContainerStanding.GONE, at, bootedAt);
         if (missed.misses() < MISSES_BEFORE_ALERT) {
             next.add(missed);
             return;
         }
-        verdicts.add(new Verdict(Outcome.ALERT, missed.gone()));
+        boolean escalation = missed.isEscalation();
+        MachineContainerStanding gone = missed.announce();
+        if (escalation) {
+            verdicts.add(new Verdict(Outcome.ALERT, gone));
+        }
     }
 
     private Map<String, MachineContainerStanding> remembered(MachineId machineId) {

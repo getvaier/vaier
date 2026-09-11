@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,7 +26,7 @@ class MachineContainerStandingTest {
             .containerName("webtrees")
             .standing(ContainerStanding.GONE)
             .lastSeenRunning(SEEN)
-            .notRunningSince(STOPPED)
+            .troubledSince(STOPPED)
             .machineBootedAt(bootedAt)
             .misses(2)
             .build();
@@ -33,13 +34,13 @@ class MachineContainerStandingTest {
 
     @Test
     void theSubjectNamesTheContainerAndTheMachine() {
-        assertThat(gone(null).goneSubject("Apalveien 5"))
+        assertThat(gone(null).troubleSubject("Apalveien 5"))
             .isEqualTo("[Vaier] webtrees is not running on Apalveien 5");
     }
 
     @Test
     void theBodySaysWhenItWasUp_whenItStopped_andThatVaierCannotStartIt() {
-        String body = gone(null).goneBody("Apalveien 5", OSLO);
+        String body = gone(null).troubleBody("Apalveien 5", OSLO);
 
         assertThat(body)
             .contains("Apalveien 5")
@@ -54,7 +55,7 @@ class MachineContainerStandingTest {
         // the words carry, named in full so there is nothing to work out.
         MachineContainerStanding rebooted = gone(Instant.parse("2026-09-11T09:40:00Z"));
 
-        assertThat(rebooted.goneBody("Apalveien 5", OSLO))
+        assertThat(rebooted.troubleBody("Apalveien 5", OSLO))
             .contains("2026-09-11 11:15 (Europe/Oslo)")
             .contains("2026-09-11 11:47 (Europe/Oslo)")
             .contains("2026-09-11 11:40 (Europe/Oslo)")
@@ -65,7 +66,7 @@ class MachineContainerStandingTest {
     @Test
     void aZoneOfItsOwnIsAllThatChanges_neverTheInstantItself() {
         // The stored instants stay UTC; only the words move. Handed UTC, it says UTC o'clock.
-        assertThat(gone(null).goneBody("Apalveien 5", ZoneId.of("UTC")))
+        assertThat(gone(null).troubleBody("Apalveien 5", ZoneId.of("UTC")))
             .contains("2026-09-11 09:15 (UTC)");
     }
 
@@ -74,7 +75,7 @@ class MachineContainerStandingTest {
         MachineContainerStanding rebooted = gone(Instant.parse("2026-09-11T09:40:00Z"));
 
         assertThat(rebooted.rebootExplanation(OSLO)).isPresent();
-        assertThat(rebooted.goneBody("Apalveien 5", OSLO)).contains("rebooted at 2026-09-11 11:40");
+        assertThat(rebooted.troubleBody("Apalveien 5", OSLO)).contains("rebooted at 2026-09-11 11:40");
         assertThat(rebooted.evidence(OSLO)).contains("rebooted at 2026-09-11 11:40");
     }
 
@@ -82,7 +83,7 @@ class MachineContainerStandingTest {
     void aBootInstantTheSweepNeverLearnedIsSimplyNotMentioned() {
         // Unknown is not a story. A guess dressed as context is worse than no context at all.
         assertThat(gone(null).rebootExplanation(OSLO)).isEmpty();
-        assertThat(gone(null).goneBody("Apalveien 5", OSLO)).doesNotContain("rebooted");
+        assertThat(gone(null).troubleBody("Apalveien 5", OSLO)).doesNotContain("rebooted");
     }
 
     @Test
@@ -110,7 +111,7 @@ class MachineContainerStandingTest {
         assertThat(running.standing()).isEqualTo(ContainerStanding.RUNNING);
         assertThat(running.isGone()).isFalse();
         assertThat(running.misses()).isZero();
-        assertThat(running.notRunningSince()).isNull();
+        assertThat(running.troubledSince()).isNull();
     }
 
     @Test
@@ -118,10 +119,126 @@ class MachineContainerStandingTest {
         MachineContainerStanding running =
             MachineContainerStanding.seenRunning(APALVEIEN, "webtrees", SEEN, null);
 
-        MachineContainerStanding twice = running.missed(STOPPED, null)
-            .missed(STOPPED.plusSeconds(30), null);
+        MachineContainerStanding twice = running.troubled(ContainerStanding.GONE, STOPPED, null)
+            .troubled(ContainerStanding.GONE, STOPPED.plusSeconds(30), null);
 
         assertThat(twice.misses()).isEqualTo(2);
-        assertThat(twice.notRunningSince()).isEqualTo(STOPPED);
+        assertThat(twice.troubledSince()).isEqualTo(STOPPED);
+    }
+
+    // --- the other two troubles, and the words for them (#317) -----------------------------------------
+
+    private static MachineContainerStanding inTrouble(ContainerStanding where) {
+        return MachineContainerStanding.builder()
+            .machineId(APALVEIEN)
+            .containerName("webtrees")
+            .standing(where)
+            .reading(where)
+            .lastSeenRunning(SEEN)
+            .troubledSince(STOPPED)
+            .misses(2)
+            .build();
+    }
+
+    @Test
+    void anUnhealthyContainerSaysUnhealthy_notStopped() {
+        MachineContainerStanding unhealthy = inTrouble(ContainerStanding.UNHEALTHY);
+
+        assertThat(unhealthy.troubleSubject("Apalveien 5"))
+            .isEqualTo("[Vaier] webtrees is unhealthy on Apalveien 5");
+        assertThat(unhealthy.cardTitle()).isEqualTo("webtrees is unhealthy");
+        assertThat(unhealthy.troubleBody("Apalveien 5", OSLO))
+            // When it was last well, and how long it has been failing — the two facts a person needs.
+            .contains("Last seen healthy: 2026-09-11 11:15 (Europe/Oslo)")
+            .contains("Unhealthy since: 2026-09-11 11:47 (Europe/Oslo)")
+            .contains("cannot restart it")
+            .doesNotContain("not running");
+    }
+
+    @Test
+    void aRestartLoopingContainerSaysSo() {
+        MachineContainerStanding looping = inTrouble(ContainerStanding.RESTARTING);
+
+        assertThat(looping.troubleSubject("Apalveien 5"))
+            .isEqualTo("[Vaier] webtrees is restart-looping on Apalveien 5");
+        assertThat(looping.cardTitle()).isEqualTo("webtrees is restart-looping");
+        assertThat(looping.troubleBody("Apalveien 5", OSLO))
+            .contains("Last seen running: 2026-09-11 11:15 (Europe/Oslo)")
+            .contains("Restarting since: 2026-09-11 11:47 (Europe/Oslo)")
+            .contains("cannot restart it");
+    }
+
+    @Test
+    void everyTroubleIsPlainThatVaierChangedNothing() {
+        for (ContainerStanding where : List.of(ContainerStanding.GONE, ContainerStanding.UNHEALTHY,
+            ContainerStanding.RESTARTING)) {
+            assertThat(inTrouble(where).troubleBody("Apalveien 5", OSLO))
+                .as("%s", where)
+                .contains("Vaier changed nothing here");
+        }
+    }
+
+    @Test
+    void theRebootIsOnlySaidWhereItExplainsSomething() {
+        // A reboot explains a container that did not come back. It explains nothing about one that is
+        // running and failing its own health check, so it is not said there — context that does not
+        // explain is just another line to read.
+        Instant rebooted = Instant.parse("2026-09-11T09:40:00Z");
+
+        assertThat(inTrouble(ContainerStanding.GONE).withMachineBootedAt(rebooted).troubleBody("m", OSLO))
+            .contains("rebooted at");
+        assertThat(inTrouble(ContainerStanding.UNHEALTHY).withMachineBootedAt(rebooted)
+            .troubleBody("m", OSLO)).doesNotContain("rebooted at");
+    }
+
+    @Test
+    void theEvidenceOnTheCardSaysWhatVaierActuallySaw() {
+        assertThat(inTrouble(ContainerStanding.UNHEALTHY).evidence(OSLO))
+            .contains("webtrees")
+            .contains("unhealthy on every scrape since 2026-09-11 11:47 (Europe/Oslo)");
+        assertThat(inTrouble(ContainerStanding.RESTARTING).evidence(OSLO))
+            .contains("restarting on every scrape since 2026-09-11 11:47 (Europe/Oslo)");
+    }
+
+    @Test
+    void everyTroubleIsTrouble_andOnlyGoneIsGone() {
+        assertThat(inTrouble(ContainerStanding.UNHEALTHY).isTrouble()).isTrue();
+        assertThat(inTrouble(ContainerStanding.UNHEALTHY).isGone()).isFalse();
+        assertThat(MachineContainerStanding.seenRunning(APALVEIEN, "webtrees", SEEN, null).isTrouble())
+            .isFalse();
+    }
+
+    @Test
+    void aDifferentTroubleStartsItsOwnCount_andItsOwnClock() {
+        MachineContainerStanding unhealthyTwice =
+            MachineContainerStanding.seenRunning(APALVEIEN, "webtrees", SEEN, null)
+                .troubled(ContainerStanding.UNHEALTHY, STOPPED, null)
+                .troubled(ContainerStanding.UNHEALTHY, STOPPED.plusSeconds(30), null);
+
+        MachineContainerStanding thenGone =
+            unhealthyTwice.troubled(ContainerStanding.GONE, STOPPED.plusSeconds(60), null);
+
+        assertThat(thenGone.misses()).isEqualTo(1);
+        assertThat(thenGone.troubledSince()).isEqualTo(STOPPED.plusSeconds(60));
+    }
+
+    @Test
+    void onlyWorseNewsIsAnEscalation() {
+        MachineContainerStanding gone = inTrouble(ContainerStanding.GONE);
+
+        assertThat(gone.troubled(ContainerStanding.UNHEALTHY, STOPPED, null).isEscalation()).isFalse();
+        assertThat(inTrouble(ContainerStanding.UNHEALTHY)
+            .troubled(ContainerStanding.GONE, STOPPED, null).isEscalation()).isTrue();
+    }
+
+    @Test
+    void announcingASuspicionMakesItTheStanding() {
+        MachineContainerStanding announced =
+            MachineContainerStanding.seenRunning(APALVEIEN, "webtrees", SEEN, null)
+                .troubled(ContainerStanding.UNHEALTHY, STOPPED, null)
+                .announce();
+
+        assertThat(announced.standing()).isEqualTo(ContainerStanding.UNHEALTHY);
+        assertThat(announced.isEscalation()).as("once said, there is nothing left to escalate").isFalse();
     }
 }

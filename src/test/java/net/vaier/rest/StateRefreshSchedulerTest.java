@@ -4,7 +4,7 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.JudgeContainerStandingsUseCase;
-import net.vaier.application.NotifyAdminsOfContainerGoneUseCase;
+import net.vaier.application.NotifyAdminsOfContainerTroubleUseCase;
 import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.RefreshLaunchpadVersionsUseCase;
 import net.vaier.domain.ContainerStanding;
@@ -40,7 +40,7 @@ class StateRefreshSchedulerTest {
     GetLanServerReachabilityUseCase lanServerReachability;
     RefreshLaunchpadVersionsUseCase launchpadVersions;
     JudgeContainerStandingsUseCase containerStandings;
-    NotifyAdminsOfContainerGoneUseCase containerNotifier;
+    NotifyAdminsOfContainerTroubleUseCase containerNotifier;
     GetMachinesUseCase machines;
     StateRefreshScheduler scheduler;
 
@@ -51,7 +51,7 @@ class StateRefreshSchedulerTest {
         lanServerReachability = mock(GetLanServerReachabilityUseCase.class);
         launchpadVersions = mock(RefreshLaunchpadVersionsUseCase.class);
         containerStandings = mock(JudgeContainerStandingsUseCase.class);
-        containerNotifier = mock(NotifyAdminsOfContainerGoneUseCase.class);
+        containerNotifier = mock(NotifyAdminsOfContainerTroubleUseCase.class);
         machines = mock(GetMachinesUseCase.class);
         scheduler = new StateRefreshScheduler(containerState, lanServerScrape,
             lanServerReachability, launchpadVersions, containerStandings, containerNotifier, machines);
@@ -63,7 +63,7 @@ class StateRefreshSchedulerTest {
             .containerName(containerName)
             .standing(where)
             .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
-            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .troubledSince(Instant.parse("2026-09-11T09:47:00Z"))
             .build();
     }
 
@@ -97,14 +97,14 @@ class StateRefreshSchedulerTest {
     }
 
     @Test
-    void refresh_aContainerThatWentMissingIsMailedAboutUnderItsMachinesName() {
+    void refresh_aContainerInTroubleIsMailedAboutUnderItsMachinesName() {
         when(containerStandings.judgeContainerStandings())
             .thenReturn(List.of(new Verdict(Outcome.ALERT, standing("webtrees", ContainerStanding.GONE))));
         when(machines.getAllMachines()).thenReturn(List.of(machine("Apalveien 5")));
 
         scheduler.refresh();
 
-        verify(containerNotifier).notifyAdminsOfContainerGone(eq("Apalveien 5"), any());
+        verify(containerNotifier).notifyAdminsOfContainerTrouble(eq("Apalveien 5"), any());
     }
 
     @Test
@@ -125,7 +125,7 @@ class StateRefreshSchedulerTest {
         scheduler.refresh();
 
         verify(machines, never()).getAllMachines();
-        verify(containerNotifier, never()).notifyAdminsOfContainerGone(any(), any());
+        verify(containerNotifier, never()).notifyAdminsOfContainerTrouble(any(), any());
     }
 
     @Test
@@ -136,11 +136,25 @@ class StateRefreshSchedulerTest {
                 new Verdict(Outcome.ALERT, standing("mariadb", ContainerStanding.GONE))));
         when(machines.getAllMachines()).thenReturn(List.of(machine("Apalveien 5")));
         doThrow(new RuntimeException("smtp down")).when(containerNotifier)
-            .notifyAdminsOfContainerGone(any(), any());
+            .notifyAdminsOfContainerTrouble(any(), any());
 
         scheduler.refresh();
 
         // Both were attempted: each mail stands on its own, as every other rider on these rounds does.
-        verify(containerNotifier, times(2)).notifyAdminsOfContainerGone(any(), any());
+        verify(containerNotifier, times(2)).notifyAdminsOfContainerTrouble(any(), any());
+    }
+
+    @Test
+    void refresh_everyTroubleTravelsTheSameRoute_andTheStandingSaysWhichItIs() {
+        // #317: unhealthy and restart-looping are not new machinery here. The scheduler switches on the
+        // verdict and nothing else — which trouble it is, and the words for it, are the domain's.
+        when(containerStandings.judgeContainerStandings()).thenReturn(List.of(
+            new Verdict(Outcome.ALERT, standing("webtrees", ContainerStanding.UNHEALTHY)),
+            new Verdict(Outcome.ALERT, standing("mariadb", ContainerStanding.RESTARTING))));
+        when(machines.getAllMachines()).thenReturn(List.of(machine("Apalveien 5")));
+
+        scheduler.refresh();
+
+        verify(containerNotifier, times(2)).notifyAdminsOfContainerTrouble(eq("Apalveien 5"), any());
     }
 }

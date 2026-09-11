@@ -596,8 +596,8 @@
         S.claudeStandings = next;
     }
 
-    // Where every container Vaier has watched run currently stands, in ONE request — the word on a stopped
-    // container's row.
+    // Where every container Vaier has watched run currently stands, in ONE request — the word on a
+    // troubled container's row: stopped, unhealthy, or restart-looping.
     //
     // The same exception the two loaders above earn. It reaches no machine: this is the 30-second container
     // scrape's own verdict, retained in memory and served back, and the backend pushes
@@ -2203,9 +2203,10 @@
         // route has to come back on the machine. No label means no button; the domain's action sentence is
         // shown in its place.
         NO_DEFAULT_ROUTE:        () => ({ icon: 'warn' }),
-        // #356: the same, and for the same reason — Vaier reads the fleet's containers and has no endpoint
-        // that starts one. No label, no button, and the domain's sentence in its place.
-        CONTAINER_GONE:          () => ({ icon: 'warn' }),
+        // #356/#317: the same, and for the same reason — Vaier reads the fleet's containers and has no
+        // endpoint that starts, stops or restarts one. No label, no button, and the domain's sentence in
+        // its place. The card's title says which trouble it is; this table only picks the glyph.
+        CONTAINER_TROUBLE:       () => ({ icon: 'warn' }),
     };
 
     // One nudge, rendered as a quiet invitation: an accent glyph for its kind, the domain's title and the
@@ -3893,6 +3894,16 @@
     // A button that looks like a verb and does nothing is a lie about what works, and the fleet is exactly
     // the place where an operator must be able to trust what the screen says.
 
+    // What the server has decided about a container that is in trouble, as one word on its row. The keys
+    // are the domain's own ContainerStanding names and the words are the operator's: the browser looks a
+    // standing up here and never works one out. RUNNING is absent on purpose — a container that is fine
+    // says nothing, and the row falls back to whatever Docker calls its state.
+    const CONTAINER_TROUBLE_WORD = {
+        GONE:       'gone',        // it was running, and Vaier has found it stopped since
+        UNHEALTHY:  'unhealthy',   // it is running, and its own health check is failing
+        RESTARTING: 'restarting',  // Docker keeps restarting it: a restart loop
+    };
+
     function renderContainers(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
@@ -3921,15 +3932,16 @@
         rows.appendChild(listHead(['Name', 'Image', 'State']));
         found.forEach((c) => {
             // `exited` is what a container stopped on purpose says too, and those are the many. A container
-            // the backend has watched run and now finds stopped reads `gone` instead — its standing is the
-            // server's own verdict (#356), never re-decided here.
-            const gone = S.containerStandings.get(standingKey(machineId, c.containerName));
-            const isGone = gone && gone.standing === 'GONE';
+            // the backend has watched run and now finds in trouble reads its trouble instead — the standing
+            // is the server's own verdict (#356, #317), never re-decided here. It matters most for the two
+            // troubles where Docker itself says `running`: unhealthy, and restart-looping.
+            const standing = S.containerStandings.get(standingKey(machineId, c.containerName));
+            const trouble = standing && CONTAINER_TROUBLE_WORD[standing.standing];
             rows.appendChild(listRow(
                 entryIco('container'), c.containerName,
                 () => go(['fleet', machineId, 'containers', c.containerName]),
-                [c.image || '—', isGone ? 'gone' : (c.state || 'unknown')],
-                c.state === 'running' ? 'OK' : (isGone ? 'GONE' : 'DOWN'), updateMark(c)));
+                [c.image || '—', trouble || c.state || 'unknown'],
+                trouble ? standing.standing : (c.state === 'running' ? 'OK' : 'DOWN'), updateMark(c)));
         });
         body.appendChild(rows);
 
@@ -3974,6 +3986,12 @@
         const ports = (c.ports || []).map((p) => (p.publicPort ? p.publicPort + '→' : '')
             + p.privatePort + '/' + (p.type || 'tcp')).join('  ');
 
+        // Docker's own word for a container whose health check is failing is "running", which on this pane
+        // would read as an all-clear. Where the server holds a trouble standing it is said on the same
+        // line, so the list and the pane can never say different things about one container (#317).
+        const standing = S.containerStandings.get(standingKey(machineId, c.containerName));
+        const trouble = standing && CONTAINER_TROUBLE_WORD[standing.standing];
+
         // --- do: the one verb Vaier has over a container --------------------------------------------
         //
         // It is here rather than in the list because it acts on ONE container, which is exactly why the
@@ -3997,7 +4015,7 @@
             ['Image', coord(c.image)],
             ['Version', coord(c.version)],
             ['Update', updateSays(c)],
-            ['State', c.state],
+            ['State', trouble ? c.state + ' (' + trouble + ')' : c.state],
             ['Ports', coord(ports)],
             ['Networks', coord((c.networks || []).join(', '))],
             ['Container id', coord((c.containerId || '').slice(0, 12))],
@@ -5044,7 +5062,12 @@
     // as the Infrastructure page reads it, so one service cannot be green on one page and red on the other.
     function stateDot(state) {
         const el = document.createElement('span');
-        const key = state === 'OK' ? 'is-up' : (state === 'UNKNOWN' ? 'is-idle' : 'is-down');
+        // Amber is the shell's existing word for "it is there, and something about it is wrong" — which is
+        // exactly a container that is up with a failing health check, or one Docker keeps restarting.
+        // Red stays for the thing that is not running at all, so the two do not compete (#317).
+        const degraded = state === 'UNHEALTHY' || state === 'RESTARTING';
+        const key = state === 'OK' ? 'is-up'
+            : (state === 'UNKNOWN' ? 'is-idle' : (degraded ? 'is-degraded' : 'is-down'));
         el.className = 'ex-dot ' + key;
         return el;
     }

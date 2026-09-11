@@ -23,6 +23,11 @@ import java.util.Optional;
  *                        may not. Null on a container nobody has judged yet: the verdict needs to know which
  *                        machine the container runs on, which only the scrape of that machine knows. Null is
  *                        read as "no action offered" — never as permission.
+ * @param health          what this container's own health check last said (#317), read off the same
+ *                        listing the scrape already makes. {@link ContainerHealth#NONE} on a container
+ *                        with no health check, and on one nobody has read a status for — never a failing
+ *                        check, which is why a scrape that predates this fact stays silent rather than
+ *                        turning the whole fleet unhealthy at once.
  * @param movingTag       whether this container's image tag is a <b>moving tag</b> — a nightly or edge
  *                        channel that the last two sweeps each found on a different digest. It still earns
  *                        the <b>update available</b> mark; it raises no <b>update-available alert</b>. False
@@ -42,7 +47,8 @@ public record DockerService(
         UpdateAvailability updateAvailable,
         ComposeCoordinates composeCoordinates,
         ContainerUpdateEligibility updateEligibility,
-        boolean movingTag
+        boolean movingTag,
+        ContainerHealth health
 ) {
 
     /**
@@ -53,7 +59,7 @@ public record DockerService(
     public DockerService(String containerId, String containerName, String image, String version,
                          List<PortMapping> ports, List<String> networks, String state) {
         this(containerId, containerName, image, version, ports, networks, state, null,
-            UpdateAvailability.UNKNOWN, null, null, false);
+            UpdateAvailability.UNKNOWN, null, null, false, ContainerHealth.NONE);
     }
 
     /** A container known down to its update verdict, but not yet to how it was started or judged. */
@@ -61,12 +67,16 @@ public record DockerService(
                          List<PortMapping> ports, List<String> networks, String state,
                          String imageDigest, UpdateAvailability updateAvailable) {
         this(containerId, containerName, image, version, ports, networks, state, imageDigest,
-            updateAvailable, null, null, false);
+            updateAvailable, null, null, false, ContainerHealth.NONE);
     }
 
-    /** Null-safe: a record built with no verdict still reads as {@link UpdateAvailability#UNKNOWN}. */
+    /**
+     * Null-safe: a record built with no verdict still reads as {@link UpdateAvailability#UNKNOWN}, and one
+     * built with no health fact as {@link ContainerHealth#NONE} — "nothing was read" is not "failing".
+     */
     public DockerService {
         updateAvailable = updateAvailable == null ? UpdateAvailability.UNKNOWN : updateAvailable;
+        health = health == null ? ContainerHealth.NONE : health;
     }
 
     /** This container carrying {@code verdict}. The scrape stays as the host reported it. */
@@ -123,6 +133,14 @@ public record DockerService(
 
     public boolean isRunning() {
         return isRunningState(state);
+    }
+
+    /**
+     * Whether Docker is restarting this container — a restart loop, seen from outside (#317). It is not
+     * running and it is not settled either, so it is neither of the two states the rest of this asks about.
+     */
+    public boolean isRestarting() {
+        return "restarting".equalsIgnoreCase(state);
     }
 
     /**

@@ -6,7 +6,7 @@ import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.JudgeContainerStandingsUseCase;
-import net.vaier.application.NotifyAdminsOfContainerGoneUseCase;
+import net.vaier.application.NotifyAdminsOfContainerTroubleUseCase;
 import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.RefreshLaunchpadVersionsUseCase;
 import net.vaier.domain.ContainerStandingTracker.Verdict;
@@ -42,7 +42,7 @@ public class StateRefreshScheduler {
     private final GetLanServerReachabilityUseCase lanServerReachability;
     private final RefreshLaunchpadVersionsUseCase launchpadVersions;
     private final JudgeContainerStandingsUseCase containerStandings;
-    private final NotifyAdminsOfContainerGoneUseCase containerNotifier;
+    private final NotifyAdminsOfContainerTroubleUseCase containerNotifier;
     // Only ever asked when something actually moved: a name is for a mail, and a healthy fleet sends none.
     private final GetMachinesUseCase machines;
 
@@ -79,7 +79,7 @@ public class StateRefreshScheduler {
         try {
             switch (verdict.outcome()) {
                 case ALERT -> containerNotifier
-                    .notifyAdminsOfContainerGone(machineName, verdict.standing());
+                    .notifyAdminsOfContainerTrouble(machineName, verdict.standing());
                 case RECOVERED -> containerNotifier
                     .notifyAdminsOfContainerBack(machineName, verdict.standing());
             }

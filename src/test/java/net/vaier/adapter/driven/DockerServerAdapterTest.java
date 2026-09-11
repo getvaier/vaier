@@ -11,6 +11,7 @@ import com.github.dockerjava.api.model.ContainerNetworkSettings;
 import com.github.dockerjava.api.model.ContainerPort;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.domain.ComposeCoordinates;
+import net.vaier.domain.ContainerHealth;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.Server;
 import org.junit.jupiter.api.Test;
@@ -795,5 +796,68 @@ class DockerServerAdapterTest {
         when(port.getType()).thenReturn(type);
         when(port.getIp()).thenReturn(ip);
         return port;
+    }
+
+    // --- what a container's own health check says (#317) -----------------------------------------------
+    //
+    // Off the listing, never an inspect. Docker writes the verdict into the status line it already returns
+    // for every container, so the fleet scrape that lists them has it in hand — and an inspect per running
+    // container per machine every 30 seconds, for a fact already on the wire, is the thing not to build.
+
+    @Test
+    void getServicesWithExposedPorts_aFailingHealthCheck_isReadOffTheListingsStatus() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = bridgeContainer("webtrees", "running",
+            new ContainerPort[]{containerPort(80, 8080, "tcp", "0.0.0.0")});
+        when(container.getId()).thenReturn("wt1");
+        when(container.getImage()).thenReturn("ghcr.io/webtrees:2.1");
+        when(container.getImageId()).thenReturn("sha256:wt");
+        when(container.getStatus()).thenReturn("Up 3 minutes (unhealthy)");
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:wt")).thenReturn(inspectImageCmd);
+        when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+        List<DockerService> services = adapter.getServicesWithExposedPorts(Server.vaierServer());
+
+        assertThat(services).singleElement()
+            .satisfies(service -> assertThat(service.health()).isEqualTo(ContainerHealth.UNHEALTHY));
+        // And still nothing asked of the daemon beyond the listing.
+        verifyNoInteractions(dockerHttpClient);
+    }
+
+    @Test
+    void getServicesWithExposedPorts_aContainerWithNoHealthCheck_carriesNoVerdict() {
+        DockerClient dockerClient = mock(DockerClient.class);
+        DockerHttpClient dockerHttpClient = mock(DockerHttpClient.class);
+
+        ListContainersCmd listCmd = mock(ListContainersCmd.class);
+        when(dockerClient.listContainersCmd()).thenReturn(listCmd);
+        when(listCmd.withShowAll(anyBoolean())).thenReturn(listCmd);
+
+        Container container = bridgeContainer("traefik", "running",
+            new ContainerPort[]{containerPort(80, 80, "tcp", "0.0.0.0")});
+        when(container.getId()).thenReturn("tk1");
+        when(container.getImage()).thenReturn("traefik:v3");
+        when(container.getImageId()).thenReturn("sha256:tk");
+        when(container.getStatus()).thenReturn("Up 5 days");
+        when(listCmd.exec()).thenReturn(List.of(container));
+
+        InspectImageCmd inspectImageCmd = mock(InspectImageCmd.class);
+        when(dockerClient.inspectImageCmd("sha256:tk")).thenReturn(inspectImageCmd);
+        when(inspectImageCmd.exec()).thenReturn(mock(InspectImageResponse.class));
+
+        DockerServerAdapter adapter = new DockerServerAdapter(dockerClient, dockerHttpClient);
+
+        assertThat(adapter.getServicesWithExposedPorts(Server.vaierServer())).singleElement()
+            .satisfies(service -> assertThat(service.health()).isEqualTo(ContainerHealth.NONE));
     }
 }

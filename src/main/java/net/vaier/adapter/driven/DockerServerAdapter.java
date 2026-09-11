@@ -13,6 +13,7 @@ import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import net.vaier.domain.ComposeCoordinates;
+import net.vaier.domain.ContainerHealth;
 import net.vaier.domain.Server;
 import net.vaier.domain.DockerService;
 import net.vaier.domain.UpdateAvailability;
@@ -91,6 +92,11 @@ public class DockerServerAdapter implements ForGettingServerInfo {
                         .ports(portMappings)
                         .networks(networks)
                         .state(container.getState())
+                        // What the container's own health check last said (#317). It rides in the status
+                        // line the listing already returns — "Up 3 minutes (unhealthy)" — so reading it
+                        // costs nothing and no container is inspected for it. What the string means is
+                        // the domain's to decide, not this adapter's to re-spell.
+                        .health(ContainerHealth.fromStatus(container.getStatus()))
                         .imageDigest(resolveImageDigest(imageInfo, image))
                         .updateAvailable(UpdateAvailability.UNKNOWN)
                         // How compose started it, straight off the container's own labels. Whether the

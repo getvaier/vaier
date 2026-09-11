@@ -20,7 +20,7 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
 /**
- * File-backed memory of what Vaier has seen running on the fleet (#356): {@code container-standings.yml}
+ * File-backed memory of what Vaier has seen running on the fleet (#356, #317): {@code container-standings.yml}
  * in the config dir, one block per machine, one entry per container Vaier has actually watched run. No
  * secrets, so — like {@link MissingDefaultRouteFileAdapter} — a plain, tolerant SnakeYAML round-trip with
  * default file permissions and no {@link SecretCipher}.
@@ -28,6 +28,10 @@ import org.yaml.snakeyaml.Yaml;
  * <p><b>Why on disk at all.</b> The container scrape lives in memory, so a redeploy — several a day here —
  * would wipe "I saw this running". A container that stopped during a deploy would then look like one Vaier
  * had never seen run, which is exactly the case this feature is deliberately silent about.
+ *
+ * <p>Tolerant on load across versions too: #356 wrote {@code notRunningSince} and knew two standings, and
+ * there is one of those files on every deployed Vaier. Both key and every unknown standing name are read
+ * rather than dropped — losing that memory on upgrade would lose the whole feature for a day.
  *
  * <p>Tolerant on load, and the tolerance errs quiet rather than loud: a file that will not parse means
  * Vaier re-learns what is running over the next 30 seconds and says nothing until it watches something
@@ -45,7 +49,10 @@ public class ContainerStandingFileAdapter implements ForPersistingContainerStand
     private static final String BOOTED_AT = "bootedAt";
     private static final String CONTAINERS = "containers";
     private static final String STANDING = "standing";
+    private static final String READING = "reading";
     private static final String LAST_SEEN_RUNNING = "lastSeenRunning";
+    private static final String TROUBLED_SINCE = "troubledSince";
+    /** What #356 called {@link #TROUBLED_SINCE} before there was more than one trouble. Read, never written. */
     private static final String NOT_RUNNING_SINCE = "notRunningSince";
     private static final String MISSES = "misses";
 
@@ -140,27 +147,38 @@ public class ContainerStandingFileAdapter implements ForPersistingContainerStand
 
     private MachineContainerStanding read(MachineId machineId, String containerName, Map<?, ?> fields,
                                           Instant bootedAt) {
-        Object standing = fields.get(STANDING);
         return MachineContainerStanding.builder()
             .machineId(machineId)
             .containerName(containerName)
-            .standing(ContainerStanding.GONE.name().equals(String.valueOf(standing))
-                ? ContainerStanding.GONE : ContainerStanding.RUNNING)
+            // What a name means is the domain's, including that an unknown one reads as RUNNING: a memory
+            // written by a newer Vaier must cost a re-learn, never an inbox full of invented alerts.
+            .standing(standing(fields.get(STANDING)))
+            .reading(fields.containsKey(READING) ? standing(fields.get(READING)) : null)
             .lastSeenRunning(instant(fields.get(LAST_SEEN_RUNNING)).orElse(null))
-            .notRunningSince(instant(fields.get(NOT_RUNNING_SINCE)).orElse(null))
+            .troubledSince(instant(fields.get(TROUBLED_SINCE))
+                .or(() -> instant(fields.get(NOT_RUNNING_SINCE))).orElse(null))
             .machineBootedAt(bootedAt)
             .misses(fields.get(MISSES) instanceof Number misses ? misses.intValue() : 0)
             .build();
     }
 
+    private static ContainerStanding standing(Object value) {
+        return ContainerStanding.named(value == null ? null : value.toString());
+    }
+
     private Map<String, Object> written(MachineContainerStanding standing) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put(STANDING, standing.standing().name());
+        // Only when the scrapes are reading something Vaier has not said yet — the window between a
+        // trouble starting and it being worth saying, which a deploy lands in often enough to matter.
+        if (standing.reading() != standing.standing()) {
+            fields.put(READING, standing.reading().name());
+        }
         if (standing.lastSeenRunning() != null) {
             fields.put(LAST_SEEN_RUNNING, standing.lastSeenRunning().toString());
         }
-        if (standing.notRunningSince() != null) {
-            fields.put(NOT_RUNNING_SINCE, standing.notRunningSince().toString());
+        if (standing.troubledSince() != null) {
+            fields.put(TROUBLED_SINCE, standing.troubledSince().toString());
         }
         if (standing.misses() > 0) {
             fields.put(MISSES, standing.misses());

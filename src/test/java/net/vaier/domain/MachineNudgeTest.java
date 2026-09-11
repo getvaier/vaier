@@ -310,7 +310,7 @@ class MachineNudgeTest {
         assertThat(MachineNudge.noDefaultRoute("nas", readingOf("sh: ip: command not found"))).isEmpty();
     }
 
-    // --- CONTAINER_GONE predicate (#356) ---
+    // --- CONTAINER_TROUBLE predicate (#356, widened in #317) ---
 
     private static final ZoneId OSLO = ZoneId.of("Europe/Oslo");
 
@@ -320,18 +320,18 @@ class MachineNudgeTest {
             .containerName(containerName)
             .standing(where)
             .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
-            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .troubledSince(Instant.parse("2026-09-11T09:47:00Z"))
             .build();
     }
 
     @Test
-    void containersGone_oneCardPerContainerThatWasRunningAndIsNot() {
-        List<MachineNudge> nudges = MachineNudge.containersGone("Apalveien 5",
+    void containersInTrouble_oneCardPerContainerThatWasRunningAndIsNot() {
+        List<MachineNudge> nudges = MachineNudge.containersInTrouble("Apalveien 5",
             List.of(standing("webtrees", ContainerStanding.GONE),
                 standing("mariadb", ContainerStanding.RUNNING)), OSLO);
 
         assertThat(nudges).singleElement().satisfies(nudge -> {
-            assertThat(nudge.kind()).isEqualTo(MachineNudge.Kind.CONTAINER_GONE);
+            assertThat(nudge.kind()).isEqualTo(MachineNudge.Kind.CONTAINER_TROUBLE);
             assertThat(nudge.title()).contains("webtrees");
             // The evidence is what Vaier actually saw: when it was last up, and when it stopped being —
             // said in the zone the operator reads it in, not the instant's own.
@@ -343,18 +343,35 @@ class MachineNudgeTest {
     }
 
     @Test
-    void containersGone_silentAboutAContainerVaierNeverSawRunning() {
+    void containersInTrouble_silentAboutAContainerVaierNeverSawRunning() {
         // No standing at all is the state of every container that is stopped on purpose, forever.
-        assertThat(MachineNudge.containersGone("Apalveien 5", List.of(), OSLO)).isEmpty();
+        assertThat(MachineNudge.containersInTrouble("Apalveien 5", List.of(), OSLO)).isEmpty();
     }
 
     @Test
-    void containersGone_carriesTheRebootThatExplainsIt() {
+    void containersInTrouble_carriesTheRebootThatExplainsIt() {
         MachineContainerStanding rebooted = standing("webtrees", ContainerStanding.GONE)
             .withMachineBootedAt(Instant.parse("2026-09-11T09:40:00Z"));
 
-        assertThat(MachineNudge.containersGone("Apalveien 5", List.of(rebooted), OSLO))
+        assertThat(MachineNudge.containersInTrouble("Apalveien 5", List.of(rebooted), OSLO))
             .singleElement()
             .satisfies(nudge -> assertThat(nudge.evidence()).contains("rebooted at"));
+    }
+
+    @Test
+    void containersInTrouble_aCardForEachTroubleTheScrapeCanSee() {
+        // #317: gone is not the only trouble the same reading shows. A failing health check and a restart
+        // loop each earn their own card, worded so the operator knows which one they are looking at.
+        List<MachineNudge> nudges = MachineNudge.containersInTrouble("Apalveien 5",
+            List.of(standing("webtrees", ContainerStanding.UNHEALTHY),
+                standing("mariadb", ContainerStanding.RESTARTING),
+                standing("traefik", ContainerStanding.RUNNING)), OSLO);
+
+        assertThat(nudges).hasSize(2);
+        assertThat(nudges.get(0).title()).isEqualTo("webtrees is unhealthy");
+        assertThat(nudges.get(0).kind()).isEqualTo(MachineNudge.Kind.CONTAINER_TROUBLE);
+        assertThat(nudges.get(0).action()).contains("cannot restart it");
+        assertThat(nudges.get(1).title()).isEqualTo("mariadb is restart-looping");
+        assertThat(nudges).allSatisfy(nudge -> assertThat(nudge.value()).isNull());
     }
 }

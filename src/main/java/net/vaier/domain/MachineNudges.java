@@ -20,7 +20,7 @@ public final class MachineNudges {
     }
 
     /**
-     * The nudges that apply to {@code machine}, trouble first (no-default-route, containers gone) and then
+     * The nudges that apply to {@code machine}, trouble first (no-default-route, containers in trouble) and then
      * the invitations in a stable order (publish, back-up, designate-backup-server, back-up-as-root,
      * route-LAN). Each is included only when its factory says so.
      *
@@ -37,8 +37,10 @@ public final class MachineNudges {
         // #357 leads: it is the only card that is trouble rather than an invitation, and every invitation
         // below it is worth less on a machine that cannot reach the internet.
         MachineNudge.noDefaultRoute(machine.name(), signals.networks()).ifPresent(nudges::add);
-        // #356 sits with it, for the same reason: a service that is simply gone is not an invitation.
-        nudges.addAll(MachineNudge.containersGone(machine.name(), signals.containerStandings(), signals.zone()));
+        // #356/#317 sit with it, for the same reason: a service that is down, unwell, or restart-looping
+        // is not an invitation.
+        nudges.addAll(MachineNudge.containersInTrouble(machine.name(), signals.containerStandings(),
+            signals.zone()));
         MachineNudge.publish(machine.name(), signals.publishableCount()).ifPresent(nudges::add);
         MachineNudge.backUp(machine.name(), signals.reachable(), signals.hasCredential(),
             signals.job().isPresent()).ifPresent(nudges::add);

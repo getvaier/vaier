@@ -9,7 +9,7 @@ import net.vaier.application.NotifyAdminsOfEnrolmentRequestUseCase;
 import net.vaier.application.NotifyAdminsOfLockoutWarningUseCase;
 import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
-import net.vaier.application.NotifyAdminsOfContainerGoneUseCase;
+import net.vaier.application.NotifyAdminsOfContainerTroubleUseCase;
 import net.vaier.application.NotifyAdminsOfMissingDefaultRouteUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
@@ -48,7 +48,7 @@ public class NotificationService implements
         NotifyAdminsOfPeerTransitionUseCase,
         NotifyAdminsOfRemoteDiskPressureUseCase,
         NotifyAdminsOfMissingDefaultRouteUseCase,
-        NotifyAdminsOfContainerGoneUseCase,
+        NotifyAdminsOfContainerTroubleUseCase,
         NotifyAdminsOfDiskFillForecastUseCase,
         NotifyAdminsOfBackupFailureUseCase,
         NotifyAdminsOfBackupServerDownUseCase,
@@ -129,9 +129,10 @@ public class NotificationService implements
     }
 
     @Override
-    public void notifyAdminsOfContainerGone(String machineName, MachineContainerStanding standing) {
-        adminNotifier.sendToAdmins(standing.goneSubject(machineName), standing.goneBody(machineName, clock.getZone()),
-                "container " + standing.containerName() + " gone on " + machineName);
+    public void notifyAdminsOfContainerTrouble(String machineName, MachineContainerStanding standing) {
+        adminNotifier.sendToAdmins(standing.troubleSubject(machineName),
+                standing.troubleBody(machineName, clock.getZone()),
+                "container " + standing.containerName() + " in trouble on " + machineName);
     }
 
     @Override

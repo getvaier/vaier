@@ -595,7 +595,7 @@ class MachineRestControllerTest {
         var response = controller.nudges(mid("apalveien").value());
 
         assertThat(response).extracting(MachineRestController.NudgeResponse::kind)
-            .containsExactly(MachineNudge.Kind.CONTAINER_GONE.name());
+            .containsExactly(MachineNudge.Kind.CONTAINER_TROUBLE.name());
         // Only this machine's: the fleet-wide read is filtered by identity, never by container name.
         assertThat(response.get(0).title()).contains("webtrees");
         // The card's times are written in the server's own zone, the same one the mail about it uses —
@@ -618,11 +618,23 @@ class MachineRestControllerTest {
         });
     }
 
+    @Test
+    void containerStandings_sayWhichTroubleItIs_notMerelyThatThereIsOne() {
+        // #317: three troubles travel this one endpoint, and the browser draws the word it is given. A
+        // flag would collapse "unhealthy" and "not running" into the same badge on the same row.
+        when(getContainerStandingsUseCase.getContainerStandings()).thenReturn(List.of(
+            goneOn(mid("apalveien"), "webtrees").toBuilder()
+                .standing(ContainerStanding.UNHEALTHY).reading(ContainerStanding.UNHEALTHY).build()));
+
+        assertThat(controller.containerStandings()).singleElement()
+            .satisfies(standing -> assertThat(standing.standing()).isEqualTo("UNHEALTHY"));
+    }
+
     private static MachineContainerStanding goneOn(MachineId machineId, String containerName) {
         return MachineContainerStanding.builder()
             .machineId(machineId).containerName(containerName).standing(ContainerStanding.GONE)
             .lastSeenRunning(Instant.parse("2026-09-11T09:15:00Z"))
-            .notRunningSince(Instant.parse("2026-09-11T09:47:00Z"))
+            .troubledSince(Instant.parse("2026-09-11T09:47:00Z"))
             .build();
     }
 

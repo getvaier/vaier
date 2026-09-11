@@ -1843,7 +1843,7 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theContainerGoneNudge_showsNoButton_becauseVaierNeverStartsAContainer() throws IOException {
+    void theContainerTroubleNudge_showsNoButton_becauseVaierNeverStartsAContainer() throws IOException {
         // #356 joins #357 as trouble rather than an invitation. Vaier reads the fleet's containers over the
         // Docker API and has no endpoint that starts one, so the card ends in a sentence. The generic
         // fallback would have drawn a dead button promising something that does not exist.
@@ -1851,7 +1851,7 @@ class ExplorerShellTest {
         int from = js.indexOf("const NUDGE_ACTION = {");
         assertThat(from).isPositive();
         String table = js.substring(from, js.indexOf("};", from));
-        assertThat(table).contains("CONTAINER_GONE:");
+        assertThat(table).contains("CONTAINER_TROUBLE:");
         assertThat(table).as("trouble wears the warning glyph, not a capability's own").contains("'warn'");
     }
 
@@ -1888,14 +1888,58 @@ class ExplorerShellTest {
         // says too, and the operator cannot tell those apart. The verdict is the server's own standing —
         // the browser is never a second place deciding what "gone" means.
         String js = read("explorer-shell.js");
-        int from = js.indexOf("function renderContainers(");
+        int from = js.indexOf("const CONTAINER_TROUBLE_WORD");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    function renderContainer(", from));
 
-        assertThat(body).contains("'GONE'");
         assertThat(body).contains("'gone'");
         // No re-deciding: nothing here compares timestamps or infers a standing from the docker state.
         assertThat(body).doesNotContain("lastSeenRunning <").doesNotContain("Date.now()");
+    }
+
+    @Test
+    void aContainerThatIsUpAndUnwell_saysWhichTroubleItIsOnItsOwnRow() throws IOException {
+        // #317: "exited" was not the only word missing. A container whose health check is failing, and one
+        // Docker is restarting in a loop, are both RUNNING as far as the docker state goes — so the row
+        // would have said "running" and a green nothing while the thing inside it was on fire.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("const CONTAINER_TROUBLE_WORD");
+        assertThat(from).isPositive();
+        String table = js.substring(from, js.indexOf("};", from));
+
+        assertThat(table).contains("GONE:").contains("'gone'");
+        assertThat(table).contains("UNHEALTHY:").contains("'unhealthy'");
+        assertThat(table).contains("RESTARTING:").contains("'restarting'");
+        // RUNNING is deliberately absent: a container that is fine gets no word and no dot at all.
+        assertThat(table).doesNotContain("RUNNING:");
+    }
+
+    @Test
+    void theContainerPane_saysTheTroubleBesideDockersOwnState() throws IOException {
+        // The list marks it and the pane must not contradict that. Docker's state for an unhealthy
+        // container is "running", which on its own reads as an all-clear on the one screen that claims to
+        // say everything Vaier knows. One line, both facts, and nothing at all when there is no trouble.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderContainer(pane)");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    // --- services:", from));
+
+        assertThat(body).contains("CONTAINER_TROUBLE_WORD");
+        assertThat(body).contains("'State'");
+    }
+
+    @Test
+    void aContainerThatIsUpAndUnwell_wearsAmber_andOnlyOneThatIsDownWearsRed() throws IOException {
+        // The shell has exactly two trouble colours and this reuses them rather than inventing a third:
+        // amber is "reachable, and something about it is wrong", which is precisely an unhealthy container
+        // or one restart-looping. Red stays for the container that is not running at all.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function stateDot(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+
+        assertThat(body).contains("'UNHEALTHY'").contains("'RESTARTING'").contains("is-degraded");
+        assertThat(body).contains("is-down");
     }
 
     @Test
