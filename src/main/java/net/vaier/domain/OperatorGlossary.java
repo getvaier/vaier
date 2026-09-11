@@ -290,6 +290,29 @@ public final class OperatorGlossary {
                         + "used, counted by Vaier and priced at Anthropic's list price.",
                     "It is behind the Chat pane's own menu, so a chatty afternoon never comes as "
                         + "a surprise on the bill. Vaier's own count, not Anthropic's invoice: the two "
-                        + "should agree to the cent, and the invoice wins if they do not."))));
+                        + "should agree to the cent, and the invoice wins if they do not."),
+                Concept.of("Web read",
+                    "The two Chat tools that reach outwards: a web search, and one public web page read "
+                        + "back as text with its markup thrown away and a long page cut.",
+                    "It is how Marvin answers what the fleet cannot tell him — what changed in a version, "
+                        + "what an error means, whether a CVE touches a package he found — and he says which "
+                        + "page a fact came from. Only the public internet: the tunnel, your LANs and every "
+                        + "other private address are refused, on every redirect too, and a page is data he "
+                        + "reads, never instructions he follows."),
+                Concept.of("Errand",
+                    "Something you send Marvin to do later, once or on a rhythm, while nobody is watching: "
+                        + "check every machine for OS updates each morning, say, or see whether Colina is "
+                        + "back in an hour.",
+                    "He runs it alone with the same reads he has in Chat, never with a card — nothing can "
+                        + "be clicked — and mails you the answer; a watch that finds nothing wrong says "
+                        + "nothing at all. Every standing errand is listed under \"Marvin's errands\" in the "
+                        + "Chat pane's own menu, each with its own cancel."),
+                Concept.of("Rhythm",
+                    "When an errand comes round: once at a given time, every day, every week on a weekday, "
+                        + "or every month on a day of the month, at an hour and minute in the fleet's own "
+                        + "time zone.",
+                    "You say it in your own words and Marvin writes it down as one of those four shapes, "
+                        + "so a reminder is as easy to set as a daily check. A once-errand is gone after it "
+                        + "runs; the others move on to their next time, even when a run could not be made."))));
     }
 }

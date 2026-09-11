@@ -43,6 +43,7 @@
         warn:    '<path d="M8 2.4l6.1 11.1H1.9z"/><path d="M8 6.4v3.3"/><circle cx="8" cy="11.4" r=".5" fill="currentColor" stroke="none"/>',
         cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
         refresh: '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.4v3.1h-3.1"/>',
+        clock:   '<circle cx="8" cy="8" r="5.75"/><path d="M8 4.6V8.2l2.5 1.5"/>',
         // A newer image exists. Deliberately not the bare `download` arrow and not `refresh`: both of those
         // are verbs elsewhere in this shell (a Download button, a Reissue button), and a mark that borrows a
         // verb's glyph reads as a control — which is the one thing this must never do, since Vaier cannot
@@ -147,7 +148,7 @@
 
     const S = {
         askAvailable: false,     // whether an Anthropic API key is stored — Chat exists only then
-        chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], spend: null },   // the kept conversation: { role, text }, the question being typed, and what Vaier remembers
+        chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], errands: [], spend: null },   // the kept conversation: { role, text }, the question being typed, and what Vaier remembers
         enrolmentRequests: [],   // phones waiting on a join code: { code, name, publicKey, expiresAt }
         path: ['fleet'],                 // the selected entry, as its path
         machines: [],                    // GET /machines
@@ -6275,6 +6276,18 @@
         S.trustedRead = true;
     }
 
+    // An errand answers while nobody asked, so the pane learns about it the same way every other live fact
+    // arrives here: the backend pushes, this listens. Opened once, when the shell starts.
+    function watchChat() {
+        const events = new EventSource('/chat/events');
+        events.addEventListener('errand-reported', () => {
+            // Mid-answer the thread is being written into; the answer's own pass re-reads both when it lands.
+            if (S.chat.busy) return;
+            loadConversation();
+            loadErrands();
+        });
+    }
+
     function watchSecurity() {
         const events = new EventSource('/security/events');
         // SSE replays nothing missed while the stream was down, so re-read on every reconnect after the
@@ -6903,6 +6916,7 @@
 
     function renderChat(pane) {
         const head = paneHead('Chat', false, 'Marvin answers, looks, proposes, hands over files, and remembers.');
+        head.classList.add('ex-chat-head');
         // Marvin's memory and his cost are reached from one menu on the pane's own bar: facts
         // about Chat, kept off the thread and out of the way of typing.
         const acts = el('div', 'ex-pane-actions');
@@ -6992,6 +7006,7 @@
             S.chat.turns = (c.turns || []).map((t) => ({ role: t.role, text: t.text }));
             S.chat.summary = c.summary || null;
             loadMemory();
+            loadErrands();
         } catch (e) {
             // Nothing kept, or nothing reachable: the pane starts empty either way.
         }
@@ -7023,12 +7038,17 @@
         const ml = el('span'); ml.textContent = 'What Marvin remembers (' + S.chat.memory.length + ')';
         memory.appendChild(ml);
         memory.onclick = () => { close(); openMemoryDialog(); };
+        const errands = el('button', 'ex-vmenu-item'); errands.setAttribute('role', 'menuitem');
+        errands.innerHTML = svg('clock', 'ex-ico');
+        const el_ = el('span'); el_.textContent = 'Marvin\u2019s errands (' + S.chat.errands.length + ')';
+        errands.appendChild(el_);
+        errands.onclick = () => { close(); openErrandsDialog(); };
         const spend = el('button', 'ex-vmenu-item'); spend.setAttribute('role', 'menuitem');
         spend.innerHTML = svg('claude', 'ex-ico');
         const sl = el('span'); sl.textContent = S.chat.spend ? 'Spend this month, ' + S.chat.spend.figure : 'Spend this month';
         spend.appendChild(sl);
         spend.onclick = () => { close(); openSpendDialog(); };
-        menu.append(memory, spend);
+        menu.append(memory, errands, spend);
         wrap.append(btn, menu);
         return wrap;
     }
@@ -7076,6 +7096,49 @@
         chatDialog('What Marvin remembers', body);
     }
 
+    // What Marvin is still going to do, and the only way to stop him. An errand runs while nobody is
+    // watching, so the list is the operator's whole view of it: when it runs, what it does, when it next
+    // comes round, and how the last run went.
+    function openErrandsDialog() {
+        const body = el('div', 'ex-dialog-body');
+        const paint = () => {
+            body.textContent = '';
+            if (!S.chat.errands.length) {
+                const none = el('div', 'ex-chat-memory-text');
+                none.textContent = 'Nothing yet. Ask Marvin to check something every morning.';
+                body.appendChild(none);
+                return;
+            }
+            const list = el('div', 'ex-chat-errands');
+            S.chat.errands.forEach((e) => {
+                const row = el('div', 'ex-chat-errand-row');
+                const lines = el('div', 'ex-chat-errand-lines');
+                const when = el('div', 'ex-chat-errand-when'); when.textContent = e.rhythm;
+                const what = el('div', 'ex-chat-memory-text'); what.textContent = e.instruction;
+                const run = el('div', 'ex-chat-errand-run');
+                run.textContent = 'Next ' + localTime(e.nextDue)
+                    + (e.lastOutcome ? ' \u00b7 last run ' + e.lastOutcome : '');
+                lines.append(when, what, run);
+                const rm = el('button', 'ex-iconbtn is-danger'); rm.innerHTML = svg('trash', 'ex-ico');
+                rm.title = 'Cancel this errand'; rm.onclick = () => cancelErrand(e).then(paint);
+                row.append(lines, rm);
+                list.appendChild(row);
+            });
+            body.appendChild(list);
+        };
+        paint();
+        chatDialog('Marvin\u2019s errands', body);
+    }
+
+    // The server sends the time with its offset, so the reader sees it in their own zone rather than the
+    // server's. An unreadable time is said as that, never as "Invalid Date".
+    function localTime(iso) {
+        const at = new Date(iso);
+        if (isNaN(at.getTime())) return 'at an unknown time';
+        return at.toLocaleString(undefined,
+            { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
     // The month's figure, and the tokens behind it. Vaier's own count at list price on the operator's own
     // key; the invoice wins if they differ, and the dialog says so.
     function openSpendDialog() {
@@ -7112,6 +7175,26 @@
             // Shown as empty until the next read; nothing decided on it here.
         }
         if (kindOf(S.path) === 'chat') render();
+    }
+
+    // What Marvin is still going to do. Re-read after every answer, because the answer may have sent him on
+    // an errand, and on every push, because one may have reported.
+    async function loadErrands() {
+        try {
+            const res = await fetch('/chat/errands', { cache: 'no-store' });
+            if (res.ok) S.chat.errands = await res.json();
+        } catch (e) {
+            // Shown as empty until the next read; nothing decided on it here.
+        }
+        if (kindOf(S.path) === 'chat') render();
+    }
+
+    async function cancelErrand(e) {
+        try {
+            const res = await fetch(`/chat/errands/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+            if (!res.ok) { toast('Vaier could not cancel that errand.'); return; }
+        } catch (err) { toast('Vaier could not cancel that errand.'); return; }
+        await loadErrands();
     }
 
     async function forgetFact(f) {
@@ -7257,6 +7340,7 @@
         S.chat.busy = false;
         render();
         loadMemory();
+        loadErrands();
         loadSpend();
     }
 
@@ -7269,6 +7353,7 @@
         security: 'Marvin is reading the block list\u2026', run_on_machine: 'Marvin is running a command\u2026',
         bundle_files: 'Marvin is gathering the files\u2026', email_bundle: 'Marvin is sending the mail\u2026',
         remember: 'Marvin is making a note\u2026', forget: 'Marvin is forgetting\u2026',
+        add_errand: 'Marvin is writing it in his diary\u2026', cancel_errand: 'Marvin is crossing it out\u2026',
     };
     function paintWorking(tool) {
         const turns = document.querySelectorAll('.ex-chat-turn.is-vaier');
@@ -7354,7 +7439,7 @@
     // re-reads the whole config — a saved section already shows its new value.
     // A key saved or removed changes what the menu offers, so both are re-read before the next paint.
     async function afterKeyChange() {
-        S.chat = { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], spend: null };
+        S.chat = { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], errands: [], spend: null };
         await Promise.all([loadChatAvailability(), loadSettings()]);
         renderVMenu();
         loadSpend();
@@ -9951,6 +10036,7 @@
         watchTransfers();
         watchBackups();
         watchSecurity();
+        watchChat();
         loadTransfers();
         // Not awaited, and read at boot rather than on view, because the Map draws threats too — an
         // operator who opens the Map first would otherwise see an honest-looking map with nobody on it.

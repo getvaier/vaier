@@ -10,6 +10,7 @@ import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForVendingSetupTokens;
+import net.vaier.rest.ChatReads;
 import net.vaier.rest.ImageUpdateAlerter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -267,6 +268,28 @@ public abstract class VaierWebMvcIntegrationBase {
 
     @MockBean
     protected EmailBundleUseCase emailBundleUseCase;
+
+    @MockBean
+    protected SearchWebUseCase searchWebUseCase;
+
+    @MockBean
+    protected ReadWebPageUseCase readWebPageUseCase;
+
+    // Errands: the three the Chat controller needs. The two the scheduler needs (due, run) belong to
+    // ErrandRunner, which a controller-slice context never creates.
+    @MockBean
+    protected AddErrandUseCase addErrandUseCase;
+
+    @MockBean
+    protected CancelErrandUseCase cancelErrandUseCase;
+
+    @MockBean
+    protected GetErrandsUseCase getErrandsUseCase;
+
+    // Every read Marvin may make lives in rest/ChatReads — a @Component, which @WebMvcTest does not scan, so
+    // the Chat controller has nothing to wire without this.
+    @MockBean
+    protected ChatReads chatReads;
 
     // Implemented by rest/SurvivalKitWriter, which composes machines, the backup stores and SSH — mocked
     // here like the other rest-layer orchestrators (@WebMvcTest loads controllers only).

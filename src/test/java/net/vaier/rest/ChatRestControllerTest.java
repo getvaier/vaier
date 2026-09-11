@@ -3,27 +3,20 @@ package net.vaier.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
+import net.vaier.application.AddErrandUseCase;
+import net.vaier.application.CancelErrandUseCase;
 import net.vaier.application.ChatUseCase;
-import net.vaier.application.DiscoverPeerContainersUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.ForgetConversationUseCase;
 import net.vaier.application.ForgetUseCase;
 import net.vaier.application.GetConversationUseCase;
+import net.vaier.application.GetErrandsUseCase;
 import net.vaier.application.GetMemoryUseCase;
 import net.vaier.application.GetSpendUseCase;
-import net.vaier.application.DiscoverVaierServerContainersUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
-import net.vaier.application.GetBackupRunsUseCase;
-import net.vaier.application.GetBlockDecisionsUseCase;
-import net.vaier.application.GetMachineDiskStandingsUseCase;
 import net.vaier.application.GetMachinesUseCase;
-import net.vaier.application.GetLanServerReachabilityUseCase;
-import net.vaier.application.GetPublishedServicesUseCase;
-import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
-import net.vaier.application.GetVpnPeersUseCase;
-import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.IsChatAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
@@ -32,9 +25,7 @@ import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RefuseEnrolmentUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
-import net.vaier.application.RememberUseCase;
 import net.vaier.application.RunBackupJobUseCase;
-import net.vaier.application.RunReadOnlyCommandUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
 import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
@@ -44,38 +35,28 @@ import net.vaier.domain.ChatCapability;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ChatUnavailableException;
 import net.vaier.domain.BackupJob;
-import net.vaier.domain.BackupRun;
 import net.vaier.domain.BackupRepository;
-import net.vaier.domain.BackupRunStatus;
 import net.vaier.domain.ConflictException;
-import net.vaier.domain.BlockDecision;
 import net.vaier.domain.Bundle;
-import net.vaier.domain.CommandOutcome;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ConversationTurn.Role;
 import net.vaier.domain.DeviceCategory;
-import net.vaier.domain.DockerService;
 import net.vaier.domain.EnrolmentRequest;
+import net.vaier.domain.Errand;
+import net.vaier.domain.Rhythm;
 import net.vaier.domain.Machine;
-import net.vaier.domain.Reachability;
-import net.vaier.domain.MachineDiskStanding;
-import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.MachineId;
 import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.Memory;
 import net.vaier.domain.ModelUsage;
 import net.vaier.domain.Spend;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
-import net.vaier.domain.NoHostCredentialException;
-import net.vaier.domain.SshConnectException;
-import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
-import net.vaier.domain.Server.State;
 import net.vaier.domain.ToolOffer;
-import net.vaier.domain.UpdateAvailability;
+import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForBrowsingRemoteFiles.RemoteStat;
-import net.vaier.domain.port.ForDiscoveringPeerContainers.PeerContainers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -96,7 +77,6 @@ import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -127,18 +107,9 @@ class ChatRestControllerTest {
 
     @Mock ChatUseCase chatUseCase;
     @Mock IsChatAvailableUseCase isChatAvailableUseCase;
-    @Mock GetLanServerReachabilityUseCase getLanServerReachabilityUseCase;
     @Mock GetMachinesUseCase getMachinesUseCase;
-    @Mock GetVpnPeersUseCase getVpnPeersUseCase;
     @Mock ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase;
-    @Mock GetPublishedServicesUseCase getPublishedServicesUseCase;
     @Mock GetBackupJobsUseCase getBackupJobsUseCase;
-    @Mock GetBackupRunsUseCase getBackupRunsUseCase;
-    @Mock GetMachineDiskStandingsUseCase getMachineDiskStandingsUseCase;
-    @Mock DiscoverPeerContainersUseCase discoverPeerContainersUseCase;
-    @Mock DiscoverVaierServerContainersUseCase discoverVaierServerContainersUseCase;
-    @Mock GetBlockDecisionsUseCase getBlockDecisionsUseCase;
-    @Mock RunReadOnlyCommandUseCase runReadOnlyCommandUseCase;
     @Mock ProposeActionUseCase proposeActionUseCase;
     @Mock TakeActionProposalUseCase takeActionProposalUseCase;
     @Mock ApproveEnrolmentUseCase approveEnrolmentUseCase;
@@ -153,11 +124,17 @@ class ChatRestControllerTest {
     @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
     @Mock OfferBundleUseCase offerBundleUseCase;
     @Mock OpenBundleUseCase openBundleUseCase;
-    @Mock RememberUseCase rememberUseCase;
     @Mock ForgetUseCase forgetUseCase;
     @Mock GetMemoryUseCase getMemoryUseCase;
     @Mock GetSpendUseCase getSpendUseCase;
     @Mock EmailBundleUseCase emailBundleUseCase;
+    @Mock AddErrandUseCase addErrandUseCase;
+    @Mock CancelErrandUseCase cancelErrandUseCase;
+    @Mock GetErrandsUseCase getErrandsUseCase;
+    @Mock ForSubscribingToEvents forSubscribingToEvents;
+
+    /** The reads Marvin may make alone live in their own component now; {@code ChatReadsTest} covers them. */
+    @Mock ChatReads chatReads;
 
     private ChatRestController controller;
 
@@ -168,14 +145,13 @@ class ChatRestControllerTest {
     @BeforeEach
     void setUp() {
         controller = new ChatRestController(chatUseCase, isChatAvailableUseCase, getMachinesUseCase,
-            getVpnPeersUseCase, listEnrolmentRequestsUseCase, getPublishedServicesUseCase,
-            getBackupJobsUseCase, getBackupRunsUseCase, getMachineDiskStandingsUseCase,
-            discoverPeerContainersUseCase, discoverVaierServerContainersUseCase, getBlockDecisionsUseCase,
-            getLanServerReachabilityUseCase, runReadOnlyCommandUseCase, proposeActionUseCase,
+            listEnrolmentRequestsUseCase, getBackupJobsUseCase, proposeActionUseCase,
             takeActionProposalUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase, runBackupJobUseCase,
             getBackupRepositoriesUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
             getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, offerBundleUseCase,
-            openBundleUseCase, rememberUseCase, forgetUseCase, getMemoryUseCase, getSpendUseCase, emailBundleUseCase, new ObjectMapper());
+            openBundleUseCase, forgetUseCase, getMemoryUseCase, getSpendUseCase, emailBundleUseCase,
+            addErrandUseCase, cancelErrandUseCase, getErrandsUseCase, forSubscribingToEvents, chatReads,
+            new ObjectMapper());
     }
 
     // --- is Ask offered at all -------------------------------------------------------------------------
@@ -251,166 +227,6 @@ class ChatRestControllerTest {
         assertThat(offeredTools()).extracting(offer -> offer.tool().toolName()).containsExactlyElementsOf(expected);
     }
 
-    @Test
-    void theFleetToolNamesEachMachineAndWhetherItIsReachable() {
-        answering("ok");
-        fleetOf();
-
-        String fleet = read(ChatTool.FLEET);
-
-        assertThat(fleet).contains("Colina 27").contains("10.13.13.3").contains("UBUNTU_SERVER");
-        assertThat(fleet).contains("\"standing\":\"connected\"");
-    }
-
-    @Test
-    void theFleetToolJudgesALanServerByItsLanProbe_andTheVaierServerAsAlwaysThere() {
-        // The live answer called the NAS and the Vaier server "not connected" — a peer's word, for machines
-        // that never had a tunnel. The machine's own verdict knows the difference.
-        answering("ok");
-        MachineId nas = MachineId.of("11111111-1111-1111-1111-111111111111");
-        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
-            new Machine(nas, "NAS", MachineType.LAN_SERVER, null, null, null, null, null, null, null,
-                null, "192.168.3.3", true, 2375, DeviceCategory.NAS, null),
-            Machine.vaierServer(MachineId.of("22222222-2222-2222-2222-222222222222"), null)));
-        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of());
-        when(getLanServerReachabilityUseCase.getReachability("192.168.3.3")).thenReturn(Reachability.OK);
-
-        String fleet = read(ChatTool.FLEET);
-
-        assertThat(fleet).contains("\"name\":\"NAS\"").contains("\"standing\":\"reachable\"");
-        assertThat(fleet).contains("\"standing\":\"this server, always reachable\"");
-        assertThat(fleet).doesNotContain("not connected");
-    }
-
-    @Test
-    void theFleetToolSaysNotCheckedYet_forALanServerVaierHasNotProbedSinceItStarted() {
-        // For the first minutes after a restart the LAN probe has no verdict. A missing fact is not a bad one.
-        answering("ok");
-        MachineId nas = MachineId.of("11111111-1111-1111-1111-111111111111");
-        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(
-            new Machine(nas, "NAS", MachineType.LAN_SERVER, null, null, null, null, null, null, null,
-                null, "192.168.3.3", true, 2375, DeviceCategory.NAS, null)));
-        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of());
-        when(getLanServerReachabilityUseCase.getReachability("192.168.3.3")).thenReturn(Reachability.UNKNOWN);
-
-        assertThat(read(ChatTool.FLEET)).contains("\"standing\":\"not checked yet\"").doesNotContain("unreachable");
-    }
-
-    @Test
-    void theWaitingToJoinToolCarriesTheJoinCodeAndNeverTheTicketOrTheKey() {
-        answering("ok");
-        when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
-            new EnrolmentRequest("4417", "a-32-byte-unguessable-ticket", "Ruten",
-                "aGVsbG8td29ybGQtdGhpcy1pcy1hLXdnLWtleS0xMjM0NQ=", System.currentTimeMillis() + 300_000,
-                null)));
-
-        String waiting = read(ChatTool.WAITING_TO_JOIN);
-
-        assertThat(waiting).contains("4417").contains("Ruten");
-        assertThat(waiting).doesNotContain("a-32-byte-unguessable-ticket");
-        assertThat(waiting).doesNotContain("aGVsbG8td29ybGQ");
-    }
-
-    @Test
-    void theBackupsToolSaysHowTheLastRunOfEachJobWent() {
-        answering("ok");
-        fleetOf();
-        when(getBackupJobsUseCase.getBackupJobs()).thenReturn(List.of(BackupJob.builder()
-            .name("colina27-home").machineId(COLINA).repositoryName("colina27")
-            .sourcePaths(List.of("/home")).excludes(List.of()).compression("zstd,6").enabled(true)
-            .keepDaily(7).keepWeekly(4).keepMonthly(6).build()));
-        when(getBackupRunsUseCase.latestForMachine(COLINA)).thenReturn(Optional.of(new BackupRun(
-            "run-1", "colina27-home", "colina27", COLINA, BackupRunStatus.WARNING,
-            Instant.parse("2026-09-08T02:00:00Z"), Instant.parse("2026-09-08T02:14:00Z"), 1,
-            "colina27-{now}", "1 file vanished during the backup")));
-
-        String backups = read(ChatTool.BACKUPS);
-
-        assertThat(backups).contains("colina27-home").contains("WARNING").contains("Colina 27");
-    }
-
-    @Test
-    void theDisksToolNamesTheFilesystemClosestToTrouble() {
-        answering("ok");
-        fleetOf();
-        when(getMachineDiskStandingsUseCase.getMachineDiskStandings()).thenReturn(List.of(
-            MachineDiskStanding.builder().machineId(COLINA).worstMountPoint("/volume1")
-                .worstUsedPercent(86).worstThresholdPercent(85).breachingFilesystems(1)
-                .watchedFilesystems(3).build()));
-
-        String disks = read(ChatTool.DISKS);
-
-        assertThat(disks).contains("/volume1").contains("86").contains("Colina 27");
-    }
-
-    @Test
-    void theContainerUpdatesToolListsOnlyContainersWantingANewerImage() {
-        answering("ok");
-        fleetOf();
-        when(discoverPeerContainersUseCase.discoverAll()).thenReturn(List.of(new PeerContainers(
-            COLINA.value(), "colina27", "10.13.13.3", "OK", List.of(
-                new DockerService("c1", "grafana", "grafana/grafana:11.3.0", "11.3.0", List.of(),
-                    List.of(), "running", "sha256:aaa", UpdateAvailability.UPDATE_AVAILABLE),
-                new DockerService("c2", "mosquitto", "eclipse-mosquitto:2.1.2", "2.1.2", List.of(),
-                    List.of(), "running", "sha256:bbb", UpdateAvailability.UP_TO_DATE)),
-            false, null)));
-
-        String updates = read(ChatTool.CONTAINER_UPDATES);
-
-        assertThat(updates).contains("grafana");
-        assertThat(updates).doesNotContain("mosquitto");
-    }
-
-    @Test
-    void theSecurityToolSaysWhoIsBeingKeptOut() {
-        answering("ok");
-        when(getBlockDecisionsUseCase.getBlockDecisions()).thenReturn(List.of(BlockDecision.builder()
-            .id(11L).scenario("crowdsecurity/ssh-bf").sourceIp("203.0.113.7").type("ban")
-            .duration("3h59m").country("RU").asnOrg("Example Telecom").build()));
-
-        String security = read(ChatTool.SECURITY);
-
-        assertThat(security).contains("203.0.113.7").contains("crowdsecurity/ssh-bf");
-    }
-
-    @Test
-    void thePublishedServicesToolSaysWhereEachServiceRunsAndWhetherItIsReachable() {
-        answering("ok");
-        when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(
-            new PublishedServiceUco("Grafana @ Colina 27", "Grafana", COLINA.value(), "Colina 27", null,
-                ServiceLocation.PEER_SERVER, true, "grafana.example.com", "10.13.13.3", 3000, State.OK, true,
-                null, false, false, null, false, null, null, null, null, null, "social", false, null)));
-
-        String services = read(ChatTool.PUBLISHED_SERVICES);
-
-        assertThat(services).contains("Grafana").contains("Colina 27").contains("grafana.example.com");
-    }
-
-    /**
-     * The one test that has to hold for the whole feature to be safe: every projection, for a fixture that
-     * carries a secret in every field that could hold one, and not one of them comes out the other side.
-     * The model never sees a key, and neither does Anthropic.
-     */
-    @Test
-    void noToolEverRendersASecret() {
-        answering("ok");
-        fleetOf();
-        when(rememberUseCase.remember(any())).thenReturn(new Memory.Fact("ab12cd", "a fact", NOW));
-        when(listEnrolmentRequestsUseCase.pending()).thenReturn(List.of(
-            new EnrolmentRequest("4417", "TICKET-SECRET", "Ruten", "PUBLICKEY-SECRET",
-                System.currentTimeMillis() + 300_000, "CONFIGFILE-SECRET")));
-
-        String everything = List.of(ChatTool.values()).stream()
-            .map(this::read)
-            .collect(Collectors.joining("\n"));
-
-        assertThat(everything)
-            .doesNotContain("TICKET-SECRET", "PUBLICKEY-SECRET", "CONFIGFILE-SECRET", "PRESHARED-SECRET");
-        assertThat(everything.toLowerCase()).doesNotContain(
-            "publickey", "privatekey", "presharedkey", "passphrase", "password", "credential",
-            "apikey", "ticket", "token", "secret", "configfile");
-    }
-
     /** A turn that ends without a word is said as an error, never as a silent done. */
     @Test
     void answer_thatSaysNothing_isAnError_notASilentDone() throws IOException {
@@ -458,72 +274,6 @@ class ChatRestControllerTest {
         List<String> events = sentEvents(emitter);
         assertThat(events).contains("event:ping\ndata:\n\n");
         assertThat(events.get(events.size() - 1)).isEqualTo("event:done\ndata:\n\n");
-    }
-
-    // --- run_on_machine: one looking command, on the machine the model named ----------------------------
-
-    @Test
-    void runOnMachine_findsTheMachineByName_andRunsThroughTheUseCase() {
-        answering("ok");
-        fleetOf();
-        when(runReadOnlyCommandUseCase.runReadOnly(COLINA, "apt list --upgradable"))
-            .thenReturn(new CommandOutcome(0, false, "curl/noble-updates 8.5.0 amd64 [upgradable from: 8.4.0]", false));
-
-        String fact = read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "colina 27", "command", "apt list --upgradable"));
-
-        assertThat(fact).contains("Colina 27").contains("apt list --upgradable").contains("curl/noble-updates")
-            .contains("\"exitCode\":0");
-    }
-
-    /** The domain's refusal is the answer, in its own words, so the model can say so. */
-    @Test
-    void runOnMachine_saysWhyARefusedCommandWasRefused() {
-        answering("ok");
-        fleetOf();
-        when(runReadOnlyCommandUseCase.runReadOnly(any(), anyString()))
-            .thenThrow(new IllegalArgumentException("Chat can look, never change: apt install is not a looking command."));
-
-        assertThat(read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "apt install vim")))
-            .isEqualTo("Chat can look, never change: apt install is not a looking command.");
-    }
-
-    @Test
-    void runOnMachine_saysWhenNoMachineHasThatName() {
-        answering("ok");
-        fleetOf();
-
-        assertThat(read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Apalveien", "command", "uptime")))
-            .contains("no machine called \"Apalveien\"");
-        verifyNoInteractions(runReadOnlyCommandUseCase);
-    }
-
-    /** A machine Vaier holds no login for cannot be reached; said plainly, and never as a stack trace. */
-    @Test
-    void runOnMachine_saysWhenVaierHoldsNoCredentialForTheMachine() {
-        answering("ok");
-        fleetOf();
-        when(runReadOnlyCommandUseCase.runReadOnly(any(), anyString()))
-            .thenThrow(new NoHostCredentialException("Colina 27"));
-
-        assertThat(read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "uptime")))
-            .isEqualTo("No SSH credential is stored for Colina 27, so Vaier cannot run anything there.");
-    }
-
-    /**
-     * A transport failure's own message can carry an address, a user or a path — the same reason the
-     * emitter never repeats one — so it is answered in Vaier's words.
-     */
-    @Test
-    void runOnMachine_neverRepeatsATransportFailuresOwnMessage() {
-        answering("ok");
-        fleetOf();
-        when(runReadOnlyCommandUseCase.runReadOnly(any(), anyString()))
-            .thenThrow(new SshConnectException("connect to 10.13.13.3:22 as geir failed"));
-
-        String fact = read(ChatTool.RUN_ON_MACHINE, Map.of("machine", "Colina 27", "command", "uptime"));
-
-        assertThat(fact).isEqualTo("Colina 27 could not be reached over SSH.");
-        assertThat(fact).doesNotContain("10.13.13.3").doesNotContain("geir");
     }
 
     // --- actions: proposed as a card, run on the click (#360 slice 2) ----------------------------------
@@ -800,34 +550,6 @@ class ChatRestControllerTest {
 
     // --- memory: what Vaier keeps across conversations (#360) --------------------------------------------
 
-    @Test
-    void remembering_keepsTheFact_andTellsTheModelSo() {
-        answering("ok");
-        when(rememberUseCase.remember("Photos live under /volume1/photo.")).thenReturn(
-            new Memory.Fact("ab12cd", "Photos live under /volume1/photo.", NOW));
-
-        assertThat(read(ChatTool.REMEMBER, Map.of("fact", "Photos live under /volume1/photo.")))
-            .isEqualTo("Remembered [ab12cd]: Photos live under /volume1/photo.");
-    }
-
-    @Test
-    void remembering_nothing_isRefusedInTheDomainsWords() {
-        answering("ok");
-        when(rememberUseCase.remember(any())).thenThrow(new IllegalArgumentException("Say what to remember."));
-
-        assertThat(read(ChatTool.REMEMBER, Map.of("fact", " "))).isEqualTo("Say what to remember.");
-    }
-
-    @Test
-    void forgetting_dropsTheFact_orSaysItWasNeverThere() {
-        answering("ok");
-        assertThat(read(ChatTool.FORGET, Map.of("id", "ab12cd"))).isEqualTo("Forgotten.");
-        verify(forgetUseCase).forget("ab12cd");
-
-        doThrow(new NotFoundException("Vaier has no memory with the id nope.")).when(forgetUseCase).forget("nope");
-        assertThat(read(ChatTool.FORGET, Map.of("id", "nope"))).isEqualTo("Vaier has no memory with the id nope.");
-    }
-
     /** The pane shows every memory, so nothing can be planted in it unseen; each one can be removed. */
     @Test
     void memory_isListedForThePane_andRemovableFromIt() {
@@ -889,24 +611,116 @@ class ChatRestControllerTest {
             .isEqualTo("The mail server would not take the mail just now; ask again in a minute.");
     }
 
+    // --- errands: what Marvin is sent off to do later (#360 slice 2) ------------------------------------
+
+    private static Errand anErrand() {
+        Rhythm rhythm = Rhythm.parse("daily 08:00");
+        return Errand.builder().id("ab12cd").operator(GEIR)
+            .instruction("Tell me if any machine has operating system updates.")
+            .rhythm(rhythm).nextDue(Instant.parse("2026-09-11T06:00:00Z"))
+            .createdAtEpochMs(NOW).build();
+    }
+
+    /** The tool answers in the domain's own sentence, so Marvin can repeat it to the operator. */
+    @Test
+    void addingAnErrand_answersWithTheDomainsOwnSentence() {
+        answering("ok");
+        when(addErrandUseCase.add(GEIR, "Tell me if any machine has operating system updates.", "daily 08:00"))
+            .thenReturn(anErrand());
+
+        assertThat(read(ChatTool.ADD_ERRAND, Map.of(
+            "instruction", "Tell me if any machine has operating system updates.", "rhythm", "daily 08:00")))
+            .isEqualTo("Added [ab12cd]: Every day at 08:00 — Tell me if any machine has operating system "
+                + "updates.");
+    }
+
+    /** A rhythm the domain will not read comes back as its refusal, naming the shapes, and nothing is kept. */
+    @Test
+    void addingAnErrandWithARhythmTheDomainWillNotRead_isRefusedInItsOwnWords() {
+        answering("ok");
+        when(addErrandUseCase.add(any(), anyString(), anyString()))
+            .thenThrow(new IllegalArgumentException(Rhythm.SHAPES));
+
+        assertThat(read(ChatTool.ADD_ERRAND, Map.of("instruction", "anything", "rhythm", "every blue moon")))
+            .contains("once 2026-09-12T08:00").contains("monthly 1 08:00");
+    }
+
+    @Test
+    void cancellingAnErrand_cancelsTheOperatorsOwn_orSaysItWasNeverThere() {
+        answering("ok");
+
+        assertThat(read(ChatTool.CANCEL_ERRAND, Map.of("id", "ab12cd"))).isEqualTo("Cancelled.");
+        verify(cancelErrandUseCase).cancel(GEIR, "ab12cd");
+
+        doThrow(new NotFoundException("Vaier has no errand with the id nope."))
+            .when(cancelErrandUseCase).cancel(GEIR, "nope");
+        assertThat(read(ChatTool.CANCEL_ERRAND, Map.of("id", "nope")))
+            .isEqualTo("Vaier has no errand with the id nope.");
+    }
+
+    /** The dialog lists this operator's own, with the times carrying their offset for the reader's own zone. */
+    @Test
+    void errands_areListedForTheDialog_withTheirRhythmInWords() {
+        when(getErrandsUseCase.getErrands(GEIR)).thenReturn(List.of(anErrand()));
+
+        List<ChatRestController.ErrandResponse> listed = controller.errands(EMAIL).getBody();
+
+        assertThat(listed).hasSize(1);
+        assertThat(listed.get(0).id()).isEqualTo("ab12cd");
+        assertThat(listed.get(0).rhythm()).isEqualTo("Every day at 08:00");
+        assertThat(listed.get(0).instruction()).isEqualTo("Tell me if any machine has operating system updates.");
+        assertThat(listed.get(0).nextDue()).startsWith("2026-09-11T").contains(":00");
+        assertThat(listed.get(0).lastRunAt()).isNull();
+        assertThat(listed.get(0).lastOutcome()).isNull();
+    }
+
+    @Test
+    void anErrandThatHasRun_saysWhenAndHowItWent() {
+        when(getErrandsUseCase.getErrands(GEIR)).thenReturn(List.of(anErrand().toBuilder()
+            .lastRunAtEpochMs(Instant.parse("2026-09-10T06:00:00Z").toEpochMilli())
+            .lastOutcome("reported").build()));
+
+        ChatRestController.ErrandResponse listed = controller.errands(EMAIL).getBody().get(0);
+
+        assertThat(listed.lastRunAt()).startsWith("2026-09-10T");
+        assertThat(listed.lastOutcome()).isEqualTo("reported");
+    }
+
+    /** The operator's last word on what Marvin keeps doing. */
+    @Test
+    void errands_areCancelledFromTheDialog() {
+        assertThat(controller.cancelErrand(EMAIL, "ab12cd").getStatusCode().value()).isEqualTo(204);
+
+        verify(cancelErrandUseCase).cancel(GEIR, "ab12cd");
+    }
+
+    /** The push that lets the pane show a report nobody asked for, without ever polling for it. */
+    @Test
+    void thePane_subscribesToTheChatTopicForErrandReports() {
+        SseEmitter subscription = new SseEmitter();
+        when(forSubscribingToEvents.subscribe("chat")).thenReturn(subscription);
+
+        assertThat(controller.events()).isSameAs(subscription);
+    }
+
     // --- fixtures and plumbing -------------------------------------------------------------------------
 
-    /** A one-machine fleet, connected, so every machine-keyed projection has a name to use. */
+    /** A one-machine fleet, so a card and a bundle have a machine to name. */
     private void fleetOf() {
         when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(new Machine(
             COLINA, "Colina 27", MachineType.UBUNTU_SERVER, "PUBLICKEY-SECRET", "10.13.13.3/32",
             "77.16.1.2", "51820", String.valueOf(System.currentTimeMillis() / 1000 - 30), "1.2 GiB", "3.4 GiB",
             "192.168.1.0/24", "192.168.1.10",
             true, 2375, DeviceCategory.SERVER, null)));
-        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(VpnPeerView.builder()
-            .id("colina27").machineId(COLINA.value()).name("Colina 27").publicKey("PUBLICKEY-SECRET")
-            .tunnelIp("10.13.13.3").peerType(MachineType.UBUNTU_SERVER).connected(true)
-            .lanCidr("192.168.1.0/24").description("the relay in the garage")
-            .deviceCategory(DeviceCategory.SERVER).build()));
     }
 
     /** Answers the given chunks, so the tool offers are captured on a path that actually completes. */
     private void answering(String... chunks) {
+        // The reads Marvin may make alone come from ChatReads — stubbed as itself answering, since this
+        // controller's job is only to merge them with its own four and announce every one of them.
+        when(chatReads.offers()).thenReturn(ChatTool.whileNobodyIsWatching().stream()
+            .map(tool -> new ToolOffer(tool, () -> "[]"))
+            .toList());
         doAnswer(invocation -> {
             Consumer<String> onText = invocation.getArgument(3);
             for (String chunk : chunks) {
@@ -974,27 +788,6 @@ class ChatRestControllerTest {
 
         assertThat(sentEvents(emitter))
             .containsExactly("event:error\ndata:Vaier could not answer that.\n\n");
-    }
-
-    /**
-     * The tunnel address comes from the peer view, which the domain derived — it is not re-derived from
-     * {@code allowedIps} here. "Which entry of an allowedIps list is the tunnel address" is a rule with a
-     * relay-peer subtlety in it, and a second copy in a controller is how Chat would come to tell the model
-     * an address the peer pane disagrees with.
-     */
-    @Test
-    void theFleetToolTakesTheTunnelAddressFromTheDomainsOwnReading() {
-        answering("ok");
-        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of(new Machine(
-            COLINA, "Colina 27", MachineType.UBUNTU_SERVER, "PUBLICKEY-SECRET",
-            "10.13.13.3/32, 192.168.1.0/24", "77.16.1.2", "51820", "1757000000", "1.2 GiB", "3.4 GiB",
-            "192.168.1.0/24", "192.168.1.10", true, 2375, DeviceCategory.SERVER, null)));
-        when(getVpnPeersUseCase.getVpnPeers()).thenReturn(List.of(VpnPeerView.builder()
-            .id("colina27").machineId(COLINA.value()).name("Colina 27").tunnelIp("10.13.13.9")
-            .peerType(MachineType.UBUNTU_SERVER).connected(true)
-            .deviceCategory(DeviceCategory.SERVER).build()));
-
-        assertThat(read(ChatTool.FLEET)).contains("10.13.13.9").doesNotContain("10.13.13.3/32");
     }
 
     @Test

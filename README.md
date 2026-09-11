@@ -34,7 +34,7 @@ Each row is the short version. The linked page carries the mechanism, the caveat
 | **Claude sign-in** | Sign each machine's Claude Code CLI in to your own Anthropic account from that machine's terminal window. The credential is Anthropic's to mint and the CLI's to keep — it never passes through Vaier. → [Explorer](docs/EXPLORER.md#claude-sign-in) |
 | **Fleet backup & survival kit** | Automated borg backups to one designated backup server, plus a self-updating survival kit so your backups stay readable even if Vaier itself is gone. → [Backup](docs/BACKUP.md) |
 | **Monitoring & alerts** | Disk watching with a fill-rate forecast that mails you about a week before a disk crosses its threshold, image-update detection for your containers with a one-click **Update**, and an inbox that stays quiet unless something is actually wrong. → [Monitoring](docs/MONITORING.md) |
-| **Chat** | Ask about your fleet in plain sentences and Marvin answers from Vaier's own facts. He can run a read-only command on a machine, propose an action you confirm with a click, and hand you files as a zip. Bring your own Anthropic API key. → [Chat](docs/CHAT.md) |
+| **Chat** | Ask about your fleet in plain sentences and Marvin answers — from Vaier's own facts, a read-only command, or a public web page when neither covers it. He can act with your click, hand you files, and run errands: send him off to check something later and he mails the answer. → [Chat](docs/CHAT.md) |
 | **What to do next** | Each machine's pane nudges you toward the next thing worth doing with it, with the evidence alongside. Each is one yes. → [Explorer](docs/EXPLORER.md#suggested-next-steps) |
 
 ![The Vaier launchpad](docs/vaier-launchpad.png)

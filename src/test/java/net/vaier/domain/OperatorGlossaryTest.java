@@ -104,7 +104,7 @@ class OperatorGlossaryTest {
 
         assertThat(ask.concepts()).extracting(Concept::term)
             .containsExactly("Chat", "Marvin", "Anthropic API key", "Chat tool", "Read-only command", "Chat action",
-                "Confirmation", "Bundle", "Conversation", "Memory", "Spend");
+                "Confirmation", "Bundle", "Conversation", "Memory", "Spend", "Web read", "Errand", "Rhythm");
         // The two promises an operator needs before pasting a key: the key never leaves for anywhere but
         // the Claude API, and the shell tool cannot change a machine.
         Concept key = ask.concepts().get(2);
@@ -123,5 +123,15 @@ class OperatorGlossaryTest {
         assertThat(memory.definition() + " " + memory.whyYouCare()).contains("across conversations").contains("remove");
         assertThat(conversation.definition() + " " + conversation.whyYouCare())
             .contains("kept").contains("summary").doesNotContain("keeps none of it");
+        // The internet and the scheduler (2026-09-10): the one promise before Marvin is let out — only the
+        // public internet, never the fleet's own addresses — and the one before sending him off alone: he
+        // mails the answer, and says nothing when a watch finds nothing wrong.
+        Concept webRead = ask.concepts().get(11);
+        assertThat(webRead.definition() + " " + webRead.whyYouCare())
+            .contains("public internet").contains("refused");
+        Concept errand = ask.concepts().get(12);
+        assertThat(errand.definition() + " " + errand.whyYouCare()).contains("mail").contains("nothing");
+        Concept rhythm = ask.concepts().get(13);
+        assertThat(rhythm.definition() + " " + rhythm.whyYouCare()).contains("once").contains("every");
     }
 }

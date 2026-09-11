@@ -205,16 +205,18 @@ class SpringAiConversationAdapterTest {
     }
 
     /**
-     * The options are pinned here and nowhere else: the model id, the answer budget, and caching the system
-     * prompt and the tool list, which are the two things that never change between turns.
+     * The options are pinned here and nowhere else: the model id, the answer budget, and what is cached.
+     * The whole conversation is cached, not only the system prompt and tools: an answer makes several
+     * calls and every call re-sends everything before it, so the history and the tool results were the
+     * bulk of the bill at full price. Cached, each call reads them at a tenth and writes only what is new.
      */
     @Test
-    void itPinsTheModelAndCachesTheStablePartOfTheRequest() {
+    void itPinsTheModelAndCachesTheWholeConversation() {
         AnthropicChatOptions options = SpringAiConversationAdapter.chatOptions();
 
         assertThat(options.getModel()).isEqualTo("claude-opus-5");
         assertThat(options.getMaxTokens()).isEqualTo(32_768);
-        assertThat(options.getCacheOptions().getStrategy().name()).isEqualTo("SYSTEM_AND_TOOLS");
+        assertThat(options.getCacheOptions().getStrategy().name()).isEqualTo("CONVERSATION_HISTORY");
     }
 
     /** Adaptive thinking is the model's own; a token budget is the old shape and Claude Opus 5 refuses it. */

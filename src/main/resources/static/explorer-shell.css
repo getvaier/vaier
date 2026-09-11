@@ -1587,7 +1587,15 @@ select.ex-input { cursor: pointer; }
 .ex-chat-spend-row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
 .ex-chat-memory { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
 .ex-chat-memory-row { display: flex; align-items: center; gap: 10px; }
-.ex-chat-memory-text { flex: 1; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
+.ex-chat-memory-text { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
+/* An errand is three lines, not one: when it runs is what the operator scans by, so it leads and carries the
+   weight; the instruction reads as memory does; the run line is the quiet part. */
+.ex-chat-errands { display: flex; flex-direction: column; gap: 14px; padding-top: 8px; }
+.ex-chat-errand-row { display: flex; align-items: flex-start; gap: 10px; }
+.ex-chat-errand-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ex-chat-errand-when, .ex-chat-errand-run { overflow-wrap: anywhere; }
+.ex-chat-errand-when { font-size: 14px; font-weight: 550; color: var(--text); }
+.ex-chat-errand-run { font-size: 12.5px; color: var(--text-dim); }
 .ex-chat-turn { display: flex; flex-direction: column; gap: 4px; }
 .ex-chat-who { font-size: 12.5px; color: var(--text-dim); }
 .ex-chat-turn.is-vaier .ex-chat-who { color: var(--accent); }
@@ -1873,6 +1881,12 @@ select.ex-input { cursor: pointer; }
     /* Touch targets, not pointer targets: the compact 4px verbs are below the ~44px a thumb needs, so they
        take the roomier padding back on small screens. */
     .ex-pane-actions .ex-btn { padding: 8px 12px; }
+    /* Chat's bar holds one verb, the Marvin menu, so it keeps the title's line instead of taking a line of
+       its own at the left edge — where its dropdown, anchored to the button's right, opened off-screen. The
+       subtitle drops below, and the menu never asks for more width than the screen has. */
+    .ex-chat-head .ex-pane-actions { width: auto; margin-left: auto; }
+    .ex-chat-head .ex-pane-sub { order: 3; flex-basis: 100%; }
+    .ex-chat-menu .ex-vmenu { min-width: 0; width: max-content; max-width: calc(100vw - 28px); }
 
     /* While something is ticked, the verbs leave the scrolling flow and sit at the foot of the screen, where
        every touch file browser puts the actions for a selection — the head scrolls away, and the rows gave

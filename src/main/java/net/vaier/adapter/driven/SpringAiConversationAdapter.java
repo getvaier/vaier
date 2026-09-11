@@ -106,8 +106,10 @@ public class SpringAiConversationAdapter implements ForConversing {
     }
 
     /**
-     * The request options. The system prompt and the tool list are the two things that never change between
-     * turns, so they are the two things worth caching. No thinking budget is set: that builder offers only
+     * The request options. The whole conversation is cached, not only the system prompt and tools: an
+     * answer makes several calls and every call re-sends everything before it, so the history and the tool
+     * results were the bulk of the bill at full price. Cached, each call reads them at a tenth of the price
+     * and writes only what is new. No thinking budget is set: that builder offers only
      * the old token-budget shape, which Claude Opus 5 refuses — left out, it thinks adaptively by itself.
      */
     static AnthropicChatOptions chatOptions() {
@@ -115,7 +117,7 @@ public class SpringAiConversationAdapter implements ForConversing {
             .model(MODEL)
             .maxTokens(MAX_TOKENS)
             .cacheOptions(AnthropicCacheOptions.builder()
-                .strategy(AnthropicCacheStrategy.SYSTEM_AND_TOOLS)
+                .strategy(AnthropicCacheStrategy.CONVERSATION_HISTORY)
                 .build())
             .build();
     }

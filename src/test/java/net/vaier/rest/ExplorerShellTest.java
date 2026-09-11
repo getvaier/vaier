@@ -809,7 +809,7 @@ class ExplorerShellTest {
     }
 
     @Test
-    void theShell_holdsSixStreams_theFleet_itsServices_itsTransfers_itsBackups_itsThreats_andWhoIsWaitingToJoin() throws IOException {
+    void theShell_holdsSevenStreams_addingMarvinsErrandsToTheSix() throws IOException {
         // Slice A held one; slice C added `published-services` (a real, existing topic); slice 2 (Move) added
         // `transfers`, a copy's live progress. Moving jobs onto their machines adds the conscious fourth —
         // `backups`, carrying run-settled so a launched backup's outcome arrives pushed, not polled. #329
@@ -817,15 +817,18 @@ class ExplorerShellTest {
         // view and the Map's threat layer learn of a new ban when it happens. It earns its place the same way
         // the others did: the alternative is a poll, and polling is the rule this test exists to hold. Each is
         // a real backend topic listened to, never invented. #359 slice 1b adds the sixth — `enrolment-requests`,
-        // a phone asking to join and the answer it got, from whichever browser gave it. Six is the ceiling now.
+        // a phone asking to join and the answer it got, from whichever browser gave it. The errand adds the
+        // seventh — `chat`, carrying errand-reported: Marvin answers a question nobody asked, and the thread
+        // has to learn of it. It earns its place the same way the others did, and seven is the ceiling now.
         // And still no clock of the shell's own — no setInterval, and no setTimeout (the toast lives out a CSS
         // animation, not a JS timer).
         String js = read("explorer-shell.js");
-        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(6);
+        assertThat(js.split("new EventSource\\(", -1).length - 1).isEqualTo(7);
         assertThat(js).contains("new EventSource('/vpn/enrolments/events')");
         assertThat(js).contains("new EventSource('/transfers/events')");
         assertThat(js).contains("new EventSource('/backup-jobs/events')");
         assertThat(js).contains("new EventSource('/security/events')");
+        assertThat(js).contains("new EventSource('/chat/events')");
         assertThat(js).doesNotContain("setInterval");
         assertThat(js).doesNotContain("setTimeout");
     }
@@ -4100,7 +4103,7 @@ class ExplorerShellTest {
         // when it already had it or nothing else does, so a repaint never pulls the cursor out of a dialog.
         String js = read("explorer-shell.js");
 
-        assertThat(js).contains("chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], spend: null }");
+        assertThat(js).contains("chat: { turns: [], summary: null, loaded: false, busy: false, error: null, draft: '', memory: [], errands: [], spend: null }");
         int from = js.indexOf("function renderChat(");
         assertThat(from).isPositive();
         String body = js.substring(from, js.indexOf("\n    }", from));
@@ -4213,6 +4216,72 @@ class ExplorerShellTest {
         int ask = js.indexOf("async function askVaier(");
         String askBody = js.substring(ask, js.indexOf("\n    }", ask));
         assertThat(askBody).contains("loadMemory()");
+    }
+
+    @Test
+    void marvinsErrands_areBehindTheChatPanesMenu_andEachOneCanBeCancelled() throws IOException {
+        // #360 slice 2: an errand runs while nobody is watching, so the one thing the pane owes the operator is
+        // a list of what Marvin is still doing and a way to stop it. Same place as his memory — one menu entry
+        // on the pane's bar, a dialog with a remove button on each row — and nothing about it on the pane
+        // itself, which is for typing.
+        String js = read("explorer-shell.js");
+
+        assertThat(js).contains("fetch('/chat/errands', { cache: 'no-store' })");
+        int menu = js.indexOf("function chatMenu(");
+        assertThat(menu).isPositive();
+        String menuBody = js.substring(menu, js.indexOf("\n    }", menu));
+        assertThat(menuBody).contains("'Marvin\\u2019s errands (' + S.chat.errands.length + ')'")
+            .contains("openErrandsDialog()");
+        int dialog = js.indexOf("function openErrandsDialog(");
+        assertThat(dialog).isPositive();
+        String dialogBody = js.substring(dialog, js.indexOf("\n    }", dialog));
+        assertThat(dialogBody).contains("cancelErrand(e)").contains("Nothing yet.");
+        int cancel = js.indexOf("async function cancelErrand(");
+        String cancelBody = js.substring(cancel, js.indexOf("\n    }", cancel));
+        assertThat(cancelBody).contains("fetch(`/chat/errands/").contains("method: 'DELETE'");
+        int chat = js.indexOf("function renderChat(");
+        String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
+        assertThat(chatBody).doesNotContain("errand");
+        // Re-read after every answer, because the answer may have sent Marvin on one.
+        int ask = js.indexOf("async function askVaier(");
+        String askBody = js.substring(ask, js.indexOf("\n    }", ask));
+        assertThat(askBody).contains("loadErrands()");
+    }
+
+    @Test
+    void anErrandThatReported_arrivesAsAPush_neverAsAPoll() throws IOException {
+        // An errand answers while nobody asked, so the thread has to learn about it without being asked — and
+        // the frontend never polls: the backend pushes, the pane listens, exactly as the Security view does.
+        String js = read("explorer-shell.js");
+
+        assertThat(js).contains("new EventSource('/chat/events')");
+        int watch = js.indexOf("function watchChat(");
+        assertThat(watch).isPositive();
+        String watchBody = js.substring(watch, js.indexOf("\n    }", watch));
+        assertThat(watchBody).contains("errand-reported").contains("loadConversation()").contains("loadErrands()");
+        assertThat(js).doesNotContain("setInterval(loadErrands");
+    }
+
+    @Test
+    void theMarvinMenu_staysOnTheTitleLineOnAPhone_andOpensInsideTheScreen() throws IOException {
+        // On a phone the pane's action row wraps to a full-width line of its own, which put the Marvin
+        // button at the left edge — and its dropdown, anchored to the button's right edge with a 240px
+        // floor, opened off the left of the screen. Chat's bar holds that one verb, so it keeps the title's
+        // line; the subtitle drops below; the menu never asks for more width than the screen has; and a
+        // long memory or errand wraps instead of pushing its remove button out of reach.
+        String js = read("explorer-shell.js");
+        String css = read("explorer-shell.css");
+
+        int chat = js.indexOf("function renderChat(");
+        String chatBody = js.substring(chat, js.indexOf("\n    }", chat));
+        assertThat(chatBody).contains("head.classList.add('ex-chat-head');");
+        int narrow = css.indexOf("@media (max-width: 760px)");
+        String narrowBody = css.substring(narrow, css.indexOf("\n}", narrow));
+        assertThat(narrowBody).contains(".ex-chat-head .ex-pane-actions { width: auto; margin-left: auto; }")
+            .contains(".ex-chat-head .ex-pane-sub { order: 3; flex-basis: 100%; }")
+            .contains(".ex-chat-menu .ex-vmenu { min-width: 0; width: max-content; max-width: calc(100vw - 28px); }");
+        assertThat(css).contains(".ex-chat-memory-text { flex: 1; min-width: 0; overflow-wrap: anywhere;")
+            .contains(".ex-chat-errand-lines { flex: 1; min-width: 0;");
     }
 
     @Test

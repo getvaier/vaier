@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Hand-made: a well-formed feed with a channel and no items, which is how Bing says it matched nothing. -->
+<rss version="2.0">
+<channel>
+<title>Bing: vaier kumquat protocol</title>
+<link>http://www.bing.com:80/search?q=vaier+kumquat+protocol</link>
+<description>Search results</description>
+<copyright>Copyright (c) 2026 Microsoft. All rights reserved.</copyright>
+</channel>
+</rss>
