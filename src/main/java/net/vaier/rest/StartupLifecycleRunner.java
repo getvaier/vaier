@@ -2,11 +2,14 @@ package net.vaier.rest;
 
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.AuditReverseProxyConfigUseCase;
+import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.config.WildcardDnsStatusHolder;
 import net.vaier.domain.Lifecycle;
+import net.vaier.domain.ReverseProxyAuditTracker;
 import net.vaier.domain.WildcardDnsReport;
 import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForResolvingDns;
@@ -17,7 +20,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Vaier's boot sequence, run once the Spring context is up: verify the wildcard DNS record, bring up
- * VPN routing, and sync LAN routes.
+ * VPN routing, sync LAN routes, and judge the reverse proxy config Vaier writes itself (#354).
  *
  * <p>This is a <em>driving adapter</em>, not an application service, and that distinction is why it
  * lives here beside {@code StateRefreshScheduler} and {@code RemoteDiskWatcher} rather than in
@@ -45,6 +48,8 @@ public class StartupLifecycleRunner {
     private final WildcardDnsStatusHolder wildcardDnsStatusHolder;
     private final ConfigResolver configResolver;
     private final SyncLanRoutesUseCase syncLanRoutesUseCase;
+    private final AuditReverseProxyConfigUseCase reverseProxyAudit;
+    private final NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
 
     public StartupLifecycleRunner(
         ForInitialisingVpnRouting forInitialisingVpnRouting,
@@ -53,7 +58,9 @@ public class StartupLifecycleRunner {
         SetupStateHolder setupStateHolder,
         WildcardDnsStatusHolder wildcardDnsStatusHolder,
         ConfigResolver configResolver,
-        SyncLanRoutesUseCase syncLanRoutesUseCase
+        SyncLanRoutesUseCase syncLanRoutesUseCase,
+        AuditReverseProxyConfigUseCase reverseProxyAudit,
+        NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier
     ) {
         this.forInitialisingVpnRouting = forInitialisingVpnRouting;
         this.publicHostResolver = publicHostResolver;
@@ -62,6 +69,8 @@ public class StartupLifecycleRunner {
         this.wildcardDnsStatusHolder = wildcardDnsStatusHolder;
         this.configResolver = configResolver;
         this.syncLanRoutesUseCase = syncLanRoutesUseCase;
+        this.reverseProxyAudit = reverseProxyAudit;
+        this.reverseProxyAuditNotifier = reverseProxyAuditNotifier;
     }
 
     @EventListener
@@ -87,6 +96,30 @@ public class StartupLifecycleRunner {
 
         forInitialisingVpnRouting.setupVpnRouting();
         syncLanRoutesUseCase.syncLanRoutes();
+        auditReverseProxyConfig();
+    }
+
+    /**
+     * Judge the reverse proxy config once at boot, as well as on every five-minute sweep. Boot is when a hand
+     * edit made while Vaier was down first becomes visible, and it is the cheapest possible moment to
+     * notice — the file is already on disk and nothing is asked of the fleet.
+     *
+     * <p>In its own try/catch: a config read that fails must not stop VPN routing coming up behind it, and
+     * an audit is never the reason a boot fails.
+     */
+    private void auditReverseProxyConfig() {
+        try {
+            ReverseProxyAuditTracker.Verdict verdict = reverseProxyAudit.auditReverseProxyConfig();
+            switch (verdict.outcome()) {
+                case ALERT -> reverseProxyAuditNotifier
+                    .notifyAdminsOfReverseProxyFindings(verdict.audit());
+                case RECOVERED -> reverseProxyAuditNotifier
+                    .notifyAdminsOfReverseProxyAuditRecovery(verdict.audit());
+                case QUIET -> { /* clear, or trouble admins already know about */ }
+            }
+        } catch (Exception e) {
+            log.debug("Could not audit the reverse proxy config at startup: {}", e.getMessage());
+        }
     }
 
     /**

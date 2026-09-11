@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.AuthMode;
+import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForManagingIgnoredServices;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForReadingReverseProxyConfig;
 import java.io.File;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -36,7 +38,8 @@ import java.util.Set;
 
 @Component
 @Slf4j
-public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRoutes, ForManagingIgnoredServices {
+public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRoutes,
+        ForReadingReverseProxyConfig, ForManagingIgnoredServices {
 
     private final Yaml yaml;
     private final Yaml dumper;
@@ -134,6 +137,99 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         }
 
         return result;
+    }
+
+    /**
+     * The whole file, unflattened, for the reverse proxy audit (#354) to judge — every router, service and
+     * middleware by name, plus the few fields an invariant turns on. Translation only: which entries are
+     * broken is the domain's call, and nothing here decides anything.
+     *
+     * <p>Its own read of the file rather than {@link #loadConfig()}'s cached map, for the same reason
+     * {@link #getReverseProxyRoutesFromFile()} takes one: the audit must judge what is on disk now,
+     * including a hand edit Vaier never made. An absent or unreadable file is an empty config — the
+     * first-boot state, and never a finding of its own.
+     */
+    @Override
+    public ReverseProxyConfig getReverseProxyConfig() {
+        File configFile = new File(configFilePath);
+        if (!configFile.exists()) {
+            return ReverseProxyConfig.empty();
+        }
+        try (FileInputStream inputStream = new FileInputStream(configFile)) {
+            Map<String, Object> loaded = new Yaml().load(inputStream);
+            if (loaded == null) {
+                return ReverseProxyConfig.empty();
+            }
+            List<ReverseProxyConfig.ConfiguredRouter> routers = new ArrayList<>();
+            List<ReverseProxyConfig.ConfiguredService> services = new ArrayList<>();
+            List<ReverseProxyConfig.ConfiguredMiddleware> middlewares = new ArrayList<>();
+            collectSection(loaded, "http", ReverseProxyConfig.Protocol.HTTP, routers, services, middlewares);
+            collectSection(loaded, "tcp", ReverseProxyConfig.Protocol.TCP, routers, services, middlewares);
+            return ReverseProxyConfig.builder()
+                .routers(routers).services(services).middlewares(middlewares).build();
+        } catch (Exception e) {
+            log.warn("Could not read the Traefik configuration file {} for the reverse proxy audit",
+                configFilePath, e);
+            return ReverseProxyConfig.empty();
+        }
+    }
+
+    /** One of Traefik's two namespaces into the domain's flat lists. */
+    private void collectSection(Map<String, Object> loaded, String sectionKey,
+                                ReverseProxyConfig.Protocol protocol,
+                                List<ReverseProxyConfig.ConfiguredRouter> routers,
+                                List<ReverseProxyConfig.ConfiguredService> services,
+                                List<ReverseProxyConfig.ConfiguredMiddleware> middlewares) {
+        Map<String, Object> section = getNestedMap(loaded, sectionKey);
+        if (section == null) {
+            return;
+        }
+        Map<String, Object> sectionRouters = getNestedMap(section, "routers");
+        if (sectionRouters != null) {
+            for (Map.Entry<String, Object> entry : sectionRouters.entrySet()) {
+                Map<String, Object> router = castToMap(entry.getValue());
+                routers.add(ReverseProxyConfig.ConfiguredRouter.builder()
+                    .protocol(protocol)
+                    .name(entry.getKey())
+                    .serviceName(router == null ? null : asText(router.get("service")))
+                    .middlewareNames(router == null ? List.of() : asTextList(router.get("middlewares")))
+                    .build());
+            }
+        }
+        Map<String, Object> sectionServices = getNestedMap(section, "services");
+        if (sectionServices != null) {
+            for (String name : sectionServices.keySet()) {
+                services.add(new ReverseProxyConfig.ConfiguredService(protocol, name));
+            }
+        }
+        Map<String, Object> sectionMiddlewares = getNestedMap(section, "middlewares");
+        if (sectionMiddlewares != null) {
+            for (Map.Entry<String, Object> entry : sectionMiddlewares.entrySet()) {
+                Map<String, Object> middleware = castToMap(entry.getValue());
+                Map<String, Object> redirect =
+                    middleware == null ? null : getNestedMap(middleware, "redirectRegex");
+                Map<String, Object> errors =
+                    middleware == null ? null : getNestedMap(middleware, "errors");
+                middlewares.add(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                    .protocol(protocol)
+                    .name(entry.getKey())
+                    .redirectRegex(redirect == null ? null : asText(redirect.get("regex")))
+                    .redirectReplacement(redirect == null ? null : asText(redirect.get("replacement")))
+                    .errorsServiceName(errors == null ? null : asText(errors.get("service")))
+                    .build());
+            }
+        }
+    }
+
+    private static String asText(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    private static List<String> asTextList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream().filter(Objects::nonNull).map(Object::toString).toList();
     }
 
     /**

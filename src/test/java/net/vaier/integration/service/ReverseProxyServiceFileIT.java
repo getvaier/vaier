@@ -1,5 +1,6 @@
 package net.vaier.integration.service;
 
+import net.vaier.adapter.driven.ReverseProxyAuditStateFileAdapter;
 import net.vaier.adapter.driven.TraefikReverseProxyAdapter;
 import net.vaier.application.AddReverseProxyRouteUseCase.ReverseProxyRouteUco;
 import net.vaier.application.service.ReverseProxyService;
@@ -33,7 +34,8 @@ class ReverseProxyServiceFileIT {
     void setUp() {
         String configFilePath = tempDir.resolve("remote-apps.yml").toString();
         adapter = new TraefikReverseProxyAdapter(configFilePath, "http://localhost:19999", "example.com");
-        reverseProxyService = new ReverseProxyService(adapter);
+        reverseProxyService = new ReverseProxyService(adapter, adapter,
+                new ReverseProxyAuditStateFileAdapter(tempDir.toString()));
     }
 
     @Test

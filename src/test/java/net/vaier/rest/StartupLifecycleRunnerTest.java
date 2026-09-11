@@ -2,10 +2,15 @@ package net.vaier.rest;
 
 import java.util.List;
 import java.util.Optional;
+import net.vaier.application.AuditReverseProxyConfigUseCase;
+import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.config.WildcardDnsStatusHolder;
+import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ReverseProxyAuditTracker;
+import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.WildcardDnsStatus;
 import net.vaier.domain.port.ForInitialisingVpnRouting;
 import net.vaier.domain.port.ForResolvingDns;
@@ -35,6 +40,8 @@ class StartupLifecycleRunnerTest {
     @Mock WildcardDnsStatusHolder wildcardDnsStatusHolder;
     @Mock ConfigResolver configResolver;
     @Mock SyncLanRoutesUseCase syncLanRoutesUseCase;
+    @Mock AuditReverseProxyConfigUseCase reverseProxyAudit;
+    @Mock NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
     @Mock ApplicationReadyEvent event;
 
     private StartupLifecycleRunner runner() {
@@ -45,7 +52,9 @@ class StartupLifecycleRunnerTest {
             setupStateHolder,
             wildcardDnsStatusHolder,
             configResolver,
-            syncLanRoutesUseCase
+            syncLanRoutesUseCase,
+            reverseProxyAudit,
+            reverseProxyAuditNotifier
         );
     }
 
@@ -108,5 +117,45 @@ class StartupLifecycleRunnerTest {
         assertThat(labels).hasSize(4);
         assertThat(probed.getValue()).endsWith(".example.com");
         assertThat(labels[0]).isNotEqualTo(labels[1]);
+    }
+
+    // --- the reverse proxy audit at boot (#354) ---
+
+    @Test
+    void boot_mailsTheReverseProxyFindingsWhenTheDomainSaysItIsNews() {
+        configured();
+        when(reverseProxyAudit.auditReverseProxyConfig()).thenReturn(
+            new ReverseProxyAuditTracker.Verdict(ReverseProxyAuditTracker.Outcome.ALERT,
+                ReverseProxyAudit.of(ReverseProxyConfig.builder()
+                    .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                        .protocol(ReverseProxyConfig.Protocol.HTTP).name("orphaned-redirect").build()))
+                    .build())));
+
+        runner().handle(event);
+
+        verify(reverseProxyAuditNotifier).notifyAdminsOfReverseProxyFindings(any());
+    }
+
+    @Test
+    void boot_saysNothingAboutAReverseProxyConfigTheDomainCallsQuiet() {
+        configured();
+        when(reverseProxyAudit.auditReverseProxyConfig()).thenReturn(
+            new ReverseProxyAuditTracker.Verdict(ReverseProxyAuditTracker.Outcome.QUIET,
+                ReverseProxyAudit.of(ReverseProxyConfig.empty())));
+
+        runner().handle(event);
+
+        verifyNoInteractions(reverseProxyAuditNotifier);
+    }
+
+    @Test
+    void boot_isNeverStoppedByAReverseProxyAuditThatFails() {
+        configured();
+        when(reverseProxyAudit.auditReverseProxyConfig())
+            .thenThrow(new RuntimeException("config unreadable"));
+
+        runner().handle(event);
+
+        verify(syncLanRoutesUseCase).syncLanRoutes();
     }
 }

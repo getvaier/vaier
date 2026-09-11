@@ -19,6 +19,8 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
 import net.vaier.domain.PeerSnapshot;
+import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForHoldingBundles;
@@ -110,6 +112,37 @@ class NotificationServiceTest {
         verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
         assertThat(subject.getValue()).contains("nas").contains("80% threshold").contains("5.0 days");
         assertThat(body.getValue()).contains("nas").contains("74%").contains("vaier.example.com");
+    }
+
+    // --- the reverse proxy audit (#354) ---
+
+    @Test
+    void notifyAdminsOfReverseProxyFindings_namesEachFindingAndSaysVaierChangedNothing() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfReverseProxyFindings(ReverseProxyAudit.of(ReverseProxyConfig.builder()
+                .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                        .protocol(ReverseProxyConfig.Protocol.HTTP).name("orphaned-redirect").build()))
+                .build()));
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), body.capture(), any());
+        assertThat(subject.getValue()).startsWith("[Vaier] ").contains("Reverse proxy config");
+        assertThat(body.getValue()).contains("orphaned-redirect").contains("changed nothing")
+                .contains("vaier.example.com");
+    }
+
+    @Test
+    void notifyAdminsOfReverseProxyAuditRecovery_saysItIsClearAgain() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+
+        service.notifyAdminsOfReverseProxyAuditRecovery(
+                ReverseProxyAudit.of(ReverseProxyConfig.empty()));
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        verify(adminNotifier).sendToAdmins(subject.capture(), any(), any());
+        assertThat(subject.getValue()).startsWith("[Vaier] ").contains("clear again");
     }
 
     @Test

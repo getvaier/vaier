@@ -4,6 +4,7 @@ import net.vaier.application.GetAppSettingsUseCase;
 import net.vaier.application.GetSelfUpdateStatusUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
+import net.vaier.application.GetReverseProxyAuditUseCase;
 import net.vaier.application.SetSurvivalKitPassphraseUseCase;
 import net.vaier.application.TestSmtpCredentialsUseCase;
 import net.vaier.application.UpdateAnthropicApiKeyUseCase;
@@ -11,6 +12,8 @@ import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
 import net.vaier.application.UpdateVaierUseCase;
+import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ReverseProxyFinding;
 import net.vaier.domain.SelfUpdateStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +22,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/settings")
@@ -34,6 +39,7 @@ public class SettingsRestController {
     private final GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase;
     private final UpdateVaierUseCase updateVaierUseCase;
     private final UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase;
+    private final GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
 
     public SettingsRestController(GetAppSettingsUseCase getAppSettingsUseCase,
                                   GetAppVersionUseCase getAppVersionUseCase,
@@ -44,7 +50,8 @@ public class SettingsRestController {
                                   SetSurvivalKitPassphraseUseCase setSurvivalKitPassphraseUseCase,
                                   GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase,
                                   UpdateVaierUseCase updateVaierUseCase,
-                                  UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase) {
+                                  UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase,
+                                  GetReverseProxyAuditUseCase getReverseProxyAuditUseCase) {
         this.getAppSettingsUseCase = getAppSettingsUseCase;
         this.getAppVersionUseCase = getAppVersionUseCase;
         this.updateSmtpSettingsUseCase = updateSmtpSettingsUseCase;
@@ -55,11 +62,35 @@ public class SettingsRestController {
         this.getSelfUpdateStatusUseCase = getSelfUpdateStatusUseCase;
         this.updateVaierUseCase = updateVaierUseCase;
         this.updateAnthropicApiKeyUseCase = updateAnthropicApiKeyUseCase;
+        this.getReverseProxyAuditUseCase = getReverseProxyAuditUseCase;
     }
 
     @GetMapping("/config")
     public ResponseEntity<AppSettingsResult> getConfig() {
         return ResponseEntity.ok(getAppSettingsUseCase.getSettings());
+    }
+
+    /**
+     * What Vaier's reverse proxy audit (#354) finds in the Traefik config Vaier writes itself. A read, and only a
+     * read: it never moves the notification latch, so opening Settings cannot cost an operator an email.
+     *
+     * <p>An empty list is the healthy answer and the common one — the surface that draws this paints
+     * nothing at all for it.
+     */
+    @GetMapping("/reverse-proxy-audit")
+    public ResponseEntity<ReverseProxyAuditResponse> getReverseProxyAudit() {
+        ReverseProxyAudit audit = getReverseProxyAuditUseCase.getReverseProxyAudit();
+        return ResponseEntity.ok(new ReverseProxyAuditResponse(audit.summary(),
+            audit.findings().stream().map(FindingResponse::of).toList()));
+    }
+
+    /** {@code summary} is the domain's own lead sentence, empty when there is nothing wrong. */
+    public record ReverseProxyAuditResponse(String summary, List<FindingResponse> findings) {}
+
+    public record FindingResponse(String kind, String entry, String message) {
+        static FindingResponse of(ReverseProxyFinding finding) {
+            return new FindingResponse(finding.kind().name(), finding.entryName(), finding.message());
+        }
     }
 
     /**

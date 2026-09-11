@@ -2398,6 +2398,49 @@ class ExplorerShellTest {
         assertThat(body).doesNotContain("viewable");
     }
 
+    // --- the reverse proxy audit in Settings (#354) ----------------------------------------------------------
+
+    @Test
+    void theReverseProxyAudit_paintsNothingAtAllWhenTheConfigIsClean() throws IOException {
+        // A healthy state paints nothing AND reserves no space. A section that said "no problems found"
+        // every time would be a heartbeat, and would teach the operator to skim past the day it says
+        // otherwise — so the whole block sits behind the findings being non-empty.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("if (findings.length) {");
+        assertThat(js).contains("section('Reverse proxy')");
+    }
+
+    @Test
+    void theReverseProxyAudit_readsWithTheRestOfSettingsAndNeverPolls() throws IOException {
+        // The backend polls (the five-minute sweep) and this reads once with the pane. No timer here.
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("'/settings/reverse-proxy-audit'");
+        int from = js.indexOf("async function loadSettings(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("/settings/reverse-proxy-audit");
+        assertThat(body).doesNotContain("setInterval");
+    }
+
+    @Test
+    void theReverseProxyAudit_offersNoButton_becauseVaierNeverTouchesTheFile() throws IOException {
+        // #354's decision: say so, do not touch. Deleting an entry Vaier may not have written is the
+        // operator's act, and there is deliberately nothing here that would do it for them.
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("const audit = S.settings.audit || {};");
+        assertThat(from).isPositive();
+        String block = js.substring(from, from + 1200);
+        assertThat(block).doesNotContain("ex-btn");
+        // Every sentence in the block is the domain's — the lead and each row alike. The shell counts
+        // nothing and phrases nothing, so Settings and the alert email cannot drift apart.
+        assertThat(block).contains("audit.summary");
+        assertThat(block).doesNotContain("findings.length === 1");
+        // And its rows wear the shell's own radius token rather than a hard-coded corner.
+        assertThat(read("explorer-shell.css")).contains(".ex-audit-row");
+        int css = read("explorer-shell.css").indexOf(".ex-audit-row {");
+        assertThat(read("explorer-shell.css").substring(css, css + 320)).contains("var(--radius-1)");
+    }
+
     // --- the Security view and the threats on the Map (#329 Slice 3) -----------------------------------
 
     @Test

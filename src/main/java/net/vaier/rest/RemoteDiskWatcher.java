@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.AuditReverseProxyConfigUseCase;
 import net.vaier.application.DetectMachineNetworksUseCase;
 import net.vaier.application.ForgetMachineNetworksUseCase;
 import net.vaier.application.GetClaudeSignInStatusUseCase;
@@ -9,6 +10,7 @@ import net.vaier.application.GetHostCredentialUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
+import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.RunRemoteCommandUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.ClaudeSignInStatus;
@@ -23,6 +25,7 @@ import net.vaier.domain.RemoteDiskForecastTracker;
 import net.vaier.domain.RemoteDiskPressureTracker;
 import net.vaier.domain.DockerCommandAccess;
 import net.vaier.domain.RemoteDiskUsage;
+import net.vaier.domain.ReverseProxyAuditTracker;
 import net.vaier.domain.SshServerPresence;
 import net.vaier.domain.port.ForHoldingClaudeSignInStandings;
 import net.vaier.domain.port.ForHoldingMachineDiskStandings;
@@ -110,6 +113,12 @@ import java.util.stream.Collectors;
  * <p>Both extra consumers sit behind {@code checkMachine}'s two existing guards (SSH access, a stored
  * credential), which is precisely why "a machine Vaier cannot read is simply not nudged" needs no rule of
  * its own.
+ *
+ * <p><b>And one rider that asks no machine anything (#354):</b> the <b>reverse proxy audit</b>, Vaier reading back
+ * the Traefik config it writes itself and judging it against invariants no route can reach. It belongs on
+ * this sweep for the reason the others do — the trip already happens — and not behind the per-machine
+ * guards, because it is a local file read about Vaier's own config rather than a question for the fleet. It
+ * reports and never repairs: see {@link net.vaier.domain.ReverseProxyAudit}.
  */
 @Component
 @Slf4j
@@ -136,6 +145,11 @@ public class RemoteDiskWatcher {
     // path to a sign-in answer and no second one that could report a state the CLI never said.
     private final GetClaudeSignInStatusUseCase claudeSignIn;
     private final ForHoldingClaudeSignInStandings claudeStandings;
+    // The one thing on this sweep that asks no machine anything (#354): Vaier reading back the routing
+    // config it writes itself. It rides here because a local file read costs nothing next to a fleet of SSH
+    // sessions, and because a config can rot between restarts — Vaier's are rare.
+    private final AuditReverseProxyConfigUseCase reverseProxyAudit;
+    private final NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
     private final RemoteDiskPressureTracker tracker;
     private final RemoteDiskForecastTracker forecastTracker;
 
@@ -161,7 +175,9 @@ public class RemoteDiskWatcher {
                              ForRecordingDockerCommandAccess dockerAccessRecorder,
                              ForPersistingDiskFillTrends diskFillTrends,
                              GetClaudeSignInStatusUseCase claudeSignIn,
-                             ForHoldingClaudeSignInStandings claudeStandings) {
+                             ForHoldingClaudeSignInStandings claudeStandings,
+                             AuditReverseProxyConfigUseCase reverseProxyAudit,
+                             NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier) {
         this.machines = machines;
         this.credentials = credentials;
         this.remoteCommand = remoteCommand;
@@ -179,6 +195,8 @@ public class RemoteDiskWatcher {
         this.diskFillTrends = diskFillTrends;
         this.claudeSignIn = claudeSignIn;
         this.claudeStandings = claudeStandings;
+        this.reverseProxyAudit = reverseProxyAudit;
+        this.reverseProxyAuditNotifier = reverseProxyAuditNotifier;
         // The domain owns the port call; this watcher only hands it in. Both trackers' state is on disk
         // precisely so that a redeploy — several a day here — no longer wipes what admins have already been
         // told, nor the week of samples the forecast projects from.
@@ -203,6 +221,41 @@ public class RemoteDiskWatcher {
         claudeStandings.retainOnly(fleet);
         diskFillTrends.retainOnly(fleet);
         forgetMachineNetworks.forgetMachineNetworksExcept(fleet);
+        auditReverseProxyConfig();
+    }
+
+    /**
+     * Vaier judging the reverse proxy config it writes itself (#354), once per sweep.
+     *
+     * <p>Every other check on this trip is about the world outside — is the host up, is the disk filling.
+     * None of them asked <em>is the config I wrote still coherent?</em>, so a defect in a write path stayed
+     * invisible until an operator opened the one URL that happened to break: four orphaned redirect
+     * middlewares, three of them redirect loops, sitting in the file for weeks.
+     *
+     * <p>In its own try/catch, for the reason every other rider here is: a file read that fails must never
+     * be able to take a fleet-wide disk sweep down with it. And the decision is not taken here — the domain
+     * decides what is broken and whether it is news; this only decides whom to tell.
+     */
+    private void auditReverseProxyConfig() {
+        try {
+            ReverseProxyAuditTracker.Verdict verdict = reverseProxyAudit.auditReverseProxyConfig();
+            switch (verdict.outcome()) {
+                case ALERT -> reverseProxyAuditNotifier
+                    .notifyAdminsOfReverseProxyFindings(verdict.audit());
+                case RECOVERED -> reverseProxyAuditNotifier
+                    .notifyAdminsOfReverseProxyAuditRecovery(verdict.audit());
+                // Clear, or in exactly the trouble admins already know about. Logged when there is trouble,
+                // so a config sitting broken is never indistinguishable from one nobody is checking.
+                case QUIET -> {
+                    if (!verdict.audit().isClean()) {
+                        log.info("Vaier's reverse proxy config still has {} entries no route can reach; admins "
+                            + "have already been told", verdict.audit().findings().size());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not audit the reverse proxy config: {}", e.getMessage());
+        }
     }
 
     /**

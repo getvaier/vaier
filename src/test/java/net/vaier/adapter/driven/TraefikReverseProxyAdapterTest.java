@@ -4,6 +4,8 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.AuthMode;
+import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.ReverseProxyRoute;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1517,5 +1519,98 @@ class TraefikReverseProxyAdapterTest {
 
         assertThatThrownBy(() -> adapter.deleteReverseProxyRoute("nope-router"))
             .hasMessageContaining("Router not found");
+    }
+
+    // --- getReverseProxyConfig: the unflattened read the reverse proxy audit judges (#354) ---
+
+    @Test
+    void getReverseProxyConfig_isEmptyWhenTheFileIsNotThereYet() {
+        ReverseProxyConfig config = adapter.getReverseProxyConfig();
+
+        assertThat(config.routers()).isEmpty();
+        assertThat(config.services()).isEmpty();
+        assertThat(config.middlewares()).isEmpty();
+    }
+
+    @Test
+    void getReverseProxyConfig_handsTheDomainEveryRouterServiceAndMiddleware() throws IOException {
+        Files.writeString(tempDir.resolve("remote-apps.yml"), """
+            http:
+              routers:
+                a-router:
+                  rule: Host(`a.example.com`)
+                  service: a-service
+                  middlewares:
+                    - a-redirect
+                    - vaier-frame-guard@file
+              services:
+                a-service:
+                  loadBalancer:
+                    servers:
+                      - url: http://10.13.13.2:8080
+                vaier-error-pages:
+                  loadBalancer:
+                    servers:
+                      - url: http://vaier:8080
+              middlewares:
+                a-redirect:
+                  redirectRegex:
+                    regex: "^https://a\\\\.example\\\\.com/?$"
+                    replacement: "https://a.example.com/admin"
+                vaier-errors:
+                  errors:
+                    status: ["502"]
+                    service: vaier-error-pages
+                    query: /error-pages/{status}
+            tcp:
+              routers:
+                mqtt-router:
+                  rule: HostSNI(`mqtt.example.com`)
+                  service: mqtt-service
+              services:
+                mqtt-service:
+                  loadBalancer:
+                    servers:
+                      - address: 172.20.0.1:1883
+            """);
+
+        ReverseProxyConfig config = adapter.getReverseProxyConfig();
+
+        assertThat(config.routers()).extracting(ReverseProxyConfig.ConfiguredRouter::name)
+            .containsExactlyInAnyOrder("a-router", "mqtt-router");
+        ReverseProxyConfig.ConfiguredRouter httpRouter = config.routers().stream()
+            .filter(r -> r.name().equals("a-router")).findFirst().orElseThrow();
+        assertThat(httpRouter.protocol()).isEqualTo(ReverseProxyConfig.Protocol.HTTP);
+        assertThat(httpRouter.serviceName()).isEqualTo("a-service");
+        assertThat(httpRouter.middlewareNames()).containsExactly("a-redirect", "vaier-frame-guard@file");
+        assertThat(config.routers().stream().filter(r -> r.name().equals("mqtt-router")).findFirst()
+            .orElseThrow().protocol()).isEqualTo(ReverseProxyConfig.Protocol.TCP);
+
+        assertThat(config.services()).extracting(ReverseProxyConfig.ConfiguredService::name)
+            .containsExactlyInAnyOrder("a-service", "vaier-error-pages", "mqtt-service");
+
+        ReverseProxyConfig.ConfiguredMiddleware redirect = config.middlewares().stream()
+            .filter(m -> m.name().equals("a-redirect")).findFirst().orElseThrow();
+        assertThat(redirect.redirectRegex()).isEqualTo("^https://a\\.example\\.com/?$");
+        assertThat(redirect.redirectReplacement()).isEqualTo("https://a.example.com/admin");
+        assertThat(config.middlewares().stream().filter(m -> m.name().equals("vaier-errors")).findFirst()
+            .orElseThrow().errorsServiceName()).isEqualTo("vaier-error-pages");
+    }
+
+    @Test
+    void getReverseProxyConfig_ofAFileVaierJustWroteIsClean() {
+        // The end of the #354 loop: what the write path produces must survive the judgement it now faces.
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, AuthMode.SOCIAL, "/admin", null);
+        adapter.addStreamRoute("mqtt.example.com", "172.20.0.1", 1883);
+
+        assertThat(ReverseProxyAudit.of(adapter.getReverseProxyConfig()).findings()).isEmpty();
+    }
+
+    @Test
+    void getReverseProxyConfig_ofAnUnpublishedRouteIsStillClean() {
+        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, AuthMode.SOCIAL, "/admin", null);
+        adapter.deleteReverseProxyRouteByDnsName("app.example.com");
+
+        assertThat(ReverseProxyAudit.of(adapter.getReverseProxyConfig()).findings()).isEmpty();
     }
 }

@@ -7401,18 +7401,23 @@
         if (S.settings.state === 'loading') return;
         S.settings = { ...S.settings, state: 'loading' };
         try {
-            const [cfg, ver, upd] = await Promise.all([
+            const [cfg, ver, upd, audit] = await Promise.all([
                 fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
                 fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 // Whether a newer Vaier is being served, and how the last update went. Read with the rest of
                 // the page rather than polled: an image going stale is not news that decays in seconds.
                 fetch('/settings/update', { cache: 'no-store' })
                     .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+                // What Vaier's reverse proxy audit finds in the Traefik config it writes itself. Read here with
+                // everything else — a config defect does not decay in seconds either, and the answer is
+                // almost always an empty list.
+                fetch('/settings/reverse-proxy-audit', { cache: 'no-store' })
+                    .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
             ]);
             S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
-                version: (ver || {}).version || '', update: upd || {} };
+                version: (ver || {}).version || '', update: upd || {}, audit: audit || {} };
         } catch (e) {
-            S.settings = { state: 'error', config: null, version: '', update: {} };
+            S.settings = { state: 'error', config: null, version: '', update: {}, audit: {} };
         }
         render();
     }
@@ -7780,6 +7785,32 @@
             const upActs = el('div', 'ex-lactions is-static');
             upActs.appendChild(selVerb('arrowup', 'Update Vaier', 'ex-btn is-accent', () => updateVaier()));
             body.appendChild(upActs);
+        }
+
+        // --- the reverse proxy audit: nothing at all unless something is wrong ---
+        //
+        // Vaier reads back the Traefik config it writes itself and names what no route can reach (#354).
+        // A clean config paints nothing and reserves no space — a section that said "all good" every time
+        // would be the heartbeat this project refuses to make, and would teach the operator to skim past
+        // the one day it says otherwise. It reports only: nothing here deletes or rewrites anything, which
+        // is why there is no button.
+        const audit = S.settings.audit || {};
+        const findings = audit.findings || [];
+        if (findings.length) {
+            body.appendChild(section('Reverse proxy'));
+            // Both sentences are the domain's: the lead it wrote, and each row's own finding. Nothing here
+            // counts entries or decides how to phrase "Vaier changed nothing" — the email says it once and
+            // this says the same words, so the two can never drift.
+            const lead = el('div', 'ex-runline');
+            lead.textContent = audit.summary || '';
+            body.appendChild(lead);
+            const list = el('div', 'ex-audit-list');
+            findings.forEach((f) => {
+                const row = el('div', 'ex-audit-row');
+                row.textContent = f.message;
+                list.appendChild(row);
+            });
+            body.appendChild(list);
         }
 
         // --- know: read-only facts, last, because nothing here is a decision ---

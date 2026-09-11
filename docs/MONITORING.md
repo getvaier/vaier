@@ -76,6 +76,28 @@ Pulled something and don't want to wait for tomorrow's sweep? **Check the regist
 
 ---
 
+## Vaier's own reverse proxy config
+
+Everything above watches the world outside: is the host up, is the disk filling, has the registry moved on. The **reverse proxy audit** is the one check pointed the other way — Vaier reads back the Traefik config it writes itself (`remote-apps.yml`) and asks whether the config it wrote is still coherent.
+
+It exists because a defect in a write path is invisible until somebody opens the one URL it broke. That is exactly how it was found: `ERR_TOO_MANY_REDIRECTS` on a service published minutes earlier, and — once the file was actually read — four orphaned redirect middlewares no router referenced, three of them redirect loops, left behind by services unpublished weeks before. Nobody could have cleared them through Vaier either: unpublishing a router that no longer exists correctly answers "Router not found", which is a dead end.
+
+Five things are checked, each of them a one-liner over a file Vaier parses on every read anyway:
+
+- **An unreferenced middleware** — an `http.middlewares` entry no router names. Usually left behind by an unpublish.
+- **A dangling middleware reference** — a router naming a middleware that does not exist. This one breaks the route outright: Traefik refuses it.
+- **A self-referential redirect** — a `redirectRegex` whose `replacement` its own `regex` matches, so a request there redirects forever. Vaier no longer writes one, but a hand-edited file can still hold one.
+- **A router with no service** — naming none at all, or naming one that is not defined.
+- **A service nothing routes to** — no router and no error middleware sends anything to it.
+
+**Vaier says so and does not touch the file.** Deleting an entry Vaier did not write is a destructive act on your config, and a middleware you added by hand and reference from somewhere Vaier cannot see would be collateral. So a finding is a sentence, and removing anything stays your decision.
+
+**Two things are deliberately never reported.** A middleware reference that names another Traefik provider (`vaier-frame-guard@file`, `crowdsec-bouncer@file`, anything `@docker`) is declared outside this file by design — flagging those would make every router look broken. And the console's own chain (`oauth2-signin`, `oauth2-authn`, `vaier-authz`, `vaier-errors`, and the two services behind them) is kept present at every startup whether or not anything is published, so a fleet with nothing published would otherwise report six findings on a perfectly healthy file.
+
+**Where you see it.** The audit runs at startup and once on every five-minute fleet sweep — a local file read costs nothing next to a round of SSH sessions, and a config can rot between restarts, which here are rare. Findings appear in **Settings**, in a block that is drawn only when there are any: a clean config paints nothing and reserves no space. Admins are mailed **on a transition only** — the first sweep that finds something, again whenever the *set* of broken entries changes (a newly broken entry is news; the same one still sitting there is not), and once more when everything is clear again. What you have already been told is kept on disk, so a redeploy cannot turn "on a transition" into "on every deploy".
+
+---
+
 ## What the edge blocks
 
 Every few minutes Vaier reads which addresses [the edge's CrowdSec bouncer](NETWORKING.md#edge-hardening) is currently turning away, and pushes the whole list, live, to the Explorer's **Security** view — where you can see every current block, lift it, or trust an address — and see and undo everything you've trusted. See [`docs/EXPLORER.md`](EXPLORER.md#security). Each entry reads as a sentence: the address, where CrowdSec places it (`195.178.110.155 (BG · Techoff Srv Limited)`), the scenario that caught it, and how long the block lasts.

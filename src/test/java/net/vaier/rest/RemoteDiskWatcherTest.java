@@ -15,7 +15,9 @@ import net.vaier.domain.port.ForPersistingDiskPressureState;
 import net.vaier.application.GetClaudeSignInStatusUseCase;
 import net.vaier.application.GetDiskWatchesUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
+import net.vaier.application.AuditReverseProxyConfigUseCase;
 import net.vaier.application.DetectMachineNetworksUseCase;
+import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.ForgetMachineNetworksUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.NotifyAdminsOfDiskFillForecastUseCase;
@@ -39,6 +41,9 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.NoSshServerException;
 import net.vaier.domain.DockerCommandAccess;
 import net.vaier.domain.RemoteDiskUsage;
+import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ReverseProxyAuditTracker;
+import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.SshServerPresence;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForRecordingDockerCommandAccess;
@@ -69,6 +74,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RemoteDiskWatcherTest {
@@ -98,6 +104,8 @@ class RemoteDiskWatcherTest {
     InMemoryMachineDiskStandingCache standings;
     ForRecordingDockerCommandAccess dockerAccessRecorder;
     GetClaudeSignInStatusUseCase claudeSignIn;
+    AuditReverseProxyConfigUseCase reverseProxyAudit;
+    NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
     InMemoryClaudeSignInStandingCache claudeStandings;
     SteppableClock clock;
     RemoteDiskWatcher watcher;
@@ -135,6 +143,13 @@ class RemoteDiskWatcherTest {
         // Nothing said about Claude unless a test says it: an unstubbed answer would be a null standing,
         // which is exactly "the sweep learned nothing here".
         lenient().when(claudeSignIn.getClaudeSignInStatus(any())).thenReturn(null);
+        reverseProxyAudit = mock(AuditReverseProxyConfigUseCase.class);
+        reverseProxyAuditNotifier = mock(NotifyAdminsOfReverseProxyFindingsUseCase.class);
+        // The reverse proxy audit rides this sweep but is not what these tests are about; a clean verdict
+        // keeps it silent.
+        lenient().when(reverseProxyAudit.auditReverseProxyConfig()).thenReturn(
+            new ReverseProxyAuditTracker.Verdict(ReverseProxyAuditTracker.Outcome.QUIET,
+                ReverseProxyAudit.of(ReverseProxyConfig.empty())));
         clock = new SteppableClock();
         // Nothing configured: every filesystem is watched at the global threshold (#325).
         lenient().when(diskWatches.getDiskWatches()).thenReturn(new DiskWatches(List.of()));
@@ -147,7 +162,7 @@ class RemoteDiskWatcherTest {
         return new RemoteDiskWatcher(machines, credentials, runner, notifier, forecastNotifier,
             diskWatches, configResolver, clock, sshPresenceRecorder, eventPublisher, pressureState,
             detectMachineNetworks, forgetMachineNetworks, standings, dockerAccessRecorder, fillTrends,
-            claudeSignIn, claudeStandings);
+            claudeSignIn, claudeStandings, reverseProxyAudit, reverseProxyAuditNotifier);
     }
 
     /** 1024-blocks in a GiB, and a 100 GiB filesystem to spend them on. */
@@ -1310,5 +1325,45 @@ class RemoteDiskWatcherTest {
         assertThat(standings.getAll()).hasSize(1);
         assertThat(claudeStandings.getAll()).isEmpty();
         verify(notifier, times(1)).notifyAdminsOfRemoteDiskPressure(any(), anyInt());
+    }
+
+    // --- the reverse proxy audit rides this sweep (#354) ---
+
+    private static ReverseProxyAudit auditWithOneOrphan() {
+        return ReverseProxyAudit.of(ReverseProxyConfig.builder()
+            .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                .protocol(ReverseProxyConfig.Protocol.HTTP).name("orphaned-redirect").build()))
+            .build());
+    }
+
+    @Test
+    void theSweep_mailsTheReverseProxyFindingsWhenTheDomainSaysItIsNews() {
+        when(machines.getAllMachines()).thenReturn(List.of());
+        when(reverseProxyAudit.auditReverseProxyConfig()).thenReturn(
+            new ReverseProxyAuditTracker.Verdict(ReverseProxyAuditTracker.Outcome.ALERT,
+                auditWithOneOrphan()));
+
+        watcher.checkRemoteDiskUsage();
+
+        verify(reverseProxyAuditNotifier).notifyAdminsOfReverseProxyFindings(any());
+    }
+
+    @Test
+    void theSweep_saysNothingAboutAReverseProxyConfigTheDomainCallsQuiet() {
+        when(machines.getAllMachines()).thenReturn(List.of());
+
+        watcher.checkRemoteDiskUsage();
+
+        verifyNoInteractions(reverseProxyAuditNotifier);
+    }
+
+    @Test
+    void theSweep_survivesAReverseProxyAuditThatFails() {
+        // A local file read must never be able to take a fleet-wide disk sweep down with it.
+        when(machines.getAllMachines()).thenReturn(List.of());
+        when(reverseProxyAudit.auditReverseProxyConfig())
+            .thenThrow(new RuntimeException("config unreadable"));
+
+        assertThatCode(() -> watcher.checkRemoteDiskUsage()).doesNotThrowAnyException();
     }
 }

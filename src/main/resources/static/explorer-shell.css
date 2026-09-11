@@ -1643,6 +1643,21 @@ select.ex-input { cursor: pointer; }
 }
 .ex-kit-row.is-err { border-left-color: var(--red); }
 .ex-kit-row.is-quiet { border-left-color: var(--border); }
+/* The reverse proxy audit's findings (#354): one sentence per entry no route can reach. Same shape as the kit's
+   rows so Settings keeps one hand, with the warning edge — this is something to look at, not something
+   broken beyond use. Drawn only when there is something to say; a clean config reserves no space at all. */
+.ex-audit-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.ex-audit-row {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--yellow);
+    border-radius: var(--radius-1);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: 13.5px;
+    line-height: 1.45;
+}
+
 .ex-kit-name { color: var(--text); font-weight: 600; }
 .ex-kit-why { color: var(--text-muted); font-size: 13px; margin-top: 3px; line-height: 1.45; }
 

@@ -10,6 +10,7 @@ import net.vaier.application.NotifyAdminsOfLockoutWarningUseCase;
 import net.vaier.application.EmailBundleUseCase;
 import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
+import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.BackupRun;
@@ -26,6 +27,7 @@ import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.JoinRequestNotice;
 import net.vaier.domain.LockoutWarning;
 import net.vaier.domain.RemoteDiskUsage;
+import net.vaier.domain.ReverseProxyAudit;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
 import net.vaier.domain.port.ForHoldingBundles;
@@ -45,7 +47,8 @@ public class NotificationService implements
         NotifyAdminsOfUpdateAvailableUseCase,
         NotifyAdminsOfBreachAttemptUseCase,
         NotifyAdminsOfLockoutWarningUseCase,
-        NotifyAdminsOfEnrolmentRequestUseCase {
+        NotifyAdminsOfEnrolmentRequestUseCase,
+        NotifyAdminsOfReverseProxyFindingsUseCase {
 
     private final ForSendingAdminNotification adminNotifier;
     private final ConfigResolver configResolver;
@@ -78,6 +81,24 @@ public class NotificationService implements
         adminNotifier.sendToAdmins(usage.recoverySubject(),
                 usage.pressureBody(thresholdPercent, configResolver.getDomain()),
                 "remote disk recovery on " + usage.machineName());
+    }
+
+    /**
+     * The reverse proxy audit's findings (#354). Says what is wrong and, deliberately, that Vaier left the file
+     * exactly as it found it — deleting an entry it may not have written is the operator's call.
+     */
+    @Override
+    public void notifyAdminsOfReverseProxyFindings(ReverseProxyAudit audit) {
+        adminNotifier.sendToAdmins(audit.findingsSubject(),
+                audit.findingsBody(configResolver.getDomain()),
+                "reverse proxy audit");
+    }
+
+    @Override
+    public void notifyAdminsOfReverseProxyAuditRecovery(ReverseProxyAudit audit) {
+        adminNotifier.sendToAdmins(audit.recoverySubject(),
+                audit.recoveryBody(configResolver.getDomain()),
+                "reverse proxy audit cleared");
     }
 
     @Override

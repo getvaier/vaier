@@ -1,8 +1,14 @@
 package net.vaier.application.service;
 
 import net.vaier.application.AddReverseProxyRouteUseCase.ReverseProxyRouteUco;
+import net.vaier.domain.ReverseProxyAuditState;
+import net.vaier.domain.ReverseProxyAuditTracker;
+import net.vaier.domain.ReverseProxyConfig;
+import net.vaier.domain.ReverseProxyFinding;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.port.ForPersistingReverseProxyAuditState;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForReadingReverseProxyConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -13,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,6 +30,12 @@ class ReverseProxyServiceTest {
 
     @Mock
     ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
+
+    @Mock
+    ForReadingReverseProxyConfig forReadingReverseProxyConfig;
+
+    @Mock
+    ForPersistingReverseProxyAuditState reverseProxyAuditState;
 
     @InjectMocks
     ReverseProxyService service;
@@ -165,5 +178,56 @@ class ReverseProxyServiceTest {
         when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of());
 
         assertThat(service.getReverseProxyRoutes()).isEmpty();
+    }
+
+    // --- the reverse proxy audit (#354): Vaier judging the config it writes itself ---
+
+    @Test
+    void getReverseProxyAudit_judgesWhatTheConfigPortHandsBack() {
+        when(forReadingReverseProxyConfig.getReverseProxyConfig()).thenReturn(
+            ReverseProxyConfig.builder()
+                .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                    .protocol(ReverseProxyConfig.Protocol.HTTP).name("orphaned-redirect").build()))
+                .build());
+
+        assertThat(service.getReverseProxyAudit().findings())
+            .extracting(ReverseProxyFinding::entryName)
+            .containsExactly("orphaned-redirect");
+    }
+
+    @Test
+    void getReverseProxyAudit_neverTouchesWhatAdminsWereTold() {
+        // Opening Settings must not be able to move a notification latch.
+        when(forReadingReverseProxyConfig.getReverseProxyConfig())
+            .thenReturn(ReverseProxyConfig.empty());
+
+        service.getReverseProxyAudit();
+
+        verifyNoInteractions(reverseProxyAuditState);
+    }
+
+    @Test
+    void auditReverseProxyConfig_alertsTheFirstTimeItFindsSomething() {
+        when(forReadingReverseProxyConfig.getReverseProxyConfig()).thenReturn(
+            ReverseProxyConfig.builder()
+                .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                    .protocol(ReverseProxyConfig.Protocol.HTTP).name("orphaned-redirect").build()))
+                .build());
+        when(reverseProxyAuditState.find()).thenReturn(Optional.empty());
+
+        ReverseProxyAuditTracker.Verdict verdict = service.auditReverseProxyConfig();
+
+        assertThat(verdict.outcome()).isEqualTo(ReverseProxyAuditTracker.Outcome.ALERT);
+        verify(reverseProxyAuditState).save(any(ReverseProxyAuditState.class));
+    }
+
+    @Test
+    void auditReverseProxyConfig_staysQuietOnAConfigThatWasNeverBroken() {
+        when(forReadingReverseProxyConfig.getReverseProxyConfig())
+            .thenReturn(ReverseProxyConfig.empty());
+        when(reverseProxyAuditState.find()).thenReturn(Optional.empty());
+
+        assertThat(service.auditReverseProxyConfig().outcome())
+            .isEqualTo(ReverseProxyAuditTracker.Outcome.QUIET);
     }
 }

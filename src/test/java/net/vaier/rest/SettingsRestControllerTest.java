@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import net.vaier.application.GetAppSettingsUseCase;
+import net.vaier.application.GetReverseProxyAuditUseCase;
 import net.vaier.application.GetAppSettingsUseCase.AppSettingsResult;
 import net.vaier.application.GetAppVersionUseCase;
 import net.vaier.application.GetSelfUpdateStatusUseCase;
@@ -10,6 +11,8 @@ import net.vaier.application.UpdateAnthropicApiKeyUseCase;
 import net.vaier.application.UpdateBackupSettingsUseCase;
 import net.vaier.application.UpdateDiskMonitorSettingsUseCase;
 import net.vaier.application.UpdateSmtpSettingsUseCase;
+import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.SelfUpdateStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +20,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
@@ -35,6 +40,7 @@ class SettingsRestControllerTest {
     @Mock SetSurvivalKitPassphraseUseCase setSurvivalKitPassphraseUseCase;
     @Mock UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase;
     @Mock GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase;
+    @Mock GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -234,5 +240,40 @@ class SettingsRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         verify(updateAnthropicApiKeyUseCase).updateAnthropicApiKey("  ");
+    }
+
+    // --- the reverse proxy audit (#354): read-only, and silent when there is nothing wrong ---
+
+    @Test
+    void getReverseProxyAudit_saysNothingIsWrongWithACleanConfig() {
+        when(getReverseProxyAuditUseCase.getReverseProxyAudit())
+                .thenReturn(ReverseProxyAudit.of(ReverseProxyConfig.empty()));
+
+        ResponseEntity<SettingsRestController.ReverseProxyAuditResponse> response =
+                controller.getReverseProxyAudit();
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody().findings()).isEmpty();
+        assertThat(response.getBody().summary()).isEmpty();
+    }
+
+    @Test
+    void getReverseProxyAudit_namesEachBrokenEntry() {
+        when(getReverseProxyAuditUseCase.getReverseProxyAudit())
+                .thenReturn(ReverseProxyAudit.of(ReverseProxyConfig.builder()
+                        .middlewares(List.of(ReverseProxyConfig.ConfiguredMiddleware.builder()
+                                .protocol(ReverseProxyConfig.Protocol.HTTP)
+                                .name("orphaned-redirect").build()))
+                        .build()));
+
+        ResponseEntity<SettingsRestController.ReverseProxyAuditResponse> response =
+                controller.getReverseProxyAudit();
+
+        assertThat(response.getBody().findings()).hasSize(1);
+        assertThat(response.getBody().findings().get(0).entry()).isEqualTo("orphaned-redirect");
+        assertThat(response.getBody().findings().get(0).kind()).isEqualTo("UNREFERENCED_MIDDLEWARE");
+        assertThat(response.getBody().findings().get(0).message()).contains("no router");
+        // The lead sentence is the domain's, carried through rather than re-phrased at the edge.
+        assertThat(response.getBody().summary()).contains("Vaier changed nothing");
     }
 }
