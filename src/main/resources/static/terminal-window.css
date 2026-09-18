@@ -323,29 +323,25 @@ body.tw {
 
 @media (max-width: 720px) {
     .tw-keys { display: flex; }
-    /* The top bar stays one line: smaller action buttons, the status truncates, and the buttons scroll
-       sideways rather than wrapping the bar to a second row (which would eat terminal height).
-       `flex: 0 1 auto` with `min-width: 0` is what makes that true, and its absence was a real bug rather
-       than a tuning problem: the base rule says `flex: none`, so the strip sized to its contents however
-       narrow the screen, its own overflow-x never engaged, and the bar's minimum width became the whole row
-       of buttons. On a phone that pushed the last of them off the right edge with no way to reach them, and
-       left the terminal fitting itself to a box wider than the screen. */
-    .tw-bar { gap: 6px; padding: 6px 8px; }
-    .tw-name { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    /* The top bar is two rows on a phone, not one. The first is the machine and its verbs; the second is
+       whatever the status has to say, and it exists only while it has something to say. One line could not
+       hold all three: the name was `flex: none`, so its ellipsis never engaged and a long name pushed the
+       verbs off the right edge; and the status was the first thing to give way, so a lost connection shrank
+       to three dots with the Reconnect button clipped out of reach — on the screen where it mattered most. */
+    .tw-bar { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px; }
+    .tw-name { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* The verbs lose their words and keep their glyphs. Five labelled buttons cannot fit a phone, and the
        answer that fits is not to drop one of them — the word survives on aria-label and title, so nothing
-       is lost but the width. Square, and a thumb's width across. */
+       is lost but the width. Square, a thumb's width across, and never scrolled: the name yields instead. */
     .tw-btn-lbl { display: none; }
     .tw-btn { width: 38px; padding: 0; min-height: 38px; justify-content: center; }
     .tw-ico { width: 17px; height: 17px; }
-    .tw-actions { flex: 0 1 auto; min-width: 0; gap: 5px; overflow-x: auto; scrollbar-width: none; }
-    .tw-actions::-webkit-scrollbar { display: none; }
-    /* The status gives way before the verbs do: it is usually empty, and a verb you cannot reach is worse
-       than a sentence you cannot finish. */
-    .tw-status { flex: 0 1 auto; }
+    .tw-actions { flex: none; gap: 5px; }
+    .tw-status { flex: 1 0 100%; order: 1; white-space: normal; overflow: visible; line-height: 1.45; }
+    .tw-status:empty { display: none; }
     /* The status's own button keeps its words: it appears one at a time, says something a glyph cannot
-       ("Clear the pinned key"), and is not part of the row that had to fit. */
-    .tw-status-btn { width: auto; padding: 4px 9px; min-height: 30px; font-size: 12.5px; }
+       ("Clear the pinned key"), and now has a whole row to say it on. */
+    .tw-status-btn { width: auto; margin: 4px 0 0; padding: 4px 10px; min-height: 30px; font-size: 12.5px; }
     /* The panel is already most of a phone screen, so it drops its indent and its card stacks. */
     /* A phone gives the sheet nearly the whole screen: the code box and the approval button are the only
        things on it, and a centred card with a margin all round would leave neither room. Inset by a hair

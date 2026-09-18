@@ -538,6 +538,10 @@
 
     buildKeyBar();
     window.addEventListener('resize', refit);
+    // The bar grows a row when the status speaks (a lost connection, on a phone) and loses it when the shell
+    // is back. Neither is a window resize, so the terminal is watched directly or its last rows would be cut
+    // off under the message.
+    if (window.ResizeObserver) new ResizeObserver(refit).observe($('twTerm'));
     // The soft keyboard shrinks the visual viewport but not the layout viewport, which would leave the terminal
     // (and the key row) hidden behind the keyboard. Bind the page height to the visual viewport so the content —
     // and the focused shell — sits above it. Desktop has no keyboard, so this just tracks the window.
