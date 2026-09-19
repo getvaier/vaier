@@ -38,6 +38,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -575,6 +576,36 @@ class ChatServiceTest {
         verify(forConversing).converse(eq("sk-ant-api03-the-key"),
             eq(ChatPrompt.forErrand("example.com", errand.nextDue().atZone(OSLO), Memory.empty(), errand).text()),
             eq(List.of()), eq(errand.instruction()), eq(TOOLS), any());
+    }
+
+    /**
+     * An errand starts a new session: the operator's kept conversation is forgotten before Marvin sets off,
+     * so the report opens a fresh thread instead of piling on yesterday's. Forgotten before, not after — the
+     * forgetting is the start of the run, whatever the run then finds.
+     */
+    @Test
+    void run_startsANewSession_forgettingTheKeptConversationBeforeItRuns() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        Errand errand = due();
+        answering("colina27 has 3 updates.");
+
+        service.run(errand, TOOLS);
+
+        InOrder inOrder = inOrder(forPersistingConversations, forConversing);
+        inOrder.verify(forPersistingConversations).forget(GEIR);
+        inOrder.verify(forConversing).converse(anyString(), anyString(), anyList(), anyString(), anyList(), any());
+    }
+
+    /** A watch that finds nothing still started afresh: the new session is the run's, not the report's. */
+    @Test
+    void run_thatFoundNothingToReport_stillStartedANewSession() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        Errand errand = due();
+        answering(ErrandReport.NOTHING_TO_REPORT);
+
+        service.run(errand, TOOLS);
+
+        verify(forPersistingConversations).forget(GEIR);
     }
 
     @Test

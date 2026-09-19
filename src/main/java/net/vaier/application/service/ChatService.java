@@ -283,9 +283,10 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     }
 
     /**
-     * One errand, run with nobody watching. It starts fresh — no history, because the thread is the
-     * operator's and an errand is not part of it; what carries across runs is Memory, and that is in the
-     * prompt. The answer is mailed unless the report says there was nothing to say, kept as a turn so the
+     * One errand, run with nobody watching. It starts a new session: the operator's kept conversation is
+     * forgotten first, so the report opens a fresh thread rather than piling on yesterday's, and the model
+     * is given no history — what carries across runs is Memory, and that is in the prompt. The answer is
+     * mailed unless the report says there was nothing to say, kept as the new thread's first turn so the
      * next question knows what was found, and the pane is nudged so it appears without being asked for.
      *
      * <p>An answer that could not be made moves the errand on all the same, marked "failed". Nobody is
@@ -298,6 +299,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         VaierConfig configured = config.orElseThrow();
 
         ZonedDateTime now = now();
+        forPersistingConversations.forget(errand.operator());
         String outcome;
         try {
             StringBuilder answer = new StringBuilder();
