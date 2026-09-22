@@ -25,6 +25,13 @@ spring:
 server:
   port: 8080
   address: 0.0.0.0
+  # The Explorer's shell is 600 KB of script, and a boot reads a dozen JSON lists of 10-16 KB; gzip makes
+  # both a fifth of that on a phone. Only these types: an event stream must never be buffered, and a
+  # download is bytes.
+  compression:
+    enabled: true
+    min-response-size: 1024
+    mime-types: text/html,text/css,text/javascript,application/javascript,application/json,image/svg+xml,text/plain
 
 logging:
   level:
