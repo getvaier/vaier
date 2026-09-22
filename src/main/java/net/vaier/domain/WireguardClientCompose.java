@@ -38,6 +38,10 @@ public final class WireguardClientCompose {
         b.append("    volumes:\n");
         b.append("      - ").append(configVolume).append("\n");
         b.append("      - /lib/modules:/lib/modules:ro\n");
+        if (hostNetwork) {
+            // A killed host-network container leaves wg0 behind; the init script clears it before wg-quick.
+            b.append("      - ./wireguard-client/custom-cont-init.d:/custom-cont-init.d:ro\n");
+        }
         if (inContainerSysctl) {
             b.append("    sysctls:\n");
             b.append("      - net.ipv4.conf.all.src_valid_mark=1\n");

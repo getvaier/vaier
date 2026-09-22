@@ -29,6 +29,14 @@ class WireguardClientComposeTest {
     }
 
     @Test
+    void hostNetwork_mountsTheCustomInitDirThatClearsAStaleWg0() {
+        // A killed host-network container leaves wg0 behind, and wg-quick refuses to start over it.
+        assertThat(WireguardClientCompose.hostNetwork())
+            .contains("- ./wireguard-client/custom-cont-init.d:/custom-cont-init.d:ro");
+        assertThat(WireguardClientCompose.standalone()).doesNotContain("custom-cont-init.d");
+    }
+
+    @Test
     void bothShareTheCommonSkeleton() {
         for (String block : new String[] { WireguardClientCompose.standalone(),
                                            WireguardClientCompose.hostNetwork() }) {

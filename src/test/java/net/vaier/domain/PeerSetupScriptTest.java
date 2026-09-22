@@ -44,6 +44,23 @@ class PeerSetupScriptTest {
     }
 
     @Test
+    void generate_installsAnInitScriptThatClearsAStaleWg0BeforeEveryTunnelStart() {
+        // Colina 27, 2026-09-21: a Docker daemon restart killed wireguard-client, wg0 outlived it in the
+        // host netns, and the restarted container failed with "wg0 already exists" — dead until a reboot.
+        String s = script();
+        String init = "$INSTALL_DIR/wireguard-client/custom-cont-init.d/10-clear-stale-wg0";
+
+        assertThat(s).contains("INIT_SCRIPT_PATH=\"" + init + "\"");
+        assertThat(s).contains("cat > \"$INIT_SCRIPT_PATH\" << 'INIT_SCRIPT'");
+        assertThat(s).contains("ip link delete wg0 2>/dev/null || true\nINIT_SCRIPT");
+        // linuxserver.io warns about a custom-init script that is not root-owned; newer builds refuse it.
+        assertThat(s).contains("sudo chown root:root \"$INIT_SCRIPT_PATH\"");
+        assertThat(s).contains("sudo chmod 755 \"$INIT_SCRIPT_PATH\"");
+        assertThat(s.indexOf(init)).isLessThan(s.indexOf("\ndocker_compose_up\n"));
+        assertThat(s).doesNotContain("so it survives Docker restart");
+    }
+
+    @Test
     void generate_namesTheMachineTheScriptIsFor() {
         assertThat(script()).contains("VAIER_MACHINE='NUC 02'");
     }

@@ -69,7 +69,7 @@ public final class PeerSetupScript {
         sb.append("\n");
         sb.append("# --- Create directory structure ---\n");
         sb.append("echo \"Setting up $INSTALL_DIR...\"\n");
-        sb.append("mkdir -p \"$INSTALL_DIR/wireguard-client/config/wg_confs\"\n");
+        sb.append("mkdir -p \"$INSTALL_DIR/wireguard-client/config/wg_confs\" \"$INSTALL_DIR/wireguard-client/custom-cont-init.d\"\n");
         sb.append("\n");
         sb.append("# --- Write .env file ---\n");
         sb.append("cat > \"$INSTALL_DIR/.env\" << ENV_FILE\n");
@@ -92,6 +92,19 @@ public final class PeerSetupScript {
         sb.append("sed -i 's|AllowedIPs.*=.*0\\.0\\.0\\.0/0.*|AllowedIPs = ").append(vpnSubnet).append("|' \"$INSTALL_DIR/wireguard-client/config/wg_confs/wg0.conf\"\n");
         sb.append("\n");
         sb.append("echo \"Created WireGuard config (split tunneling enabled)\"\n");
+        sb.append("\n");
+        // A Docker daemon restart kills the container without wg-quick down, wg0 outlives it in the
+        // host netns, and the restarted container fails with "wg0 already exists" (Colina 27, 2026-09-21).
+        // linuxserver.io runs custom-cont-init.d before activating the tunnel, root-owned + executable only.
+        sb.append("# --- Clear a stale wg0 before every tunnel start (survives Docker daemon restarts) ---\n");
+        sb.append("INIT_SCRIPT_PATH=\"$INSTALL_DIR/wireguard-client/custom-cont-init.d/10-clear-stale-wg0\"\n");
+        sb.append("cat > \"$INIT_SCRIPT_PATH\" << 'INIT_SCRIPT'\n");
+        sb.append("#!/bin/bash\n");
+        sb.append("# wg0 lives in the host netns and outlives a killed container; wg-quick refuses to start over it.\n");
+        sb.append("ip link delete wg0 2>/dev/null || true\n");
+        sb.append("INIT_SCRIPT\n");
+        sb.append("sudo chown root:root \"$INIT_SCRIPT_PATH\"\n");
+        sb.append("sudo chmod 755 \"$INIT_SCRIPT_PATH\"\n");
         sb.append("\n");
         sb.append("# --- Set sysctl on host (cannot use container sysctls with host network mode) ---\n");
         sb.append("sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1\n");
@@ -219,7 +232,6 @@ public final class PeerSetupScript {
         sb.append("\n");
         sb.append(SetupScriptGuard.stamp(peerId));
         sb.append("\n");
-        sb.append("# WireGuard runs in host network mode, so it survives Docker restart\n");
         sb.append("echo \"\"\n");
         sb.append("echo \"=== Setup complete ===\"\n");
         sb.append("echo \"  Install dir:  $INSTALL_DIR\"\n");
