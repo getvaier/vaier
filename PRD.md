@@ -4222,3 +4222,25 @@ absent, which a peer with no handshake yet is.
 requests cost one round trip, the same as one; with the per-request middleware cost now ~1 ms (§6.57) the
 saving would be unmeasurable, and it would have meant a new controller re-stating thirteen DTOs. The
 measurement decides, not the plan.
+
+### 6.59 The bytes shrink: gzip on the shell and every JSON list ✅ (implemented 2026-09-22)
+
+Layer three of "Explorer is slow to load" (§6.57 the edge, §6.58 the server). `explorer-shell.js` is
+597 KB and left the server uncompressed — Traefik has no compress middleware on Vaier's routers, and
+Tomcat's compression was off — so every deploy cost the phone 600 KB before the first paint, and every
+boot pulled a dozen JSON lists of 10–16 KB at full size. Tomcat compression is now on for text and JSON
+(`server.compression` in `application.yml`): HTML, CSS, script, JSON, SVG and plain text, from 1 KB up.
+Deliberately not for `text/event-stream` — a buffered event stream is a broken one — and not for
+downloads, which are bytes.
+
+**What was deliberately not built: long-lived asset caching.** With the edge and the server fixed, the
+fourteen assets' revalidations cost one round trip in parallel (46 ms median on the operator's phone), and
+`no-cache` is what makes a deploy visible on the next reload. Caching them for real means content-hashed
+names, which for static HTML means a build step rewriting every `<script>` and `<link>`; for a solo
+operator who deploys and reloads, a five-minute stale window would be a trap and a hashed-name pipeline
+is machinery a 46 ms cost has not earned. The measurement decides.
+
+**One remaining exec at boot, recorded and left alone:** `/vpn/peers` still runs `wg show wg0 public-key`
+through a Docker exec on every request to render the server context — ~130 ms alone. The key does not
+change while the interface is up; memoising it belongs in the adapter that should own that read, and
+`VpnService` currently execs it directly, so it is a small refactor of its own.
