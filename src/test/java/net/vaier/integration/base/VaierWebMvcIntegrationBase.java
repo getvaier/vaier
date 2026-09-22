@@ -92,6 +92,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
 
+    @MockBean
+    protected InspectConsoleCertificateUseCase inspectConsoleCertificateUseCase;
+
     // --- VPN peer use cases ---
     @MockBean
     protected GetVpnClientsUseCase getVpnClientsUseCase;

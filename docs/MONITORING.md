@@ -146,6 +146,12 @@ Five things are checked, each of them a one-liner over a file Vaier parses on ev
 
 **Where you see it.** The audit runs at startup and once on every five-minute fleet sweep — a local file read costs nothing next to a round of SSH sessions, and a config can rot between restarts, which here are rare. Findings appear in **Settings**, in a block that is drawn only when there are any: a clean config paints nothing and reserves no space. Admins are mailed **on a transition only** — the first sweep that finds something, again whenever the *set* of broken entries changes (a newly broken entry is news; the same one still sitting there is not), and once more when everything is clear again. What you have already been told is kept on disk, so a redeploy cannot turn "on a transition" into "on every deploy".
 
+## Pre-flight
+
+The one place that answers **"is this thing working?"** A misconfiguration — the wildcard record pointing elsewhere, a certificate never issued, WireGuard down, the server's own disk full — used to surface later, as a failed publish or a page a browser warned about, long after the operator had moved on from the cause. The **pre-flight** judges Vaier's own basics from facts it already has or can learn on a path that exists: the wildcard verdict the boot probe took; the certificate the front door actually presents, read off a live TLS handshake from inside the stack (Traefik's self-signed placeholder means none has been issued yet, and one with under a fortnight left means renewal is not happening); whether WireGuard answers at all; and whether this server's own disk is past its threshold.
+
+**Where you see it.** In **Settings**, beside the reverse proxy audit, under the same rule: **a healthy row paints nothing**. Only a failing check appears, as two sentences — what is wrong, and what to do. No separate page and no header badge, because a green badge is a heartbeat and Vaier does not send those. Every "what counts as wrong" is the domain's decision (`PreFlight`); the page only shows the words. Two things it deliberately does not check: the reverse proxy config, which the audit above already covers on the same page, and whether mail actually sends — Vaier keeps no record of a failed send yet, and a guess would be worse than silence. A crash-looping Dex is the one failure no panel inside Vaier can show, since Dex sits behind the only door; that one belongs on the offline page.
+
 ---
 
 ## What the edge blocks

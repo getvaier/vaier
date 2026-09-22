@@ -15,6 +15,20 @@ import net.vaier.domain.ReverseProxyAudit;
 import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.SelfUpdateStatus;
 import org.junit.jupiter.api.Test;
+import java.util.Optional;
+import java.time.Instant;
+import java.time.Duration;
+import net.vaier.domain.PreFlightFinding;
+import net.vaier.domain.MachineType;
+import net.vaier.domain.MachineId;
+import net.vaier.domain.MachineDiskStanding;
+import net.vaier.domain.Machine;
+import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.ConsoleCertificate;
+import net.vaier.application.GetVaierServerUseCase;
+import net.vaier.application.GetMachineDiskStandingsUseCase;
+import net.vaier.application.GetVpnClientsUseCase;
+import net.vaier.application.InspectConsoleCertificateUseCase;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -41,6 +55,10 @@ class SettingsRestControllerTest {
     @Mock UpdateAnthropicApiKeyUseCase updateAnthropicApiKeyUseCase;
     @Mock GetSelfUpdateStatusUseCase getSelfUpdateStatusUseCase;
     @Mock GetReverseProxyAuditUseCase getReverseProxyAuditUseCase;
+    @Mock InspectConsoleCertificateUseCase inspectConsoleCertificateUseCase;
+    @Mock GetVpnClientsUseCase getVpnClientsUseCase;
+    @Mock GetMachineDiskStandingsUseCase getMachineDiskStandingsUseCase;
+    @Mock GetVaierServerUseCase getVaierServerUseCase;
 
     @InjectMocks
     SettingsRestController controller;
@@ -53,6 +71,31 @@ class SettingsRestControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody().version()).isEqualTo("1.0.0");
+    }
+
+    /**
+     * "Is it working?" (#265): composed at the driving edge from what the use cases already hold, judged by the
+     * domain, and carrying only what is wrong — a healthy server answers with an empty list and no summary.
+     */
+    @Test
+    void getPreFlight_composesTheFacts_andReturnsOnlyWhatIsWrong() {
+        when(getAppSettingsUseCase.getSettings()).thenReturn(new AppSettingsResult("example.com", null, null, null,
+            null, null, "NOT_RESOLVING", "Not resolving", "ERROR", "Wildcard DNS is not set up. Create one record.",
+            85, false, 2, "Europe/Oslo", false, false, false, false));
+        when(inspectConsoleCertificateUseCase.inspectConsoleCertificate("vaier.example.com")).thenReturn(
+            Optional.of(new ConsoleCertificate("R11", Instant.now().plus(Duration.ofDays(60)), false)));
+        when(getVpnClientsUseCase.getClients()).thenThrow(new RuntimeException("wg command failed"));
+        Machine server = new Machine(MachineId.generate(), "Vaier server", MachineType.UBUNTU_SERVER, "pk",
+            "10.13.13.1/32", null, null, null, null, null, null, null, true, null, DeviceCategory.SERVER, null);
+        when(getVaierServerUseCase.getVaierServerMachine()).thenReturn(server);
+        when(getMachineDiskStandingsUseCase.getMachineDiskStandings()).thenReturn(List.of(
+            new MachineDiskStanding(server.id(), "/", 40, 85, 0, 2)));
+
+        SettingsRestController.PreFlightResponse body = controller.getPreFlight().getBody();
+
+        assertThat(body.findings()).extracting(SettingsRestController.PreFlightFindingResponse::check)
+            .containsExactly(PreFlightFinding.Check.WILDCARD_DNS.name(), PreFlightFinding.Check.WIREGUARD.name());
+        assertThat(body.summary()).isEqualTo("2 things need attention before Vaier works as expected.");
     }
 
     @Test

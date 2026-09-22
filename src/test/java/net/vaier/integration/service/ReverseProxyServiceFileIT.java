@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,8 +35,9 @@ class ReverseProxyServiceFileIT {
     void setUp() {
         String configFilePath = tempDir.resolve("remote-apps.yml").toString();
         adapter = new TraefikReverseProxyAdapter(configFilePath, "http://localhost:19999", "example.com");
+        // The console certificate is not this test's business: a look-only port that finds no front door.
         reverseProxyService = new ReverseProxyService(adapter, adapter,
-                new ReverseProxyAuditStateFileAdapter(tempDir.toString()));
+                new ReverseProxyAuditStateFileAdapter(tempDir.toString()), host -> Optional.empty());
     }
 
     @Test

@@ -4,16 +4,20 @@ import net.vaier.application.AddReverseProxyRouteUseCase;
 import net.vaier.application.AuditReverseProxyConfigUseCase;
 import net.vaier.application.DeleteReverseProxyRouteUseCase;
 import net.vaier.application.GetReverseProxyAuditUseCase;
+import net.vaier.application.InspectConsoleCertificateUseCase;
 import net.vaier.application.GetReverseProxyRoutesUseCase;
 import net.vaier.domain.ReverseProxyAudit;
+import net.vaier.domain.ConsoleCertificate;
 import net.vaier.domain.ReverseProxyAuditTracker;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.port.ForPersistingReverseProxyAuditState;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
+import net.vaier.domain.port.ForInspectingConsoleCertificates;
 import net.vaier.domain.port.ForReadingReverseProxyConfig;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ReverseProxyService implements
@@ -21,17 +25,21 @@ public class ReverseProxyService implements
     DeleteReverseProxyRouteUseCase,
     GetReverseProxyRoutesUseCase,
     GetReverseProxyAuditUseCase,
-    AuditReverseProxyConfigUseCase {
+    AuditReverseProxyConfigUseCase,
+    InspectConsoleCertificateUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForReadingReverseProxyConfig forReadingReverseProxyConfig;
     private final ReverseProxyAuditTracker auditTracker;
+    private final ForInspectingConsoleCertificates forInspectingConsoleCertificates;
 
     public ReverseProxyService(ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes,
                                ForReadingReverseProxyConfig forReadingReverseProxyConfig,
-                               ForPersistingReverseProxyAuditState reverseProxyAuditState) {
+                               ForPersistingReverseProxyAuditState reverseProxyAuditState,
+                               ForInspectingConsoleCertificates forInspectingConsoleCertificates) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forReadingReverseProxyConfig = forReadingReverseProxyConfig;
+        this.forInspectingConsoleCertificates = forInspectingConsoleCertificates;
         // The domain owns the port call; this service only hands it in. On disk, so a redeploy cannot wipe
         // what admins were told and turn a transition-only alert into a per-deploy one.
         this.auditTracker = new ReverseProxyAuditTracker(reverseProxyAuditState);
@@ -68,5 +76,10 @@ public class ReverseProxyService implements
     @Override
     public ReverseProxyAuditTracker.Verdict auditReverseProxyConfig() {
         return auditTracker.observe(getReverseProxyAudit());
+    }
+
+    @Override
+    public Optional<ConsoleCertificate> inspectConsoleCertificate(String host) {
+        return forInspectingConsoleCertificates.inspect(host);
     }
 }

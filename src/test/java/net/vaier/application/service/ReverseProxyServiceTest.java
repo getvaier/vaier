@@ -1,11 +1,13 @@
 package net.vaier.application.service;
 
 import net.vaier.application.AddReverseProxyRouteUseCase.ReverseProxyRouteUco;
+import net.vaier.domain.ConsoleCertificate;
 import net.vaier.domain.ReverseProxyAuditState;
 import net.vaier.domain.ReverseProxyAuditTracker;
 import net.vaier.domain.ReverseProxyConfig;
 import net.vaier.domain.ReverseProxyFinding;
 import net.vaier.domain.ReverseProxyRoute;
+import net.vaier.domain.port.ForInspectingConsoleCertificates;
 import net.vaier.domain.port.ForPersistingReverseProxyAuditState;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForReadingReverseProxyConfig;
@@ -18,8 +20,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
+import java.time.Instant;
 import java.util.Optional;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,6 +39,9 @@ class ReverseProxyServiceTest {
 
     @Mock
     ForPersistingReverseProxyAuditState reverseProxyAuditState;
+
+    @Mock
+    ForInspectingConsoleCertificates forInspectingConsoleCertificates;
 
     @InjectMocks
     ReverseProxyService service;
@@ -229,5 +235,13 @@ class ReverseProxyServiceTest {
 
         assertThat(service.auditReverseProxyConfig().outcome())
             .isEqualTo(ReverseProxyAuditTracker.Outcome.QUIET);
+    }
+
+    @Test
+    void inspectConsoleCertificate_handsThePortsAnswerThrough() {
+        ConsoleCertificate presented = new ConsoleCertificate("R11", Instant.parse("2026-12-01T00:00:00Z"), false);
+        when(forInspectingConsoleCertificates.inspect("vaier.example.com")).thenReturn(Optional.of(presented));
+
+        assertThat(service.inspectConsoleCertificate("vaier.example.com")).contains(presented);
     }
 }

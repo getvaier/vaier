@@ -1661,6 +1661,8 @@ select.ex-input { cursor: pointer; }
     font-size: 13.5px;
     line-height: 1.45;
 }
+/* The pre-flight's second line: what to do, under what is wrong. */
+.ex-audit-remedy { margin-top: 3px; color: var(--text-dim); font-size: 13px; }
 
 .ex-kit-name { color: var(--text); font-weight: 600; }
 .ex-kit-why { color: var(--text-muted); font-size: 13px; margin-top: 3px; line-height: 1.45; }

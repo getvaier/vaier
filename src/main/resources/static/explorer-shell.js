@@ -7496,7 +7496,7 @@
         if (S.settings.state === 'loading') return;
         S.settings = { ...S.settings, state: 'loading' };
         try {
-            const [cfg, ver, upd, audit] = await Promise.all([
+            const [cfg, ver, upd, audit, preflight] = await Promise.all([
                 fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
                 fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 // Whether a newer Vaier is being served, and how the last update went. Read with the rest of
@@ -7508,11 +7508,16 @@
                 // almost always an empty list.
                 fetch('/settings/reverse-proxy-audit', { cache: 'no-store' })
                     .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+                // "Is it working?" (#265) — Vaier's judgement of its own basics: the wildcard record, the
+                // certificate on its front door, the tunnel, the disk under it. Read with the page, never
+                // polled, and almost always an empty list.
+                fetch('/settings/pre-flight', { cache: 'no-store' })
+                    .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
             ]);
             S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
-                version: (ver || {}).version || '', update: upd || {}, audit: audit || {} };
+                version: (ver || {}).version || '', update: upd || {}, audit: audit || {}, preflight: preflight || {} };
         } catch (e) {
-            S.settings = { state: 'error', config: null, version: '', update: {}, audit: {} };
+            S.settings = { state: 'error', config: null, version: '', update: {}, audit: {}, preflight: {} };
         }
         render();
     }
@@ -7880,6 +7885,28 @@
             const upActs = el('div', 'ex-lactions is-static');
             upActs.appendChild(selVerb('arrowup', 'Update Vaier', 'ex-btn is-accent', () => updateVaier()));
             body.appendChild(upActs);
+        }
+
+        // --- the pre-flight: is it working? Nothing at all unless something is wrong (#265) ---
+        //
+        // The same rule as the audit below it: a healthy server paints nothing and reserves no space. Each row
+        // is two of the domain's sentences — what is wrong, and what to do — and nothing here re-judges a fact.
+        const pre = S.settings.preflight || {};
+        const preFindings = pre.findings || [];
+        if (preFindings.length) {
+            body.appendChild(section('Is it working?'));
+            const preLead = el('div', 'ex-runline');
+            preLead.textContent = pre.summary || '';
+            body.appendChild(preLead);
+            const preList = el('div', 'ex-audit-list');
+            preFindings.forEach((f) => {
+                const row = el('div', 'ex-audit-row');
+                const what = el('div'); what.textContent = f.message;
+                const fix = el('div', 'ex-audit-remedy'); fix.textContent = f.remedy;
+                row.append(what, fix);
+                preList.appendChild(row);
+            });
+            body.appendChild(preList);
         }
 
         // --- the reverse proxy audit: nothing at all unless something is wrong ---
