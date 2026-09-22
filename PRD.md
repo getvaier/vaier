@@ -1108,6 +1108,7 @@ chain). Address selection (tunnel IP for peers, `lanAddress` for LAN servers) is
   until the shell's WebSocket is connected (tooltip explains why); a refused clipboard read reports itself
   and points at `Ctrl+V` / `⌘V` as the fallback. Gives desktop a discoverable alternative to the keyboard
   shortcut too.
+- **Copy button in the terminal window's top bar ✅ 2026-09-22.** xterm.js 5 has no touch selection and the shell's touch handler turns a drag into a scroll on purpose, so on a phone nothing in a shell could be selected and nothing could leave it — a blocker for an operator driving Claude Code from the pop-out shell. **Copy** does the obvious thing twice over: with a mouse selection it copies that and stops; without one it opens a sheet over the shell showing the screen as ordinary selectable page text (wrapped continuations glued back into one line, trailing blank rows dropped), with **Copy all of this** and **Show earlier output** for the scrollback. It works while the shell says *Connection lost*, since the text is already in the window. The clipboard API is asked first; a browser that refuses gets the page's own copy command over a selection of the sheet. Duplicate took a new "another window" glyph so the two-rectangles glyph could mean copy.
 
 **Backlog:** SFTP *over the terminal session itself* remains out of scope — the terminal's V1 scope is the
 interactive shell plus saved snippets. (Vaier does speak SFTP now, but as its own feature: see **6.20

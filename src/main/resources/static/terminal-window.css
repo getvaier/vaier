@@ -147,6 +147,27 @@ body.tw {
 }
 .tw-modal-close:hover { color: var(--text); border-color: var(--border-hi); }
 .tw-modal-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* --- Copy, for a finger --------------------------------------------------------------------------------
+
+   The shell's text once more as page text: black like the terminal so it reads as the same screen, but
+   selectable, because that is the one thing the terminal cannot be on a phone. */
+.tw-copy-modal { width: min(760px, 100%); }
+.tw-copy-hint { margin: 0; padding: 10px 16px 0; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.tw-copy-text {
+    flex: 1 1 auto; min-height: 120px;
+    margin: 12px 16px 0; padding: 12px;
+    overflow: auto;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    font-family: var(--mono); font-size: 12px; line-height: 1.45; color: var(--text);
+    background: #000000;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+    user-select: text; -webkit-user-select: text; cursor: text;
+}
+.tw-copy-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tw-copy-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 16px 16px; }
+.tw-copy-all { border-color: var(--accent); color: var(--accent); }
+.tw-copy-all:hover { background: var(--accent); color: #000000; }
 .tw-claude {
     display: flex;
     flex-direction: column;

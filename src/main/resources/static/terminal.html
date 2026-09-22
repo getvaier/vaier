@@ -34,6 +34,23 @@
             <div class="tw-claude" id="twClaude"></div>
         </div>
     </div>
+    <!-- Copy, for a finger. xterm.js draws text you cannot select on a phone, and Vaier's touch handler turns a
+         drag into a scroll on purpose — so the shell's text is shown here, once more, as ordinary page text
+         the OS knows how to select. Desktop with a selection never sees this: Copy takes the selection directly. -->
+    <div class="tw-scrim" id="twCopyScrim" hidden>
+        <div class="tw-modal tw-copy-modal" role="dialog" aria-modal="true" aria-labelledby="twCopyTitle">
+            <div class="tw-modal-head">
+                <span class="tw-modal-title" id="twCopyTitle">Copy from the shell</span>
+                <button type="button" class="tw-modal-close" id="twCopyClose" aria-label="Close">&#215;</button>
+            </div>
+            <p class="tw-copy-hint">Select what you need, or copy all of it.</p>
+            <pre class="tw-copy-text" id="twCopyText" tabindex="0"></pre>
+            <div class="tw-copy-acts">
+                <button type="button" class="tw-btn" id="twCopyEarlier">Show earlier output</button>
+                <button type="button" class="tw-btn tw-copy-all" id="twCopyAll">Copy all of this</button>
+            </div>
+        </div>
+    </div>
     <div class="tw-main">
         <div class="tw-term" id="twTerm"></div>
     </div>

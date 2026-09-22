@@ -126,6 +126,7 @@
     const ICON = {
         claude: '<path d="M8 1.7v12.6M1.7 8h12.6"/><path d="M5.2 5.2l5.6 5.6M10.8 5.2l-5.6 5.6"/>',
         copy:   '<rect x="5.5" y="5.5" width="8" height="8.2" rx="1.2"/><path d="M3.4 10.5H3a1 1 0 0 1-1-1V3.2a1 1 0 0 1 1-1h6.3a1 1 0 0 1 1 1v.4"/>',
+        window: '<path d="M6.8 2.6H3.2a1 1 0 0 0-1 1v9.2a1 1 0 0 0 1 1h9.6a1 1 0 0 0 1-1V9.2"/><path d="M9.6 2.6h4.2v4.2M13.8 2.6 8.2 8.2"/>',
         clip:   '<rect x="3" y="2.6" width="10" height="11.4" rx="1.2"/><path d="M5.8 2.6V2a.9.9 0 0 1 .9-.9h2.6a.9.9 0 0 1 .9.9v.6z"/><path d="M5.6 7.2h4.8M5.6 9.7h4.8M5.6 12.2h2.8"/>',
         key:    '<circle cx="5.4" cy="10.6" r="2.9"/><path d="M7.5 8.5l5.7-5.7"/><path d="M11.1 4.9l1.5 1.5M12.3 3.7l1.5 1.5"/>',
         cross:  '<path d="M4 4l8 8M12 4l-8 8"/>',
@@ -144,8 +145,10 @@
         window.open('terminal.html?machine=' + encodeURIComponent(machine)
             + '&id=' + encodeURIComponent(machineId) + '&pane=' + encodeURIComponent(pane),
             'vaier-shell-' + encodeURIComponent(pane), 'popup,width=1024,height=680');
-    }, 'copy');
+    }, 'window');
     btnDup.title = 'Open a second, separate shell on ' + machine;
+    const btnCopy = actionButton('Copy', copyFromShell, 'copy');
+    btnCopy.title = 'Copy from this shell: the selection if there is one, otherwise the screen as text you can select';
     const btnPaste = actionButton('Paste', pasteClipboard, 'clip');
     const btnPassword = actionButton('Send password', () => send({ type: 'send-password' }), 'key');
     const btnEnd = actionButton('Exit shell', endShell, 'cross');
@@ -161,12 +164,14 @@
     $('twClaudeClose').onclick = () => setClaudePanel(false);
     $('twScrim').onclick = (e) => { if (e.target === $('twScrim')) setClaudePanel(false); };
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !$('twScrim').hidden) { e.preventDefault(); setClaudePanel(false); }
+        if (e.key !== 'Escape') return;
+        if (!$('twScrim').hidden) { e.preventDefault(); setClaudePanel(false); }
+        if (!$('twCopyScrim').hidden) { e.preventDefault(); setCopySheet(false); }
     });
     btnClaude.hidden = true;
     btnClaude.setAttribute('aria-expanded', 'false');
     btnClaude.setAttribute('aria-controls', 'twScrim');
-    $('twActions').append(btnClaude, btnDup, btnPaste, btnPassword, btnEnd);
+    $('twActions').append(btnClaude, btnDup, btnCopy, btnPaste, btnPassword, btnEnd);
     refreshActions();
 
     function actionButton(label, onClick, icon) {
@@ -229,6 +234,73 @@
             if (claude) claude.leave();
             term.focus();
         }
+    }
+
+    // --- Copy, for a finger ---------------------------------------------------------------------------------
+    //
+    // xterm.js 5 has no touch selection, and attachTouchScroll turns a drag into a scroll on purpose, so on a
+    // phone nothing in the shell can be selected at all. Copy therefore does the obvious thing twice over: with
+    // a selection (a mouse) it copies that and stops; without one it shows the screen as plain page text the OS
+    // already knows how to select, plus one button for the whole of it.
+    let _copyAll = false;
+    $('twCopyClose').onclick = () => setCopySheet(false);
+    $('twCopyScrim').onclick = (e) => { if (e.target === $('twCopyScrim')) setCopySheet(false); };
+    $('twCopyEarlier').onclick = () => { _copyAll = !_copyAll; fillCopySheet(); };
+    $('twCopyAll').onclick = () => writeClipboard($('twCopyText').textContent, true);
+
+    function copyFromShell() {
+        if (term.hasSelection()) { writeClipboard(term.getSelection(), false); return; }
+        _copyAll = false;
+        setCopySheet(true);
+    }
+
+    // The buffer's lines as text. A wrapped continuation is glued back onto its line, so a long command copies
+    // as the one line it was typed as; trailing blank rows below the last output are dropped.
+    function shellText(all) {
+        const buf = term.buffer.active;
+        const from = all ? 0 : buf.viewportY;
+        const to = all ? buf.length : Math.min(buf.length, buf.viewportY + term.rows);
+        const lines = [];
+        for (let i = from; i < to; i++) {
+            const line = buf.getLine(i);
+            const text = line ? line.translateToString(true) : '';
+            if (line && line.isWrapped && lines.length) lines[lines.length - 1] += text;
+            else lines.push(text);
+        }
+        while (lines.length && !lines[lines.length - 1]) lines.pop();
+        return lines.join('\n');
+    }
+
+    function fillCopySheet() {
+        const pre = $('twCopyText');
+        pre.textContent = shellText(_copyAll);
+        $('twCopyEarlier').textContent = _copyAll ? 'Show only the screen' : 'Show earlier output';
+        $('twCopyEarlier').hidden = !_copyAll && term.buffer.active.viewportY === 0;
+        pre.scrollTop = pre.scrollHeight;   // the newest output is what was just asked for
+    }
+
+    function setCopySheet(open) {
+        const scrim = $('twCopyScrim');
+        if (open === !scrim.hidden) return;
+        scrim.hidden = !open;
+        if (open) { fillCopySheet(); $('twCopyText').focus(); } else { term.focus(); }
+    }
+
+    // The clipboard is asked politely first; a browser that refuses (or has no navigator.clipboard) gets the
+    // page's own copy command over a selection of the sheet's text, which every browser still honours.
+    async function writeClipboard(text, fromSheet) {
+        if (!text) { setStatus('Nothing to copy.', true); return; }
+        let ok = false;
+        try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { ok = false; }
+        if (!ok && fromSheet) {
+            const range = document.createRange(); range.selectNodeContents($('twCopyText'));
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            sel.removeAllRanges();
+        }
+        if (ok) { setStatus('Copied.'); setCopySheet(false); return; }
+        if (!fromSheet) { _copyAll = false; setCopySheet(true); }
+        setStatus('The browser did not share the clipboard. Select the text and copy it by hand.', true);
     }
 
     // Pasting from a button, not only from Ctrl/Cmd+V: a soft keyboard has no Ctrl at all, and a browser
