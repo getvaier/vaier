@@ -110,6 +110,8 @@ This project follows strict TDD. Always write a failing test before writing any 
 
 Never write implementation code without a corresponding test written first. PRs that add features without prior failing tests are not acceptable.
 
+Write those tests with the `write-tests` skill: it says which layer owns a behaviour's test, when a new fact is a row in an existing table rather than a new method, and what never gets a test. Only Java code has tests — no JavaScript, CSS, HTML, shell or YAML test frameworks. A test that restates a fact a sibling or another layer already proves is treated as a defect, not as extra safety.
+
 ## Keeping docs in sync
 
 After any change to the feature set — new features, changed behaviour, removed functionality, renamed concepts — update `README.md`, `PRD.md`, `UBIQUITOUS_LANGUAGE.md`, and `web/index.html` before committing:
