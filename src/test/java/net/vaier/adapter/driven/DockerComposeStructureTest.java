@@ -915,18 +915,38 @@ class DockerComposeStructureTest {
             .as("crowdsec-bouncer must be the first entry in the entrypoint's middleware chain")
             .contains("--entrypoints.websecure.http.middlewares=crowdsec-bouncer@file,vaier-security-headers@file");
 
-        // ...and the middleware it names has to exist and point at the bouncer's forwardAuth
-        // endpoint, or Traefik disables every websecure router.
+        // The bouncer is Traefik's CrowdSec plugin in STREAM mode, not a forward-auth hop. The standalone
+        // bouncer it replaced asked the Security Engine about every request, and under one page load's
+        // burst that SQLite-backed API serialised to a second per request. Pinned like every upstream.
+        assertThat(traefikCommand())
+            .contains("--experimental.plugins.bouncer.modulename=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin")
+            .anyMatch(arg -> arg.matches("--experimental\\.plugins\\.bouncer\\.version=v\\d+\\.\\d+\\.\\d+"));
+
+        // ...and the middleware it names has to exist and be that plugin, or Traefik disables every
+        // websecure router.
         Path configDir = runTraefikEntrypoint(tempDir);
         Map<String, Object> rendered = (Map<String, Object>) new Yaml()
             .load(Files.readString(configDir.resolve("security.yml")));
         Map<String, Object> middlewares =
             (Map<String, Object>) ((Map<String, Object>) rendered.get("http")).get("middlewares");
-        Map<String, Object> forwardAuth =
-            (Map<String, Object>) ((Map<String, Object>) middlewares.get("crowdsec-bouncer")).get("forwardAuth");
+        Map<String, Object> bouncer = (Map<String, Object>) ((Map<String, Object>)
+            ((Map<String, Object>) middlewares.get("crowdsec-bouncer")).get("plugin")).get("bouncer");
 
-        assertThat(forwardAuth.get("address")).isEqualTo("http://crowdsec-bouncer:8080/api/v1/forwardAuth");
-        assertThat(forwardAuth.get("trustForwardHeader")).isEqualTo(true);
+        assertThat(bouncer.get("crowdsecMode")).isEqualTo("stream");
+        assertThat(bouncer.get("crowdsecLapiHost")).isEqualTo("crowdsec:8080");
+        // An engine that cannot be reached keeps the LAST list in force rather than turning every route away.
+        assertThat(bouncer.get("updateMaxFailure")).isEqualTo(-1);
+        // The key reaches the plugin through the file provider's own templating, from the same
+        // install.sh-generated secret crowdsec self-registers at boot — it is never written to disk.
+        assertThat(bouncer.get("crowdsecLapiKey")).isEqualTo("{{ env \"CROWDSEC_BOUNCER_API_KEY\" }}");
+        Map<String, Object> traefik = (Map<String, Object>) composeServices().get("traefik");
+        assertThat((String) ((Map<String, Object>) traefik.get("environment")).get("CROWDSEC_BOUNCER_API_KEY"))
+            .as("a blank key must stop the stack at config-parse time, as it did for the old bouncer")
+            .startsWith("${VAIER_CROWDSEC_BOUNCER_KEY:?");
+        // Traefik keeps the downloaded plugin here, so a restart never depends on the plugin registry.
+        assertThat((List<String>) traefik.get("volumes")).contains("./traefik/plugins-storage:/plugins-storage");
+        // ...and the standalone bouncer container is gone.
+        assertThat(composeServices()).doesNotContainKey("crowdsec-bouncer");
     }
 
     @Test

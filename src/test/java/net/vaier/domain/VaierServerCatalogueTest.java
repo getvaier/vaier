@@ -27,7 +27,6 @@ class VaierServerCatalogueTest {
 
         // The edge's threat detection.
         assertThat(VaierServerCatalogue.isExcluded("crowdsec")).isTrue();
-        assertThat(VaierServerCatalogue.isExcluded("crowdsec-bouncer")).isTrue();
 
         // The offline placeholder and the log rotator.
         assertThat(VaierServerCatalogue.isExcluded("vaier-offline")).isTrue();

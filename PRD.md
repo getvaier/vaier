@@ -3853,6 +3853,47 @@ must not fetch `claude-sign-in` at all and must not carry a state map of its own
 
 ---
 
+### 6.40 The edge answers from memory: the CrowdSec bouncer becomes Traefik's plugin in stream mode ✅ (implemented 2026-09-22)
+
+**The symptom.** "Explorer is slow to load." One boot of the Explorer on the operator's phone is 57–82
+requests (fourteen static assets revalidated, some twenty-five API reads, seven event streams). Traefik's
+access log put the numbers on it: the JVM answered most of those in 4–50 ms, and each still took
+500–1500 ms to reach the phone. The `Overhead` column — Traefik's own middleware time — was the cost, on
+two-byte responses.
+
+**The cause.** `fbonalair/traefik-crowdsec-bouncer:0.5.0` (§6.26) is a live-mode bouncer: every request on
+the `websecure` entry point, published services included, became a `GET /v1/decisions?ip=` against the
+Security Engine's SQLite API. Idle, that answers in 50–80 ms. Under the boot's burst it serialised: 43
+queries during one boot, median 443 ms, and the bouncer's own log showed a median of 655 ms per
+forward-auth. A controlled replay from the host reproduced it exactly — 30 concurrent queries at the
+engine's API alone: median 1.1 s. (A measurement trap on the way: busybox `date +%s%N` in the Traefik
+container prints zero elapsed for everything, which made the bouncer look free until its own log was
+read. The access log is the instrument; in-container arithmetic is not.)
+
+**The fix.** Traefik's own CrowdSec plugin (`maxlerebourg/crowdsec-bouncer-traefik-plugin`, pinned) as the
+`crowdsec-bouncer@file` middleware, in **stream** mode: it pulls the block list from the engine once a
+minute and answers every request from memory. Nothing else in the chain moves — same middleware name,
+same first position on the entry point, same `AuthMode`/`ReverseProxyAudit` exemptions, same
+`VAIER_CROWDSEC_BOUNCER_KEY` that `crowdsec` self-registers at boot. The key reaches the plugin through
+the file provider's Go templating (`{{ env "CROWDSEC_BOUNCER_API_KEY" }}`, proven live before the change
+was written) from Traefik's environment in the mandatory `${…:?}` form, so a blank key still stops the
+stack at config-parse time (§6.35). The plugin is cached on a bind mount so a restart never depends on
+the plugin registry. The standalone container is gone, and with it its entry in `VaierServerCatalogue`.
+
+**One behaviour changed on purpose.** The old bouncer failed closed on every failure: an engine that
+could not be reached turned every route away. The plugin is configured with `updateMaxFailure: -1` — an
+unreachable engine keeps the *last* list in force. The engine's detection is down in that case too, so
+nothing new could have been banned; what the old behaviour bought was an outage of the whole domain on
+every hiccup of one container. Start-up is unchanged: Traefik waits for the first sync before serving.
+
+**What it does not fix, and what is next.** The bouncer wore the cost of every request, so nothing inside
+Vaier could have made the page fast alone. Two more layers remain, both Vaier's: the boot's awaited reads
+cost the JVM about 1.9 s in the burst because `getAllMachines()` runs `wg show dump` through a Docker
+exec on every call and the backup controller calls it once *per row*; and the shell script is 597 KB
+served uncompressed, with all fourteen assets revalidated on every load. The operator's direction for
+the first is recorded: the server absorbs infrastructure slowness in its own threads, serves a
+memory-backed snapshot, and pushes deltas over the streams that already exist.
+
 ## 7. End-to-End Workflows
 
 ### 7.1 New service on a peer (primary workflow)
