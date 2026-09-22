@@ -47,6 +47,10 @@ public interface GetAppSettingsUseCase {
          * Whether, never what — the key opens the operator's own Claude account and the browser has no use
          * for it (#360).
          */
-        boolean hasAnthropicApiKey
+        boolean hasAnthropicApiKey,
+        /** Whether a survival kit has ever been written — the fleet nudge ladder (#336) asks. */
+        boolean survivalKitWritten,
+        /** Whether mail is set up at all, as {@code VaierConfig} decides it — the same ladder asks. */
+        boolean smtpConfigured
     ) {}
 }

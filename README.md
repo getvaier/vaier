@@ -35,7 +35,7 @@ Each row is the short version. The linked page carries the mechanism, the caveat
 | **Fleet backup & survival kit** | Automated borg backups to one designated backup server, plus a self-updating survival kit so your backups stay readable even if Vaier itself is gone. → [Backup](docs/BACKUP.md) |
 | **Monitoring & alerts** | Disk watching with a fill-rate forecast that mails you about a week before a disk fills, a word when a container that was running stops, turns unhealthy or starts restart-looping, image-update detection with a one-click **Update**, and an inbox that stays quiet unless something is wrong. → [Monitoring](docs/MONITORING.md) |
 | **Chat** | Ask about your fleet in plain sentences and Marvin answers — from Vaier's own facts, a read-only command, or a public web page when neither covers it. He can act with your click, hand you files, and run errands: send him off to check something later and he mails the answer. → [Chat](docs/CHAT.md) |
-| **What to do next** | Each machine's pane nudges you toward the next thing worth doing with it, with the evidence alongside. Each is one yes. → [Explorer](docs/EXPLORER.md#suggested-next-steps) |
+| **What to do next** | The fleet root says what to do next — add a machine, publish, back up, write the survival kit, let people in, set up mail — and each machine's pane does the same for itself, evidence alongside. Each is one yes. → [Explorer](docs/EXPLORER.md#suggested-next-steps) |
 
 ![The Vaier launchpad](docs/vaier-launchpad.png)
 

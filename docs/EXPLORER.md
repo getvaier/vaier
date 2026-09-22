@@ -12,6 +12,8 @@ Once a machine is on the mesh, its pane in the Explorer surfaces evidence-backed
 
 ---
 
+The same ladder exists at fleet altitude, on the page everyone lands on. The **Fleet** root shows up to three **fleet nudges** — someone waiting to be let in, add the machine your services run on, publish the services a machine exposes, designate a backup server (naming a NAS if the fleet has one), write the survival kit once repositories exist, set up mail so alerts are not silent — each with the evidence Vaier used, ordered by the domain and capped so it reads as guidance rather than a to-do list. A rung disappears the moment its condition clears; a fully configured fleet shows none, which means "you're done", not "nothing here". A fresh install therefore no longer opens on an empty note: it opens on the one thing to do first.
+
 ## The address space
 
 Every machine is an **entry** you can open, and it grows only the entries Vaier can actually reach on it: **files** when Vaier has SSH to it, **containers** when it runs Docker, **services** when something is published from it, its **disk** when Vaier has SSH, and a **backup** entry on the one machine that is the fleet's backup server — so a machine with no SSH doesn't sprout files it can't read, and a machine running no Docker doesn't sprout an empty container list. A machine's **shell** is not an entry either — it is a card on the machine's own page, beside those same ways in, and it opens the terminal in its own window (see [Web terminal](#web-terminal) below).

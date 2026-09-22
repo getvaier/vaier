@@ -176,11 +176,14 @@ class ExplorerShellTest {
         // here. It briefly had a /claude-sign-ins fleet read; that was removed because painting one pane
         // must not SSH to the whole fleet, and an endpoint with no caller is exactly the machinery
         // CLAUDE.md says not to carry.
+        // /fleet (#336) is the fleet root's own read — the nudge ladder at fleet altitude, GET /fleet/nudges —
+        // and has the /fleet-credentials kind of justification: a genuinely new capability whose REST surface
+        // and view shipped together, composed at the driving edge from use cases that already existed.
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
                                        "/docker-services", "/published-services", "/access/services",
                                        "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
                                        "/settings", "/lan-scan", "/survival-kit", "/security",
-                                       "/fleet-credentials", "/vpn/enrolments", "/chat");
+                                       "/fleet-credentials", "/vpn/enrolments", "/chat", "/fleet/nudges");
         String js = read("explorer-shell.js");
         Matcher m = Pattern.compile("fetch\\([`']([^`']+)[`']").matcher(js);
         int found = 0;

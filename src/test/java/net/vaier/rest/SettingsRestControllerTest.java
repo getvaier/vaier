@@ -61,7 +61,7 @@ class SettingsRestControllerTest {
                 "smtp.example.com", 587, "user@example.com", "noreply@example.com",
                 "COVERED", "Covered", "OK",
                 "Wildcard DNS is working — *.example.com resolves to 52.29.74.114.",
-                85, false, 2, "Europe/Oslo", true, true);
+                85, false, 2, "Europe/Oslo", true, true, false, true);
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         ResponseEntity<AppSettingsResult> response = controller.getConfig();

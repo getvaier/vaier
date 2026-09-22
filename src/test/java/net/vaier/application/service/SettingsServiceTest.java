@@ -145,6 +145,21 @@ class SettingsServiceTest {
     }
 
     @Test
+    void getSettings_saysWhetherASurvivalKitWasEverWritten_andWhetherMailIsConfigured() {
+        // The fleet nudge ladder (#336) asks both. The kit's only record is the fingerprint the writer keeps;
+        // "mail configured" is VaierConfig's own verdict (host AND username), never re-derived downstream.
+        when(configPersistence.load()).thenReturn(Optional.of(VaierConfig.builder().smtpHost("smtp.example.com").build()));
+        assertThat(service.getSettings().survivalKitWritten()).isFalse();
+        assertThat(service.getSettings().smtpConfigured()).as("a host without a username is not configured").isFalse();
+
+        when(configPersistence.load()).thenReturn(Optional.of(VaierConfig.builder()
+            .smtpHost("smtp.example.com").smtpUsername("user@example.com").build()
+            .withSurvivalKitFingerprint("sha256:abc")));
+        assertThat(service.getSettings().survivalKitWritten()).isTrue();
+        assertThat(service.getSettings().smtpConfigured()).isTrue();
+    }
+
+    @Test
     void getSettings_returnsNullsWhenNoConfig() {
         when(configPersistence.load()).thenReturn(Optional.empty());
 

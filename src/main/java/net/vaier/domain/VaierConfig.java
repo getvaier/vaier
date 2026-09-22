@@ -131,6 +131,11 @@ public class VaierConfig {
     }
 
     /** Whether a kit passphrase has been chosen — asked before a rollout, and answered for the browser. */
+    /** Whether a survival kit has ever been written: the writer keeps a fingerprint of the last sheet it wrote. */
+    public boolean survivalKitEverWritten() {
+        return survivalKitFingerprint != null;
+    }
+
     public boolean hasSurvivalKitPassphrase() {
         return survivalKitPassphrase != null && !survivalKitPassphrase.isBlank();
     }

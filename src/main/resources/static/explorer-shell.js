@@ -1244,12 +1244,24 @@
             body.appendChild(list);
         }
 
+        // What to do next, at fleet altitude (#336): the domain's ladder, three rungs at most, each with the
+        // evidence it used. Filled when the read lands, into a holder that is already in place, so the pane
+        // never repaints under the operator; a fleet with nothing left to say paints nothing here at all.
+        const next = el('div', 'ex-fleet-next');
+        body.appendChild(next);
+        fetch('/fleet/nudges', { cache: 'no-store' })
+            .then((res) => (res.ok ? res.json() : []))
+            .then((rungs) => {
+                if (!Array.isArray(rungs) || !rungs.length) return;
+                next.appendChild(section('What to do next'));
+                rungs.forEach((n) => next.appendChild(nudgeCard(null, n)));
+            })
+            .catch(() => { /* the ladder is guidance; a failed read is silence, not an error card */ });
+
         // No "Machines" heading: the pane is already titled Fleet and its subtitle has just counted them, so
-        // a label over the grid says a third time what two lines above it already said.
-        if (!S.machines.length) {
-            body.appendChild(note('No machines yet. Add one with the Add machine button below and it will appear '
-                + 'here.', false));
-        } else {
+        // a label over the grid says a third time what two lines above it already said. An empty fleet says
+        // nothing more either: the first rung above is the one sentence it needs.
+        if (S.machines.length) {
             const grid = document.createElement('div');
             grid.className = 'ex-grid';
             sortedMachines().forEach((m) => {
@@ -2188,9 +2200,19 @@
     // where folders are ticked and protected; DESIGNATE → the make-the-backup-server form. Keyed by the
     // domain's nudge kind; an unknown kind falls back to a no-op label so a new kind can never throw here.
     const NUDGE_ACTION = {
-        PUBLISH:                 (m) => ({ icon: 'route',   label: 'Publish',          run: () => go(['fleet', m.id, 'services']) }),
+        // PUBLISH and DESIGNATE_BACKUP_SERVER are raised on a machine AND on the fleet (#336). On the fleet the
+        // card carries no machine of its own; the one it points at travels as the nudge's value.
+        PUBLISH:                 (m, n) => ({ icon: 'route',   label: 'Publish',          run: () => go(['fleet', m ? m.id : n.value, 'services']) }),
         BACK_UP:                 (m) => ({ icon: 'archive', label: 'Choose folders',   run: () => go(['fleet', m.id, 'files']) }),
-        DESIGNATE_BACKUP_SERVER: (m) => ({ icon: 'nas',     label: 'Set it up',        run: () => designateBackupServer(m) }),
+        // With no candidate to offer, the domain's sentence stands in for the button and the operator chooses.
+        DESIGNATE_BACKUP_SERVER: (m, n) => (nudgeTarget(m, n)
+            ? { icon: 'nas', label: 'Set it up', run: () => designateBackupServer(nudgeTarget(m, n)) }
+            : { icon: 'nas' }),
+        // The fleet's own rungs. Each routes into the flow that satisfies it and nothing else.
+        ADD_MACHINE:             () => ({ icon: 'machine', label: 'Add a machine',    run: addMachine }),
+        LET_PEOPLE_IN:           () => ({ icon: 'users',   label: 'Review them',      run: () => go(['users']) }),
+        WRITE_SURVIVAL_KIT:      () => ({ icon: 'key',     label: 'Write the kit',    run: () => go(['settings']) }),
+        CONFIGURE_SMTP:          () => ({ icon: 'gear',    label: 'Set up mail',      run: () => go(['settings']) }),
         // The only nudge whose answer changes what Vaier's login on that machine is allowed to do, so it is
         // the only one that carries a `learn` slug: the operator can read what saying yes grants, on the
         // Concepts page, before answering. `run` is the single grant-and-flag action, never a wizard step.
@@ -2208,6 +2230,11 @@
         // its place. The card's title says which trouble it is; this table only picks the glyph.
         CONTAINER_TROUBLE:       () => ({ icon: 'warn' }),
     };
+
+    // The machine a nudge is about: the pane's own, or — on the fleet — the one the nudge's value names.
+    function nudgeTarget(m, n) {
+        return m || S.machines.find((x) => x.id === (n && n.value)) || null;
+    }
 
     // One nudge, rendered as a quiet invitation: an accent glyph for its kind, the domain's title and the
     // evidence behind it ("the why"), and a single outline action button routed by NUDGE_ACTION.

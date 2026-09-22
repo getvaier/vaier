@@ -805,6 +805,10 @@ button.ex-lname:focus-visible, a.ex-lname:focus-visible { outline: 2px solid var
    apply; the shell only renders them). A thin accent left-edge and accent glyph mark an opportunity — never
    the warn colour, since a nudge is an offer, not a problem. The action stays a quiet outline button that
    warms to the accent on hover, so three stacked nudges invite rather than shout. */
+/* The fleet's own ladder (#336) sits above the machines; empty it takes no room at all, because a fleet with
+   nothing left to say must not leave a gap where advice used to be. */
+.ex-fleet-next:not(:empty) { margin-bottom: 14px; }
+
 .ex-nudge {
     display: flex; align-items: flex-start; gap: 14px;
     padding: 15px 17px;

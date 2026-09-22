@@ -25,7 +25,7 @@ class SettingsControllerIT extends VaierWebMvcIntegrationBase {
                 "NOT_RESOLVING", "Not resolving", "ERROR",
                 "Wildcard DNS is not set up. Create one record — *.example.com A 52.29.74.114 — "
                         + "and every service Vaier publishes will resolve.",
-                85, false, 2, "Europe/Oslo", false, false);
+                85, false, 2, "Europe/Oslo", false, false, false, true);
         when(getAppSettingsUseCase.getSettings()).thenReturn(settings);
 
         mockMvc.perform(get("/settings/config"))

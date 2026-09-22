@@ -97,7 +97,7 @@ public class SettingsService implements
             .orElse(new AppSettingsResult(null, null, null, null, null, null,
                 wildcardDnsStatus(), wildcardDnsLabel(), wildcardDnsSeverity(), wildcardDnsMessage(),
                 VaierConfig.DEFAULT_DISK_MONITOR_THRESHOLD_PERCENT, configResolver.isSocialAuthAvailable(),
-                VaierConfig.DEFAULT_BACKUP_SCHEDULE_HOUR, backupScheduleZone(), false, false));
+                VaierConfig.DEFAULT_BACKUP_SCHEDULE_HOUR, backupScheduleZone(), false, false, false, false));
     }
 
     @Override
@@ -204,7 +204,9 @@ public class SettingsService implements
             config.effectiveBackupScheduleHour(),
             backupScheduleZone(),
             config.hasSurvivalKitPassphrase(),
-            config.hasAnthropicApiKey()
+            config.hasAnthropicApiKey(),
+            config.survivalKitEverWritten(),
+            config.isSmtpConfigured()
         );
     }
 
