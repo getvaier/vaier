@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -119,31 +120,59 @@ class AccessFileAdapterTest {
                 entry("new@gmail.com", Role.PENDING, List.of()));
     }
 
-    // --- display name persistence (back-compat: entries with no name read as null) ---
+    // --- optional field persistence (back-compat: entries written before a field existed read it as null) ---
 
     @Test
-    void upsert_persistsTheDisplayName() throws Exception {
-        AccessFileAdapter a = adapter();
-        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins"), "You Name"));
+    void upsert_persistsEachOptionalField() throws Exception {
+        record Row(String label, AccessEntry entry, List<String> expectedInYaml) {}
+        List<Row> rows = List.of(
+                new Row("name", entry("you@gmail.com", Role.ADMIN, List.of("admins"), "You Name"),
+                        List.of("name: You Name")),
+                new Row("provider", AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                        .groups(List.of("admins")).provider("github").build(),
+                        List.of("provider: github")),
+                new Row("providerUserId", AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                        .groups(List.of("admins")).providerUserId("98765").build(),
+                        List.of("providerUserId:", "98765")));
 
-        String contents = Files.readString(tempDir.resolve("access.yml"));
-        assertThat(contents).contains("name: You Name");
+        for (Row row : rows) {
+            Path dir = Files.createDirectory(tempDir.resolve("upsert-" + row.label()));
+            new AccessFileAdapter(dir.toString(), null).upsert(row.entry());
+
+            String contents = Files.readString(dir.resolve("access.yml"));
+            for (String expected : row.expectedInYaml()) {
+                assertThat(contents).as(row.label()).contains(expected);
+            }
+        }
     }
 
     @Test
-    void getEntries_roundTripsTheDisplayName() {
-        AccessFileAdapter a = adapter();
-        a.upsert(entry("you@gmail.com", Role.ADMIN, List.of("admins"), "You Name"));
+    void getEntries_roundTripsEachOptionalField() throws Exception {
+        record Row(String label, AccessEntry entry, Function<AccessEntry, Object> getter, Object expected) {}
+        List<Row> rows = List.of(
+                new Row("name", entry("you@gmail.com", Role.ADMIN, List.of("admins"), "You Name"),
+                        AccessEntry::getName, "You Name"),
+                new Row("provider", AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                        .groups(List.of("admins")).provider("github").build(),
+                        AccessEntry::getProvider, "github"),
+                new Row("providerUserId", AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
+                        .groups(List.of("admins")).providerUserId("98765").build(),
+                        AccessEntry::getProviderUserId, "98765"));
 
-        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
+        for (Row row : rows) {
+            Path dir = Files.createDirectory(tempDir.resolve("roundtrip-" + row.label()));
+            new AccessFileAdapter(dir.toString(), null).upsert(row.entry());
 
-        assertThat(fresh.findByEmail("you@gmail.com"))
-                .map(AccessEntry::getName).contains("You Name");
+            AccessFileAdapter fresh = new AccessFileAdapter(dir.toString(), null);
+
+            assertThat(fresh.findByEmail("you@gmail.com").map(row.getter()))
+                    .as(row.label()).contains(row.expected());
+        }
     }
 
     @Test
-    void getEntries_entryWithoutNameReadsAsNullName() throws Exception {
-        // Back-compat: an entry written before display names existed has no `name` key.
+    void getEntries_entryWithoutOptionalFields_readsThemAllAsNull() throws Exception {
+        // Back-compat: an entry written before name/provider/providerUserId existed has none of their keys.
         Files.writeString(tempDir.resolve("access.yml"), """
             entries:
               old@gmail.com:
@@ -151,84 +180,11 @@ class AccessFileAdapterTest {
                 groups: [family]
             """);
 
-        assertThat(adapter().findByEmail("old@gmail.com"))
-                .hasValueSatisfying(e -> assertThat(e.getName()).isNull());
-    }
+        AccessEntry entry = adapter().findByEmail("old@gmail.com").orElseThrow();
 
-    // --- last-sign-in provider persistence (back-compat: entries with no provider read as null) ---
-
-    @Test
-    void upsert_persistsTheProvider() throws Exception {
-        AccessFileAdapter a = adapter();
-        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
-                .groups(List.of("admins")).provider("github").build());
-
-        String contents = Files.readString(tempDir.resolve("access.yml"));
-        assertThat(contents).contains("provider: github");
-    }
-
-    @Test
-    void getEntries_roundTripsTheProvider() {
-        AccessFileAdapter a = adapter();
-        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
-                .groups(List.of("admins")).provider("github").build());
-
-        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
-
-        assertThat(fresh.findByEmail("you@gmail.com"))
-                .map(AccessEntry::getProvider).contains("github");
-    }
-
-    @Test
-    void getEntries_entryWithoutProviderReadsAsNullProvider() throws Exception {
-        // Back-compat: an entry written before providers existed has no `provider` key.
-        Files.writeString(tempDir.resolve("access.yml"), """
-            entries:
-              old@gmail.com:
-                role: user
-                groups: [family]
-            """);
-
-        assertThat(adapter().findByEmail("old@gmail.com"))
-                .hasValueSatisfying(e -> assertThat(e.getProvider()).isNull());
-    }
-
-    // --- provider user id persistence (back-compat: entries with no providerUserId read as null) ---
-
-    @Test
-    void upsert_persistsTheProviderUserId() throws Exception {
-        AccessFileAdapter a = adapter();
-        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
-                .groups(List.of("admins")).providerUserId("98765").build());
-
-        String contents = Files.readString(tempDir.resolve("access.yml"));
-        assertThat(contents).contains("providerUserId:").contains("98765");
-    }
-
-    @Test
-    void getEntries_roundTripsTheProviderUserId() {
-        AccessFileAdapter a = adapter();
-        a.upsert(AccessEntry.builder().email("you@gmail.com").role(Role.ADMIN)
-                .groups(List.of("admins")).providerUserId("98765").build());
-
-        AccessFileAdapter fresh = new AccessFileAdapter(tempDir.toString(), null);
-
-        assertThat(fresh.findByEmail("you@gmail.com"))
-                .map(AccessEntry::getProviderUserId).contains("98765");
-    }
-
-    @Test
-    void getEntries_entryWithoutProviderUserIdReadsAsNull() throws Exception {
-        // Back-compat: an entry written before provider user ids existed has no `providerUserId` key.
-        Files.writeString(tempDir.resolve("access.yml"), """
-            entries:
-              old@gmail.com:
-                role: user
-                groups: [family]
-            """);
-
-        assertThat(adapter().findByEmail("old@gmail.com"))
-                .hasValueSatisfying(e -> assertThat(e.getProviderUserId()).isNull());
+        assertThat(entry.getName()).as("name").isNull();
+        assertThat(entry.getProvider()).as("provider").isNull();
+        assertThat(entry.getProviderUserId()).as("providerUserId").isNull();
     }
 
     @Test
@@ -315,34 +271,22 @@ class AccessFileAdapterTest {
     }
 
     @Test
-    void setAllowedGroups_emptyListRemovesTheHostRule() {
-        AccessFileAdapter a = adapter();
-        a.setAllowedGroups("plex.example.com", List.of("family"));
+    void setAllowedGroups_clearingTheListRemovesTheHostRule() {
+        record Row(String label, List<String> clearedTo) {}
+        List<Row> rows = List.of(
+                new Row("empty list", List.of()),
+                new Row("blank-only list", Arrays.asList("  ", "", (String) null)),
+                new Row("null list", null));
 
-        a.setAllowedGroups("plex.example.com", List.of());
+        for (Row row : rows) {
+            AccessFileAdapter a = adapter();
+            a.setAllowedGroups("plex.example.com", List.of("family"));
 
-        assertThat(a.allowedGroupsForHost("plex.example.com")).isEmpty();
-        assertThat(a.allServiceAccessRules()).doesNotContainKey("plex.example.com");
-    }
+            a.setAllowedGroups("plex.example.com", row.clearedTo());
 
-    @Test
-    void setAllowedGroups_blankOnlyListRemovesTheHostRule() {
-        AccessFileAdapter a = adapter();
-        a.setAllowedGroups("plex.example.com", List.of("family"));
-
-        a.setAllowedGroups("plex.example.com", Arrays.asList("  ", "", (String) null));
-
-        assertThat(a.allServiceAccessRules()).doesNotContainKey("plex.example.com");
-    }
-
-    @Test
-    void setAllowedGroups_nullListRemovesTheHostRule() {
-        AccessFileAdapter a = adapter();
-        a.setAllowedGroups("plex.example.com", List.of("family"));
-
-        a.setAllowedGroups("plex.example.com", null);
-
-        assertThat(a.allServiceAccessRules()).doesNotContainKey("plex.example.com");
+            assertThat(a.allowedGroupsForHost("plex.example.com")).as(row.label()).isEmpty();
+            assertThat(a.allServiceAccessRules()).as(row.label()).doesNotContainKey("plex.example.com");
+        }
     }
 
     @Test

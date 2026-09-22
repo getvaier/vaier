@@ -419,17 +419,6 @@ class UserServiceTest {
     }
 
     @Test
-    void grantRole_preservesDisplayName() {
-        when(forPersistingAccessEntries.findByEmail("p@example.com")).thenReturn(Optional.of(
-                AccessEntry.builder().email("p@example.com").role(Role.PENDING).groups(List.of("family")).name("Alice").build()));
-
-        service.grantRole("p@example.com", Role.USER);
-
-        verify(forPersistingAccessEntries).upsert(argThat(e ->
-                e.getRole() == Role.USER && "Alice".equals(e.getName())));
-    }
-
-    @Test
     void assignGroups_preservesDisplayName() {
         when(forPersistingAccessEntries.findByEmail("u@example.com")).thenReturn(Optional.of(
                 AccessEntry.builder().email("u@example.com").role(Role.USER).groups(List.of()).name("Alice").build()));
@@ -453,16 +442,17 @@ class UserServiceTest {
     // --- grantRole ---
 
     @Test
-    void grantRole_existingEntry_setsRoleAndPreservesGroups() {
-        when(forPersistingAccessEntries.findByEmail("p@example.com"))
-                .thenReturn(Optional.of(accessEntry("p@example.com", Role.PENDING, List.of("family"))));
+    void grantRole_existingEntry_setsRoleAndPreservesGroupsAndDisplayName() {
+        when(forPersistingAccessEntries.findByEmail("p@example.com")).thenReturn(Optional.of(
+                AccessEntry.builder().email("p@example.com").role(Role.PENDING).groups(List.of("family")).name("Alice").build()));
 
         service.grantRole("p@example.com", Role.USER);
 
         verify(forPersistingAccessEntries).upsert(argThat(e ->
                 e.getEmail().equals("p@example.com")
                         && e.getRole() == Role.USER
-                        && e.getGroups().equals(List.of("family"))));
+                        && e.getGroups().equals(List.of("family"))
+                        && "Alice".equals(e.getName())));
     }
 
     @Test
@@ -555,13 +545,6 @@ class UserServiceTest {
     }
 
     // --- revokeAccess ---
-
-    @Test
-    void revokeAccess_deletesEntry() {
-        service.revokeAccess("gone@example.com");
-
-        verify(forPersistingAccessEntries).delete("gone@example.com");
-    }
 
     @Test
     void revokeAccess_normalisesEmail() {

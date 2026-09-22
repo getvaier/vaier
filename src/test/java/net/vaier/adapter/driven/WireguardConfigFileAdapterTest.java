@@ -4,7 +4,11 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import net.vaier.domain.DeviceCategory;
+import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerNotFoundException;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -15,9 +19,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WireguardConfigFileAdapterTest {
 
@@ -247,52 +254,128 @@ class WireguardConfigFileAdapterTest {
         assertThat(result.get().lanAddress()).isEqualTo("192.168.3.121");
     }
 
-    // --- updateLanAddress ---
+    // --- updateLanAddress / updateLanCidr / updateDescription / updateDeviceCategory: shared shapes ---
 
     @Test
-    void updateLanAddress_writesLanAddressIntoVaierMetadata() throws IOException {
-        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
-                "{\"peerType\":\"UBUNTU_SERVER\"}");
+    void updateX_writesFieldIntoVaierMetadata() throws IOException {
+        record Row(String label, String peer, BiConsumer<String, String> action, String value,
+                   Function<PeerConfiguration, Object> getter, Object expected) {}
+        List<Row> rows = List.of(
+                new Row("lanAddress", "apalveien5", adapter::updateLanAddress, "192.168.3.121",
+                        PeerConfiguration::lanAddress, "192.168.3.121"),
+                new Row("lanCidr", "apalveien5", adapter::updateLanCidr, "192.168.3.0/24",
+                        PeerConfiguration::lanCidr, "192.168.3.0/24"),
+                new Row("description", "nuc", adapter::updateDescription, "Raspberry Pi in garage",
+                        PeerConfiguration::description, "Raspberry Pi in garage"),
+                new Row("deviceCategory", "nuc", adapter::updateDeviceCategory, "NAS",
+                        PeerConfiguration::deviceCategory, DeviceCategory.NAS));
 
-        adapter.updateLanAddress("apalveien5", "192.168.3.121");
+        for (Row row : rows) {
+            createPeerConfWithVaierMetadata(row.peer(), "10.13.13.6", "{\"peerType\":\"UBUNTU_SERVER\"}");
 
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+            row.action().accept(row.peer(), row.value());
+
+            PeerConfiguration result = adapter.getPeerConfigByName(row.peer()).orElseThrow();
+            assertThat(row.getter().apply(result)).as(row.label()).isEqualTo(row.expected());
+            assertThat(result.peerType()).as(row.label()).isEqualTo(MachineType.UBUNTU_SERVER);
+        }
     }
 
     @Test
-    void updateLanAddress_preservesExistingLanCidr() throws IOException {
-        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\"}");
+    void updateX_preservesTheSiblingField() throws IOException {
+        record Row(String label, String peer, String seedJson, BiConsumer<String, String> action, String value,
+                   Function<PeerConfiguration, Object> siblingGetter, Object siblingExpected,
+                   Function<PeerConfiguration, Object> primaryGetter, Object primaryExpected) {}
+        List<Row> rows = List.of(
+                new Row("updateLanAddress preserves lanCidr", "apalveien5",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\"}",
+                        adapter::updateLanAddress, "192.168.3.121",
+                        PeerConfiguration::lanCidr, "192.168.3.0/24",
+                        PeerConfiguration::lanAddress, "192.168.3.121"),
+                new Row("updateLanCidr preserves lanAddress", "apalveien5",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"lanAddress\":\"192.168.3.121\"}",
+                        adapter::updateLanCidr, "192.168.3.0/24",
+                        PeerConfiguration::lanAddress, "192.168.3.121",
+                        PeerConfiguration::lanCidr, "192.168.3.0/24"),
+                new Row("updateLanAddress preserves description", "nuc",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"keep me\"}",
+                        adapter::updateLanAddress, "192.168.3.121",
+                        PeerConfiguration::description, "keep me", null, null),
+                new Row("updateLanCidr preserves description", "nuc",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"keep me\"}",
+                        adapter::updateLanCidr, "192.168.3.0/24",
+                        PeerConfiguration::description, "keep me", null, null),
+                new Row("updateDescription preserves deviceCategory", "nuc",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}",
+                        adapter::updateDescription, "keep category",
+                        PeerConfiguration::deviceCategory, DeviceCategory.NAS, null, null));
 
-        adapter.updateLanAddress("apalveien5", "192.168.3.121");
+        for (Row row : rows) {
+            createPeerConfWithVaierMetadata(row.peer(), "10.13.13.6", row.seedJson());
 
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
-        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
+            row.action().accept(row.peer(), row.value());
+
+            PeerConfiguration result = adapter.getPeerConfigByName(row.peer()).orElseThrow();
+            assertThat(row.siblingGetter().apply(result)).as(row.label()).isEqualTo(row.siblingExpected());
+            if (row.primaryGetter() != null) {
+                assertThat(row.primaryGetter().apply(result)).as(row.label()).isEqualTo(row.primaryExpected());
+            }
+        }
     }
 
     @Test
-    void updateLanAddress_blankClearsExistingValue() throws IOException {
-        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"lanAddress\":\"192.168.3.121\"}");
+    void updateX_blankClearsExistingValue() throws IOException {
+        record Row(String label, String peer, String seedJson, BiConsumer<String, String> action,
+                   Function<PeerConfiguration, Object> getter) {}
+        List<Row> rows = List.of(
+                new Row("lanAddress", "apalveien5",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"lanAddress\":\"192.168.3.121\"}",
+                        adapter::updateLanAddress, PeerConfiguration::lanAddress),
+                new Row("lanCidr", "apalveien5",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\"}",
+                        adapter::updateLanCidr, PeerConfiguration::lanCidr),
+                new Row("description", "nuc",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"old text\"}",
+                        adapter::updateDescription, PeerConfiguration::description),
+                new Row("deviceCategory", "nuc",
+                        "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}",
+                        adapter::updateDeviceCategory, PeerConfiguration::deviceCategory));
 
-        adapter.updateLanAddress("apalveien5", "");
+        for (Row row : rows) {
+            createPeerConfWithVaierMetadata(row.peer(), "10.13.13.6", row.seedJson());
 
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanAddress()).isNull();
+            row.action().accept(row.peer(), "");
+
+            PeerConfiguration result = adapter.getPeerConfigByName(row.peer()).orElseThrow();
+            assertThat(row.getter().apply(result)).as(row.label()).isNull();
+        }
     }
 
     @Test
-    void updateLanAddress_addsVaierCommentWhenMissing() throws IOException {
-        createPeerConf("apalveien5", "10.13.13.6");
+    void updateX_addsVaierCommentWhenMissing() throws IOException {
+        record Row(String label, String peer, BiConsumer<String, String> action, String value,
+                   Function<PeerConfiguration, Object> getter, Object expected, boolean checksPeerType) {}
+        List<Row> rows = List.of(
+                new Row("lanAddress", "apalveien5", adapter::updateLanAddress, "192.168.3.121",
+                        PeerConfiguration::lanAddress, "192.168.3.121", true),
+                new Row("lanCidr", "apalveien5", adapter::updateLanCidr, "192.168.3.0/24",
+                        PeerConfiguration::lanCidr, "192.168.3.0/24", true),
+                new Row("description", "nuc", adapter::updateDescription, "Home media server",
+                        PeerConfiguration::description, "Home media server", true),
+                new Row("deviceCategory", "nuc", adapter::updateDeviceCategory, "PRINTER",
+                        PeerConfiguration::deviceCategory, DeviceCategory.PRINTER, false));
 
-        adapter.updateLanAddress("apalveien5", "192.168.3.121");
+        for (Row row : rows) {
+            createPeerConf(row.peer(), "10.13.13.7");
 
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
+            row.action().accept(row.peer(), row.value());
+
+            PeerConfiguration result = adapter.getPeerConfigByName(row.peer()).orElseThrow();
+            assertThat(row.getter().apply(result)).as(row.label()).isEqualTo(row.expected());
+            if (row.checksPeerType()) {
+                assertThat(result.peerType()).as(row.label()).isEqualTo(MachineType.UBUNTU_SERVER);
+            }
+        }
     }
 
     @Test
@@ -308,65 +391,19 @@ class WireguardConfigFileAdapterTest {
     }
 
     @Test
-    void updateLanAddress_throwsWhenPeerDoesNotExist() {
+    void updateX_throwsWhenPeerDoesNotExist() {
         assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
-        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
-            () -> adapter.updateLanAddress("ghost", "192.168.3.121"));
-    }
+        record Row(String label, ThrowingCallable action) {}
+        List<Row> rows = List.of(
+                new Row("lanAddress", () -> adapter.updateLanAddress("ghost", "192.168.3.121")),
+                new Row("lanCidr", () -> adapter.updateLanCidr("ghost", "192.168.3.0/24")),
+                new Row("description", () -> adapter.updateDescription("ghost", "anything")),
+                new Row("name", () -> adapter.updateName("ghost", "Phantom")),
+                new Row("deviceCategory", () -> adapter.updateDeviceCategory("ghost", "NAS")));
 
-    // --- updateLanCidr ---
-
-    @Test
-    void updateLanCidr_writesLanCidrIntoVaierMetadata() throws IOException {
-        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
-                "{\"peerType\":\"UBUNTU_SERVER\"}");
-
-        adapter.updateLanCidr("apalveien5", "192.168.3.0/24");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
-    }
-
-    @Test
-    void updateLanCidr_preservesExistingLanAddress() throws IOException {
-        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"lanAddress\":\"192.168.3.121\"}");
-
-        adapter.updateLanCidr("apalveien5", "192.168.3.0/24");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
-        assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
-    }
-
-    @Test
-    void updateLanCidr_blankClearsExistingValue() throws IOException {
-        createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\"}");
-
-        adapter.updateLanCidr("apalveien5", "");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanCidr()).isNull();
-    }
-
-    @Test
-    void updateLanCidr_addsVaierCommentWhenMissing() throws IOException {
-        createPeerConf("apalveien5", "10.13.13.6");
-
-        adapter.updateLanCidr("apalveien5", "192.168.3.0/24");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("apalveien5").orElseThrow();
-        assertThat(result.lanCidr()).isEqualTo("192.168.3.0/24");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
-    }
-
-    @Test
-    void updateLanCidr_throwsWhenPeerDoesNotExist() {
-        assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
-        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
-            () -> adapter.updateLanCidr("ghost", "192.168.3.0/24"));
+        for (Row row : rows) {
+            assertThatThrownBy(row.action()).as(row.label()).isInstanceOf(PeerNotFoundException.class);
+        }
     }
 
     // --- VAIER metadata (description, #54) ---
@@ -404,17 +441,6 @@ class WireguardConfigFileAdapterTest {
     }
 
     @Test
-    void updateDescription_writesDescriptionIntoVaierMetadata() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
-
-        adapter.updateDescription("nuc", "Raspberry Pi in garage");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
-        assertThat(result.description()).isEqualTo("Raspberry Pi in garage");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
-    }
-
-    @Test
     void updateDescription_preservesPeerTypeLanCidrAndLanAddress() throws IOException {
         createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
                 "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\",\"lanAddress\":\"192.168.3.121\"}");
@@ -428,28 +454,6 @@ class WireguardConfigFileAdapterTest {
     }
 
     @Test
-    void updateDescription_blankClearsExistingValue() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"old text\"}");
-
-        adapter.updateDescription("nuc", "");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
-        assertThat(result.description()).isNull();
-    }
-
-    @Test
-    void updateDescription_addsVaierCommentWhenMissing() throws IOException {
-        createPeerConf("nuc", "10.13.13.7");
-
-        adapter.updateDescription("nuc", "Home media server");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
-        assertThat(result.description()).isEqualTo("Home media server");
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
-    }
-
-    @Test
     void updateDescription_roundTripsSpecialCharacters() throws IOException {
         createPeerConf("nuc", "10.13.13.7");
 
@@ -457,33 +461,6 @@ class WireguardConfigFileAdapterTest {
 
         PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
         assertThat(result.description()).isEqualTo("NAS \"box\" — line1\nline2");
-    }
-
-    @Test
-    void updateDescription_throwsWhenPeerDoesNotExist() {
-        assertThat(adapter.getPeerConfigByName("ghost")).isEmpty();
-        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
-            () -> adapter.updateDescription("ghost", "anything"));
-    }
-
-    @Test
-    void updateLanAddress_preservesExistingDescription() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"keep me\"}");
-
-        adapter.updateLanAddress("nuc", "192.168.3.121");
-
-        assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().description()).isEqualTo("keep me");
-    }
-
-    @Test
-    void updateLanCidr_preservesExistingDescription() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"description\":\"keep me\"}");
-
-        adapter.updateLanCidr("nuc", "192.168.3.0/24");
-
-        assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().description()).isEqualTo("keep me");
     }
 
     // --- updateName: the editable display name (#209) ---
@@ -538,12 +515,6 @@ class WireguardConfigFileAdapterTest {
         assertThat(result.description()).isEqualTo("Spain relay");
     }
 
-    @Test
-    void updateName_throwsWhenPeerDoesNotExist() {
-        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
-            () -> adapter.updateName("ghost", "Phantom"));
-    }
-
     // --- VAIER metadata (deviceCategory override) ---
 
     @Test
@@ -568,17 +539,6 @@ class WireguardConfigFileAdapterTest {
     }
 
     @Test
-    void updateDeviceCategory_writesOverrideIntoVaierMetadata() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7", "{\"peerType\":\"UBUNTU_SERVER\"}");
-
-        adapter.updateDeviceCategory("nuc", "NAS");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
-        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.NAS);
-        assertThat(result.peerType()).isEqualTo(net.vaier.domain.MachineType.UBUNTU_SERVER);
-    }
-
-    @Test
     void updateDeviceCategory_preservesOtherMetadata() throws IOException {
         createPeerConfWithVaierMetadata("apalveien5", "10.13.13.6",
                 "{\"peerType\":\"UBUNTU_SERVER\",\"lanCidr\":\"192.168.3.0/24\","
@@ -592,44 +552,6 @@ class WireguardConfigFileAdapterTest {
         assertThat(result.lanAddress()).isEqualTo("192.168.3.121");
         assertThat(result.description()).isEqualTo("Spain relay");
         assertThat(result.name()).isEqualTo("Spain");
-    }
-
-    @Test
-    void updateDeviceCategory_blankClearsOverride() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}");
-
-        adapter.updateDeviceCategory("nuc", "");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
-        assertThat(result.deviceCategory()).isNull();
-    }
-
-    @Test
-    void updateDeviceCategory_addsVaierCommentWhenMissing() throws IOException {
-        createPeerConf("nuc", "10.13.13.7");
-
-        adapter.updateDeviceCategory("nuc", "PRINTER");
-
-        PeerConfiguration result = adapter.getPeerConfigByName("nuc").orElseThrow();
-        assertThat(result.deviceCategory()).isEqualTo(net.vaier.domain.DeviceCategory.PRINTER);
-    }
-
-    @Test
-    void updateDeviceCategory_throwsWhenPeerDoesNotExist() {
-        org.junit.jupiter.api.Assertions.assertThrows(net.vaier.domain.PeerNotFoundException.class,
-            () -> adapter.updateDeviceCategory("ghost", "NAS"));
-    }
-
-    @Test
-    void updateDescription_preservesExistingDeviceCategory() throws IOException {
-        createPeerConfWithVaierMetadata("nuc", "10.13.13.7",
-                "{\"peerType\":\"UBUNTU_SERVER\",\"deviceCategory\":\"NAS\"}");
-
-        adapter.updateDescription("nuc", "keep category");
-
-        assertThat(adapter.getPeerConfigByName("nuc").orElseThrow().deviceCategory())
-            .isEqualTo(net.vaier.domain.DeviceCategory.NAS);
     }
 
     // --- getAllPeerConfigs ---

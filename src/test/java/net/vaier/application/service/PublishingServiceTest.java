@@ -521,25 +521,23 @@ class PublishingServiceTest {
     }
 
     @Test
-    void getPublishedServices_unknownIpAddress_nameShowsVaierServer() {
-        setupOneRoute("app.example.com", "10.13.13.5", 8080);
-        setupEmptyVpnClients();
-        setupEmptyVaierServerServices();
+    void getPublishedServices_unresolvedAddress_nameShowsVaierServer() {
+        record Row(String fqdn, String address, String expectedName) {}
+        List<Row> rows = List.of(
+            new Row("app.example.com", "10.13.13.5", "app @ Vaier server"),
+            new Row("traefik.example.com", "traefik", "traefik @ Vaier server")
+        );
 
-        PublishedServiceUco result = service.getPublishedServices().get(0);
+        for (Row row : rows) {
+            service.invalidatePublishedServicesCache();
+            setupOneRoute(row.fqdn(), row.address(), 8080);
+            setupEmptyVpnClients();
+            setupEmptyVaierServerServices();
 
-        assertThat(result.name()).isEqualTo("app @ Vaier server");
-    }
+            PublishedServiceUco result = service.getPublishedServices().get(0);
 
-    @Test
-    void getPublishedServices_simpleSubdomain_extractedCorrectly() {
-        setupOneRoute("traefik.example.com", "traefik", 8080);
-        setupEmptyVpnClients();
-        setupEmptyVaierServerServices();
-
-        PublishedServiceUco result = service.getPublishedServices().get(0);
-
-        assertThat(result.name()).isEqualTo("traefik @ Vaier server");
+            assertThat(result.name()).as(row.fqdn()).isEqualTo(row.expectedName());
+        }
     }
 
     @Test

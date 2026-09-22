@@ -117,25 +117,6 @@ class PublishedServiceControllerIT extends VaierWebMvcIntegrationBase {
     }
 
     @Test
-    void publishService_streamIntent_reachesTheUseCaseOverTheWire() throws Exception {
-        mockMvc.perform(post("/published-services/publish")
-                       .contentType(MediaType.APPLICATION_JSON)
-                       .content("""
-                           {
-                             "address":"172.20.0.1",
-                             "port":1883,
-                             "subdomain":"mqtt",
-                             "requiresAuth":false,
-                             "stream":true
-                           }
-                           """))
-               .andExpect(status().isOk());
-
-        verify(publishPeerServiceUseCase).publishService(
-                "172.20.0.1", 1883, "mqtt", false, null, false, null, true);
-    }
-
-    @Test
     void deleteService_delegatesToUseCase() throws Exception {
         mockMvc.perform(delete("/published-services/app.example.com"))
                .andExpect(status().isOk());

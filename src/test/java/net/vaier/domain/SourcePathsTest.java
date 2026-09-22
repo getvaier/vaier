@@ -101,30 +101,34 @@ class SourcePathsTest {
     }
 
     @Test
-    void coversAnExactMember() {
-        assertThat(SourcePaths.of(List.of("/home/geir")).covers("/home/geir")).isTrue();
+    void covers_isTrueForAMemberOrADescendantOfOne() {
+        record Row(String description, String candidate) {}
+        List<Row> rows = List.of(
+            new Row("an exact member", "/home/geir"),
+            new Row("a descendant of a member", "/home/geir/docs/notes.txt")
+        );
+
+        SourcePaths paths = SourcePaths.of(List.of("/home/geir"));
+        for (Row row : rows) {
+            assertThat(paths.covers(row.candidate())).as(row.description()).isTrue();
+        }
     }
 
     @Test
-    void coversADescendantOfAMember() {
-        assertThat(SourcePaths.of(List.of("/home/geir")).covers("/home/geir/docs/notes.txt")).isTrue();
-    }
+    void doesNotCover_falseForUnrelatedAncestorOrPrefixSiblingPaths() {
+        record Row(String description, String candidate) {}
+        List<Row> rows = List.of(
+            new Row("an unrelated path", "/etc/nginx"),
+            // "/home" is NOT backed up just because "/home/geir" is — coverage flows down, not up.
+            new Row("an ancestor of a member", "/home"),
+            // "/home/geir2" must not be treated as inside "/home/geir".
+            new Row("a sibling with a shared name prefix", "/home/geir2")
+        );
 
-    @Test
-    void doesNotCoverAnUnrelatedPath() {
-        assertThat(SourcePaths.of(List.of("/home/geir")).covers("/etc/nginx")).isFalse();
-    }
-
-    @Test
-    void doesNotCoverAnAncestorOfAMember() {
-        // "/home" is NOT backed up just because "/home/geir" is — coverage flows down, not up.
-        assertThat(SourcePaths.of(List.of("/home/geir")).covers("/home")).isFalse();
-    }
-
-    @Test
-    void doesNotCoverASiblingWithASharedNamePrefix() {
-        // "/home/geir2" must not be treated as inside "/home/geir".
-        assertThat(SourcePaths.of(List.of("/home/geir")).covers("/home/geir2")).isFalse();
+        SourcePaths paths = SourcePaths.of(List.of("/home/geir"));
+        for (Row row : rows) {
+            assertThat(paths.covers(row.candidate())).as(row.description()).isFalse();
+        }
     }
 
     @Test
@@ -139,24 +143,20 @@ class SourcePathsTest {
     }
 
     @Test
-    void doesNotEncloseAMemberItself() {
-        // "/home/geir" IS the source path — it is covered, not merely enclosing.
-        assertThat(SourcePaths.of(List.of("/home/geir")).enclosesUnder("/home/geir")).isFalse();
-    }
+    void doesNotEnclose_falseForTheMemberItselfADescendantOrUnrelatedPaths() {
+        record Row(String description, String candidate) {}
+        List<Row> rows = List.of(
+            // "/home/geir" IS the source path — it is covered, not merely enclosing.
+            new Row("the member itself", "/home/geir"),
+            new Row("a descendant of a member", "/home/geir/docs"),
+            new Row("an unrelated path", "/var"),
+            new Row("a sibling with a shared name prefix", "/home/gei")
+        );
 
-    @Test
-    void doesNotEncloseADescendantOfAMember() {
-        assertThat(SourcePaths.of(List.of("/home/geir")).enclosesUnder("/home/geir/docs")).isFalse();
-    }
-
-    @Test
-    void doesNotEncloseAnUnrelatedPath() {
-        assertThat(SourcePaths.of(List.of("/home/geir")).enclosesUnder("/var")).isFalse();
-    }
-
-    @Test
-    void doesNotEncloseASiblingWithASharedNamePrefix() {
-        assertThat(SourcePaths.of(List.of("/home/geir")).enclosesUnder("/home/gei")).isFalse();
+        SourcePaths paths = SourcePaths.of(List.of("/home/geir"));
+        for (Row row : rows) {
+            assertThat(paths.enclosesUnder(row.candidate())).as(row.description()).isFalse();
+        }
     }
 
     @Test

@@ -236,19 +236,6 @@ class VpnServiceTest {
         assertThat(result).isEqualTo("docker-compose-yaml-content");
     }
 
-    @Test
-    void generateWireguardClientDockerCompose_constructsDockerComposeConfigRecord() {
-        ArgumentCaptor<DockerComposeConfig> captor = ArgumentCaptor.forClass(DockerComposeConfig.class);
-        when(dockerComposeGenerator.generateWireguardClientDockerCompose(captor.capture())).thenReturn("");
-
-        service.generateWireguardClientDockerCompose("bob", "server.net", "51820");
-
-        DockerComposeConfig config = captor.getValue();
-        assertThat(config.peerId()).isEqualTo("bob");
-        assertThat(config.serverUrl()).isEqualTo("server.net");
-        assertThat(config.serverPort()).isEqualTo("51820");
-    }
-
     // --- generateSetupScript ---
 
     @Test
@@ -259,7 +246,7 @@ class VpnServiceTest {
     }
 
     @Test
-    void generateSetupScript_peerFound_returnsNonEmptyScript() {
+    void generateSetupScript_rendersThePeersScript_withNameIpServerAndDockerBootstrap() {
         when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
             Optional.of(new PeerConfiguration("alice", "10.13.13.2", "[Interface]\nAddress=10.13.13.2/32"))
         );
@@ -267,106 +254,17 @@ class VpnServiceTest {
         Optional<String> result = service.generateSetupScript("alice", "vpn.example.com", "51820");
 
         assertThat(result).isPresent();
-        assertThat(result.get()).isNotBlank();
-    }
-
-    @Test
-    void generateSetupScript_scriptStartsWithShebang() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
+        String script = result.orElseThrow();
+        assertThat(script).isNotBlank();
         assertThat(script).startsWith("#!/bin/bash");
-    }
-
-    @Test
-    void generateSetupScript_scriptContainsPeerName() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("alice");
-    }
-
-    @Test
-    void generateSetupScript_scriptContainsVpnIp() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("10.13.13.2");
-    }
-
-    @Test
-    void generateSetupScript_scriptContainsServerUrl() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("vpn.example.com");
-    }
-
-    @Test
-    void generateSetupScript_scriptContainsServerPort() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("51820");
-    }
-
-    @Test
-    void generateSetupScript_scriptEnablesDockerOnBoot() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("systemctl enable docker");
-    }
-
-    @Test
-    void generateSetupScript_systemctlCallsAreNonFatal() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("systemctl enable docker || true");
         assertThat(script).contains("systemctl restart docker");
-    }
-
-    @Test
-    void generateSetupScript_scriptFallsBackToServiceRestartWhenSystemctlFails() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("systemctl restart docker || sudo service docker restart || true");
-    }
-
-    @Test
-    void generateSetupScript_scriptHandlesSnapDocker() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
         assertThat(script).contains("snap.docker.dockerd");
         assertThat(script).contains("/var/snap/docker/current/config/daemon.json");
     }
@@ -1119,16 +1017,6 @@ class VpnServiceTest {
     }
 
     // --- updatePeerDeviceCategory: orthogonal icon override ---
-
-    @Test
-    void updatePeerDeviceCategory_persistsValidOverride() {
-        when(peerConfigProvider.getPeerConfigByName("nas"))
-            .thenReturn(Optional.of(new PeerConfiguration("nas", "10.13.13.2", "config")));
-
-        service.updatePeerDeviceCategory("nas", "NAS");
-
-        verify(forUpdatingPeerConfigurations).updateDeviceCategory("nas", "NAS");
-    }
 
     @Test
     void updatePeerDeviceCategory_blankClearsOverride() {

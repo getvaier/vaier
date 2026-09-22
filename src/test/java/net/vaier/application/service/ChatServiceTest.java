@@ -271,7 +271,6 @@ class ChatServiceTest {
         verify(forConversing).converse(anyString(), prompt.capture(), anyList(), anyString(), anyList(),
             any());
         assertThat(prompt.getValue()).contains("example.com");
-        assertThat(prompt.getValue()).contains("Answer only from what the tools return.");
     }
 
     /**

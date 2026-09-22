@@ -5,6 +5,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -12,86 +14,53 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class CidrTest {
 
     @Test
-    void contains_ipInsideSubnet_returnsTrue() {
-        Cidr cidr = Cidr.parse("172.20.0.0/16");
+    void contains_matchesAddressAgainstCidr() {
+        record Row(String description, String cidr, String address, boolean expected) {}
+        List<Row> rows = List.of(
+            new Row("ip inside subnet", "172.20.0.0/16", "172.20.0.5", true),
+            new Row("ip inside subnet at the top of the range", "172.20.0.0/16", "172.20.255.255", true),
+            new Row("ip outside subnet", "172.20.0.0/16", "203.0.113.99", false),
+            new Row("ip outside subnet, adjacent network", "172.20.0.0/16", "172.21.0.1", false),
+            new Row("handles prefixes not aligned to a byte boundary, inside", "10.0.0.0/12", "10.15.255.255", true),
+            new Row("handles prefixes not aligned to a byte boundary, outside", "10.0.0.0/12", "10.16.0.0", false),
+            new Row("/0 matches everything, low end", "0.0.0.0/0", "1.2.3.4", true),
+            new Row("/0 matches everything, high end", "0.0.0.0/0", "255.255.255.255", true),
+            new Row("/32 matches only the exact ip", "192.168.1.1/32", "192.168.1.1", true),
+            new Row("/32 rejects a neighbouring ip", "192.168.1.1/32", "192.168.1.2", false),
+            new Row("mismatched address family returns false", "172.20.0.0/16", "::1", false),
+            new Row("malformed ip returns false", "172.20.0.0/16", "not-an-ip", false),
+            // A container name or a partial/over-range dotted string must be rejected as a
+            // strict IPv4 literal — never resolved via DNS.
+            new Row("non-literal address, container name", "192.168.1.0/24", "my-container", false),
+            new Row("non-literal address, incomplete dotted quad", "192.168.1.0/24", "192.168.1", false),
+            new Row("non-literal address, out-of-range octet", "192.168.1.0/24", "192.168.1.999", false),
+            new Row("non-literal address, zero-padded octets", "192.168.1.0/24", "192.168.001.050", false),
+            new Row("non-literal address, null", "192.168.1.0/24", null, false)
+        );
 
-        assertThat(cidr.contains("172.20.0.5")).isTrue();
-        assertThat(cidr.contains("172.20.255.255")).isTrue();
+        for (Row row : rows) {
+            Cidr cidr = Cidr.parse(row.cidr());
+            assertThat(cidr.contains(row.address())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
-    void contains_ipOutsideSubnet_returnsFalse() {
-        Cidr cidr = Cidr.parse("172.20.0.0/16");
+    void isIpv4_trueOnlyForStrictDottedQuads() {
+        record Row(String description, String input, boolean expected) {}
+        List<Row> rows = List.of(
+            new Row("plain dotted quad", "10.13.13.2", true),
+            new Row("max dotted quad", "255.255.255.255", true),
+            new Row("all-zero dotted quad", "0.0.0.0", true),
+            new Row("hostname is not a literal", "my-peer", false),
+            new Row("incomplete dotted quad is not a literal", "10.13.13", false),
+            new Row("out-of-range octet is not a literal", "256.0.0.1", false),
+            new Row("cidr suffix disqualifies it as a bare literal", "10.13.13.2/32", false),
+            new Row("null is not a literal", null, false)
+        );
 
-        assertThat(cidr.contains("203.0.113.99")).isFalse();
-        assertThat(cidr.contains("172.21.0.1")).isFalse();
-    }
-
-    @Test
-    void contains_handlesPrefixesThatDoNotAlignToByteBoundary() {
-        Cidr cidr = Cidr.parse("10.0.0.0/12");
-
-        assertThat(cidr.contains("10.15.255.255")).isTrue();
-        assertThat(cidr.contains("10.16.0.0")).isFalse();
-    }
-
-    @Test
-    void contains_slashZero_matchesEverything() {
-        Cidr cidr = Cidr.parse("0.0.0.0/0");
-
-        assertThat(cidr.contains("1.2.3.4")).isTrue();
-        assertThat(cidr.contains("255.255.255.255")).isTrue();
-    }
-
-    @Test
-    void contains_slash32_matchesOnlyExactIp() {
-        Cidr cidr = Cidr.parse("192.168.1.1/32");
-
-        assertThat(cidr.contains("192.168.1.1")).isTrue();
-        assertThat(cidr.contains("192.168.1.2")).isFalse();
-    }
-
-    @Test
-    void contains_mismatchedAddressFamilies_returnsFalse() {
-        Cidr cidr = Cidr.parse("172.20.0.0/16");
-
-        assertThat(cidr.contains("::1")).isFalse();
-    }
-
-    @Test
-    void contains_malformedIp_returnsFalse() {
-        Cidr cidr = Cidr.parse("172.20.0.0/16");
-
-        assertThat(cidr.contains("not-an-ip")).isFalse();
-    }
-
-    @Test
-    void contains_nonLiteralAddress_returnsFalseWithoutDnsLookup() {
-        // A container name or a partial/over-range dotted string must be rejected as a
-        // strict IPv4 literal — never resolved via DNS.
-        Cidr cidr = Cidr.parse("192.168.1.0/24");
-
-        assertThat(cidr.contains("my-container")).isFalse();
-        assertThat(cidr.contains("192.168.1")).isFalse();
-        assertThat(cidr.contains("192.168.1.999")).isFalse();
-        assertThat(cidr.contains("192.168.001.050")).isFalse();
-        assertThat(cidr.contains(null)).isFalse();
-    }
-
-    @Test
-    void isIpv4_trueForStrictDottedQuads() {
-        assertThat(Cidr.isIpv4("10.13.13.2")).isTrue();
-        assertThat(Cidr.isIpv4("255.255.255.255")).isTrue();
-        assertThat(Cidr.isIpv4("0.0.0.0")).isTrue();
-    }
-
-    @Test
-    void isIpv4_falseForNonLiterals() {
-        assertThat(Cidr.isIpv4("my-peer")).isFalse();
-        assertThat(Cidr.isIpv4("10.13.13")).isFalse();
-        assertThat(Cidr.isIpv4("256.0.0.1")).isFalse();
-        assertThat(Cidr.isIpv4("10.13.13.2/32")).isFalse();
-        assertThat(Cidr.isIpv4(null)).isFalse();
+        for (Row row : rows) {
+            assertThat(Cidr.isIpv4(row.input())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test

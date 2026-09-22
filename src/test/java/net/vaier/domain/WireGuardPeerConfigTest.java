@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WireGuardPeerConfigTest {
@@ -303,45 +305,46 @@ class WireGuardPeerConfigTest {
     // --- readDirective / readIpAddress (#215) — inverse of generate() ---
 
     @Test
-    void readDirective_findsKeyWithSpacesAroundEquals() {
-        String config = "[Interface]\nPrivateKey = abc123\nAddress = 10.13.13.2/32\n";
+    void readDirective_findsTheKeyWhetherOrNotEqualsIsSpaced() {
+        record Row(String description, String config, String expected) {}
+        List<Row> rows = List.of(
+            new Row("finds key with spaces around equals",
+                "[Interface]\nPrivateKey = abc123\nAddress = 10.13.13.2/32\n", "abc123"),
+            new Row("finds key with no spaces around equals",
+                "[Interface]\nPrivateKey=abc123\nAddress=10.13.13.2/32\n", "abc123")
+        );
 
-        assertThat(WireGuardPeerConfig.readDirective(config, "PrivateKey")).isEqualTo("abc123");
+        for (Row row : rows) {
+            assertThat(WireGuardPeerConfig.readDirective(row.config(), "PrivateKey")).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
-    void readDirective_findsKeyWithNoSpacesAroundEquals() {
-        String config = "[Interface]\nPrivateKey=abc123\nAddress=10.13.13.2/32\n";
+    void readDirective_returnsEmptyStringWhenTheKeyIsNotThere() {
+        record Row(String description, String config, String key) {}
+        List<Row> rows = List.of(
+            new Row("missing key", "[Interface]\nAddress = 10.13.13.2/32\n", "PrivateKey"),
+            new Row("does not match a partial key name", "PresharedKey = xyz789\n", "Key")
+        );
 
-        assertThat(WireGuardPeerConfig.readDirective(config, "PrivateKey")).isEqualTo("abc123");
+        for (Row row : rows) {
+            assertThat(WireGuardPeerConfig.readDirective(row.config(), row.key())).as(row.description()).isEmpty();
+        }
     }
 
     @Test
-    void readDirective_returnsEmptyStringForMissingKey() {
-        String config = "[Interface]\nAddress = 10.13.13.2/32\n";
+    void readIpAddress_stripsMaskOrReadsABareAddress() {
+        record Row(String description, String config, String expected) {}
+        List<Row> rows = List.of(
+            new Row("strips mask from the Address directive",
+                "[Interface]\nPrivateKey = abc\nAddress = 10.13.13.7/32\n", "10.13.13.7"),
+            new Row("reads a bare address without a mask",
+                "[Interface]\nAddress = 10.13.13.7\n", "10.13.13.7")
+        );
 
-        assertThat(WireGuardPeerConfig.readDirective(config, "PrivateKey")).isEmpty();
-    }
-
-    @Test
-    void readDirective_doesNotMatchPartialKeyName() {
-        String config = "PresharedKey = xyz789\n";
-
-        assertThat(WireGuardPeerConfig.readDirective(config, "Key")).isEmpty();
-    }
-
-    @Test
-    void readIpAddress_stripsMaskFromAddressDirective() {
-        String config = "[Interface]\nPrivateKey = abc\nAddress = 10.13.13.7/32\n";
-
-        assertThat(WireGuardPeerConfig.readIpAddress(config)).isEqualTo("10.13.13.7");
-    }
-
-    @Test
-    void readIpAddress_readsBareAddressWithoutMask() {
-        String config = "[Interface]\nAddress = 10.13.13.7\n";
-
-        assertThat(WireGuardPeerConfig.readIpAddress(config)).isEqualTo("10.13.13.7");
+        for (Row row : rows) {
+            assertThat(WireGuardPeerConfig.readIpAddress(row.config())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test

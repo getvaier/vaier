@@ -1,10 +1,12 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.domain.WireguardClientCompose;
 import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,17 +17,14 @@ class DockerComposeGeneratorAdapterTest {
     private final DockerComposeGeneratorAdapter adapter = new DockerComposeGeneratorAdapter();
 
     @Test
-    void generateWireguardClientDockerCompose_validConfig_includesServiceDefinition() {
+    void generateWireguardClientDockerCompose_emitsTheDomainsStandaloneComposeDocument() {
+        // The compose service definition itself (image, caps, volumes, restart policy) is
+        // WireguardClientCompose.standalone()'s content, pinned by WireguardClientComposeTest.
         DockerComposeConfig config = new DockerComposeConfig("alice", "vpn.example.com", "51820");
 
         String result = adapter.generateWireguardClientDockerCompose(config);
 
-        assertThat(result)
-            .contains("services:")
-            .contains("wireguard-client:")
-            .contains("image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110")
-            .contains("container_name: wireguard-client")
-            .doesNotContain("wireguard:latest");
+        assertThat(result).startsWith(WireguardClientCompose.standalone());
     }
 
     @Test
@@ -44,91 +43,24 @@ class DockerComposeGeneratorAdapterTest {
     }
 
     @Test
-    void generateWireguardClientDockerCompose_validConfig_includesRequiredCapabilities() {
-        DockerComposeConfig config = new DockerComposeConfig("alice", "vpn.example.com", "51820");
+    void generateWireguardClientDockerCompose_setupInstructions_carryThePeerAndServerThrough() {
+        record Row(String peerId, String url, String port, String expectedSubstring) {}
+        List<Row> rows = List.of(
+            new Row("bob", "vpn.example.com", "51820", "./wireguard/config/bob/bob.conf"),
+            new Row("alice", "vpn.example.com", "51820", "# Server: vpn.example.com:51820"),
+            new Row("phone-2024", "vpn.example.com", "51820", "./wireguard/config/phone-2024/phone-2024.conf"),
+            new Row("alice", "vpn.example.com", "51999", "# Server: vpn.example.com:51999"),
+            new Row("alice", "203.0.113.7", "51820", "# Server: 203.0.113.7:51820"),
+            // Documents current behaviour: the adapter does no input validation;
+            // a null peer name is rendered as the literal string "null" by String.format.
+            new Row(null, "vpn.example.com", "51820", "./wireguard/config/null/null.conf")
+        );
 
-        String result = adapter.generateWireguardClientDockerCompose(config);
+        for (Row row : rows) {
+            String result = adapter.generateWireguardClientDockerCompose(
+                new DockerComposeConfig(row.peerId(), row.url(), row.port()));
 
-        assertThat(result)
-            .contains("cap_add:")
-            .contains("- NET_ADMIN")
-            .contains("- SYS_MODULE")
-            .contains("net.ipv4.conf.all.src_valid_mark=1");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_includesPeerNameInSetupInstructions() {
-        DockerComposeConfig config = new DockerComposeConfig("bob", "vpn.example.com", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("./wireguard/config/bob/bob.conf");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_includesServerUrlAndPort() {
-        DockerComposeConfig config = new DockerComposeConfig("alice", "vpn.example.com", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("# Server: vpn.example.com:51820");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_peerNameWithHyphenAndDigits_isPreserved() {
-        DockerComposeConfig config = new DockerComposeConfig("phone-2024", "vpn.example.com", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("./wireguard/config/phone-2024/phone-2024.conf");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_nonStandardServerPort_isPreserved() {
-        DockerComposeConfig config = new DockerComposeConfig("alice", "vpn.example.com", "51999");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("# Server: vpn.example.com:51999");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_ipServerAddress_isPreserved() {
-        DockerComposeConfig config = new DockerComposeConfig("alice", "203.0.113.7", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("# Server: 203.0.113.7:51820");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_includesVolumeMounts() {
-        DockerComposeConfig config = new DockerComposeConfig("alice", "vpn.example.com", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result)
-            .contains("./wireguard-client/config:/config")
-            .contains("/lib/modules:/lib/modules:ro");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_includesRestartPolicy() {
-        DockerComposeConfig config = new DockerComposeConfig("alice", "vpn.example.com", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("restart: unless-stopped");
-    }
-
-    @Test
-    void generateWireguardClientDockerCompose_nullPeerName_emitsLiteralNullInPaths() {
-        // Documents current behaviour: the adapter does no input validation;
-        // a null peer name is rendered as the literal string "null" by String.format.
-        DockerComposeConfig config = new DockerComposeConfig(null, "vpn.example.com", "51820");
-
-        String result = adapter.generateWireguardClientDockerCompose(config);
-
-        assertThat(result).contains("./wireguard/config/null/null.conf");
+            assertThat(result).as(row.expectedSubstring()).contains(row.expectedSubstring());
+        }
     }
 }

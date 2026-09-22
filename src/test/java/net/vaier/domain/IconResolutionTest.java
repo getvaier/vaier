@@ -12,24 +12,24 @@ class IconResolutionTest {
     // --- extractIconUrl ---
 
     @Test
-    void extractsIconFromStandardLinkTag() {
-        String html = "<html><head><link rel=\"icon\" href=\"/favicon.ico\"></head></html>";
-        Optional<String> url = IconResolution.extractIconUrl(html, "https://example.com");
-        assertThat(url).contains("https://example.com/favicon.ico");
-    }
+    void extractsIcon_findsTheLinkTagRegardlessOfRelValueOrAttributeOrder() {
+        record Row(String description, String html, String base, String expectedUrl) {}
+        List<Row> rows = List.of(
+            new Row("standard link tag",
+                "<html><head><link rel=\"icon\" href=\"/favicon.ico\"></head></html>",
+                "https://example.com", "https://example.com/favicon.ico"),
+            new Row("shortcut icon link tag",
+                "<html><head><link rel=\"shortcut icon\" href=\"/images/icon.png\"></head></html>",
+                "https://example.com", "https://example.com/images/icon.png"),
+            new Row("href comes before rel",
+                "<html><head><link href=\"/favicon.png\" rel=\"icon\" type=\"image/png\"></head></html>",
+                "https://sonarr.example.com", "https://sonarr.example.com/favicon.png")
+        );
 
-    @Test
-    void extractsIconFromShortcutIconLinkTag() {
-        String html = "<html><head><link rel=\"shortcut icon\" href=\"/images/icon.png\"></head></html>";
-        Optional<String> url = IconResolution.extractIconUrl(html, "https://example.com");
-        assertThat(url).contains("https://example.com/images/icon.png");
-    }
-
-    @Test
-    void extractsIconWhenHrefComesBeforeRel() {
-        String html = "<html><head><link href=\"/favicon.png\" rel=\"icon\" type=\"image/png\"></head></html>";
-        Optional<String> url = IconResolution.extractIconUrl(html, "https://sonarr.example.com");
-        assertThat(url).contains("https://sonarr.example.com/favicon.png");
+        for (Row row : rows) {
+            Optional<String> url = IconResolution.extractIconUrl(row.html(), row.base());
+            assertThat(url).as(row.description()).contains(row.expectedUrl());
+        }
     }
 
     @Test
@@ -69,33 +69,19 @@ class IconResolutionTest {
     // --- cdnLookupName ---
 
     @Test
-    void cdnLookupNameUsesFinalPathPrefixSegmentWhenPresent() {
-        assertThat(IconResolution.cdnLookupName("services.example.com", "/grafana"))
-                .isEqualTo("grafana");
-    }
+    void cdnLookupName_derivesNameFromPathPrefixOrHost() {
+        record Row(String description, String host, String pathPrefix, String expected) {}
+        List<Row> rows = List.of(
+            new Row("uses the final path-prefix segment when present", "services.example.com", "/grafana", "grafana"),
+            new Row("uses the final segment of a multi-segment path prefix", "services.example.com", "/team/grafana", "grafana"),
+            new Row("lowercases the path segment", "services.example.com", "/Grafana", "grafana"),
+            new Row("falls back to the first dns label when path prefix is null", "pihole.example.com", null, "pihole"),
+            new Row("falls back to the first dns label when path prefix is empty", "pihole.example.com", "", "pihole")
+        );
 
-    @Test
-    void cdnLookupNameUsesFinalSegmentOfMultiSegmentPathPrefix() {
-        assertThat(IconResolution.cdnLookupName("services.example.com", "/team/grafana"))
-                .isEqualTo("grafana");
-    }
-
-    @Test
-    void cdnLookupNameLowercasesPathSegment() {
-        assertThat(IconResolution.cdnLookupName("services.example.com", "/Grafana"))
-                .isEqualTo("grafana");
-    }
-
-    @Test
-    void cdnLookupNameFallsBackToFirstDnsLabelWhenPathPrefixIsNull() {
-        assertThat(IconResolution.cdnLookupName("pihole.example.com", null))
-                .isEqualTo("pihole");
-    }
-
-    @Test
-    void cdnLookupNameFallsBackToFirstDnsLabelWhenPathPrefixIsEmpty() {
-        assertThat(IconResolution.cdnLookupName("pihole.example.com", ""))
-                .isEqualTo("pihole");
+        for (Row row : rows) {
+            assertThat(IconResolution.cdnLookupName(row.host(), row.pathPrefix())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     // --- cacheKey ---
@@ -171,21 +157,22 @@ class IconResolutionTest {
     }
 
     @Test
-    void contentType_returnsGifForGifMagic() {
-        byte[] body = "GIF89a".getBytes();
-        assertThat(IconResolution.contentType(body)).isEqualTo("image/gif");
+    void contentType_recognisesGifAndSvgPayloads() {
+        record Row(String description, byte[] body, String expected) {}
+        List<Row> rows = List.of(
+            new Row("gif magic", "GIF89a".getBytes(), "image/gif"),
+            new Row("xml start indicates svg", "<svg".getBytes(), "image/svg+xml")
+        );
+
+        for (Row row : rows) {
+            assertThat(IconResolution.contentType(row.body())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
     void contentType_returnsJpegForJpegMagic() {
         byte[] body = {(byte) 0xFF, (byte) 0xD8, 0, 0};
         assertThat(IconResolution.contentType(body)).isEqualTo("image/jpeg");
-    }
-
-    @Test
-    void contentType_returnsSvgForXmlStart() {
-        byte[] body = "<svg".getBytes();
-        assertThat(IconResolution.contentType(body)).isEqualTo("image/svg+xml");
     }
 
     @Test

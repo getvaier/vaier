@@ -148,24 +148,20 @@ class RegistryV2ImageAdapterTest {
     }
 
     @Test
-    void aRegistryThatAnswersWithoutTheDigestHeaderResolvesToEmpty() throws Exception {
-        respondInOrder(response(200, Map.of(), ""));
+    void anUnusableRegistryResponseResolvesToEmptyRatherThanThrowing() throws Exception {
+        record Row(String label, int status, String body, String tag) {}
+        List<Row> rows = List.of(
+            new Row("no digest header", 200, "", "7.2"),
+            new Row("unknown tag", 404, "not found", "nope"),
+            new Row("rate limited", 429, "too many requests", "7.2"));
 
-        assertThat(adapter().resolveDigest(ImageReference.parse("redis:7.2").orElseThrow())).isEmpty();
-    }
+        for (Row row : rows) {
+            sent.clear();
+            respondInOrder(response(row.status(), Map.of(), row.body()));
 
-    @Test
-    void anUnknownTagResolvesToEmptyRatherThanThrowing() throws Exception {
-        respondInOrder(response(404, Map.of(), "not found"));
-
-        assertThat(adapter().resolveDigest(ImageReference.parse("redis:nope").orElseThrow())).isEmpty();
-    }
-
-    @Test
-    void aRateLimitedRegistryResolvesToEmpty() throws Exception {
-        respondInOrder(response(429, Map.of(), "too many requests"));
-
-        assertThat(adapter().resolveDigest(ImageReference.parse("redis:7.2").orElseThrow())).isEmpty();
+            assertThat(adapter().resolveDigest(ImageReference.parse("redis:" + row.tag()).orElseThrow()))
+                .as(row.label()).isEmpty();
+        }
     }
 
     @Test

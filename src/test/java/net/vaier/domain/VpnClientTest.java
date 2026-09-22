@@ -2,188 +2,101 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class VpnClientTest {
 
     @Test
-    void isConnected_whenHandshakeIsRecent_returnsTrue() {
+    void isConnected_reflectsHandshakeRecency() {
+        record Row(String description, String handshake, boolean expected) {}
         String recent = String.valueOf(System.currentTimeMillis() / 1000 - 60);
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", recent, "0", "0");
-
-        assertThat(client.isConnected()).isTrue();
-    }
-
-    @Test
-    void isConnected_whenHandshakeIsOlderThanThreshold_returnsFalse() {
         String stale = String.valueOf(System.currentTimeMillis() / 1000 - 3600);
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", stale, "0", "0");
+        List<Row> rows = List.of(
+            new Row("handshake is recent", recent, true),
+            new Row("handshake is older than threshold", stale, false),
+            new Row("handshake is zero", "0", false),
+            new Row("handshake is not a number", "not-a-number", false),
+            new Row("handshake is null", null, false)
+        );
 
-        assertThat(client.isConnected()).isFalse();
+        for (Row row : rows) {
+            VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", row.handshake(), "0", "0");
+            assertThat(client.isConnected()).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
-    void isConnected_whenHandshakeIsZero_returnsFalse() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "0", "0", "0");
+    void latestHandshakeEpoch_parsesOrDefaultsToZero() {
+        record Row(String description, String handshake, long expected) {}
+        List<Row> rows = List.of(
+            new Row("parses numeric handshake", "1700000000", 1700000000L),
+            new Row("trims surrounding whitespace", "  1700000000 ", 1700000000L),
+            new Row("null defaults to zero", null, 0L),
+            new Row("non-numeric defaults to zero", "not-a-number", 0L)
+        );
 
-        assertThat(client.isConnected()).isFalse();
+        for (Row row : rows) {
+            VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", row.handshake(), "0", "0");
+            assertThat(client.latestHandshakeEpoch()).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
-    void isConnected_whenHandshakeIsNotANumber_returnsFalse() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "not-a-number", "0", "0");
+    void vpnIp_extractsTheTunnelAddressFromAllowedIps() {
+        record Row(String description, String allowedIps, String expected) {}
+        List<Row> rows = List.of(
+            new Row("strips mask from /32 form", "10.13.13.2/32", "10.13.13.2"),
+            new Row("returns bare ip when no mask", "10.13.13.2", "10.13.13.2"),
+            // Relay peer: /32 VPN IP first, then a LAN CIDR — the tunnel IP is always the first entry.
+            new Row("returns first entry for relay peer with LAN cidr", "10.13.13.5/32, 192.168.1.0/24", "10.13.13.5"),
+            new Row("trims surrounding whitespace", "  10.13.13.2/32 ", "10.13.13.2"),
+            new Row("null allowedIps returns null", null, null)
+        );
 
-        assertThat(client.isConnected()).isFalse();
+        for (Row row : rows) {
+            VpnClient client = new VpnClient("pk", row.allowedIps(), "1.2.3.4", "51820", "0", "0", "0");
+            assertThat(client.vpnIp()).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
-    void isConnected_whenHandshakeIsNull_returnsFalse() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", null, "0", "0");
+    void containsAddress_matchesAgainstAllowedIpsCidrs() {
+        record Row(String description, String allowedIps, String address, boolean expected) {}
+        String relayAllowedIps = "10.13.13.5/32, 192.168.1.0/24";
+        List<Row> rows = List.of(
+            new Row("matches /32 peer ip", "10.13.13.2/32", "10.13.13.2", true),
+            new Row("rejects other address for /32 peer ip", "10.13.13.2/32", "10.13.13.3", false),
+            // wg sometimes emits a bare IP instead of IP/32
+            new Row("matches bare ip without mask", "10.13.13.2", "10.13.13.2", true),
+            new Row("rejects other address for bare ip", "10.13.13.2", "10.13.13.3", false),
+            // Relay peer: /32 VPN IP plus a LAN CIDR behind it.
+            new Row("matches address inside LAN cidr", relayAllowedIps, "192.168.1.100", true),
+            new Row("matches LAN cidr network address", relayAllowedIps, "192.168.1.1", true),
+            new Row("matches LAN cidr broadcast address", relayAllowedIps, "192.168.1.255", true),
+            new Row("matches the relay's own /32 address", relayAllowedIps, "10.13.13.5", true),
+            new Row("rejects address outside all cidrs", relayAllowedIps, "10.13.13.99", false),
+            new Row("rejects address in an unrelated subnet", relayAllowedIps, "192.168.2.1", false),
+            new Row("rejects address in an unrelated network", relayAllowedIps, "172.20.0.1", false),
+            new Row("respects non-byte-aligned prefix network address", "10.13.13.0/28", "10.13.13.0", true),
+            new Row("respects non-byte-aligned prefix last address", "10.13.13.0/28", "10.13.13.15", true),
+            new Row("respects non-byte-aligned prefix boundary", "10.13.13.0/28", "10.13.13.16", false),
+            new Row("null allowedIps returns false", null, "10.13.13.2", false),
+            new Row("null address returns false", "10.13.13.2/32", null, false),
+            new Row("empty address returns false", "10.13.13.2/32", "", false),
+            new Row("blank address returns false", "10.13.13.2/32", "   ", false),
+            // Callers may pass a container name instead of an IP; must not throw or do DNS lookups.
+            new Row("non-ip container name returns false", "10.13.13.2/32", "my-container", false),
+            new Row("incomplete ip returns false", "10.13.13.2/32", "192.168.1", false),
+            new Row("out-of-range octet returns false", "10.13.13.2/32", "192.168.1.999", false),
+            new Row("ignores malformed cidr entries but matches a valid one", "not-a-cidr, 192.168.1.0/24, 10.0.0.0/99", "192.168.1.50", true),
+            new Row("ignores malformed cidr entries, rejects unmatched address", "not-a-cidr, 192.168.1.0/24, 10.0.0.0/99", "10.0.0.1", false)
+        );
 
-        assertThat(client.isConnected()).isFalse();
-    }
-
-    @Test
-    void latestHandshakeEpoch_parsesNumericHandshake() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "1700000000", "0", "0");
-
-        assertThat(client.latestHandshakeEpoch()).isEqualTo(1700000000L);
-    }
-
-    @Test
-    void latestHandshakeEpoch_trimsSurroundingWhitespace() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "  1700000000 ", "0", "0");
-
-        assertThat(client.latestHandshakeEpoch()).isEqualTo(1700000000L);
-    }
-
-    @Test
-    void latestHandshakeEpoch_whenNull_returnsZero() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", null, "0", "0");
-
-        assertThat(client.latestHandshakeEpoch()).isZero();
-    }
-
-    @Test
-    void latestHandshakeEpoch_whenNotANumber_returnsZero() {
-        VpnClient client = new VpnClient("pk", "10.0.0.2/32", "1.2.3.4", "51820", "not-a-number", "0", "0");
-
-        assertThat(client.latestHandshakeEpoch()).isZero();
-    }
-
-    @Test
-    void vpnIp_stripsMaskFromSlash32Form() {
-        VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.vpnIp()).isEqualTo("10.13.13.2");
-    }
-
-    @Test
-    void vpnIp_returnsBareIpWhenNoMask() {
-        VpnClient client = new VpnClient("pk", "10.13.13.2", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.vpnIp()).isEqualTo("10.13.13.2");
-    }
-
-    @Test
-    void vpnIp_returnsFirstEntryForRelayPeerWithLanCidr() {
-        // Relay peer: /32 VPN IP first, then a LAN CIDR — the tunnel IP is always the first entry.
-        VpnClient client = new VpnClient("pk", "10.13.13.5/32, 192.168.1.0/24", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.vpnIp()).isEqualTo("10.13.13.5");
-    }
-
-    @Test
-    void vpnIp_trimsSurroundingWhitespace() {
-        VpnClient client = new VpnClient("pk", "  10.13.13.2/32 ", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.vpnIp()).isEqualTo("10.13.13.2");
-    }
-
-    @Test
-    void vpnIp_whenAllowedIpsIsNull_returnsNull() {
-        VpnClient client = new VpnClient("pk", null, "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.vpnIp()).isNull();
-    }
-
-    @Test
-    void containsAddress_matchesSlash32PeerIp() {
-        VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("10.13.13.2")).isTrue();
-        assertThat(client.containsAddress("10.13.13.3")).isFalse();
-    }
-
-    @Test
-    void containsAddress_matchesBareIpWithoutMask() {
-        // wg sometimes emits a bare IP instead of IP/32
-        VpnClient client = new VpnClient("pk", "10.13.13.2", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("10.13.13.2")).isTrue();
-        assertThat(client.containsAddress("10.13.13.3")).isFalse();
-    }
-
-    @Test
-    void containsAddress_matchesAddressInsideLanCidr() {
-        // Relay peer: /32 VPN IP plus a LAN CIDR behind it.
-        VpnClient client = new VpnClient("pk", "10.13.13.5/32, 192.168.1.0/24", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("192.168.1.100")).isTrue();
-        assertThat(client.containsAddress("192.168.1.1")).isTrue();
-        assertThat(client.containsAddress("192.168.1.255")).isTrue();
-        assertThat(client.containsAddress("10.13.13.5")).isTrue();
-    }
-
-    @Test
-    void containsAddress_rejectsAddressOutsideAllCidrs() {
-        VpnClient client = new VpnClient("pk", "10.13.13.5/32, 192.168.1.0/24", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("10.13.13.99")).isFalse();
-        assertThat(client.containsAddress("192.168.2.1")).isFalse();
-        assertThat(client.containsAddress("172.20.0.1")).isFalse();
-    }
-
-    @Test
-    void containsAddress_respectsNonByteAlignedPrefix() {
-        VpnClient client = new VpnClient("pk", "10.13.13.0/28", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("10.13.13.0")).isTrue();
-        assertThat(client.containsAddress("10.13.13.15")).isTrue();
-        assertThat(client.containsAddress("10.13.13.16")).isFalse();
-    }
-
-    @Test
-    void containsAddress_whenAllowedIpsIsNull_returnsFalse() {
-        VpnClient client = new VpnClient("pk", null, "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("10.13.13.2")).isFalse();
-    }
-
-    @Test
-    void containsAddress_whenAddressIsNullOrBlank_returnsFalse() {
-        VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress(null)).isFalse();
-        assertThat(client.containsAddress("")).isFalse();
-        assertThat(client.containsAddress("   ")).isFalse();
-    }
-
-    @Test
-    void containsAddress_whenAddressIsNotAnIp_returnsFalse() {
-        // Callers may pass a container name instead of an IP; must not throw or do DNS lookups.
-        VpnClient client = new VpnClient("pk", "10.13.13.2/32", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("my-container")).isFalse();
-        assertThat(client.containsAddress("192.168.1")).isFalse();
-        assertThat(client.containsAddress("192.168.1.999")).isFalse();
-    }
-
-    @Test
-    void containsAddress_ignoresMalformedCidrs() {
-        VpnClient client = new VpnClient("pk", "not-a-cidr, 192.168.1.0/24, 10.0.0.0/99", "1.2.3.4", "51820", "0", "0", "0");
-
-        assertThat(client.containsAddress("192.168.1.50")).isTrue();
-        assertThat(client.containsAddress("10.0.0.1")).isFalse();
+        for (Row row : rows) {
+            VpnClient client = new VpnClient("pk", row.allowedIps(), "1.2.3.4", "51820", "0", "0", "0");
+            assertThat(client.containsAddress(row.address())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 }

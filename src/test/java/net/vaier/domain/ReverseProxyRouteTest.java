@@ -100,18 +100,21 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void normalisePathPrefix_preservesOperatorTrailingSlash() {
-        // The operator's trailing slash is part of their intent — backend SPAs sometimes serve
-        // different content for /path vs /path/, so we keep the slash they typed instead of
-        // silently dropping it (issue: bmp.native.corporater.dev/builder/ui).
-        assertThat(ReverseProxyRoute.normalisePathPrefix("/auth/")).isEqualTo("/auth/");
-        assertThat(ReverseProxyRoute.normalisePathPrefix("/builder/ui/")).isEqualTo("/builder/ui/");
-    }
+    void normalisePathPrefix_preservesTrailingSlashAndGoodValues() {
+        record Row(String description, String input, String expected) {}
+        List<Row> rows = List.of(
+            // The operator's trailing slash is part of their intent — backend SPAs sometimes serve
+            // different content for /path vs /path/, so we keep the slash they typed instead of
+            // silently dropping it (issue: bmp.native.corporater.dev/builder/ui).
+            new Row("preserves operator trailing slash", "/auth/", "/auth/"),
+            new Row("preserves operator trailing slash on a nested path", "/builder/ui/", "/builder/ui/"),
+            new Row("preserves a good value unchanged", "/auth", "/auth"),
+            new Row("preserves a good value unchanged with mixed case", "/CorpoWebserver", "/CorpoWebserver")
+        );
 
-    @Test
-    void normalisePathPrefix_preservesGoodValueUnchanged() {
-        assertThat(ReverseProxyRoute.normalisePathPrefix("/auth")).isEqualTo("/auth");
-        assertThat(ReverseProxyRoute.normalisePathPrefix("/CorpoWebserver")).isEqualTo("/CorpoWebserver");
+        for (Row row : rows) {
+            assertThat(ReverseProxyRoute.normalisePathPrefix(row.input())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -218,32 +221,21 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void launchpadDisplayName_hostOnly_returnsSubdomain() {
-        ReverseProxyRoute route = route("grafana.example.com", "10.0.0.1", 8080);
+    void launchpadDisplayName_hostOnlyOrPathBased_returnsTheRelevantLabel() {
+        record Row(String description, ReverseProxyRoute route, String expected) {}
+        List<Row> rows = List.of(
+            new Row("host-only route returns the subdomain", route("grafana.example.com", "10.0.0.1", 8080), "grafana"),
+            // grafana.myserver.example.com → "grafana"
+            new Row("host-only route on a nested subdomain returns the first label",
+                route("grafana.myserver.example.com", "10.13.13.2", 8080), "grafana"),
+            new Row("path-based route returns the last path segment", pathRoute("svc.example.com", "/grafana"), "grafana"),
+            new Row("path-based route with a nested path returns the final segment",
+                pathRoute("svc.example.com", "/api/v1"), "v1")
+        );
 
-        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
-    }
-
-    @Test
-    void launchpadDisplayName_hostOnlyOnNestedSubdomain_returnsFirstLabel() {
-        // grafana.myserver.example.com → "grafana"
-        ReverseProxyRoute route = route("grafana.myserver.example.com", "10.13.13.2", 8080);
-
-        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
-    }
-
-    @Test
-    void launchpadDisplayName_pathBased_returnsLastPathSegment() {
-        ReverseProxyRoute route = pathRoute("svc.example.com", "/grafana");
-
-        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("grafana");
-    }
-
-    @Test
-    void launchpadDisplayName_pathBasedNested_returnsFinalSegment() {
-        ReverseProxyRoute route = pathRoute("svc.example.com", "/api/v1");
-
-        assertThat(route.launchpadDisplayName("example.com")).isEqualTo("v1");
+        for (Row row : rows) {
+            assertThat(row.route().launchpadDisplayName("example.com")).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -515,25 +507,25 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void launchpadUrl_pathPrefixWithTrailingSlash_isEmittedVerbatim() {
-        // Operator typed `/builder/ui/` — we don't strip the slash, and we don't auto-add one
-        // either; the launchpad URL uses the pathPrefix as the landing path as-is.
-        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
-            null, null, null, null, null, false, false, null, "/builder/ui/");
+    void launchpadUrl_pathPrefixEmittedVerbatimWithOrWithoutTrailingSlash() {
+        record Row(String description, String pathPrefix, String expected) {}
+        List<Row> rows = List.of(
+            // Operator typed `/builder/ui/` — we don't strip the slash, and we don't auto-add one
+            // either; the launchpad URL uses the pathPrefix as the landing path as-is.
+            new Row("path prefix with trailing slash is emitted verbatim", "/builder/ui/", "https://bmp.example.com/builder/ui/"),
+            // Operator typed `/builder/ui` (no slash) — emitted as-is. If the backend needs a slash,
+            // the operator can express that via a redirect.
+            new Row("path prefix without trailing slash is emitted verbatim", "/builder/ui", "https://bmp.example.com/builder/ui")
+        );
 
-        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
-            .isEqualTo("https://bmp.example.com/builder/ui/");
-    }
+        for (Row row : rows) {
+            ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
+                null, null, null, null, null, false, false, null, row.pathPrefix());
 
-    @Test
-    void launchpadUrl_pathPrefixWithoutTrailingSlash_isEmittedVerbatim() {
-        // Operator typed `/builder/ui` (no slash) — emitted as-is. If the backend needs a slash,
-        // the operator can express that via a redirect.
-        ReverseProxyRoute route = new ReverseProxyRoute("r", "bmp.example.com", "10.0.0.1", 8080, "svc",
-            null, null, null, null, null, false, false, null, "/builder/ui");
-
-        assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
-            .isEqualTo("https://bmp.example.com/builder/ui");
+            assertThat(route.launchpadUrl(null, List.of(), List.of(), "example.com"))
+                .as(row.description())
+                .isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -626,11 +618,20 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void hostState_connectedVpnPeerMatchingAddress_returnsOk() {
-        ReverseProxyRoute route = route("app.example.com", "10.13.13.2", 8080);
-        VpnClient connected = connectedPeer("10.13.13.2/32");
+    void hostState_connectedVpnPeerReturnsOk() {
+        record Row(String description, String host, String address, String allowedIps) {}
+        List<Row> rows = List.of(
+            new Row("connected vpn peer matching address returns OK", "app.example.com", "10.13.13.2", "10.13.13.2/32"),
+            new Row("peer address with connected peer returns OK regardless of local containers",
+                "openhab.relay.example.com", "10.13.13.3", "10.13.13.3/32,192.168.1.0/24")
+        );
 
-        assertThat(route.hostState(List.of(), List.of(connected))).isEqualTo(State.OK);
+        for (Row row : rows) {
+            ReverseProxyRoute route = route(row.host(), row.address(), 8080);
+            VpnClient connected = connectedPeer(row.allowedIps());
+
+            assertThat(route.hostState(List.of(), List.of(connected))).as(row.description()).isEqualTo(State.OK);
+        }
     }
 
     @Test
@@ -651,14 +652,6 @@ class ReverseProxyRouteTest {
         List<DockerService> local = List.of(runningLocal("vaier", 8080));
 
         assertThat(route.hostState(local, List.of(stale))).isEqualTo(State.UNREACHABLE);
-    }
-
-    @Test
-    void hostState_peerAddress_connectedPeer_returnsOkRegardlessOfLocalContainers() {
-        ReverseProxyRoute route = route("openhab.relay.example.com", "10.13.13.3", 8080);
-        VpnClient connected = connectedPeer("10.13.13.3/32,192.168.1.0/24");
-
-        assertThat(route.hostState(List.of(), List.of(connected))).isEqualTo(State.OK);
     }
 
     @Test
@@ -719,17 +712,6 @@ class ReverseProxyRouteTest {
 
         assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null,
             Map.of("192.168.3.50", Reachability.DOWN))).isEqualTo(State.UNREACHABLE);
-    }
-
-    @Test
-    void hostState_lanService_relayConnected_lanHostOk_returnsOk() {
-        ReverseProxyRoute route = ReverseProxyRoute.lanRoute("r", "nas.example.com", "192.168.3.50", 5000, "http", "svc");
-        PeerConfiguration relay = new PeerConfiguration("apalveien5", "10.13.13.5", "",
-            MachineType.UBUNTU_SERVER, "192.168.3.0/24", "192.168.3.5");
-        VpnClient connectedRelay = connectedPeer("10.13.13.5/32");
-
-        assertThat(route.hostState(List.of(), List.of(connectedRelay), List.of(relay), null,
-            Map.of("192.168.3.50", Reachability.OK))).isEqualTo(State.OK);
     }
 
     @Test
@@ -1043,13 +1025,23 @@ class ReverseProxyRouteTest {
     // --- displayName ---
 
     @Test
-    void displayName_vaierServerService_returnsSubdomainAtVaierServer() {
-        ReverseProxyRoute route = route("pihole.example.com", "pihole", 8080);
-        ForResolvingPeerIds resolver = ip -> ip;
+    void displayName_fallsBackToVaierServerWhenNoPeerMatches() {
+        record Row(String description, String host, String address, int port, String expected) {}
+        List<Row> rows = List.of(
+            new Row("vaier-server-hosted service returns subdomain @ Vaier server",
+                "pihole.example.com", "pihole", 8080, "pihole @ Vaier server"),
+            new Row("unknown address falls back to Vaier server",
+                "app.example.com", "10.13.13.5", 8080, "app @ Vaier server")
+        );
 
-        String name = route.displayName("example.com", List.of(), List.of(), resolver);
+        for (Row row : rows) {
+            ReverseProxyRoute route = route(row.host(), row.address(), row.port());
+            ForResolvingPeerIds resolver = ip -> ip;
 
-        assertThat(name).isEqualTo("pihole @ Vaier server");
+            String name = route.displayName("example.com", List.of(), List.of(), resolver);
+
+            assertThat(name).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -1064,44 +1056,31 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void displayName_peerService_stripsPeerIdSuffixEvenWhenDisplayNameDiffers() {
-        // Regression from the peer id/name split: the ".<peer>" disambiguation suffix in the
-        // DNS name is the immutable peer id (a slug), never the editable display name. The
-        // strip must match the id — otherwise a renamed peer shows "openhab.apalveien5".
-        ReverseProxyRoute route = route("openhab.apalveien5.example.com", "10.13.13.5", 8080);
-        VpnClient peerClient = connectedPeer("10.13.13.5/32");
-        PeerConfiguration peer = new PeerConfiguration("apalveien5", "Apalveien 5", "10.13.13.5",
-            "", MachineType.UBUNTU_SERVER, null, null, null);
-        ForResolvingPeerIds resolver = ip -> ip;
+    void displayName_peerService_stripsPeerSuffixLeniently() {
+        record Row(String description, String host, String address, int port, String peerId, String peerDisplayName, String expected) {}
+        List<Row> rows = List.of(
+            // Regression from the peer id/name split: the ".<peer>" disambiguation suffix in the
+            // DNS name is the immutable peer id (a slug), never the editable display name. The
+            // strip must match the id — otherwise a renamed peer shows "openhab.apalveien5".
+            new Row("strips peer id suffix even when display name differs",
+                "openhab.apalveien5.example.com", "10.13.13.5", 8080, "apalveien5", "Apalveien 5", "openhab @ Apalveien 5"),
+            // The operator hand-types the ".<peer>" suffix: here "colina27" while the peer id is
+            // "Colina-27" and the display name "Colina 27". The strip must match leniently.
+            new Row("strips hand-typed suffix that differs from id in punctuation",
+                "nut.colina27.example.com", "10.13.13.3", 3001, "Colina-27", "Colina 27", "nut @ Colina 27")
+        );
 
-        String name = route.displayName("example.com", List.of(), List.of(peerClient), resolver, List.of(peer));
+        for (Row row : rows) {
+            ReverseProxyRoute route = route(row.host(), row.address(), row.port());
+            VpnClient peerClient = connectedPeer(row.address() + "/32");
+            PeerConfiguration peer = new PeerConfiguration(row.peerId(), row.peerDisplayName(), row.address(),
+                "", MachineType.UBUNTU_SERVER, null, null, null);
+            ForResolvingPeerIds resolver = ip -> ip;
 
-        assertThat(name).isEqualTo("openhab @ Apalveien 5");
-    }
+            String name = route.displayName("example.com", List.of(), List.of(peerClient), resolver, List.of(peer));
 
-    @Test
-    void displayName_peerService_stripsHandTypedSuffixThatDiffersFromIdInPunctuation() {
-        // The operator hand-types the ".<peer>" suffix: here "colina27" while the peer id is
-        // "Colina-27" and the display name "Colina 27". The strip must match leniently.
-        ReverseProxyRoute route = route("nut.colina27.example.com", "10.13.13.3", 3001);
-        VpnClient peerClient = connectedPeer("10.13.13.3/32");
-        PeerConfiguration peer = new PeerConfiguration("Colina-27", "Colina 27", "10.13.13.3",
-            "", MachineType.UBUNTU_SERVER, null, null, null);
-        ForResolvingPeerIds resolver = ip -> ip;
-
-        String name = route.displayName("example.com", List.of(), List.of(peerClient), resolver, List.of(peer));
-
-        assertThat(name).isEqualTo("nut @ Colina 27");
-    }
-
-    @Test
-    void displayName_unknownAddress_fallsBackToVaierServer() {
-        ReverseProxyRoute route = route("app.example.com", "10.13.13.5", 8080);
-        ForResolvingPeerIds resolver = ip -> ip;
-
-        String name = route.displayName("example.com", List.of(), List.of(), resolver);
-
-        assertThat(name).isEqualTo("app @ Vaier server");
+            assertThat(name).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -1339,30 +1318,26 @@ class ReverseProxyRouteTest {
     }
 
     @Test
-    void directUrl_pathPrefixOnly_usesPathPrefixVerbatim() {
-        // No redirect set, pathPrefix has no trailing slash — the direct URL must not invent one.
-        ReverseProxyRoute route = new ReverseProxyRoute(
-            "r", "bmp.example.com", "10.13.13.2", 8080, "svc",
-            null, null, null, null, null, false, false, null, "/builder/ui");
-        PeerConfiguration peer = new PeerConfiguration("s", "10.13.13.2", "",
-            MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10");
-        VpnClient peerClient = connectedPeerWithEndpoint("10.13.13.2/32", "203.0.113.5");
+    void directUrl_pathPrefixUsedVerbatimWithOrWithoutTrailingSlash() {
+        record Row(String description, String pathPrefix, String expected) {}
+        List<Row> rows = List.of(
+            // No redirect set, pathPrefix has no trailing slash — the direct URL must not invent one.
+            new Row("path prefix only uses the path prefix verbatim", "/builder/ui", "http://192.168.1.10:8080/builder/ui"),
+            new Row("path prefix with trailing slash is preserved in the direct URL", "/builder/ui/", "http://192.168.1.10:8080/builder/ui/")
+        );
 
-        assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
-            .isEqualTo("http://192.168.1.10:8080/builder/ui");
-    }
+        for (Row row : rows) {
+            ReverseProxyRoute route = new ReverseProxyRoute(
+                "r", "bmp.example.com", "10.13.13.2", 8080, "svc",
+                null, null, null, null, null, false, false, null, row.pathPrefix());
+            PeerConfiguration peer = new PeerConfiguration("s", "10.13.13.2", "",
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10");
+            VpnClient peerClient = connectedPeerWithEndpoint("10.13.13.2/32", "203.0.113.5");
 
-    @Test
-    void directUrl_pathPrefixWithTrailingSlash_preservedInDirectUrl() {
-        ReverseProxyRoute route = new ReverseProxyRoute(
-            "r", "bmp.example.com", "10.13.13.2", 8080, "svc",
-            null, null, null, null, null, false, false, null, "/builder/ui/");
-        PeerConfiguration peer = new PeerConfiguration("s", "10.13.13.2", "",
-            MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10");
-        VpnClient peerClient = connectedPeerWithEndpoint("10.13.13.2/32", "203.0.113.5");
-
-        assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
-            .isEqualTo("http://192.168.1.10:8080/builder/ui/");
+            assertThat(route.directUrl("203.0.113.5", List.of(peer), List.of(peerClient)))
+                .as(row.description())
+                .isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -1419,14 +1394,15 @@ class ReverseProxyRouteTest {
 
     @Test
     void routerName_pathBased_includesSluggedPath() {
-        assertThat(ReverseProxyRoute.routerName("svc.example.com", "/grafana"))
-            .isEqualTo("svc-example-com-grafana-router");
-    }
+        record Row(String description, String path, String expected) {}
+        List<Row> rows = List.of(
+            new Row("single-segment path becomes a slugged suffix", "/grafana", "svc-example-com-grafana-router"),
+            new Row("multi-segment path slashes become dashes", "/builder/ui", "svc-example-com-builder-ui-router")
+        );
 
-    @Test
-    void routerName_multiSegmentPath_slashesBecomeDashes() {
-        assertThat(ReverseProxyRoute.routerName("svc.example.com", "/builder/ui"))
-            .isEqualTo("svc-example-com-builder-ui-router");
+        for (Row row : rows) {
+            assertThat(ReverseProxyRoute.routerName("svc.example.com", row.path())).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test

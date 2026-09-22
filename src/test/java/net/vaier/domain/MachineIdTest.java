@@ -3,6 +3,7 @@ package net.vaier.domain;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.IntStream;
 
@@ -27,60 +28,40 @@ class MachineIdTest {
     }
 
     @Test
-    void of_acceptsACanonicalUuid() {
-        assertThat(MachineId.of(CANONICAL).value()).isEqualTo(CANONICAL);
+    void of_acceptsAndNormalisesWellFormedUuidText() {
+        record Row(String description, String input, String expected) {}
+        List<Row> rows = List.of(
+            new Row("accepts a canonical uuid", CANONICAL, CANONICAL),
+            new Row("normalises uppercase to lowercase", CANONICAL.toUpperCase(), CANONICAL),
+            new Row("trims surrounding whitespace", "  " + CANONICAL + "  ", CANONICAL)
+        );
+
+        for (Row row : rows) {
+            assertThat(MachineId.of(row.input()).value()).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
-    void of_normalisesUppercaseToLowercase() {
-        assertThat(MachineId.of(CANONICAL.toUpperCase()).value()).isEqualTo(CANONICAL);
-    }
+    void of_rejectsBadInput() {
+        record Row(String description, String input) {}
+        List<Row> rows = List.of(
+            new Row("null", null),
+            new Row("blank", "   "),
+            new Row("non-uuid text", "Apalveien 5"),
+            // UUID.fromString is famously lenient — it accepts "1-1-1-1-1" and silently zero-pads it
+            // into a different, valid-looking UUID. A hand-written config must never be reshaped like
+            // that, so validation is by pattern, not by round-tripping through UUID.
+            new Row("abbreviated uuid that java would silently expand", "1-1-1-1-1"),
+            new Row("uuid with missing hyphens", CANONICAL.replace("-", "")),
+            // The all-zero UUID is a placeholder, not an identity — rejected so a stub can't reach the fleet.
+            new Row("the nil uuid", "00000000-0000-0000-0000-000000000000")
+        );
 
-    @Test
-    void of_trimsSurroundingWhitespace() {
-        assertThat(MachineId.of("  " + CANONICAL + "  ").value()).isEqualTo(CANONICAL);
-    }
-
-    @Test
-    void of_rejectsNull() {
-        assertThatThrownBy(() -> MachineId.of(null))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void of_rejectsBlank() {
-        assertThatThrownBy(() -> MachineId.of("   "))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void of_rejectsNonUuidText() {
-        assertThatThrownBy(() -> MachineId.of("Apalveien 5"))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    /**
-     * {@code UUID.fromString} is famously lenient — it accepts {@code "1-1-1-1-1"} and silently
-     * zero-pads it into a different, valid-looking UUID. A hand-written config must never be
-     * reshaped like that, so validation is by pattern, not by round-tripping through {@code UUID}.
-     */
-    @Test
-    void of_rejectsAbbreviatedUuidThatJavaWouldSilentlyExpand() {
-        assertThatThrownBy(() -> MachineId.of("1-1-1-1-1"))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void of_rejectsUuidWithMissingHyphens() {
-        assertThatThrownBy(() -> MachineId.of(CANONICAL.replace("-", "")))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    /** The all-zero UUID is a placeholder, not an identity — rejected so a stub can't reach the fleet. */
-    @Test
-    void of_rejectsTheNilUuid() {
-        assertThatThrownBy(() -> MachineId.of("00000000-0000-0000-0000-000000000000"))
-            .isInstanceOf(IllegalArgumentException.class);
+        for (Row row : rows) {
+            assertThatThrownBy(() -> MachineId.of(row.input()))
+                .as(row.description())
+                .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LanServerTest {
@@ -61,97 +62,46 @@ class LanServerTest {
     }
 
     @Test
-    void validate_runsDockerTrueWithValidPort_passes() {
-        LanServer.validate("nas", "192.168.3.50", true, 2375);
+    void validate_acceptsWellFormedCombinations_passes() {
+        record Row(String description, String name, String lanAddress, boolean runsDocker, Integer port) {}
+        List<Row> rows = List.of(
+            new Row("runsDocker true with a valid port", "nas", "192.168.3.50", true, 2375),
+            new Row("runsDocker false without a port", "printer", "192.168.3.20", false, null),
+            new Row("runsDocker false with a port anyway", "printer", "192.168.3.20", false, 9100)
+        );
+
+        for (Row row : rows) {
+            assertThatCode(() -> LanServer.validate(row.name(), row.lanAddress(), row.runsDocker(), row.port()))
+                .as(row.description())
+                .doesNotThrowAnyException();
+        }
     }
 
     @Test
-    void validate_runsDockerFalseWithoutPort_passes() {
-        LanServer.validate("printer", "192.168.3.20", false, null);
-    }
+    void validate_rejectsBadInputs_namingWhatWasWrong() {
+        record Row(String description, String name, String lanAddress, boolean runsDocker, Integer port, String expectedMessageFragment) {}
+        List<Row> rows = List.of(
+            new Row("runsDocker true without a port", "nas", "192.168.3.50", true, null, "dockerPort"),
+            new Row("runsDocker true with port below 1", "nas", "192.168.3.50", true, 0, "dockerPort"),
+            new Row("runsDocker true with port above 65535", "nas", "192.168.3.50", true, 70000, "dockerPort"),
+            new Row("blank name", "  ", "192.168.3.50", true, 2375, "name"),
+            new Row("null name", null, "192.168.3.50", true, 2375, "name"),
+            // A name with CR/LF is never legitimate and would enable log forging if persisted.
+            new Row("name with control characters", "nas\ninjected", "192.168.3.50", false, null, "name"),
+            // The name is a /lan-servers/{name} path segment; a '/' makes the server unaddressable.
+            new Row("name with slash", "nas/2", "192.168.3.50", false, null, "name"),
+            new Row("blank lanAddress", "nas", "", true, 2375, "lanAddress"),
+            new Row("non-IPv4 lanAddress", "nas", "not-an-ip", true, 2375, "lanAddress"),
+            new Row("hostname as lanAddress, the rule is the shared lanAddress one", "NAS", "nas.home.example.com", false, null, "IPv4"),
+            new Row("runsDocker false, lanAddress still validated", "printer", "not-an-ip", false, null, "lanAddress")
+        );
 
-    @Test
-    void validate_runsDockerFalseWithPort_passes() {
-        LanServer.validate("printer", "192.168.3.20", false, 9100);
-    }
-
-    @Test
-    void validate_runsDockerTrueWithoutPort_throws() {
-        assertThatThrownBy(() -> LanServer.validate("nas", "192.168.3.50", true, null))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("dockerPort");
-    }
-
-    @Test
-    void validate_runsDockerTrueWithPortBelowOne_throws() {
-        assertThatThrownBy(() -> LanServer.validate("nas", "192.168.3.50", true, 0))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("dockerPort");
-    }
-
-    @Test
-    void validate_runsDockerTrueWithPortAbove65535_throws() {
-        assertThatThrownBy(() -> LanServer.validate("nas", "192.168.3.50", true, 70000))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("dockerPort");
-    }
-
-    @Test
-    void validate_blankName_throws() {
-        assertThatThrownBy(() -> LanServer.validate("  ", "192.168.3.50", true, 2375))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("name");
-    }
-
-    @Test
-    void validate_nullName_throws() {
-        assertThatThrownBy(() -> LanServer.validate(null, "192.168.3.50", true, 2375))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("name");
-    }
-
-    @Test
-    void validate_nameWithControlCharacters_throws() {
-        // A name with CR/LF is never legitimate and would enable log forging if persisted.
-        assertThatThrownBy(() -> LanServer.validate("nas\ninjected", "192.168.3.50", false, null))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("name");
-    }
-
-    @Test
-    void validate_nameWithSlash_throws() {
-        // The name is a /lan-servers/{name} path segment; a '/' makes the server unaddressable.
-        assertThatThrownBy(() -> LanServer.validate("nas/2", "192.168.3.50", false, null))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("name");
-    }
-
-    @Test
-    void validate_blankLanAddress_throws() {
-        assertThatThrownBy(() -> LanServer.validate("nas", "", true, 2375))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("lanAddress");
-    }
-
-    @Test
-    void validate_nonIpv4LanAddress_throws() {
-        assertThatThrownBy(() -> LanServer.validate("nas", "not-an-ip", true, 2375))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("lanAddress");
-    }
-
-    @Test
-    void validate_rejectsAHostnameAsLanAddress_theRuleIsTheSharedLanAddressOne() {
-        assertThatThrownBy(() -> LanServer.validate("NAS", "nas.home.example.com", false, null))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("IPv4");
-    }
-
-    @Test
-    void validate_runsDockerFalse_lanAddressStillValidated() {
-        assertThatThrownBy(() -> LanServer.validate("printer", "not-an-ip", false, null))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("lanAddress");
+        for (Row row : rows) {
+            assertThatThrownBy(() -> LanServer.validate(row.name(), row.lanAddress(), row.runsDocker(), row.port()))
+                .as(row.description())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(row.expectedMessageFragment());
+        }
     }
 
     @Test
@@ -202,27 +152,20 @@ class LanServerTest {
     }
 
     @Test
-    void renamedTo_rejectsBlankName() {
+    void renamedTo_rejectsBadNewNames() {
+        record Row(String description, String newName) {}
+        List<Row> rows = List.of(
+            new Row("blank name", "   "),
+            new Row("name with control characters", "media\r\nnas"),
+            new Row("name with slash", "media/nas")
+        );
+
         LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
-
-        assertThatThrownBy(() -> nas.renamedTo("   "))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void renamedTo_rejectsNameWithControlCharacters() {
-        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
-
-        assertThatThrownBy(() -> nas.renamedTo("media\r\nnas"))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void renamedTo_rejectsNameWithSlash() {
-        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
-
-        assertThatThrownBy(() -> nas.renamedTo("media/nas"))
-            .isInstanceOf(IllegalArgumentException.class);
+        for (Row row : rows) {
+            assertThatThrownBy(() -> nas.renamedTo(row.newName()))
+                .as(row.description())
+                .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     // --- description (#54) ---

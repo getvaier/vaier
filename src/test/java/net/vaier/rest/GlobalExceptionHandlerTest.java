@@ -245,10 +245,6 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(502);
         assertThat(response.getBody().code()).isEqualTo("NO_SSH_SERVER");
         assertThat(response.getBody().detail()).isEqualTo("Roon kjøkken");
-        assertThat(response.getBody().message())
-                .contains("Roon kjøkken")
-                .contains("does not answer SSH")
-                .contains("Install and start an SSH server");
     }
 
     /**

@@ -653,7 +653,8 @@ class LanServerServiceTest {
 
 
     @Test
-    void rename_noOpSameName_leavesSshStateIntact() {
+    void rename_sameName_isANoOp() {
+        // No name change means no derived-field change, so don't churn any of the state renaming would touch.
         LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
         when(forPersistingLanServers.getAll()).thenReturn(List.of(nas));
 
@@ -661,17 +662,9 @@ class LanServerServiceTest {
 
         verify(forPersistingHostCredentials, never()).deleteByMachine(any());
         verify(forTrackingHostKeys, never()).clear(any());
-    }
-
-    @Test
-    void rename_noOp_doesNotInvalidatePublishedServicesCache() {
-        // No name change means no derived-field change, so don't churn the cache.
-        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(nas));
-
-        service.rename(nas.machineId(), "nas");
-
         verify(publishedServicesCacheInvalidator, never()).invalidatePublishedServicesCache();
+        verify(forPersistingLanServers, never()).save(any());
+        verify(forPersistingLanServers, never()).deleteById(any());
     }
 
     @Test
@@ -699,17 +692,6 @@ class LanServerServiceTest {
         assertThat(saved.getValue().name()).isEqualTo("printer");
         // And it is still its own machine — the rename moved a label, not an identity.
         assertThat(saved.getValue().machineId()).isEqualTo(nas.machineId());
-    }
-
-    @Test
-    void rename_isNoOpWhenNameUnchanged() {
-        LanServer nas = new LanServer("nas", "192.168.1.50", false, null);
-        when(forPersistingLanServers.getAll()).thenReturn(List.of(nas));
-
-        service.rename(nas.machineId(), "nas");
-
-        verify(forPersistingLanServers, never()).save(any());
-        verify(forPersistingLanServers, never()).deleteById(any());
     }
 
     @Test

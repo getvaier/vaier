@@ -11,28 +11,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PeerIdTest {
 
     @Test
-    void sanitized_keepsAlreadyValidName() {
-        assertThat(PeerId.sanitized("media-server_01").value()).isEqualTo("media-server_01");
-    }
+    void sanitized_normalisesToTheAllowedCharset() {
+        record Row(String description, String input, String expected) {}
+        List<Row> rows = List.of(
+            new Row("keeps an already-valid name", "media-server_01", "media-server_01"),
+            new Row("replaces invalid characters with a hyphen", "media server!!", "media-server"),
+            new Row("collapses repeated hyphens", "a   b", "a-b"),
+            new Row("strips leading and trailing hyphens", "  -nas-  ", "nas"),
+            new Row("preserves case", "Media Server", "Media-Server")
+        );
 
-    @Test
-    void sanitized_replacesInvalidCharactersWithHyphen() {
-        assertThat(PeerId.sanitized("media server!!").value()).isEqualTo("media-server");
-    }
-
-    @Test
-    void sanitized_collapsesRepeatedHyphens() {
-        assertThat(PeerId.sanitized("a   b").value()).isEqualTo("a-b");
-    }
-
-    @Test
-    void sanitized_stripsLeadingAndTrailingHyphens() {
-        assertThat(PeerId.sanitized("  -nas-  ").value()).isEqualTo("nas");
-    }
-
-    @Test
-    void sanitized_preservesCase() {
-        assertThat(PeerId.sanitized("Media Server").value()).isEqualTo("Media-Server");
+        for (Row row : rows) {
+            assertThat(PeerId.sanitized(row.input()).value()).as(row.description()).isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -48,27 +39,20 @@ class PeerIdTest {
     }
 
     @Test
-    void constructor_rejectsBlankValue() {
-        assertThatThrownBy(() -> new PeerId("   "))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void constructor_rejectsPathTraversalSequence() {
-        assertThatThrownBy(() -> new PeerId("../etc"))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     void constructor_rejectsCharactersOutsideAllowedCharset() {
-        assertThatThrownBy(() -> new PeerId("a/b"))
-            .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new PeerId("a.b"))
-            .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new PeerId("a b"))
-            .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new PeerId("a!b"))
-            .isInstanceOf(IllegalArgumentException.class);
+        record Row(String description, String input) {}
+        List<Row> rows = List.of(
+            new Row("blank value", "   "),
+            new Row("path traversal sequence", "../etc"),
+            new Row("slash", "a/b"),
+            new Row("dot", "a.b"),
+            new Row("space", "a b"),
+            new Row("bang", "a!b")
+        );
+
+        for (Row row : rows) {
+            assertThatThrownBy(() -> new PeerId(row.input())).as(row.description()).isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test

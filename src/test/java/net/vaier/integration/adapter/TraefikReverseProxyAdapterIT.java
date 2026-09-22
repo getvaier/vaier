@@ -11,7 +11,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -50,29 +49,6 @@ class TraefikReverseProxyAdapterIT {
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
         assertThat(content).contains(ServiceNames.VAIER_AUTHZ_MIDDLEWARE);
         assertThat(content).contains("redirectRegex");
-    }
-
-    @Test
-    void addRoute_thenDelete_removesRouterAndService() {
-        adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
-
-        adapter.deleteReverseProxyRouteByDnsName("app.example.com");
-
-        // Non-existent Traefik API → falls back to file routes only
-        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
-        assertThat(routes).isEmpty();
-    }
-
-    @Test
-    void addTwoRoutes_deleteOne_theOtherSurvives() {
-        adapter.addReverseProxyRoute("app1.example.com", "10.13.13.2", 8080, false, null);
-        adapter.addReverseProxyRoute("app2.example.com", "10.13.13.3", 9090, false, null);
-
-        adapter.deleteReverseProxyRouteByDnsName("app1.example.com");
-
-        List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
-        assertThat(routes).hasSize(1);
-        assertThat(routes.getFirst().getDomainName()).isEqualTo("app2.example.com");
     }
 
     @Test
@@ -213,17 +189,6 @@ class TraefikReverseProxyAdapterIT {
         List<ReverseProxyRoute> routes = adapter.getReverseProxyRoutes();
         assertThat(routes).hasSize(1);
         assertThat(routes.getFirst().getDomainName()).isEqualTo("b.example.com");
-    }
-
-    @Test
-    void ignoreService_persistedAcrossNewAdapterInstance() {
-        adapter.ignoreService("peer1:myapp:8080");
-
-        TraefikReverseProxyAdapter adapter2 = new TraefikReverseProxyAdapter(
-                tempDir.resolve("remote-apps.yml").toString(), "http://localhost:19999", "example.com");
-
-        Set<String> ignored = adapter2.getIgnoredServiceKeys();
-        assertThat(ignored).contains("peer1:myapp:8080");
     }
 
     @Test

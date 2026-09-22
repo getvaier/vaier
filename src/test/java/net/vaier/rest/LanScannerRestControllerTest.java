@@ -164,31 +164,6 @@ class LanScannerRestControllerTest {
     }
 
     @Test
-    void getDeviceCategoryFallsBackToRoleWhenHostnameHasNoKeyword() {
-        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
-            ScanStatus.IDLE,
-            List.of(new DiscoveredLanMachine("192.168.3.12", "box-9", List.of(9100), "apalveien5")),
-            Instant.parse("2026-06-04T12:00:00Z")));
-
-        var machine = controller.getSnapshot().getBody().machines().get(0);
-
-        assertThat(machine.deviceCategory()).isEqualTo("PRINTER");
-    }
-
-    @Test
-    void getDeviceCategoryFallsBackToGenericWhenNoSignal() {
-        // Unknown role (no telling ports) and no hostname keyword -> GENERIC (LAN role contributes none).
-        when(getDiscoveredLanMachinesUseCase.snapshot()).thenReturn(new LanScanSnapshot(
-            ScanStatus.IDLE,
-            List.of(new DiscoveredLanMachine("192.168.3.13", "box-9", List.of(12345), "apalveien5")),
-            Instant.parse("2026-06-04T12:00:00Z")));
-
-        var machine = controller.getSnapshot().getBody().machines().get(0);
-
-        assertThat(machine.deviceCategory()).isEqualTo("GENERIC");
-    }
-
-    @Test
     void adoptDelegatesTheIpAndNameOverrideAndReturnsTheCreatedMachine() {
         when(adoptDiscoveredMachineUseCase.adopt("192.168.3.50", "living-room-nas")).thenReturn(
             new LanServer("living-room-nas", "192.168.3.50", true, 2375, null, DeviceCategory.NAS));

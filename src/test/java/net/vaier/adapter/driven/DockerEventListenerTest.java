@@ -18,54 +18,23 @@ import static org.mockito.Mockito.*;
 class DockerEventListenerTest {
 
     @Test
-    void containerStartEvent_invalidatesCacheAndPublishesSseEvent() {
-        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
-        ForPublishingEvents events = mock(ForPublishingEvents.class);
+    void containerStartStopOrDieEvent_invalidatesCacheAndPublishesSseEvent() {
+        for (String action : new String[] { "start", "stop", "die" }) {
+            PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
+            ForPublishingEvents events = mock(ForPublishingEvents.class);
 
-        DockerEventListener listener = new DockerEventListener(cache, events);
+            DockerEventListener listener = new DockerEventListener(cache, events);
 
-        Event event = mock(Event.class);
-        when(event.getType()).thenReturn(EventType.CONTAINER);
-        when(event.getAction()).thenReturn("start");
+            Event event = mock(Event.class);
+            when(event.getType()).thenReturn(EventType.CONTAINER);
+            when(event.getAction()).thenReturn(action);
 
-        listener.onEvent(event);
+            listener.onEvent(event);
 
-        verify(cache).invalidatePublishedServicesCache();
-        verify(events).publish("published-services", "service-updated", "container-state-changed");
-    }
-
-    @Test
-    void containerStopEvent_invalidatesCacheAndPublishesSseEvent() {
-        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
-        ForPublishingEvents events = mock(ForPublishingEvents.class);
-
-        DockerEventListener listener = new DockerEventListener(cache, events);
-
-        Event event = mock(Event.class);
-        when(event.getType()).thenReturn(EventType.CONTAINER);
-        when(event.getAction()).thenReturn("stop");
-
-        listener.onEvent(event);
-
-        verify(cache).invalidatePublishedServicesCache();
-        verify(events).publish("published-services", "service-updated", "container-state-changed");
-    }
-
-    @Test
-    void containerDieEvent_invalidatesCacheAndPublishesSseEvent() {
-        PublishedServicesCacheInvalidator cache = mock(PublishedServicesCacheInvalidator.class);
-        ForPublishingEvents events = mock(ForPublishingEvents.class);
-
-        DockerEventListener listener = new DockerEventListener(cache, events);
-
-        Event event = mock(Event.class);
-        when(event.getType()).thenReturn(EventType.CONTAINER);
-        when(event.getAction()).thenReturn("die");
-
-        listener.onEvent(event);
-
-        verify(cache).invalidatePublishedServicesCache();
-        verify(events).publish("published-services", "service-updated", "container-state-changed");
+            verify(cache, description(action)).invalidatePublishedServicesCache();
+            verify(events, description(action)).publish("published-services", "service-updated",
+                "container-state-changed");
+        }
     }
 
     @Test

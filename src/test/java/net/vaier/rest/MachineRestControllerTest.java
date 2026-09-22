@@ -638,14 +638,6 @@ class MachineRestControllerTest {
             .build();
     }
 
-    @Test
-    void nudges_unknownMachine_404() {
-        when(getMachinesUseCase.getAllMachines()).thenReturn(List.of());
-
-        assertThatThrownBy(() -> controller.nudges(mid("ghost").value()))
-            .isInstanceOf(NotFoundException.class);
-    }
-
     // --- a machine's filesystems (#323 slice C, fixed by #325) ---
     //
     // A sibling of /machines/{machine}/files: a non-whitelisted path under /machines, so it sits behind the

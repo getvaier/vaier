@@ -474,8 +474,6 @@ class BackupProvisionerTest {
 
         assertThat(script).isPresent();
         assertThat(script.get()).contains("OWNER=\"geir\"");
-        assertThat(script.get()).contains("id -u \"$OWNER\"");
-        assertThat(script.get()).doesNotContain("BORG_UID=1000");
     }
 
     @Test

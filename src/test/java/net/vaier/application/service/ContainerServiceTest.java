@@ -998,45 +998,26 @@ class ContainerServiceTest {
     }
 
     @Test
-    void getUnpublishedVaierServerServices_excludesAutheliaContainer() {
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer(ServiceNames.AUTHELIA, 9091, "tcp")));
+    void getUnpublishedVaierServerServices_excludesVaierStackContainersAndUdpPorts() {
+        record Row(String description, String name, int port, String proto) {}
+        List<Row> rows = List.of(
+            new Row("Authelia container", ServiceNames.AUTHELIA, 9091, "tcp"),
+            new Row("Redis container", ServiceNames.REDIS, 6379, "tcp"),
+            new Row("Vaier container", ServiceNames.VAIER, 8080, "tcp"),
+            new Row("wireguard-masquerade container", ServiceNames.WIREGUARD_MASQUERADE, 8080, "tcp"),
+            // docker-proxy serves the Docker API on 2375. It was offered for publishing for as long as the
+            // catalogue went unrevised — one click from putting root on every container on a public hostname.
+            new Row("docker socket proxy", "docker-proxy", 2375, "tcp"),
+            new Row("traefik on its dashboard-only port 80", "traefik", 80, "tcp"),
+            new Row("a UDP port", "my-app", 3000, "udp")
+        );
 
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
-    }
+        for (Row row : rows) {
+            when(forGettingServerInfo.getServicesWithExposedPorts(any()))
+                .thenReturn(List.of(localContainer(row.name(), row.port(), row.proto())));
 
-    @Test
-    void getUnpublishedVaierServerServices_excludesRedisContainer() {
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer(ServiceNames.REDIS, 6379, "tcp")));
-
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
-    }
-
-    @Test
-    void getUnpublishedVaierServerServices_excludesVaierContainer() {
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer(ServiceNames.VAIER, 8080, "tcp")));
-
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
-    }
-
-    @Test
-    void getUnpublishedVaierServerServices_excludesWireguardMasqueradeContainer() {
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer(ServiceNames.WIREGUARD_MASQUERADE, 8080, "tcp")));
-
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
-    }
-
-    @Test
-    void getUnpublishedVaierServerServices_excludesTheDockerSocketProxy() {
-        // docker-proxy serves the Docker API on 2375. It was offered for publishing for as long as the
-        // catalogue went unrevised — one click from putting root on every container on a public hostname.
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer("docker-proxy", 2375, "tcp")));
-
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
+            assertThat(refreshThenGetUnpublished(List.of())).as(row.description()).isEmpty();
+        }
     }
 
     @Test
@@ -1067,14 +1048,6 @@ class ContainerServiceTest {
     }
 
     @Test
-    void getUnpublishedVaierServerServices_traefikOnPort80_excluded() {
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer("traefik", 80, "tcp")));
-
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
-    }
-
-    @Test
     void getUnpublishedVaierServerServices_unknownContainerTcpPort_includedWithNullRedirectPath() {
         when(forGettingServerInfo.getServicesWithExposedPorts(any()))
             .thenReturn(List.of(localContainer("my-app", 3000, "tcp")));
@@ -1085,14 +1058,6 @@ class ContainerServiceTest {
         assertThat(result.get(0).containerName()).isEqualTo("my-app");
         assertThat(result.get(0).port()).isEqualTo(3000);
         assertThat(result.get(0).rootRedirectPath()).isNull();
-    }
-
-    @Test
-    void getUnpublishedVaierServerServices_udpPort_excluded() {
-        when(forGettingServerInfo.getServicesWithExposedPorts(any()))
-            .thenReturn(List.of(localContainer("my-app", 3000, "udp")));
-
-        assertThat(refreshThenGetUnpublished(List.of())).isEmpty();
     }
 
     @Test

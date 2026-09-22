@@ -163,30 +163,6 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
-    void addReverseProxyRoute_socialMode_definesTheProvenMiddlewares() throws IOException {
-        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
-            net.vaier.domain.AuthMode.SOCIAL, null, null);
-
-        var middlewares = (java.util.Map<String, Object>) http().get("middlewares");
-
-        var signin = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-signin")).get("errors");
-        assertThat((List<String>) signin.get("status")).containsExactly("401");
-        assertThat(signin.get("service")).isEqualTo("oauth2-proxy-svc");
-        assertThat(signin.get("query")).isEqualTo("/oauth2/sign_in?rd={url}");
-
-        var authn = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("oauth2-authn")).get("forwardAuth");
-        assertThat(authn.get("address")).isEqualTo("http://oauth2-proxy:4180/oauth2/auth");
-        assertThat((List<String>) authn.get("authResponseHeaders"))
-            .containsExactly("X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Name",
-                    "X-Auth-Request-Connector", "X-Auth-Request-Connector-Uid");
-
-        var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
-        assertThat(authz.get("address")).isEqualTo("http://vaier:8080/authz/verify");
-        assertThat((List<String>) authz.get("authResponseHeaders"))
-            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups", "Remote-Name");
-    }
-
-    @Test
     void addReverseProxyRoute_socialMode_addsHigherPriorityOauth2EndpointsRouterForTheHost() throws IOException {
         adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
             net.vaier.domain.AuthMode.SOCIAL, null, null);

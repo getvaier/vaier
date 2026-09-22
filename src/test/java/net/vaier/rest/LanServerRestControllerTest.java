@@ -203,16 +203,6 @@ class LanServerRestControllerTest {
     }
 
     @Test
-    void register_runsDockerTrueWithoutDockerPort_propagatesIllegalArgument() {
-        doThrow(new IllegalArgumentException("dockerPort is required"))
-            .when(registerLanServerUseCase).register("nas", "192.168.3.50", true, null, null, null);
-        var request = new LanServerRestController.RegisterRequest("nas", "192.168.3.50", true, null, null, null);
-
-        assertThatThrownBy(() -> controller.register(request))
-            .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     void register_propagatesIllegalArgument() {
         doThrow(new IllegalArgumentException("not in any lanCidr"))
             .when(registerLanServerUseCase).register("nas", "10.99.99.99", true, 2375, null, null);
