@@ -147,6 +147,25 @@ body.tw {
 }
 .tw-modal-close:hover { color: var(--text); border-color: var(--border-hi); }
 .tw-modal-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* --- the shells already running on this machine ---------------------------------------------------------
+
+   One row per shell besides this one. An orphan — a shell no window holds — is what the list is for, so it
+   is the row that says something; a shell some window holds is said plainly and left alone. */
+.tw-shells-modal { width: min(680px, 100%); }
+.tw-shells { list-style: none; margin: 0; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.tw-shell {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-1);
+}
+.tw-shell.is-orphan { border-left: 3px solid var(--accent); }
+.tw-shell-text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tw-shell-cmd { font-family: var(--mono); font-size: 14px; color: var(--text); }
+.tw-shell-meta { color: var(--text-dim); font-size: 13px; line-height: 1.4; }
+.tw-shell-acts { flex: none; display: flex; gap: 6px; }
+.tw-btn.is-armed, .tw-btn.is-armed:hover { color: var(--red); border-color: var(--red); }
+
 /* --- Copy, for a finger --------------------------------------------------------------------------------
 
    The shell's text once more as page text: black like the terminal so it reads as the same screen, but

@@ -6,6 +6,7 @@ import net.vaier.application.ClearHostKeyUseCase;
 import net.vaier.application.DeleteFleetCredentialUseCase;
 import net.vaier.application.DeleteHostCredentialUseCase;
 import net.vaier.application.EndTerminalSessionUseCase;
+import net.vaier.application.ListPersistentShellsUseCase;
 import net.vaier.application.GenerateManagedKeypairUseCase;
 import net.vaier.application.GetFleetCredentialsUseCase;
 import net.vaier.application.GetHostCredentialUseCase;
@@ -29,6 +30,7 @@ import net.vaier.domain.HostCredentialView;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.PasswordPrompt;
 import net.vaier.domain.PersistentShell;
+import net.vaier.domain.RunningShell;
 import net.vaier.domain.SshCredentialDraft;
 import net.vaier.domain.SshCredentialVerification;
 import net.vaier.domain.SshServerPresence;
@@ -72,6 +74,7 @@ public class TerminalService implements
     OpenTerminalSessionUseCase,
     OpenClaudeSignInShellUseCase,
     EndTerminalSessionUseCase,
+    ListPersistentShellsUseCase,
     RunRemoteCommandUseCase,
     SendHostPasswordUseCase,
     VerifySshCredentialUseCase,
@@ -214,6 +217,21 @@ public class TerminalService implements
         } catch (RuntimeException e) {
             log.warn("Could not end terminal session {} on {}: {}",
                 PersistentShell.sessionName(paneId), machineId, e.toString());
+        }
+    }
+
+    @Override
+    public List<RunningShell> listShells(MachineId machineId) {
+        // On the open path of a terminal window: a host that is down, has no credential, or has no tmux must
+        // never keep the window from opening. Unreadable reads as no shells, and the domain decides what is ours.
+        try {
+            SshTarget target = forResolvingSshTargets.resolve(machineId);
+            CommandResult result = forRunningSshCommands.run(target, PersistentShell.listCommand());
+            pinOnFirstUse(target, result.hostKeyFingerprint());
+            return PersistentShell.readShells(result.stdout());
+        } catch (RuntimeException e) {
+            log.warn("Could not list the shells running on {}: {}", machineId, e.toString());
+            return List.of();
         }
     }
 

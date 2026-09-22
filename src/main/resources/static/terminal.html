@@ -51,6 +51,19 @@
             </div>
         </div>
     </div>
+    <!-- The shells already running on this machine besides this one (#322). Vaier creates persistent shells
+         but could never enumerate them, so a pane id lost anywhere — a cleared browser, another device — was a
+         shell lost forever, still running whatever was in it. Listed by the machine itself, so nothing is guessed. -->
+    <div class="tw-scrim" id="twShellsScrim" hidden>
+        <div class="tw-modal tw-shells-modal" role="dialog" aria-modal="true" aria-labelledby="twShellsTitle">
+            <div class="tw-modal-head">
+                <span class="tw-modal-title" id="twShellsTitle">Shells running here</span>
+                <button type="button" class="tw-modal-close" id="twShellsClose" aria-label="Close">&#215;</button>
+            </div>
+            <p class="tw-copy-hint" id="twShellsHint"></p>
+            <ul class="tw-shells" id="twShellsList"></ul>
+        </div>
+    </div>
     <div class="tw-main">
         <div class="tw-term" id="twTerm"></div>
     </div>

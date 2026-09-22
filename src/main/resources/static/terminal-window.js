@@ -127,6 +127,7 @@
         claude: '<path d="M8 1.7v12.6M1.7 8h12.6"/><path d="M5.2 5.2l5.6 5.6M10.8 5.2l-5.6 5.6"/>',
         copy:   '<rect x="5.5" y="5.5" width="8" height="8.2" rx="1.2"/><path d="M3.4 10.5H3a1 1 0 0 1-1-1V3.2a1 1 0 0 1 1-1h6.3a1 1 0 0 1 1 1v.4"/>',
         window: '<path d="M6.8 2.6H3.2a1 1 0 0 0-1 1v9.2a1 1 0 0 0 1 1h9.6a1 1 0 0 0 1-1V9.2"/><path d="M9.6 2.6h4.2v4.2M13.8 2.6 8.2 8.2"/>',
+        shells: '<rect x="2" y="4.6" width="10" height="8.6" rx="1.2"/><path d="M4.6 2.6h8.2a1.2 1.2 0 0 1 1.2 1.2v6.4"/><path d="M4.6 7.6l1.9 1.4-1.9 1.4M8 10.6h1.8"/>',
         clip:   '<rect x="3" y="2.6" width="10" height="11.4" rx="1.2"/><path d="M5.8 2.6V2a.9.9 0 0 1 .9-.9h2.6a.9.9 0 0 1 .9.9v.6z"/><path d="M5.6 7.2h4.8M5.6 9.7h4.8M5.6 12.2h2.8"/>',
         key:    '<circle cx="5.4" cy="10.6" r="2.9"/><path d="M7.5 8.5l5.7-5.7"/><path d="M11.1 4.9l1.5 1.5M12.3 3.7l1.5 1.5"/>',
         cross:  '<path d="M4 4l8 8M12 4l-8 8"/>',
@@ -147,6 +148,11 @@
             'vaier-shell-' + encodeURIComponent(pane), 'popup,width=1024,height=680');
     }, 'window');
     btnDup.title = 'Open a second, separate shell on ' + machine;
+    // Hidden until the machine has said it runs shells besides this one: a control for nothing is noise.
+    const btnShells = actionButton('Shells', () => setShellsSheet(true), 'shells');
+    btnShells.hidden = true;
+    btnShells.setAttribute('aria-expanded', 'false');
+    btnShells.setAttribute('aria-controls', 'twShellsScrim');
     const btnCopy = actionButton('Copy', copyFromShell, 'copy');
     btnCopy.title = 'Copy from this shell: the selection if there is one, otherwise the screen as text you can select';
     const btnPaste = actionButton('Paste', pasteClipboard, 'clip');
@@ -167,11 +173,12 @@
         if (e.key !== 'Escape') return;
         if (!$('twScrim').hidden) { e.preventDefault(); setClaudePanel(false); }
         if (!$('twCopyScrim').hidden) { e.preventDefault(); setCopySheet(false); }
+        if (!$('twShellsScrim').hidden) { e.preventDefault(); setShellsSheet(false); }
     });
     btnClaude.hidden = true;
     btnClaude.setAttribute('aria-expanded', 'false');
     btnClaude.setAttribute('aria-controls', 'twScrim');
-    $('twActions').append(btnClaude, btnDup, btnCopy, btnPaste, btnPassword, btnEnd);
+    $('twActions').append(btnClaude, btnDup, btnShells, btnCopy, btnPaste, btnPassword, btnEnd);
     refreshActions();
 
     function actionButton(label, onClick, icon) {
@@ -234,6 +241,100 @@
             if (claude) claude.leave();
             term.focus();
         }
+    }
+
+    // --- the shells already running on this machine (#322) ------------------------------------------------
+    //
+    // Asked of the machine itself once this window has an identity to ask about, and again whenever the sheet
+    // opens or a shell is ended — never on a timer. This window's own shell is left out: the list is what ELSE
+    // is running here. A shell some window holds is said so; one nobody holds is the orphan this exists for.
+    let _shells = [];
+    $('twShellsClose').onclick = () => setShellsSheet(false);
+    $('twShellsScrim').onclick = (e) => { if (e.target === $('twShellsScrim')) setShellsSheet(false); };
+
+    async function loadShells() {
+        if (!machineId) return;
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machineId) + '/shells');
+            _shells = res.ok ? (await res.json()).filter((sh) => sh.paneId !== paneId) : [];
+        } catch (e) { _shells = []; }
+        const n = _shells.length;
+        btnShells.hidden = n === 0;
+        btnShells.title = n === 1 ? 'One other shell is running on ' + machine
+            : n + ' other shells are running on ' + machine;
+        if (!$('twShellsScrim').hidden) renderShells();
+        if (n === 0) setShellsSheet(false);
+    }
+
+    function ago(seconds) {
+        if (seconds < 60) return 'moments';
+        if (seconds < 3600) return Math.round(seconds / 60) + ' min';
+        if (seconds < 86400) return Math.round(seconds / 3600) + ' h';
+        return Math.round(seconds / 86400) + ' d';
+    }
+
+    function renderShells() {
+        const list = $('twShellsList');
+        list.textContent = '';
+        $('twShellsTitle').textContent = 'Shells running on ' + machine;
+        $('twShellsHint').textContent = 'Besides this one. Reattach opens a shell in its own window; End stops it for good.';
+        for (const sh of _shells) {
+            const li = document.createElement('li'); li.className = 'tw-shell';
+            const held = sh.attached || (window.VaierPanes && VaierPanes.isLive && VaierPanes.isLive(sh.paneId));
+            const text = document.createElement('div'); text.className = 'tw-shell-text';
+            const cmd = document.createElement('span'); cmd.className = 'tw-shell-cmd'; cmd.textContent = sh.running || 'shell';
+            const meta = document.createElement('span'); meta.className = 'tw-shell-meta';
+            meta.textContent = 'started ' + ago(sh.ageSeconds) + ' ago · '
+                + (held ? 'open in another window' : 'no window has held it for ' + ago(sh.sinceAttachedSeconds));
+            if (!held) li.classList.add('is-orphan');
+            text.append(cmd, meta);
+            const acts = document.createElement('div'); acts.className = 'tw-shell-acts';
+            const reattach = document.createElement('button'); reattach.type = 'button'; reattach.className = 'tw-btn';
+            reattach.textContent = 'Reattach';
+            reattach.onclick = () => reattachShell(sh.paneId);
+            const end = document.createElement('button'); end.type = 'button'; end.className = 'tw-btn tw-danger';
+            end.textContent = 'End';
+            // Two taps: the first arms it in place, the second ends a shell that may still be running something.
+            end.onclick = () => {
+                if (!end.classList.contains('is-armed')) { end.classList.add('is-armed'); end.textContent = 'End it?'; return; }
+                endOtherShell(sh.paneId, end);
+            };
+            acts.append(reattach, end);
+            li.append(text, acts);
+            list.appendChild(li);
+        }
+    }
+
+    // The same door Duplicate uses, on the orphan's own pane id: the new window adopts the id into the pane store,
+    // so the shell is owned again and closing that window later ends it properly.
+    function reattachShell(pid) {
+        const w = window.open('terminal.html?machine=' + encodeURIComponent(machine)
+            + '&id=' + encodeURIComponent(machineId) + '&pane=' + encodeURIComponent(pid),
+            'vaier-shell-' + encodeURIComponent(pid), 'popup,width=1024,height=680');
+        if (!w) { setStatus('Your browser blocked the shell window. Allow pop-ups for Vaier and try again.', true); return; }
+        w.focus();
+    }
+
+    async function endOtherShell(pid, button) {
+        button.disabled = true;
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(machineId) + '/shells/' + encodeURIComponent(pid),
+                { method: 'DELETE' });
+            if (!res.ok) throw new Error(String(res.status));
+            VaierPanes.release(machineId, pid, machine);
+            setStatus('Ended the shell.');
+        } catch (e) {
+            setStatus('Could not end that shell.', true);
+        }
+        await loadShells();
+    }
+
+    function setShellsSheet(open) {
+        const scrim = $('twShellsScrim');
+        if (open === !scrim.hidden) return;
+        scrim.hidden = !open;
+        btnShells.setAttribute('aria-expanded', String(open));
+        if (open) { renderShells(); $('twShellsClose').focus(); loadShells(); } else { term.focus(); }
     }
 
     // --- Copy, for a finger ---------------------------------------------------------------------------------
@@ -637,6 +738,7 @@
         claimPane();
         connect();
         startClaude();
+        loadShells();
     } else {
         setStatus('Finding ' + machine + '…');
         fetch('/machines')
@@ -664,6 +766,7 @@
                 claimPane();   // only now is there an identity to file the session under
                 connect();
                 startClaude();
+                loadShells();
             })
             .catch(() => setStatus('Could not reach Vaier to find ' + machine + '.', true));
     }

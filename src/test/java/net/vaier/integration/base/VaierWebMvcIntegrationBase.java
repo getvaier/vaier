@@ -379,6 +379,12 @@ public abstract class VaierWebMvcIntegrationBase {
     protected ClearHostKeyUseCase clearHostKeyUseCase;
 
     @MockBean
+    protected ListPersistentShellsUseCase listPersistentShellsUseCase;
+
+    @MockBean
+    protected EndTerminalSessionUseCase endTerminalSessionUseCase;
+
+    @MockBean
     protected GetMachineDiskUsageUseCase getMachineDiskUsageUseCase;
 
     @MockBean

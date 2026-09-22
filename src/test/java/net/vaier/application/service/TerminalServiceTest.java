@@ -14,6 +14,7 @@ import net.vaier.domain.MachineId;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.PersistentShell;
+import net.vaier.domain.RunningShell;
 import net.vaier.domain.SshAuthException;
 import net.vaier.domain.SshConnectException;
 import net.vaier.domain.SshCredentialDraft;
@@ -467,6 +468,30 @@ class TerminalServiceTest {
     }
 
     // --- ending a shell (the leak fix): an explicit close must kill the tmux session -------------
+
+    @Test
+    void listShells_runsTheListCommand_andReadsTheShellsRunningThere() {
+        machineResolvesTo("nuc", "10.13.13.9", "SHA256:pinned");
+        when(forRunningSshCommands.run(any(), any()))
+            .thenReturn(probe("SHA256:pinned", "VAIER_NOW 100\nvaier-p1\t90\t95\t0\tclaude\n"));
+
+        List<RunningShell> shells = service.listShells(mid("nuc"));
+
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(forRunningSshCommands).run(any(), command.capture());
+        assertThat(command.getValue()).contains("tmux list-sessions");
+        assertThat(shells).extracting(RunningShell::paneId).containsExactly("p1");
+        assertThat(shells.get(0).running()).isEqualTo("claude");
+    }
+
+    @Test
+    void listShells_unreachableHost_readsAsNoShells_andNeverThrows() {
+        // This runs on the open path of a terminal window; a host that is down or has no credential must
+        // never keep the window from opening.
+        when(forResolvingSshTargets.resolve(mid("nuc"))).thenThrow(new NoHostCredentialException("nuc"));
+
+        assertThat(service.listShells(mid("nuc"))).isEmpty();
+    }
 
     @Test
     void endTerminal_killsThePanesTmuxSession_onThatMachine() {

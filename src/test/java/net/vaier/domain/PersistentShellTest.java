@@ -2,6 +2,9 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PersistentShellTest {
@@ -123,5 +126,62 @@ class PersistentShellTest {
         // Same guarantee as sessionName: a hostile pane id can never break out of the command line.
         assertThat(PersistentShell.endCommand("a b;rm -rf/")).contains("-t 'vaier-abrm-rf'");
         assertThat(PersistentShell.endCommand("a b;rm -rf/")).doesNotContain("rm -rf/");
+    }
+
+    // --- the shells already running on a machine (#322) -----------------------------------------------
+
+    @Test
+    void listCommand_listsTmuxSessions_withTheMachinesOwnClock_andSaysWhenTmuxIsAbsent() {
+        String cmd = PersistentShell.listCommand();
+
+        assertThat(cmd).contains("VAIER_TMUX_ABSENT");
+        assertThat(cmd).contains("date +%s");
+        assertThat(cmd).contains("tmux list-sessions -F");
+        assertThat(cmd).contains("#{session_name}").contains("#{session_created}")
+            .contains("#{session_last_attached}").contains("#{session_attached}").contains("#{pane_current_command}");
+    }
+
+    @Test
+    void readShells_readsOnlyVaierSessions_withAgesFromTheMachinesOwnClock() {
+        // The uuid is one Vaier mints: sessionName sanitises, so a name cannot be reversed to an arbitrary
+        // pane id in general, but crypto.randomUUID output round-trips — pinned here, not discovered later.
+        String uuid = "3826a934-1d23-4bc0-9f1e-0c2d4e6f8a10";
+        String out = "VAIER_NOW 1000000\n"
+            + "vaier-abc\t990000\t995000\t0\tclaude\n"       // detached; last held 5000 s ago
+            + PersistentShell.sessionName(uuid) + "\t900000\t999000\t1\tbash\n"   // held by a window now
+            + "vaier-p\t999700\t0\t0\tsh\n"                   // never attached: detached since created
+            + "main\t100\t100\t1\tbash\nwork-vaier\t100\t100\t0\tvim\n";   // the operator's own
+
+        List<RunningShell> shells = PersistentShell.readShells(out);
+
+        assertThat(shells).extracting(RunningShell::paneId).containsExactly("abc", uuid, "p");
+        RunningShell claude = shells.get(0);
+        assertThat(claude.running()).isEqualTo("claude");
+        assertThat(claude.age()).isEqualTo(Duration.ofSeconds(10000));
+        assertThat(claude.sinceAttached()).isEqualTo(Duration.ofSeconds(5000));
+        assertThat(claude.attached()).isFalse();
+        assertThat(shells.get(1).attached()).isTrue();
+        assertThat(shells.get(2).sinceAttached()).isEqualTo(Duration.ofSeconds(300));
+    }
+
+    @Test
+    void readShells_absentTmux_noServer_garbageOrNothing_allReadAsNoShells() {
+        assertThat(PersistentShell.readShells("VAIER_TMUX_ABSENT\n")).isEmpty();
+        assertThat(PersistentShell.readShells("VAIER_NOW 5\n")).isEmpty();
+        assertThat(PersistentShell.readShells("no server running on /tmp/tmux-1000/default\n")).isEmpty();
+        assertThat(PersistentShell.readShells("VAIER_NOW 5\nvaier-broken\tnot-a-number\n")).isEmpty();
+        assertThat(PersistentShell.readShells(null)).isEmpty();
+    }
+
+    @Test
+    void readShells_roundTripsThePaneIdsVaierMints() {
+        // sessionName sanitises, so a session name cannot be reversed to an arbitrary pane id — but the ids
+        // Vaier mints (crypto.randomUUID) are already inside the charset and under the cap. Pin it.
+        String paneId = "3826a934-1d23-4bc0-9f1e-0c2d4e6f8a10";
+        String name = PersistentShell.sessionName(paneId);
+        assertThat(name).isEqualTo("vaier-" + paneId);
+
+        List<RunningShell> shells = PersistentShell.readShells("VAIER_NOW 10\n" + name + "\t1\t1\t0\tbash\n");
+        assertThat(shells.get(0).paneId()).isEqualTo(paneId);
     }
 }

@@ -1,5 +1,9 @@
 package net.vaier.domain;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * The single place in Vaier that knows how to open a shell on a machine so the shell <em>outlives the
  * Vaier process</em>. When the operator redeploys the Vaier container (a "hot deploy" run from a web
@@ -41,6 +45,7 @@ public final class PersistentShell {
     private static final String MARKER_ABSENT = "VAIER_TMUX_ABSENT";
     private static final String MARKER_ATTACH = "VAIER_TMUX_ATTACH";
     private static final String MARKER_NEW = "VAIER_TMUX_NEW";
+    private static final String MARKER_NOW = "VAIER_NOW";
 
     private PersistentShell() {
     }
@@ -136,6 +141,67 @@ public final class PersistentShell {
             return Continuity.REATTACHED;
         }
         return Continuity.NEW;
+    }
+
+    /**
+     * The command that lists every tmux session on the machine, led by the machine's own clock so ages are
+     * measured where the sessions live rather than against Vaier's clock. Each session is one tab-separated
+     * line: name, created, last attached, attached-client count, and what its active pane is running. Says
+     * {@value #MARKER_ABSENT} where tmux is not installed; a tmux with no server prints nothing.
+     */
+    public static String listCommand() {
+        return "command -v tmux >/dev/null 2>&1 || { echo " + MARKER_ABSENT + "; exit 0; }; "
+            + "echo \"" + MARKER_NOW + " $(date +%s)\"; "
+            + "tmux list-sessions -F '#{session_name}\t#{session_created}\t#{session_last_attached}"
+            + "\t#{session_attached}\t#{pane_current_command}' 2>/dev/null || true";
+    }
+
+    /**
+     * Read a {@link #listCommand} run's output into the shells that are Vaier's: only sessions carrying the
+     * {@value #SESSION_PREFIX} prefix, so the operator's own sessions are never listed and never touched.
+     * A session never attached counts as detached since it was created. Anything unreadable — tmux absent,
+     * no server, a garbled line — reads as no shells; it never throws.
+     */
+    public static List<RunningShell> readShells(String output) {
+        String text = output == null ? "" : output;
+        if (text.contains(MARKER_ABSENT)) {
+            return List.of();
+        }
+        long now = -1;
+        List<String[]> rows = new ArrayList<>();
+        for (String line : text.split("\n")) {
+            if (line.startsWith(MARKER_NOW + " ")) {
+                now = parseLongOr(line.substring(MARKER_NOW.length() + 1).trim(), -1);
+                continue;
+            }
+            String[] f = line.split("\t", -1);
+            if (f.length == 5 && f[0].startsWith(SESSION_PREFIX)) {
+                rows.add(f);
+            }
+        }
+        List<RunningShell> shells = new ArrayList<>();
+        for (String[] f : rows) {
+            long created = parseLongOr(f[1], -1);
+            long lastAttached = parseLongOr(f[2], -1);
+            long attachedClients = parseLongOr(f[3], -1);
+            if (created < 0 || lastAttached < 0 || attachedClients < 0) {
+                continue;
+            }
+            long base = now >= 0 ? now : Math.max(created, lastAttached);
+            long since = lastAttached > 0 ? lastAttached : created;
+            shells.add(new RunningShell(f[0].substring(SESSION_PREFIX.length()), f[4],
+                Duration.ofSeconds(Math.max(0, base - created)), Duration.ofSeconds(Math.max(0, base - since)),
+                attachedClients > 0));
+        }
+        return List.copyOf(shells);
+    }
+
+    private static long parseLongOr(String value, long fallback) {
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /**

@@ -129,5 +129,5 @@
     function beat(paneId) { const l = read(LIVE); l[paneId] = Date.now(); write(LIVE, l); }
     function stopBeat(paneId) { const l = read(LIVE); if (l[paneId] != null) { delete l[paneId]; write(LIVE, l); } }
 
-    window.VaierPanes = { claim, primary, adopt, release, beat, stopBeat, newId };
+    window.VaierPanes = { claim, primary, adopt, release, beat, stopBeat, newId, isLive };
 })();
