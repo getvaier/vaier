@@ -22,6 +22,7 @@ import net.vaier.application.UpdatePeerDeviceCategoryUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.CallerIp;
 import net.vaier.domain.GeoLocation;
+import net.vaier.domain.LanAddress;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.PeerArtifact;
 import net.vaier.domain.Placement;
@@ -435,6 +436,7 @@ public class VpnPeerRestController {
             @PathVariable String peerId,
             @RequestBody(required = false) UpdateLanAddressRequest request) {
         String lanAddress = request != null ? request.lanAddress() : null;
+        LanAddress.validate(lanAddress);
         log.info("Updating LAN address for peer {} to {}",
             LogSafe.forLog(peerId), LogSafe.forLog(lanAddress));
         forUpdatingPeerConfigurations.updateLanAddress(peerId, lanAddress);

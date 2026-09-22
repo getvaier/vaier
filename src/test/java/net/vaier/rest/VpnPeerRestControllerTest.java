@@ -195,6 +195,19 @@ class VpnPeerRestControllerTest {
     }
 
     @Test
+    void updateLanAddress_refusesAHostname_beforeItReachesThePort() {
+        // The launchpad's local path is http://<lanAddress>:<port>; it survives HSTS only while the host is an
+        // IP literal, so a hostname is refused here rather than written and discovered a max-age later (#342).
+        var request = new VpnPeerRestController.UpdateLanAddressRequest("nas.home.example.com");
+
+        assertThatThrownBy(() -> controller.updateLanAddress("apalveien5", request))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("IPv4");
+        verify(forUpdatingPeerConfigurations, never()).updateLanAddress(any(), any());
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
+    }
+
+    @Test
     void updateLanAddress_propagatesPeerNotFound_withoutPublishing() {
         doThrow(new PeerNotFoundException("Peer not found: ghost"))
             .when(forUpdatingPeerConfigurations).updateLanAddress("ghost", "192.168.3.121");

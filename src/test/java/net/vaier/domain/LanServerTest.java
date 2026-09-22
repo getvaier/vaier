@@ -141,6 +141,13 @@ class LanServerTest {
     }
 
     @Test
+    void validate_rejectsAHostnameAsLanAddress_theRuleIsTheSharedLanAddressOne() {
+        assertThatThrownBy(() -> LanServer.validate("NAS", "nas.home.example.com", false, null))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("IPv4");
+    }
+
+    @Test
     void validate_runsDockerFalse_lanAddressStillValidated() {
         assertThatThrownBy(() -> LanServer.validate("printer", "not-an-ip", false, null))
             .isInstanceOf(IllegalArgumentException.class)

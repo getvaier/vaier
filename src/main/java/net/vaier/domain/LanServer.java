@@ -1,7 +1,5 @@
 package net.vaier.domain;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.Collection;
 import java.util.Optional;
 
@@ -158,14 +156,7 @@ public record LanServer(String name, String lanAddress, boolean runsDocker, Inte
         if (lanAddress == null || lanAddress.isBlank()) {
             throw new IllegalArgumentException("lanAddress must not be blank");
         }
-        try {
-            byte[] addr = InetAddress.getByName(lanAddress).getAddress();
-            if (addr.length != 4) {
-                throw new IllegalArgumentException("lanAddress must be a valid IPv4 address (was " + lanAddress + ")");
-            }
-        } catch (UnknownHostException e) {
-            throw new IllegalArgumentException("lanAddress must be a valid IPv4 address (was " + lanAddress + ")", e);
-        }
+        LanAddress.validate(lanAddress);
         if (runsDocker) {
             if (dockerPort == null) {
                 throw new IllegalArgumentException("dockerPort is required when runsDocker is true");
