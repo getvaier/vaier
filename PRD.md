@@ -4240,7 +4240,9 @@ names, which for static HTML means a build step rewriting every `<script>` and `
 operator who deploys and reloads, a five-minute stale window would be a trap and a hashed-name pipeline
 is machinery a 46 ms cost has not earned. The measurement decides.
 
-**One remaining exec at boot, recorded and left alone:** `/vpn/peers` still runs `wg show wg0 public-key`
-through a Docker exec on every request to render the server context — ~130 ms alone. The key does not
-change while the interface is up; memoising it belongs in the adapter that should own that read, and
-`VpnService` currently execs it directly, so it is a small refactor of its own.
+**The last exec at boot, closed the same day.** `/vpn/peers` ran `wg show wg0 public-key` through a Docker
+exec on every request to render the server context — ~130 ms alone — from `VpnService` itself, which
+execed it directly in three places. The read is now a driven port, `ForGettingServerPublicKey`, that
+`WireGuardVpnAdapter` implements on the same ten-second tunnel read as the peer list: one tick's view of
+the interface is its peers and its own key, read together, so a request waits on neither. `VpnService`
+takes the key from the port; the two INFO lines it logged per request went with the exec.

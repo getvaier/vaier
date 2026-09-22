@@ -96,6 +96,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import net.vaier.domain.port.ForGettingServerPublicKey;
 
 @Service
 @Slf4j
@@ -161,6 +162,7 @@ public class VpnService implements
     private final ForPersistingMachinePositions forPersistingMachinePositions;
     private final ForPersistingLastServicesReached forPersistingLastServicesReached;
     private final ForHoldingEnrolmentRequests forHoldingEnrolmentRequests;
+    private final ForGettingServerPublicKey forGettingServerPublicKey;
 
     public VpnService(ConfigResolver configResolver,
                       ForGettingVpnClients forGettingVpnClients,
@@ -183,7 +185,8 @@ public class VpnService implements
                       ForTrackingHostKeys forTrackingHostKeys,
                       ForPersistingMachinePositions forPersistingMachinePositions,
                       ForPersistingLastServicesReached forPersistingLastServicesReached,
-                      ForHoldingEnrolmentRequests forHoldingEnrolmentRequests) {
+                      ForHoldingEnrolmentRequests forHoldingEnrolmentRequests,
+                      ForGettingServerPublicKey forGettingServerPublicKey) {
         this.configResolver = configResolver;
         this.forGettingVpnClients = forGettingVpnClients;
         this.forResolvingPeerIds = forResolvingPeerIds;
@@ -206,6 +209,7 @@ public class VpnService implements
         this.forPersistingMachinePositions = forPersistingMachinePositions;
         this.forPersistingLastServicesReached = forPersistingLastServicesReached;
         this.forHoldingEnrolmentRequests = forHoldingEnrolmentRequests;
+        this.forGettingServerPublicKey = forGettingServerPublicKey;
     }
 
     // --- GetVpnClientsUseCase ---
@@ -253,7 +257,7 @@ public class VpnService implements
     private ServerRenderContext resolveServerRenderContext() {
         try {
             return new ServerRenderContext(
-                getServerPublicKey(wireguardInterface),
+                forGettingServerPublicKey.getServerPublicKey(),
                 extractServerEndpoint(),
                 forResolvingServerLanCidr.resolve().orElse(null));
         } catch (Exception e) {
@@ -800,7 +804,7 @@ public class VpnService implements
         String presharedKey = forExecutingInContainer.execute(wireguardContainerName, "wg", "genpsk").trim();
         String ipAddress = findNextAvailableIp();
         log.info("Assigned IP address {} to peer {}", ipAddress, id);
-        return new PeerSlot(ipAddress, presharedKey, getServerPublicKey(wireguardInterface),
+        return new PeerSlot(ipAddress, presharedKey, forGettingServerPublicKey.getServerPublicKey(),
                 extractServerEndpoint(), forResolvingServerLanCidr.resolve().orElse(null),
                 MachineId.generate());
     }
@@ -827,39 +831,34 @@ public class VpnService implements
             throw new ConflictException(peer.name() + " made its own key, so there is no config to "
                 + "reissue. Remove it and enrol it again from the app to replace the key.");
         }
-        try {
-            String serverPublicKey = getServerPublicKey(wireguardInterface);
-            String serverEndpoint = extractServerEndpoint();
-            String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
+        String serverPublicKey = forGettingServerPublicKey.getServerPublicKey();
+        String serverEndpoint = extractServerEndpoint();
+        String serverLanCidr = forResolvingServerLanCidr.resolve().orElse(null);
 
-            // Re-render from current logic, preserving the keypair/PSK/tunnel IP baked into the
-            // on-disk config. Pass the raw stored name (null when absent) so the metadata round-trips.
-            // Pass the raw device-category override only (null when not overridden) — never the
-            // effective category — so a non-overridden peer's reissued metadata stays free of the
-            // key and keeps auto-detecting.
-            String deviceCategoryOverride = peer.deviceCategory() != null
-                ? peer.deviceCategory().name() : null;
-            String newContent = WireGuardPeerConfig.reissue(
-                peer.configContent(), peer.peerType(), peer.lanCidr(), peer.lanAddress(),
-                peer.description(), storedName(peer.configContent(), peer.name()),
-                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, deviceCategoryOverride);
+        // Re-render from current logic, preserving the keypair/PSK/tunnel IP baked into the
+        // on-disk config. Pass the raw stored name (null when absent) so the metadata round-trips.
+        // Pass the raw device-category override only (null when not overridden) — never the
+        // effective category — so a non-overridden peer's reissued metadata stays free of the
+        // key and keeps auto-detecting.
+        String deviceCategoryOverride = peer.deviceCategory() != null
+            ? peer.deviceCategory().name() : null;
+        String newContent = WireGuardPeerConfig.reissue(
+            peer.configContent(), peer.peerType(), peer.lanCidr(), peer.lanAddress(),
+            peer.description(), storedName(peer.configContent(), peer.name()),
+            serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, deviceCategoryOverride);
 
-            forUpdatingPeerConfigurations.rewriteConfig(peer.id(), newContent);
-            // Deliberate operator-initiated re-exposure: re-open the one-shot retrieval budget.
-            forTrackingPeerConfigRetrieval.resetViewed(peer.id());
+        forUpdatingPeerConfigurations.rewriteConfig(peer.id(), newContent);
+        // Deliberate operator-initiated re-exposure: re-open the one-shot retrieval budget.
+        forTrackingPeerConfigRetrieval.resetViewed(peer.id());
 
-            // The peer's public key is derived from its preserved private key — no server-side
-            // mutation, so the live tunnel and the wg0.conf [Peer] entry are untouched.
-            String publicKey = forExecutingInContainer.executeWithInput(wireguardContainerName,
-                WireGuardPeerConfig.readDirective(newContent, "PrivateKey"), "wg", "pubkey").trim();
+        // The peer's public key is derived from its preserved private key — no server-side
+        // mutation, so the live tunnel and the wg0.conf [Peer] entry are untouched.
+        String publicKey = forExecutingInContainer.executeWithInput(wireguardContainerName,
+            WireGuardPeerConfig.readDirective(newContent, "PrivateKey"), "wg", "pubkey").trim();
 
-            log.info("Reissued config for peer {} (serverLanCidr: {})", peer.id(), serverLanCidr);
-            return new ReissuedPeerUco(peer.id(), peer.machineId(), peer.name(), peer.ipAddress(),
-                publicKey, newContent, peer.peerType());
-        } catch (IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            throw new RuntimeException("Failed to reissue config for peer " + peerId + ": " + e.getMessage(), e);
-        }
+        log.info("Reissued config for peer {} (serverLanCidr: {})", peer.id(), serverLanCidr);
+        return new ReissuedPeerUco(peer.id(), peer.machineId(), peer.name(), peer.ipAddress(),
+            publicKey, newContent, peer.peerType());
     }
 
     // --- UpdatePeerDeviceCategoryUseCase ---
@@ -925,14 +924,6 @@ public class VpnService implements
         }
         // The domain owns the allocation rule (one past the highest octet, never the server's .1).
         return new VpnSubnet(vpnSubnet).nextAvailableIp(assignedIps);
-    }
-
-    private String getServerPublicKey(String interfaceName) throws IOException, InterruptedException {
-        log.info("Getting server public key from running interface {}", interfaceName);
-        String output = forExecutingInContainer.execute(wireguardContainerName, "wg", "show", interfaceName, "public-key");
-        String publicKey = output.trim();
-        log.info("Got server public key from interface: {}", publicKey);
-        return publicKey;
     }
 
     private String extractServerEndpoint() {

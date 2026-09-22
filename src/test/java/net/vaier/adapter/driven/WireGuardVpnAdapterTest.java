@@ -61,22 +61,28 @@ class WireGuardVpnAdapterTest {
     }
 
     @Test
-    void getClients_readsTheTunnelOnceForEveryoneInsideAStatsTick_andAgainAfterItChangesTheTunnel() {
+    void theTunnelAndTheServersKey_areReadOnceForEveryoneInsideAStatsTick_andAgainAfterItChangesTheTunnel() {
         // Twenty-two callers read the tunnel — the machine list alone walks it on every call, and one
         // page load asks for the machine list a dozen times, each a Docker exec into the wireguard
         // container. The peer-stats tick already reads it every ten seconds for the stream, so inside
         // that window every caller gets the tick's answer and the tunnel is asked exactly once.
         when(exec.execute("wireguard", "wg", "show", "interfaces")).thenReturn("wg0\n");
         when(exec.execute("wireguard", "wg", "show", "wg0", "dump")).thenReturn(DUMP_HEADER + RUTEN);
+        // The server's own key rides the same read: the peer list renders every peer's config against it,
+        // and it used to be one more exec per request.
+        when(exec.execute("wireguard", "wg", "show", "wg0", "public-key")).thenReturn("srvpub\n");
 
         assertThat(adapter.getClients()).hasSize(1);
         assertThat(adapter.getClients()).hasSize(1);
+        assertThat(adapter.getServerPublicKey()).isEqualTo("srvpub");
         verify(exec, times(1)).execute("wireguard", "wg", "show", "wg0", "dump");
+        verify(exec, times(1)).execute("wireguard", "wg", "show", "wg0", "public-key");
 
         // The next tick reads again.
         clock.advance(WireGuardVpnAdapter.TUNNEL_READ_MEMO);
-        adapter.getClients();
+        adapter.getServerPublicKey();
         verify(exec, times(2)).execute("wireguard", "wg", "show", "wg0", "dump");
+        verify(exec, times(2)).execute("wireguard", "wg", "show", "wg0", "public-key");
 
         // ...and so does the first read after this adapter itself changed the tunnel: a peer that was
         // just removed must not linger in anyone's fleet for the rest of the tick. (deletePeer's own

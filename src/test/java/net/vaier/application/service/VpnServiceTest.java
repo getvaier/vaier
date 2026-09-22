@@ -35,6 +35,7 @@ import net.vaier.domain.port.ForGeneratingDockerComposeFiles.DockerComposeConfig
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForGettingServerPublicKey;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForHoldingEnrolmentRequests;
 import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
@@ -85,6 +86,7 @@ class VpnServiceTest {
 
     @Mock ConfigResolver configResolver;
     @Mock ForGettingVpnClients forGettingVpnClients;
+    @Mock ForGettingServerPublicKey forGettingServerPublicKey;
     @Mock ForResolvingPeerIds forResolvingPeerIds;
     @Mock ForGettingPeerConfigurations peerConfigProvider;
     @Mock ForDeletingVpnPeers vpnPeerDeleter;
@@ -1244,8 +1246,7 @@ class VpnServiceTest {
                 null, null, null, null, null, mid("ruten"), DEVICE_KEY)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
 
         assertThat(service.getVpnPeers().get(0).configOutOfDate()).isFalse();
     }
@@ -1421,8 +1422,7 @@ class VpnServiceTest {
                 MachineType.UBUNTU_SERVER, null, null, null)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
             .thenReturn("PEER_PUB\n");
 
@@ -1463,8 +1463,7 @@ class VpnServiceTest {
                 net.vaier.domain.DeviceCategory.NAS)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
             .thenReturn("PEER_PUB\n");
 
@@ -1489,8 +1488,7 @@ class VpnServiceTest {
                 MachineType.UBUNTU_SERVER, null, null, null, null)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
             .thenReturn("PEER_PUB\n");
 
@@ -1518,15 +1516,15 @@ class VpnServiceTest {
                 MachineType.UBUNTU_SERVER, null, null, null)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
 
         assertThat(service.getVpnPeers().get(0).configOutOfDate()).isTrue();
     }
 
     @Test
     void getVpnPeers_configNotOutOfDateWhenServerStateUnavailable() {
-        // No server pubkey stubbed → drift can't be computed; must not false-flag.
+        // The tunnel cannot say its own key → drift can't be computed; must not false-flag.
+        when(forGettingServerPublicKey.getServerPublicKey()).thenThrow(new RuntimeException("wg0 is down"));
         VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
         when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.6")).thenReturn("apalveien5");
@@ -1933,8 +1931,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
 
         var enrolled = service.enrol("Geir's phone", DEVICE_KEY);
@@ -1963,8 +1960,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
 
         service.enrol("Geir's phone", DEVICE_KEY);
@@ -1978,8 +1974,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
 
         service.enrol("phone", DEVICE_KEY);
@@ -1997,8 +1992,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
 
         service.enrol("phone", DEVICE_KEY);
@@ -2016,8 +2010,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
 
         var enrolled = service.enrol("phone", DEVICE_KEY);
@@ -2119,8 +2112,7 @@ class VpnServiceTest {
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of());
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
         when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
-        when(forExecutingInContainer.execute("wireguard", "wg", "show", "wg0", "public-key"))
-            .thenReturn("SERVER_PUB\n");
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
         when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
 
         var approved = service.approve("4821");

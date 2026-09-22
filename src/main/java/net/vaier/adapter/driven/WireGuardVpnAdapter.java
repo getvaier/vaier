@@ -25,10 +25,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Autowired;
+import net.vaier.domain.port.ForGettingServerPublicKey;
 
 @Component
 @Slf4j
-public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpnPeers, ForUpdatingServerAllowedIps {
+public class WireGuardVpnAdapter implements ForGettingVpnClients, ForGettingServerPublicKey, ForDeletingVpnPeers,
+        ForUpdatingServerAllowedIps {
 
     @Value("${wireguard.config.path:/wireguard/config}")
     private String wireguardConfigPath;
@@ -46,7 +48,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
     /**
      * How long one read of the tunnel serves every caller. The peer-stats tick reads it this often for the
-     * stream, so inside the window a request never waits on the two Docker execs. A write through this
+     * stream, so inside the window a request never waits on the three Docker execs. A write through this
      * adapter forgets the read at once; a peer added by any other path shows up on the next tick.
      */
     static final Duration TUNNEL_READ_MEMO = Duration.ofSeconds(10);
@@ -54,7 +56,8 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
     private final Clock clock;
     private volatile TunnelRead lastRead;
 
-    private record TunnelRead(Instant at, List<VpnClient> clients) {}
+    /** One tick's view of the interface: its peers and its own public key, read together. */
+    private record TunnelRead(Instant at, List<VpnClient> clients, String serverPublicKey) {}
 
     @Autowired
     public WireGuardVpnAdapter(ForExecutingInContainer forExecutingInContainer) {
@@ -318,14 +321,26 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
     @Override
     public List<VpnClient> getClients() {
+        return tunnel().clients();
+    }
+
+    @Override
+    public String getServerPublicKey() {
+        return tunnel().serverPublicKey();
+    }
+
+    private TunnelRead tunnel() {
         TunnelRead memo = lastRead;
         Instant now = clock.instant();
-        if (memo != null && now.isBefore(memo.at().plus(TUNNEL_READ_MEMO))) return memo.clients();
+        if (memo != null && now.isBefore(memo.at().plus(TUNNEL_READ_MEMO))) return memo;
         List<VpnClient> clients = getInterfaces().stream()
             .flatMap(interfaceName -> getClients(interfaceName).stream())
             .toList();
-        lastRead = new TunnelRead(now, clients);
-        return clients;
+        String serverPublicKey = forExecutingInContainer
+            .execute(wireguardContainerName, "wg", "show", wireguardInterface, "public-key").trim();
+        TunnelRead read = new TunnelRead(now, clients, serverPublicKey);
+        lastRead = read;
+        return read;
     }
 
     private List<VpnClient> getClients(String interfaceName) {
