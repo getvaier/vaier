@@ -424,6 +424,17 @@ class ExplorerShellTest {
         }
     }
 
+    @Test
+    void theShellBarsStateClasses_neverBorrowTheMessageBoxNames() throws IOException {
+        // styles.css owns `.error`, `.success` and `.warning` as padded message boxes. The shell bar toggled a
+        // bare `error` on its six-pixel dot and its one-line status, so a lost connection drew the dot as a
+        // padded oval and the status as a boxed pill with no width left for its own words.
+        Matcher m = Pattern.compile("^\\.(error|success|warning)\\b", Pattern.MULTILINE).matcher(read("styles.css"));
+        assertThat(m.find()).as("styles.css still owns the message-box classes this guards against").isTrue();
+        assertThat(read("terminal-window.js")).doesNotContain("'error'").doesNotContain("'success'").doesNotContain("'warning'");
+        assertThat(read("terminal-window.css")).doesNotContainPattern("\\.tw-[a-z-]+\\.(error|success|warning)\\b");
+    }
+
     // --- 11. liveness is the whole fleet's, not just the peers' ----------------------------------------
     //
     // The bug: livenessOf() only knew WireGuard peers, so of the fleet's machines only the four that are
@@ -3760,13 +3771,15 @@ class ExplorerShellTest {
         assertThat(css).contains(".tw-claude-state.is-claude-out { color: var(--claude); opacity: .45; }");
         assertThat(css).as("the left edge is the same word again, so it follows the word")
             .contains(".tw-claude-card:has(.tw-claude-state.is-claude-in) { border-left-color: var(--claude); }");
-        // The bar's own control says the same standing in the same clay, hollow when nobody holds a
-        // sign-in — never amber or red, which belong to trouble.
-        assertThat(css).contains(".tw-claude-btn.is-claude-in {").contains(".tw-claude-btn.is-claude-out {");
-        assertThat(css.substring(css.indexOf(".tw-claude-btn.is-claude-in {"),
-                                 css.indexOf(".tw-claude-btn.is-muted")))
-            .as("a sign-in is presence, not an outage")
-            .doesNotContain("var(--red)").doesNotContain("var(--orange)").doesNotContain("var(--yellow)");
+        // The bar's own control is one button among six — same text, border and weight as its neighbours —
+        // and only its glyph wears the clay: full for a sign-in, hollow when nobody holds one, never amber
+        // or red, which belong to trouble.
+        assertThat(css).contains(".tw-claude-btn.is-claude-in .tw-ico { color: var(--claude); }");
+        assertThat(css).contains(".tw-claude-btn.is-claude-out .tw-ico { color: var(--claude); opacity: .45; }");
+        assertThat(css).contains(".tw-claude-btn.is-muted .tw-ico { color: var(--text-dim); }");
+        assertThat(css).as("the button itself is styled by nothing but .tw-btn")
+            .doesNotContainPattern("\\.tw-claude-btn(\\.[a-z-]+)?(:hover)?\\s*\\{")
+            .doesNotContainPattern("\\.tw-claude-btn[^{]*\\{[^}]*var\\(--(red|orange|yellow)\\)");
         // And the green tone it used to reach for is gone rather than left lying about — on either sheet.
         assertThat(css).doesNotContain(".tw-claude-state.is-in {");
         assertThat(read("explorer-shell.css")).doesNotContain(".ex-standing-state.is-in {")

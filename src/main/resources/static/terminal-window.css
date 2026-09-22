@@ -31,14 +31,14 @@ body.tw {
     background: var(--green);
     transition: background .15s ease;
 }
-.tw-dot.error { background: var(--red); }
+.tw-dot.is-bad { background: var(--red); }
 .tw-name { flex: none; font-family: var(--mono); font-size: 14px; color: var(--text); }
 .tw-status {
     flex: 1 1 auto; min-width: 0;
     font-size: 13px; color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tw-status.error { color: var(--red); }
+.tw-status.is-bad { color: var(--red); }
 .tw-status-btn { margin-left: 6px; }
 /* Armed: the button has been clicked once and now states what the second click asserts. It changes colour
    because it has changed meaning — the first click was "show me", the second one clears a security pin. */
@@ -71,30 +71,13 @@ body.tw {
    that machine's terminal as that user. The bar carries where the machine stands; clicking it opens the
    sign-in over the shell, taking no rows from it. */
 
-/* The bar's control says only "Claude". It said "Claude · Signed in" and was half again the width of every
-   other button in a bar that already carries four — and the standing was being said twice, since the clay
-   below already carries it and the title spells it out. */
-.tw-claude-btn { font-weight: 500; }
-
-/* Clay says WHOSE sign-in this is; weight says whether anyone holds one. Amber and red belong to trouble,
-   and a sign-in is presence, not an outage — so the signed-out button keeps the hue and goes hollow rather
-   than picking up a warning colour. The quiet states (no Claude, no answer) stay in the ordinary text tone:
-   they are facts about the machine, not a standing to read at a glance. */
-.tw-claude-btn.is-claude-in {
-    color: var(--claude);
-    border-color: var(--claude);
-    font-weight: 600;
-}
-.tw-claude-btn.is-claude-out {
-    color: var(--claude);
-    border-color: rgba(217, 119, 87, .45);   /* --claude, hollow */
-    font-weight: 400;
-}
-/* The answers that are not a verdict about a sign-in — no Claude here, no answer at all — carry no clay at
-   all, resting or hovered. There is no standing to wear one. */
-.tw-claude-btn.is-muted { color: var(--text-dim); }
-.tw-claude-btn.is-claude-in:hover,
-.tw-claude-btn.is-claude-out:hover { border-color: var(--claude); color: var(--claude); }
+/* The bar's control says only "Claude", and is one button among six: the same text, border and weight as
+   its neighbours. Only the glyph wears the clay, so the standing is read from the icon — full when someone
+   holds a sign-in, hollow when nobody does, and the ordinary dim tone where there is no standing to read
+   (no Claude here, no answer). Amber and red belong to trouble, and a sign-in is presence, not an outage. */
+.tw-claude-btn.is-claude-in .tw-ico { color: var(--claude); }
+.tw-claude-btn.is-claude-out .tw-ico { color: var(--claude); opacity: .45; }
+.tw-claude-btn.is-muted .tw-ico { color: var(--text-dim); }
 
 /* The scrim and the sheet it holds. [hidden] has to be spelled out on the scrim because it is a flex box
    when it is open. */

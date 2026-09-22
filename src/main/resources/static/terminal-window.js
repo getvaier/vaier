@@ -461,7 +461,7 @@
             if (state.ended) return;
             // A clean exit means the remote shell ended — the session is gone, so let it go and close the window.
             if (ev.code === 1000) { state.ended = true; VaierPanes.release(machineId, paneId, machine); window.close(); setStatus('The shell ended.'); return; }
-            setDot('error');
+            setDot('is-bad');
             setPasswordPrompt(false);
             if (!PERMANENT.has(ev.code) && state.retries < MAX_RECONNECTS) {
                 state.retries++;
@@ -530,7 +530,7 @@
     // --- chrome: dot, status, fit ---------------------------------------------------------------------
     function setDot(kind) {
         const dot = $('twDot');
-        dot.classList.remove('error');
+        dot.classList.remove('is-bad');
         if (kind) dot.classList.add(kind);
     }
     // `action` is a two-step button: the first click arms it and re-labels it with what is actually being
@@ -539,7 +539,7 @@
     // be a reflex, so the assertion is made in place instead of skipped.
     function setStatus(message, isError, retry, action) {
         const el = $('twStatus');
-        el.classList.toggle('error', !!isError);
+        el.classList.toggle('is-bad', !!isError);
         el.textContent = '';
         if (!message) return;
         el.append(document.createTextNode(message + ' '));
