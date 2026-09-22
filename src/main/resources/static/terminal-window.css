@@ -26,7 +26,7 @@ body.tw {
 }
 .tw-dot {
     flex: none;
-    width: 9px; height: 9px;
+    width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--green);
     transition: background .15s ease;
