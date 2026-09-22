@@ -2,7 +2,21 @@
 
 Back to [README](../README.md).
 
-How to get a fleet from nothing to backed up, what borg does under the hood, and how to recover if Vaier itself is the thing that's gone.
+**Tick what matters. Vaier does the rest.** That is the whole of backing up a machine in Vaier, and it is the only path you need to learn. Everything below the first section is reference: how it works under the hood, and the recovery and adoption machinery for the day a NAS has no root to give or a repository already exists.
+
+## Tick what matters
+
+Open a machine's files in the **Explorer**, tick the folders that matter — the ones you would want back if the machine died — and press **Back up**. That is the one decision that is yours. Vaier makes every other one: it creates a place for that machine's archives on the backup server with a generated passphrase, prepares the machine on its first backup (trusting its key on the server, installing the client), keeps the list of paths minimal (a folder you tick absorbs anything already ticked beneath it), runs every night, and emails the admins only when a run fails or came back with holes. **Back up more** takes you back to the files; **Stop backing up** removes a path and its descendants, and — when the last one goes — the machine's job with it, leaving the archives already made untouched.
+
+The machine's `backup` entry shows what is protected, when it last ran and how it went, and the two verbs above. Anything else about it — backing up other users' files, stopping altogether — sits under a fold, because it is not a step, it is a setting.
+
+*How it works, in one paragraph:* the archives are [borg](https://www.borgbackup.org/) repositories on the machine you designated as the fleet's **backup server**, one repository per machine, reached over SSH with a key trusted for exactly that repository; the passphrases live in Vaier and, encrypted under one passphrase of yours, in the **survival kit** copied onto machines Vaier does not run on. You never have to name a repository, choose retention or compression, or run borg yourself. The sections below are for when you want to see, adopt or recover that machinery by hand.
+
+---
+
+## Under the hood: recovery and adoption reference
+
+Nothing here is a step on the way to a backup. It is what Vaier does for you, exposed for the hosts where it cannot (a Synology it has no root on), for adopting a borg server or repository that already exists, and for recovering with the borg CLI when Vaier is the thing that is gone.
 
 ---
 
@@ -10,7 +24,7 @@ How to get a fleet from nothing to backed up, what borg does under the hood, and
 
 A machine running a borg server that holds your repositories. The fleet has **at most one**. You designate which machine plays the role from its Inspector in the **Explorer** — a **Make this the fleet's backup server** action, offered on any machine but only while none is designated yet, with the coordinates form prefilled from that machine's own address. Adopt an existing borg server or have Vaier provision one from scratch (often a LAN server such as your NAS), and Vaier stands up a **pinned** borg-server container there.
 
-The server's `backup` entry in the Explorer then carries its coordinates and a **Server operations** section with the operational actions — **Provision**, **Authorize a host**, and **Download setup script** — alongside its repositories and jobs. Where Vaier can drive docker over SSH it runs the setup for you (**Provision**); where it can't — a Synology NAS, for instance, doesn't expose a usable docker CLI over SSH — it **stages** an idempotent **setup.sh** on the host over SSH and hands you the one command to run (`sudo bash <path>`). The setup script is served behind admin login, so it is never curled onto the host; if Vaier can't reach the host at all, download setup.sh from the UI and copy it over yourself. Either way that's guidance, not a failure.
+The server's `backup` entry in the Explorer then carries its coordinates under a plain **Server details** fold and the manual operations — **Provision**, **Authorize a host**, **Setup script**, **Edit coordinates**, **Remove designation** — under a warning fold named for what it does, *Provision, authorize or remove this backup server*, alongside its repositories and jobs. Where Vaier can drive docker over SSH it runs the setup for you (**Provision**); where it can't — a Synology NAS, for instance, doesn't expose a usable docker CLI over SSH — it **stages** an idempotent **setup.sh** on the host over SSH and hands you the one command to run (`sudo bash <path>`). The setup script is served behind admin login, so it is never curled onto the host; if Vaier can't reach the host at all, download setup.sh from the UI and copy it over yourself. Either way that's guidance, not a failure.
 
 **Authorize a host** trusts a client machine's SSH key on the server exactly once, so backup jobs authenticate — borg runs on the client as the SSH user, not root, and that key has to be trusted server-side. Authorizing also **pins the server's host key** on that client, so borg's non-interactive SSH can verify the server with no trust-on-first-use — Vaier obtains the key over its own authenticated channel and installs it in the client's `known_hosts`. If the backup server goes quiet, Vaier emails every admin (and again, once, when it recovers).
 
@@ -22,7 +36,7 @@ Authorizing also **pins the backup server's SSH host key** on the client, so bor
 
 ## Backup repository
 
-Add one just by naming it under the backup server's `backup` entry in the **Explorer** (**New repository**); its path derives as `base/<name>` (an advanced field lets you point at an existing, oddly-named repository instead). Each repository is an entry of its own in the tree — open it to see its path, append-only setting, whether a passphrase is stored, and the archives inside it, and to **Edit** or **Delete** it (Delete forgets the repository in Vaier; it does not erase the borg store or its archives).
+You never create one by hand: **Back up** creates one per machine behind the verb, named for the machine, with a generated passphrase, its path deriving as `base/<name>`. Each repository is still an entry of its own under the backup server's `backup` entry, and adopting an existing, oddly-named repository is done there, from its own entry. Each repository is an entry of its own in the tree — open it to see its path, append-only setting, whether a passphrase is stored, and the archives inside it, and to **Edit** or **Delete** it (Delete forgets the repository in Vaier; it does not erase the borg store or its archives).
 
 A repository or server **name is a safe identifier** (letters, digits, `_` and `-`) because it becomes a shell/path token in every borg command — type "NUC 02" and it's slugged to `NUC-02` as you go, and spaces or shell metacharacters are refused outright. As defense in depth Vaier also **single-quotes every borg path** (the repo URL, each `--restrict-to-path`) so a hand-edited config file can never inject a command. On create, Vaier generates a strong, shell-safe **passphrase** for you, shown once with a copy button — save it, since it's stored encrypted at rest and never shown back.
 
@@ -38,9 +52,7 @@ The install runs detached on the host (it can outlast the SSH exec cap); the **b
 
 Give each machine a job: which machine (by name), which backup repository, the source paths to back up, exclude patterns, retention (`keepDaily` / `keepWeekly` / `keepMonthly`), compression (default `zstd,6`), whether the job is enabled, and whether it backs up **as root**. You create, edit, delete, run and enable/disable a job in the **Explorer**, on the machine's `backup` entry — there is no separate Backups page.
 
-You can also create a job without touching its form at all — **select files or folders in the Explorer and click Back up**, and Vaier gets-or-creates the machine's repository (with a generated passphrase) and job and adds your selection to it, keeping the paths minimal (a chosen folder absorbs anything already chosen beneath it); **Stop backing up** removes a path and its descendants, or — when the path sits inside a protected path that stays — records it as an **exclude** on the job, which is what makes borg skip it; backing that path up again clears the exclude. Removing the last protected path deletes the job while keeping the repository. The `DELETE` answers `{changed, stopped[], job}`, so a request that matched nothing is never reported as a removal.
-
-On a machine's **first** back-up (the call that creates its job) Vaier also **prepares the host** automatically — trusting its key on the backup server and running **Prepare client** — so a machine goes from unprovisioned to backed up without the guided wizard. This happens only on that first job (backing up more paths on a machine that already has a job never re-prepares it), and a preparation failure never fails the back-up: the paths are saved and the reason comes back in the response. Backing up a path before any backup server is designated is refused with "Designate a backup server before backing up machines."
+The **Tick what matters** path above creates and maintains this job for you; the form is for reading how a machine is being backed up today and for adopting a job written by hand.
 
 ### Back up as root
 

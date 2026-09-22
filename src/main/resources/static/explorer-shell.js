@@ -5832,7 +5832,7 @@
     // its last run, and the buttons to run it now, edit it, enable it or forget it. Running is the one long
     // operation, and it does not poll: POST starts it, the run shows RUNNING, and the backend pushes
     // `run-settled` on the backups stream when borg finishes (watchBackups). Getting a host ready the first
-    // time — installing borg, the root grant — happens on the backup server's own entry (see Server operations).
+    // time — installing borg, the root grant — happens on the backup server's own entry, under its operations fold.
 
     // INCOMPLETE reads red, not amber: the archive exists but is missing files borg could not read, which is
     // the failure mode that hurts most — it looks fine until you need the data. WARNING stays amber; borg got
@@ -5950,7 +5950,9 @@
         const run = selVerb('refresh', running ? 'Backing up…' : 'Back up now',
             needsReady ? 'ex-btn' : 'ex-btn is-accent', () => runNow(job));
         if (running) run.disabled = true;
-        acts.append(run);
+        // Protecting more is done where the files are: tick and Back up. This only opens that door (#335).
+        const more = selVerb('archive', 'Back up more', 'ex-btn', () => go(['fleet', machineId, 'files']));
+        acts.append(run, more);
         body.appendChild(acts);
 
         // --- know: how this backup stands, and the one setting behind it ------------------------------

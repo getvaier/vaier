@@ -397,7 +397,7 @@ class ExplorerShellTest {
         assertThat(js).contains("provision-settled");
         assertThat(js).contains("/authorize/");
         assertThat(js).contains("/setup.sh");
-        assertThat(js).contains("Server operations");
+        assertThat(js).contains("dangerFold('Provision, authorize or remove this backup server')");
     }
 
     // --- 10. tokens -------------------------------------------------------------------------------------
@@ -2334,6 +2334,14 @@ class ExplorerShellTest {
         int from = js.indexOf("function repoLabel(");
         String body = js.substring(from, js.indexOf("\n    }", from));
         assertThat(body).as("it falls back to its own name, never to a guess").contains("repoName");
+    }
+
+    @Test
+    void protectingMore_isDoneWhereTheFilesAre_theBackupEntryOnlyOpensThatDoor() throws IOException {
+        // The machine's backup entry says what is protected and how the last run went, and its verbs are the
+        // two the one-path story names. "Back up more" is not a second form: it goes to the files (#335).
+        String js = read("explorer-shell.js");
+        assertThat(js).contains("selVerb('archive', 'Back up more', 'ex-btn', () => go(['fleet', machineId, 'files']))");
     }
 
     @Test
