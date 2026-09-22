@@ -134,7 +134,7 @@ ensure_secret() {   # $1=var name  $2=generator function
 ensure_secret VAIER_DEX_CLIENT_SECRET gen_hex
 ensure_secret VAIER_OAUTH2_COOKIE_SECRET gen_b64
 # #329: the shared bouncer API key between crowdsec (BOUNCER_KEY_vaier, self-registers on boot)
-# and crowdsec-bouncer (CROWDSEC_BOUNCER_API_KEY). Not operator-authored — same reasoning as the
+# and Traefik's bouncer plugin (CROWDSEC_BOUNCER_API_KEY). Not operator-authored — same reasoning as the
 # two secrets above.
 ensure_secret VAIER_CROWDSEC_BOUNCER_KEY gen_hex
 

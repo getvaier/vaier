@@ -29,8 +29,8 @@ public final class VaierServerCatalogue {
         "vaier", "wireguard", "wireguard-masquerade",
         // The social-login chain — already reachable at oauth2.<domain> and dex.<domain>.
         "oauth2-proxy", "dex",
-        // The edge's threat detection: the agent and the Traefik bouncer.
-        "crowdsec", "crowdsec-bouncer",
+        // The edge's threat detection (its bouncer is a Traefik plugin, not a container).
+        "crowdsec",
         // The Docker socket proxy. It serves the Docker API on 2375, so publishing it would put root
         // on every container behind a public hostname — the sharpest reason this list exists.
         "docker-proxy",

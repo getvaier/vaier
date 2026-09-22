@@ -186,6 +186,9 @@ services:
     environment:
       # Used only by the entrypoint's DNS-propagation wait below to build the infra hostnames it holds on.
       VAIER_DOMAIN: ${VAIER_DOMAIN:-}
+      # Read by the CrowdSec bouncer plugin through the file provider's templating (security.yml below),
+      # so the key never lands on disk. The same install.sh-generated secret crowdsec self-registers.
+      CROWDSEC_BOUNCER_API_KEY: ${VAIER_CROWDSEC_BOUNCER_KEY:?not in .env — re-run install.sh to generate it (it only appends what is missing and never overwrites a value you set)}
     entrypoint:
       - /bin/sh
       - -c
@@ -215,15 +218,26 @@ services:
           middlewares:
             # #329 Slice 1: applied to EVERY router via the websecure entrypoint, ahead of every
             # other middleware — a CrowdSec block decision is refused before it ever reaches
-            # oauth2-proxy or a published backend. trustForwardHeader is safe here: Traefik is the
-            # only thing that can reach crowdsec-bouncer (same Docker network, no published port),
-            # so the X-Forwarded-For it reads is the one Traefik itself set from the real client.
-            # Verified healthy (cscli bouncers list, /healthz, /ping, /forwardAuth from vaier)
-            # BEFORE this was added to --entrypoints.websecure.http.middlewares below.
+            # oauth2-proxy or a published backend.
+            # Traefik's CrowdSec plugin in STREAM mode: the block list is pulled from the Security
+            # Engine once a minute and every request is answered from memory. The standalone
+            # bouncer this replaced asked the engine about each request, and under one page load's
+            # burst of sixty requests that SQLite-backed API serialised to a second per request —
+            # the whole domain felt slow, published services included.
+            # updateMaxFailure -1: an engine that cannot be reached keeps the LAST list in force
+            # instead of turning every route away — its detection is down then too, so nothing
+            # new could have been banned. Startup still waits for the first sync (the plugin's
+            # default), so no request is served before the list exists.
             crowdsec-bouncer:
-              forwardAuth:
-                address: http://crowdsec-bouncer:8080/api/v1/forwardAuth
-                trustForwardHeader: true
+              plugin:
+                bouncer:
+                  enabled: true
+                  crowdsecMode: stream
+                  crowdsecLapiScheme: http
+                  crowdsecLapiHost: crowdsec:8080
+                  crowdsecLapiKey: '{{ env "CROWDSEC_BOUNCER_API_KEY" }}'
+                  updateIntervalSeconds: 60
+                  updateMaxFailure: -1
             # Applied to EVERY router via the websecure entrypoint, published third-party services
             # included. Only headers that are safe on an application Vaier did not write: nosniff
             # cannot break a correctly-typed response, and strict-origin-when-cross-origin is already
@@ -330,6 +344,10 @@ services:
       # the security headers (and, on Vaier's own routers, ahead of the Social auth chain too), so a
       # CrowdSec block decision is refused before Traefik does anything else with the request.
       - --entrypoints.websecure.http.middlewares=crowdsec-bouncer@file,vaier-security-headers@file
+      # The bouncer is this plugin (the crowdsec-bouncer middleware rendered above), pinned like every
+      # other upstream. Fetched from the plugin registry once and kept in plugins-storage.
+      - --experimental.plugins.bouncer.modulename=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      - --experimental.plugins.bouncer.version=v1.7.1
       - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
@@ -349,6 +367,8 @@ services:
       - ./traefik/acme:/traefik/acme
       - ./wireguard/config:/wireguard-config:ro
       - ./traefik/logs:/traefik/logs
+      # The downloaded bouncer plugin, kept so a restart never depends on the plugin registry.
+      - ./traefik/plugins-storage:/plugins-storage
     restart: unless-stopped
     depends_on:
       - wireguard
@@ -397,16 +417,14 @@ services:
     networks:
       - vaier-network
 
-  # --- #329 Slice 1: CrowdSec fleet-threat-detection. Not yet wired into Traefik's request path —
-  # see the `traefik` service's --entrypoints.websecure.http.middlewares flag and security.yml for
-  # the actual enforcement point, added only once this container and crowdsec-bouncer are verified
-  # healthy (forwardAuth fails CLOSED: a broken bouncer would 401/502 every websecure route,
-  # console included, the moment it's on that flag).
+  # --- #329 Slice 1: CrowdSec fleet-threat-detection. This is the Security Engine; enforcement is
+  # Traefik's own CrowdSec plugin — see the `traefik` service's --entrypoints.websecure.http.middlewares
+  # flag and the crowdsec-bouncer middleware in security.yml.
   #
   # BOUNCER_KEY_vaier: crowdsec's own docker_start.sh scans every BOUNCER_KEY_* env var at boot and
   # self-registers a bouncer named after the suffix with that value as its API key (see
   # /docker_start.sh's register_bouncer loop) — no cscli exec from Vaier needed. The same value is
-  # handed to crowdsec-bouncer below as CROWDSEC_BOUNCER_API_KEY. VAIER_CROWDSEC_BOUNCER_KEY is
+  # handed to Traefik's bouncer plugin as CROWDSEC_BOUNCER_API_KEY. VAIER_CROWDSEC_BOUNCER_KEY is
   # install.sh-generated exactly like VAIER_DEX_CLIENT_SECRET — not operator-authored.
   #
   # COLLECTIONS=crowdsecurity/traefik installs the Traefik log parser + scenarios; the acquis.d
@@ -431,25 +449,6 @@ services:
     depends_on:
       vaier-init:
         condition: service_completed_successfully
-    restart: unless-stopped
-    networks:
-      - vaier-network
-
-  # fbonalair/traefik-crowdsec-bouncer: a distroless Go binary (no shell — confirmed by hand,
-  # `docker run --entrypoint sh` fails with "executable file not found"), so there is no wrapper
-  # entrypoint here. It reads CROWDSEC_BOUNCER_API_KEY and CROWDSEC_AGENT_HOST directly as plain
-  # env vars (confirmed via `strings` on the extracted binary), which is exactly what
-  # BOUNCER_KEY_vaier above and this service's environment provide at container creation — no
-  # exec, no polling, no restart-to-pick-up-a-new-key needed on this side either.
-  crowdsec-bouncer:
-    image: fbonalair/traefik-crowdsec-bouncer:0.5.0
-    container_name: crowdsec-bouncer
-    mem_limit: 64m
-    environment:
-      CROWDSEC_BOUNCER_API_KEY: ${VAIER_CROWDSEC_BOUNCER_KEY:?not in .env — re-run install.sh to generate it (it only appends what is missing and never overwrites a value you set)}
-      CROWDSEC_AGENT_HOST: crowdsec:8080
-    depends_on:
-      - crowdsec
     restart: unless-stopped
     networks:
       - vaier-network

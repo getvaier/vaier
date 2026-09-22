@@ -43,7 +43,9 @@ class InstallScriptCoverageTest {
         "crowdsec/config",
         "crowdsec/data",
         // #329: Vaier's SecurityService writes the rendered trusted-networks allowlist here.
-        "crowdsec/whitelist"
+        "crowdsec/whitelist",
+        // Traefik downloads its CrowdSec bouncer plugin here on first start and keeps it.
+        "traefik/plugins-storage"
     );
 
     // Variables the OPERATOR fills in — their domain, their identity-provider credentials, optional
