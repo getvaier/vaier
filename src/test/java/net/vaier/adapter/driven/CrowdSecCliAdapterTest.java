@@ -21,19 +21,38 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 class CrowdSecCliAdapterTest {
 
     private ForExecutingInContainer forExecutingInContainer;
     private ForGeolocatingIps forGeolocatingIps;
+    private MutableClock clock;
     private CrowdSecCliAdapter adapter;
+
+    /** The house pattern for a clock a test can step (see {@code RegistryV2ImageAdapterTest}). */
+    private static class MutableClock extends Clock {
+        private Instant now = Instant.parse("2026-09-22T18:00:00Z");
+
+        void advance(Duration by) { now = now.plus(by); }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
+    }
 
     @BeforeEach
     void setUp() {
         forExecutingInContainer = mock(ForExecutingInContainer.class);
         forGeolocatingIps = mock(ForGeolocatingIps.class);
         when(forGeolocatingIps.locate(anyString())).thenReturn(Optional.empty());
-        adapter = new CrowdSecCliAdapter(forExecutingInContainer, forGeolocatingIps);
+        clock = new MutableClock();
+        adapter = new CrowdSecCliAdapter(forExecutingInContainer, forGeolocatingIps, clock);
     }
 
     private void cscliPrints(String output) {
@@ -47,6 +66,35 @@ class CrowdSecCliAdapterTest {
         adapter.getActiveDecisionsOrEmpty();
 
         verify(forExecutingInContainer).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
+    }
+
+    @Test
+    void theBlockList_isReadOnceForEveryoneInsideASweep_andAgainAfterALiftOrAFailedRead() {
+        // Every page load reads this list for the Map and the Security view, and each read was a cscli
+        // exec into the engine's container — a second of the boot, for a list the breach sweep already
+        // reads every five minutes. Inside a sweep everyone gets the sweep's answer.
+        cscliPrints("null");
+        adapter.getActiveDecisionsOrFail();
+        adapter.getActiveDecisionsOrEmpty();
+        verify(forExecutingInContainer, times(1)).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
+
+        clock.advance(CrowdSecCliAdapter.BLOCK_LIST_MEMO);
+        adapter.getActiveDecisionsOrFail();
+        verify(forExecutingInContainer, times(2)).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
+
+        // An operator who just lifted a block is looking at the list to see it gone.
+        adapter.liftBlock(SourceAddress.of("203.0.113.9"));
+        adapter.getActiveDecisionsOrFail();
+        verify(forExecutingInContainer, times(3)).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
+
+        // A read that failed is not an answer anyone should be handed for the rest of the sweep.
+        clock.advance(CrowdSecCliAdapter.BLOCK_LIST_MEMO);
+        when(forExecutingInContainer.execute(anyString(), any(String[].class)))
+            .thenThrow(new RuntimeException("cscli: unable to load config"));
+        assertThatThrownBy(adapter::getActiveDecisionsOrFail).isInstanceOf(BlockDecisionsUnreadableException.class);
+        cscliPrints("null");
+        adapter.getActiveDecisionsOrFail();
+        verify(forExecutingInContainer, times(5)).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
     }
 
     // The real `cscli decisions list -o json` shape: an array of ALERTS, each carrying its own enriched

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,6 +17,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 class WireGuardVpnAdapterTest {
 
@@ -27,18 +33,57 @@ class WireGuardVpnAdapterTest {
     Path configDir;
 
     ForExecutingInContainer exec;
+    MutableClock clock;
     WireGuardVpnAdapter adapter;
+
+    /** The house pattern for a clock a test can step (see {@code RegistryV2ImageAdapterTest}). */
+    private static class MutableClock extends Clock {
+        private Instant now = Instant.parse("2026-09-22T18:00:00Z");
+
+        void advance(Duration by) { now = now.plus(by); }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
+    }
 
     @BeforeEach
     void setUp() throws IOException {
         exec = mock(ForExecutingInContainer.class);
-        adapter = new WireGuardVpnAdapter(exec);
+        clock = new MutableClock();
+        adapter = new WireGuardVpnAdapter(exec, clock);
         ReflectionTestUtils.setField(adapter, "wireguardConfigPath", configDir.toString());
         ReflectionTestUtils.setField(adapter, "wireguardContainerName", "wireguard");
         ReflectionTestUtils.setField(adapter, "wireguardInterface", "wg0");
         Path dir = Files.createDirectory(configDir.resolve("Ruten"));
         Files.writeString(dir.resolve("Ruten.conf"), "[Interface]\nAddress = 10.13.13.8/32\n");
         Files.writeString(dir.resolve("Ruten.conf.viewed"), "");
+    }
+
+    @Test
+    void getClients_readsTheTunnelOnceForEveryoneInsideAStatsTick_andAgainAfterItChangesTheTunnel() {
+        // Twenty-two callers read the tunnel — the machine list alone walks it on every call, and one
+        // page load asks for the machine list a dozen times, each a Docker exec into the wireguard
+        // container. The peer-stats tick already reads it every ten seconds for the stream, so inside
+        // that window every caller gets the tick's answer and the tunnel is asked exactly once.
+        when(exec.execute("wireguard", "wg", "show", "interfaces")).thenReturn("wg0\n");
+        when(exec.execute("wireguard", "wg", "show", "wg0", "dump")).thenReturn(DUMP_HEADER + RUTEN);
+
+        assertThat(adapter.getClients()).hasSize(1);
+        assertThat(adapter.getClients()).hasSize(1);
+        verify(exec, times(1)).execute("wireguard", "wg", "show", "wg0", "dump");
+
+        // The next tick reads again.
+        clock.advance(WireGuardVpnAdapter.TUNNEL_READ_MEMO);
+        adapter.getClients();
+        verify(exec, times(2)).execute("wireguard", "wg", "show", "wg0", "dump");
+
+        // ...and so does the first read after this adapter itself changed the tunnel: a peer that was
+        // just removed must not linger in anyone's fleet for the rest of the tick. (deletePeer's own
+        // dump read to find the key is the third exec; the read after it is the fourth.)
+        adapter.deletePeer("Ruten");
+        adapter.getClients();
+        verify(exec, times(4)).execute("wireguard", "wg", "show", "wg0", "dump");
     }
 
     @Test
