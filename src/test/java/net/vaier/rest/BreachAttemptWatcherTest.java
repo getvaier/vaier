@@ -299,14 +299,13 @@ class BreachAttemptWatcherTest {
 
     /**
      * The pushed decision carries the domain's {@code locatable} verdict, not just raw coordinates — the
-     * same shape the REST read returns, so the view cannot end up re-deriving null island in JavaScript
-     * where {@code 0} is falsy.
+     * same shape the REST read returns, so the view cannot end up re-deriving "drawable" in JavaScript
+     * where {@code 0} is falsy and a real zero on one axis would vanish.
      */
     @Test
     void thePushedDecisionCarriesTheDomainsLocatableVerdict() {
         when(forDetectingIntrusions.getActiveDecisionsOrEmpty()).thenReturn(List.of(
-            BlockDecision.builder().id(2L).sourceIp("5.6.7.8").type("ban")
-                .latitude(0.0).longitude(0.0).build()));
+            BlockDecision.builder().id(2L).sourceIp("5.6.7.8").type("ban").build()));
 
         watcher.checkForBreachAttempts();
 

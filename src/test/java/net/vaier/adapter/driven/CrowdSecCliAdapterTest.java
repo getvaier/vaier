@@ -3,12 +3,15 @@ package net.vaier.adapter.driven;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.BlockDecisionsUnreadableException;
 import net.vaier.domain.BlockNotLiftedException;
+import net.vaier.domain.GeoLocation;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.port.ForExecutingInContainer;
+import net.vaier.domain.port.ForGeolocatingIps;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -22,12 +25,15 @@ import static org.mockito.Mockito.when;
 class CrowdSecCliAdapterTest {
 
     private ForExecutingInContainer forExecutingInContainer;
+    private ForGeolocatingIps forGeolocatingIps;
     private CrowdSecCliAdapter adapter;
 
     @BeforeEach
     void setUp() {
         forExecutingInContainer = mock(ForExecutingInContainer.class);
-        adapter = new CrowdSecCliAdapter(forExecutingInContainer);
+        forGeolocatingIps = mock(ForGeolocatingIps.class);
+        when(forGeolocatingIps.locate(anyString())).thenReturn(Optional.empty());
+        adapter = new CrowdSecCliAdapter(forExecutingInContainer, forGeolocatingIps);
     }
 
     private void cscliPrints(String output) {
@@ -123,11 +129,59 @@ class CrowdSecCliAdapterTest {
             assertThat(decision.sourceIp()).isEqualTo("192.168.1.10");
             assertThat(decision.country()).isNull();
             assertThat(decision.asnOrg()).isNull();
-            // Reported as CrowdSec wrote it, NOT collapsed to null here: what 0/0 means is the domain's
-            // call (BlockDecisionTest.nullIslandIsNotALocation), and collapsing it here would also
-            // destroy the single-axis carve-out.
-            assertThat(decision.latitude()).isEqualTo(0.0);
-            assertThat(decision.longitude()).isEqualTo(0.0);
+            // 0/0 is how CrowdSec's wire format says "could not place" — a patch of Atlantic off Ghana.
+            // That is wire knowledge, so it is read as no coordinates here and the domain never meets it.
+            assertThat(decision.latitude()).isNull();
+            assertThat(decision.longitude()).isNull();
+            assertThat(decision.locatable()).isFalse();
+        });
+    }
+
+    // A genuine zero on ONE axis is a real place — the equator and the prime meridian both run through
+    // inhabited land — so only the 0/0 pair is the sentinel.
+    @Test
+    void aZeroOnOneAxisAloneIsAReadCoordinate() {
+        cscliPrints("""
+            [
+              {
+                "id": 9,
+                "source": { "cn": "GH", "latitude": 0, "longitude": -0.19, "scope": "Ip", "value": "1.2.3.4" },
+                "decisions": [
+                  { "duration": "1h0m0s", "id": 41, "scenario": "crowdsecurity/http-probing",
+                    "scope": "Ip", "type": "ban", "value": "1.2.3.4" }
+                ]
+              }
+            ]
+            """);
+
+        assertThat(adapter.getActiveDecisionsOrEmpty()).singleElement()
+            .satisfies(decision -> assertThat(decision.locatable()).isTrue());
+    }
+
+    // #347: the same database that places machines places blocked addresses; CrowdSec keeps the ASN.
+    @Test
+    void decisionsArePlacedByVaiersOwnDatabase_withTheNetworkStillFromCrowdSec() {
+        when(forGeolocatingIps.locate("195.178.110.155"))
+            .thenReturn(Optional.of(new GeoLocation(42.7, 23.3, "Sofia", "Bulgaria")));
+        cscliPrints("""
+            [
+              {
+                "id": 9,
+                "source": { "cn": "", "as_name": "Techoff Srv Limited", "latitude": 0, "longitude": 0,
+                            "scope": "Ip", "value": "195.178.110.155" },
+                "decisions": [
+                  { "duration": "1h0m0s", "id": 42, "scenario": "crowdsecurity/http-probing",
+                    "scope": "Ip", "type": "ban", "value": "195.178.110.155" }
+                ]
+              }
+            ]
+            """);
+
+        assertThat(adapter.getActiveDecisionsOrFail()).singleElement().satisfies(decision -> {
+            assertThat(decision.latitude()).isEqualTo(42.7);
+            assertThat(decision.longitude()).isEqualTo(23.3);
+            assertThat(decision.origin()).isEqualTo("Bulgaria · Techoff Srv Limited");
+            assertThat(decision.locatable()).isTrue();
         });
     }
 

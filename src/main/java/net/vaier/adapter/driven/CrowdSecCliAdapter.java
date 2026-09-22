@@ -9,6 +9,7 @@ import net.vaier.domain.BlockNotLiftedException;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.port.ForDetectingIntrusions;
 import net.vaier.domain.port.ForExecutingInContainer;
+import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForLiftingBlocks;
 import org.springframework.stereotype.Component;
 
@@ -47,10 +48,12 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
     private static final String CROWDSEC_CONTAINER = "crowdsec";
 
     private final ForExecutingInContainer forExecutingInContainer;
+    private final ForGeolocatingIps forGeolocatingIps;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public CrowdSecCliAdapter(ForExecutingInContainer forExecutingInContainer) {
+    public CrowdSecCliAdapter(ForExecutingInContainer forExecutingInContainer, ForGeolocatingIps forGeolocatingIps) {
         this.forExecutingInContainer = forExecutingInContainer;
+        this.forGeolocatingIps = forGeolocatingIps;
     }
 
     /**
@@ -146,10 +149,15 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
         JsonNode source = alert.path("source");
         String country = textOrNull(source, "cn");
         String asnOrg = textOrNull(source, "as_name");
-        // An unreadable coordinate costs the decision its place on the map, never its place in the sweep —
-        // whether the pair can honestly be drawn is BlockDecision.locatable()'s call, not this adapter's.
+        // An unreadable coordinate costs the decision its place on the map, never its place in the sweep.
+        // 0/0 is this wire format's way of saying "could not place" (null island, off Ghana), so it is read
+        // as no coordinates here; a zero on one axis alone is a real place and stays.
         Double latitude = numberOrNull(source, "latitude");
         Double longitude = numberOrNull(source, "longitude");
+        if (latitude != null && longitude != null && latitude == 0.0 && longitude == 0.0) {
+            latitude = null;
+            longitude = null;
+        }
         for (JsonNode alertDecision : alertDecisions) {
             JsonNode id = alertDecision.path("id");
             if (!id.isNumber()) {
@@ -168,7 +176,9 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
                 .asnOrg(asnOrg)
                 .latitude(latitude)
                 .longitude(longitude)
-                .build());
+                .build()
+                // Vaier's own database places the source — the same one that places machines (#347).
+                .placedBy(forGeolocatingIps));
         }
     }
 

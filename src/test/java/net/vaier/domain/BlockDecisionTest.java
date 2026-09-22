@@ -1,8 +1,10 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForGeolocatingIps;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -64,11 +66,34 @@ class BlockDecisionTest {
         assertThat(banOn("1.2.3.4").longitude(23.332).build().locatable()).isFalse();
     }
 
-    // Null island: CrowdSec emits 0/0 for a source it could not place. That point is a patch of Atlantic
-    // off Ghana, and drawing a threat marker there is worse than drawing none at all.
+    // --- where a source sits is Vaier's own database's call, CrowdSec's only a fallback (#347) ----------
+
     @Test
-    void nullIslandIsNotALocation() {
-        assertThat(banOn("192.168.1.10").latitude(0.0).longitude(0.0).build().locatable()).isFalse();
+    void placedBy_takesCoordinatesAndCountryFromVaiersOwnDatabase_andKeepsTheNetworkFromCrowdSec() {
+        ForGeolocatingIps geo = ip -> "195.178.110.155".equals(ip)
+            ? Optional.of(new GeoLocation(42.7, 23.3, "Sofia", "Bulgaria")) : Optional.empty();
+        BlockDecision crowdSecs = banOn("195.178.110.155")
+            .country("BG").asnOrg("Techoff Srv Limited").latitude(41.0).longitude(20.0).build();
+
+        BlockDecision placed = crowdSecs.placedBy(geo);
+
+        assertThat(placed.latitude()).isEqualTo(42.7);
+        assertThat(placed.longitude()).isEqualTo(23.3);
+        assertThat(placed.origin()).isEqualTo("Bulgaria · Techoff Srv Limited");
+        assertThat(placed.id()).isEqualTo(crowdSecs.id());
+        assertThat(placed.scenario()).isEqualTo(crowdSecs.scenario());
+    }
+
+    @Test
+    void placedBy_fallsBackToCrowdSecsOwnPlacement_onlyWhenVaierCannotPlaceTheSource() {
+        ForGeolocatingIps nowhere = ip -> Optional.empty();
+        BlockDecision enrichedByCrowdSec = banOn("1.2.3.4").country("BG").latitude(42.696).longitude(23.332).build();
+        BlockDecision unplaced = banOn("192.168.1.10").build();
+
+        assertThat(enrichedByCrowdSec.placedBy(nowhere)).isEqualTo(enrichedByCrowdSec);
+        // Neither source can place it: not located, and no sentinel coordinates to defend against.
+        assertThat(unplaced.placedBy(nowhere).locatable()).isFalse();
+        assertThat(unplaced.placedBy(nowhere).enriched()).isFalse();
     }
 
     // ...but a genuine zero on ONE axis is a real place — the equator and the prime meridian both run

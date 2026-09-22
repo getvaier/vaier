@@ -1,6 +1,7 @@
 package net.vaier.domain;
 
 import lombok.Builder;
+import net.vaier.domain.port.ForGeolocatingIps;
 
 import java.util.StringJoiner;
 
@@ -11,16 +12,16 @@ import java.util.StringJoiner;
  * the operator only ever needs to read it, never compute with it. {@code id} is the identity
  * {@link BreachAttemptTracker} diffs sweeps on.
  *
- * <p>{@code country}, {@code asnOrg}, {@code latitude} and {@code longitude} are CrowdSec's own geo/ASN
- * enrichment of the source and are all optional: a private-range address, or one CrowdSec could not place,
- * has none of them. Mapping the wire shape onto this record belongs to the driven adapter — the record
- * itself carries no serialisation coupling, so where the decisions are read from can change without
- * touching the domain.
+ * <p>{@code country}, {@code asnOrg}, {@code latitude} and {@code longitude} say where the source sits and are
+ * all optional. The ASN is CrowdSec's; the place is Vaier's own database's whenever it can answer
+ * ({@link #placedBy}), with CrowdSec's own placement only as a fallback — one map, one authority (#347).
+ * Mapping the wire shape onto this record belongs to the driven adapter — the record itself carries no
+ * serialisation coupling, so where the decisions are read from can change without touching the domain.
  *
  * <p>Nine components, six of them strings and two of them {@code Double}, is exactly the shape that lets
  * two same-typed fields be swapped silently at a call site — hence {@link Builder}.
  */
-@Builder
+@Builder(toBuilder = true)
 public record BlockDecision(Long id, String scenario, String sourceIp, String type, String duration,
                             String country, String asnOrg, Double latitude, Double longitude) {
 
@@ -66,17 +67,32 @@ public record BlockDecision(Long id, String scenario, String sourceIp, String ty
     }
 
     /**
-     * Whether this attempt can honestly be drawn on the map. Both coordinates must be present, and the
-     * pair must not be null island — CrowdSec writes {@code 0}/{@code 0} for a source it could not place,
-     * and that point is a patch of Atlantic off Ghana, not an attacker. A marker there is a lie; no marker
-     * is merely a gap. A genuine zero on one axis alone is a real place and stays on the map.
+     * Whether this attempt can honestly be drawn on the map: both coordinates present. Absence is the only
+     * "could not place" here — the CrowdSec adapter reads that format's {@code 0}/{@code 0} sentinel as
+     * absence, so no null-island carve-out is needed and a genuine zero on one axis is a real place.
      *
      * <p>This is the domain's call, not the map's: a containment-style predicate that lives in JavaScript
      * is one every future caller has to rediscover.
      */
     public boolean locatable() {
-        if (latitude == null || longitude == null) return false;
-        return latitude != 0.0 || longitude != 0.0;
+        return latitude != null && longitude != null;
+    }
+
+    /**
+     * This decision placed by Vaier's own geolocation database — the one that places machines — so both
+     * kinds of pin on one map come from one authority. Coordinates and country are taken from it when it
+     * can answer; the network (ASN) stays CrowdSec's, which is the more identifying half of the origin
+     * line and which that database does not hold. When it cannot answer, CrowdSec's own placement stands.
+     */
+    public BlockDecision placedBy(ForGeolocatingIps geo) {
+        if (sourceIp == null) return this;
+        return geo.locate(sourceIp)
+            .map(place -> toBuilder()
+                .latitude(place.latitude())
+                .longitude(place.longitude())
+                .country(place.country() != null ? place.country() : country)
+                .build())
+            .orElse(this);
     }
 
     /**

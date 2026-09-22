@@ -46,10 +46,10 @@ class SecurityRestControllerTest {
         .duration("3h0m40s").country("BG").asnOrg("Techoff Srv Limited")
         .latitude(42.696).longitude(23.332).build();
 
-    /** CrowdSec's "I could not place this" sentinel: null island, a patch of Atlantic off Ghana. */
-    private static final BlockDecision NULL_ISLAND = BlockDecision.builder()
+    /** A source neither CrowdSec nor Vaier's own database could place: no coordinates at all. */
+    private static final BlockDecision UNPLACED = BlockDecision.builder()
         .id(40L).scenario("crowdsecurity/ssh-bf").sourceIp("1.2.3.4").type("ban").duration("4h0m0s")
-        .latitude(0.0).longitude(0.0).build();
+        .build();
 
     GetBlockDecisionsUseCase getBlockDecisions = mock(GetBlockDecisionsUseCase.class);
     LiftBlockUseCase liftBlock = mock(LiftBlockUseCase.class);
@@ -89,14 +89,14 @@ class SecurityRestControllerTest {
     }
 
     /**
-     * The one thing this DTO must not do is ship raw coordinates alone. Null island is {@code 0}/{@code 0},
-     * and {@code 0} is falsy in JavaScript — a frontend re-deriving "is this drawable?" from latitude and
-     * longitude would collapse the deliberate single-axis carve-out in {@code BlockDecision.locatable()}
-     * without anyone noticing. The domain has already decided; the wire carries the decision.
+     * The one thing this DTO must not do is ship raw coordinates alone. {@code 0} is falsy in JavaScript, so a
+     * frontend re-deriving "is this drawable?" from latitude and longitude would drop a genuine zero on one
+     * axis — the equator, the prime meridian — without anyone noticing. The domain has already decided; the
+     * wire carries the decision.
      */
     @Test
     void getDecisions_shipsTheDomainsLocatableDecision_notJustRawCoordinates() throws Exception {
-        when(getBlockDecisions.getBlockDecisions()).thenReturn(List.of(PLACED, NULL_ISLAND));
+        when(getBlockDecisions.getBlockDecisions()).thenReturn(List.of(PLACED, UNPLACED));
 
         mvc.perform(get("/security/decisions"))
             .andExpect(status().isOk())
@@ -144,7 +144,7 @@ class SecurityRestControllerTest {
      */
     @Test
     void deleteDecision_pushesTheRefreshedDecisionsAtOnce() throws Exception {
-        when(getBlockDecisions.getBlockDecisions()).thenReturn(List.of(NULL_ISLAND));
+        when(getBlockDecisions.getBlockDecisions()).thenReturn(List.of(UNPLACED));
 
         mvc.perform(delete("/security/decisions/195.178.110.155"));
 

@@ -212,9 +212,8 @@ public class SecurityRestController {
      *
      * <p>{@code locatable} and {@code enriched} are carried as the domain decided them, <b>not</b> left
      * for the browser to re-derive from {@code latitude}/{@code longitude}. That matters concretely:
-     * CrowdSec writes {@code 0}/{@code 0} for a source it could not place, {@code 0} is falsy in
-     * JavaScript, and a frontend truthiness check would quietly destroy the deliberate single-axis
-     * carve-out in {@code BlockDecision.locatable()} — a genuine zero on one axis is a real place. The raw
+     * {@code 0} is falsy in JavaScript, and a frontend truthiness check would quietly drop a genuine zero
+     * on one axis — the equator and the prime meridian both run through inhabited land. The raw
      * coordinates ride along because the map needs numbers to draw with; the <em>decision</em> whether to
      * draw at all is already made.
      */
