@@ -260,7 +260,11 @@ public class BackupRestController {
      * should be able to show, not one to paper over.
      */
     private String machineNameOf(MachineId machineId) {
-        return getMachines.getAllMachines().stream()
+        return nameIn(getMachines.getAllMachines(), machineId);
+    }
+
+    private static String nameIn(List<Machine> fleet, MachineId machineId) {
+        return fleet.stream()
             .filter(m -> m.id().equals(machineId))
             .map(Machine::name)
             .findFirst()
@@ -271,14 +275,18 @@ public class BackupRestController {
 
     @GetMapping("/backup-repositories")
     public ResponseEntity<List<RepositoryResponse>> listRepositories() {
+        // The fleet and the jobs are read once for the list, not once per row: each fleet read walks the
+        // tunnel, and this list was the boot's slowest request because of it.
+        List<Machine> fleet = getMachines.getAllMachines();
+        List<BackupJob> jobs = getBackupJobs.getBackupJobs();
         return ResponseEntity.ok(getBackupRepositories.getBackupRepositories().stream()
-            .map(this::toResponse).toList());
+            .map(repo -> toResponse(repo, fleet, jobs)).toList());
     }
 
     @GetMapping("/backup-repositories/{name}")
     public ResponseEntity<RepositoryResponse> getRepository(@PathVariable String name) {
         return findRepository(name)
-            .map(repo -> ResponseEntity.ok(toResponse(repo)))
+            .map(repo -> ResponseEntity.ok(toResponse(repo, getMachines.getAllMachines(), getBackupJobs.getBackupJobs())))
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
@@ -295,7 +303,7 @@ public class BackupRestController {
         BackupRepository repository = new BackupRepository(name, request.serverName(), request.repoPath(),
             passphrase, request.appendOnly());
         saveBackupRepository.saveBackupRepository(repository);
-        return ResponseEntity.ok(toResponse(repository));
+        return ResponseEntity.ok(toResponse(repository, getMachines.getAllMachines(), getBackupJobs.getBackupJobs()));
     }
 
     @DeleteMapping("/backup-repositories/{name}")
@@ -332,19 +340,20 @@ public class BackupRestController {
      */
     @GetMapping("/backup-jobs")
     public ResponseEntity<List<JobResponse>> listJobs() {
-        return ResponseEntity.ok(getBackupJobs.getBackupJobs().stream().map(this::withLastRun).toList());
+        List<Machine> fleet = getMachines.getAllMachines();
+        return ResponseEntity.ok(getBackupJobs.getBackupJobs().stream().map(job -> withLastRun(job, fleet)).toList());
     }
 
     @GetMapping("/backup-jobs/{machineId}")
     public ResponseEntity<JobResponse> getJob(@PathVariable String machineId) {
         return findJob(machineId)
-            .map(job -> ResponseEntity.ok(withLastRun(job)))
+            .map(job -> ResponseEntity.ok(withLastRun(job, getMachines.getAllMachines())))
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     /** A job with its latest run's status attached, or {@code null} status when it has never run. */
-    private JobResponse withLastRun(BackupJob job) {
-        return JobResponse.from(job, machineNameOf(job.machineId()),
+    private JobResponse withLastRun(BackupJob job, List<Machine> fleet) {
+        return JobResponse.from(job, nameIn(fleet, job.machineId()),
             getBackupRuns.latestForMachine(job.machineId())
                 .map(BackupRun::status).map(Enum::name).orElse(null));
     }
@@ -624,12 +633,12 @@ public class BackupRestController {
         return ServerResponse.from(s, machineNameOf(s.machineId()));
     }
 
-    private RepositoryResponse toResponse(BackupRepository r) {
+    private RepositoryResponse toResponse(BackupRepository r, List<Machine> fleet, List<BackupJob> jobs) {
         String effectivePath = findServer(r.serverName())
             .map(r::repoPathOn)
             .orElse(r.repoPath());
         boolean hasPassphrase = r.passphrase() != null && !r.passphrase().isBlank();
-        return new RepositoryResponse(r.name(), storeLabel(r), r.serverName(), effectivePath,
+        return new RepositoryResponse(r.name(), storeLabel(r, fleet, jobs), r.serverName(), effectivePath,
             r.appendOnly(), hasPassphrase);
     }
 
@@ -639,9 +648,8 @@ public class BackupRestController {
      * surfaces end up disagreeing about which store is which, which is the failure the label exists to
      * prevent. {@link BackupStoreLabel} owns the rule; this only finds the machine to ask it about.
      */
-    private String storeLabel(BackupRepository repository) {
-        List<Machine> fleet = getMachines.getAllMachines();
-        return getBackupJobs.getBackupJobs().stream()
+    private String storeLabel(BackupRepository repository, List<Machine> fleet, List<BackupJob> jobs) {
+        return jobs.stream()
             .filter(j -> repository.name().equals(j.repositoryName()))
             .findFirst()
             .flatMap(job -> fleet.stream().filter(m -> m.id().equals(job.machineId())).findFirst())

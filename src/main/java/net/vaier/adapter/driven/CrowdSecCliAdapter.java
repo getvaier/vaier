@@ -15,6 +15,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * Reads CrowdSec's active block decisions by running {@code cscli decisions list -o json} inside the
@@ -51,9 +55,28 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
     private final ForGeolocatingIps forGeolocatingIps;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * How long one read of the block list serves every caller — the breach sweep's own interval, so a
+     * request never waits on the cscli exec for a list the sweep is already keeping. A lift forgets the
+     * read at once; a failed read is never kept.
+     */
+    static final Duration BLOCK_LIST_MEMO = Duration.ofMinutes(5);
+
+    private final Clock clock;
+    private volatile ListRead lastRead;
+
+    private record ListRead(Instant at, List<BlockDecision> decisions) {}
+
+    @Autowired
     public CrowdSecCliAdapter(ForExecutingInContainer forExecutingInContainer, ForGeolocatingIps forGeolocatingIps) {
+        this(forExecutingInContainer, forGeolocatingIps, Clock.systemUTC());
+    }
+
+    CrowdSecCliAdapter(ForExecutingInContainer forExecutingInContainer, ForGeolocatingIps forGeolocatingIps,
+                       Clock clock) {
         this.forExecutingInContainer = forExecutingInContainer;
         this.forGeolocatingIps = forGeolocatingIps;
+        this.clock = clock;
     }
 
     /**
@@ -88,6 +111,15 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
      */
     @Override
     public List<BlockDecision> getActiveDecisionsOrFail() {
+        ListRead memo = lastRead;
+        Instant now = clock.instant();
+        if (memo != null && now.isBefore(memo.at().plus(BLOCK_LIST_MEMO))) return memo.decisions();
+        List<BlockDecision> decisions = readDecisions();
+        lastRead = new ListRead(now, decisions);
+        return decisions;
+    }
+
+    private List<BlockDecision> readDecisions() {
         JsonNode alerts = readAlerts();
         if (alerts == null || alerts.isNull()) return List.of();
         if (!alerts.isArray()) {
@@ -99,7 +131,7 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
         for (JsonNode alert : alerts) {
             collectDecisionsOf(alert, decisions);
         }
-        return decisions;
+        return List.copyOf(decisions);
     }
 
     private JsonNode readAlerts() {
@@ -131,6 +163,7 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
         try {
             String output = forExecutingInContainer.execute(
                 CROWDSEC_CONTAINER, "cscli", "decisions", "delete", "-i", address.value());
+            lastRead = null;
             // Safe to log unescaped: SourceAddress admits nothing but a dotted quad, so no newline can
             // reach this line to forge a second one.
             log.info("Lifted the CrowdSec block on {}: {}", address.value(), output.strip());

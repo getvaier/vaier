@@ -539,24 +539,33 @@
     // The routes, and the groups allowed through them. The access rules are keyed by the route's DNS name —
     // the same key the Access page writes them under.
     async function loadServices() {
-        try {
-            const res = await fetch('/published-services/discover', { cache: 'no-store' });
-            S.services = res.ok ? await res.json() : [];
-        } catch (e) {
-            S.services = [];
-        }
-        try {
-            const res = await fetch('/access/services', { cache: 'no-store' });
-            S.access = res.ok ? await res.json() : {};
-        } catch (e) {
-            S.access = {};
-        }
-        try {
-            const res = await fetch('/published-services/publishable', { cache: 'no-store' });
-            S.publishable = res.ok ? await res.json() : [];
-        } catch (e) {
-            S.publishable = [];
-        }
+        // Three independent reads, one wave — see loadFleet.
+        await Promise.all([
+            (async () => {
+                try {
+                    const res = await fetch('/published-services/discover', { cache: 'no-store' });
+                    S.services = res.ok ? await res.json() : [];
+                } catch (e) {
+                    S.services = [];
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/access/services', { cache: 'no-store' });
+                    S.access = res.ok ? await res.json() : {};
+                } catch (e) {
+                    S.access = {};
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/published-services/publishable', { cache: 'no-store' });
+                    S.publishable = res.ok ? await res.json() : [];
+                } catch (e) {
+                    S.publishable = [];
+                }
+            })(),
+        ]);
     }
 
     // The whole fleet's disk pressure, in ONE request — the disk mark on every machine card.
@@ -687,25 +696,34 @@
     // moment. Never polled — a server is designated by an operator, not by a schedule, so a reload is the right
     // time to learn a new one. The fleet has at most one, so the list is read as its single head.
     async function loadBackup() {
-        try {
-            const res = await fetch('/backup-servers', { cache: 'no-store' });
-            const list = res.ok ? await res.json() : [];
-            S.backupServer = list.length ? list[0] : null;
-        } catch (e) {
-            S.backupServer = null;
-        }
-        try {
-            const res = await fetch('/backup-repositories', { cache: 'no-store' });
-            S.backupRepos = res.ok ? await res.json() : [];
-        } catch (e) {
-            S.backupRepos = [];
-        }
-        try {
-            const res = await fetch('/backup-jobs', { cache: 'no-store' });
-            S.backupJobs = res.ok ? await res.json() : [];
-        } catch (e) {
-            S.backupJobs = [];
-        }
+        // Three independent reads, one wave — see loadFleet.
+        await Promise.all([
+            (async () => {
+                try {
+                    const res = await fetch('/backup-servers', { cache: 'no-store' });
+                    const list = res.ok ? await res.json() : [];
+                    S.backupServer = list.length ? list[0] : null;
+                } catch (e) {
+                    S.backupServer = null;
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/backup-repositories', { cache: 'no-store' });
+                    S.backupRepos = res.ok ? await res.json() : [];
+                } catch (e) {
+                    S.backupRepos = [];
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/backup-jobs', { cache: 'no-store' });
+                    S.backupJobs = res.ok ? await res.json() : [];
+                } catch (e) {
+                    S.backupJobs = [];
+                }
+            })(),
+        ]);
     }
 
     // A machine that left the fleet takes its cached directories with it. Machines that are still here keep
@@ -9653,12 +9671,25 @@
     const liveEnrolmentRequests = () => S.enrolmentRequests.filter((r) => r.expiresAt > Date.now());
 
     async function loadFleet() {
+        // The four reads are independent. A phone pays a round trip per link of a chain, so they go as
+        // one wave, and the fleet's shape is settled only when all of them are back.
+        await Promise.all([loadMachines(), loadPeers(), loadLanServers(), loadServerLocation()]);
+        // The fleet just changed shape. A machine that left must not leave its directories behind in the
+        // cache, and a read still in flight for it must not be able to put them back (readDir checks that
+        // its slot is still its own).
+        pruneDirs();
+    }
+
+    async function loadMachines() {
         try {
             const res = await fetch('/machines');
             S.machines = res.ok ? await res.json() : [];
         } catch (e) {
             S.machines = [];
         }
+    }
+
+    async function loadPeers() {
         try {
             // The peers carry what /machines cannot: the tunnel address and the live connection state. The
             // stats that arrive on the stream are keyed by the peer's id, so keep the id -> machine map too.
@@ -9677,18 +9708,13 @@
                 S.peersById.set(p.id, p);
             });
         } catch (e) { /* a fleet with no peers is a fleet, not a failure */ }
+    }
 
-        await loadLanServers();
-
+    async function loadServerLocation() {
         try {
             const res = await fetch('/vpn/peers/server-location');
             S.serverLocation = res.ok ? await res.json() : null;
         } catch (e) { S.serverLocation = null; }
-
-        // The fleet just changed shape. A machine that left must not leave its directories behind in the
-        // cache, and a read still in flight for it must not be able to put them back (readDir checks that
-        // its slot is still its own).
-        pruneDirs();
     }
 
     // The other half of the fleet's liveness. /lan-servers hands us `status` — a MachineStatus the domain has

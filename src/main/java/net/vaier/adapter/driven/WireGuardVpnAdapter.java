@@ -21,6 +21,10 @@ import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Component
 @Slf4j
@@ -40,8 +44,26 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
     private final ForExecutingInContainer forExecutingInContainer;
 
+    /**
+     * How long one read of the tunnel serves every caller. The peer-stats tick reads it this often for the
+     * stream, so inside the window a request never waits on the two Docker execs. A write through this
+     * adapter forgets the read at once; a peer added by any other path shows up on the next tick.
+     */
+    static final Duration TUNNEL_READ_MEMO = Duration.ofSeconds(10);
+
+    private final Clock clock;
+    private volatile TunnelRead lastRead;
+
+    private record TunnelRead(Instant at, List<VpnClient> clients) {}
+
+    @Autowired
     public WireGuardVpnAdapter(ForExecutingInContainer forExecutingInContainer) {
+        this(forExecutingInContainer, Clock.systemUTC());
+    }
+
+    WireGuardVpnAdapter(ForExecutingInContainer forExecutingInContainer, Clock clock) {
         this.forExecutingInContainer = forExecutingInContainer;
+        this.clock = clock;
     }
 
     private String executeWgCommand(String... wgArgs) throws IOException, InterruptedException {
@@ -175,6 +197,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
             // Persist live runtime state to wg0.conf so it survives a container restart.
             forExecutingInContainer.execute(wireguardContainerName, "wg-quick", "save", wireguardInterface);
+            lastRead = null;
             log.info("Persisted new AllowedIPs for peer at {}", peerIpAddress);
 
             // wg set / wg-quick save mutate cryptokey routing but never install kernel
@@ -247,6 +270,7 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
                 // not user-supplied, but the sh-c pattern is being purged repo-wide. Closes #195.
                 String output = forExecutingInContainer.execute(
                     wireguardContainerName, "wg", "set", wireguardInterface, "peer", peer.publicKey(), "remove");
+                lastRead = null;
                 log.info("Remove peer output: {}", output);
 
                 String saveOutput = forExecutingInContainer.execute(
@@ -294,9 +318,14 @@ public class WireGuardVpnAdapter implements ForGettingVpnClients, ForDeletingVpn
 
     @Override
     public List<VpnClient> getClients() {
-        return getInterfaces().stream()
+        TunnelRead memo = lastRead;
+        Instant now = clock.instant();
+        if (memo != null && now.isBefore(memo.at().plus(TUNNEL_READ_MEMO))) return memo.clients();
+        List<VpnClient> clients = getInterfaces().stream()
             .flatMap(interfaceName -> getClients(interfaceName).stream())
             .toList();
+        lastRead = new TunnelRead(now, clients);
+        return clients;
     }
 
     private List<VpnClient> getClients(String interfaceName) {

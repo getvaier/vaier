@@ -72,6 +72,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.Mockito.times;
 
 class BackupRestControllerTest {
 
@@ -212,6 +213,24 @@ class BackupRestControllerTest {
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 
         assertThat(body).contains("\"lastRunStatus\":null");
+    }
+
+    @Test
+    void theLists_resolveTheFleetOnce_notOncePerRow() throws Exception {
+        // Five jobs meant five reads of the whole fleet for one list — each a walk of the tunnel — and
+        // the repository list read it once more per row on top. The boot's slowest requests were these.
+        when(getMachines.getAllMachines()).thenReturn(List.of(machine("Colina 27"), machine("NAS")));
+        jobs.save(job());
+        jobs.save(new BackupJob("nas-home", TestMachineIds.of("NAS"), "nas-borg",
+            List.of("/volume1"), List.of(), 7, 4, 6, "zstd,6", true, false));
+        repositories.save(repo());
+        repositories.save(new BackupRepository("nas-other", "nas-borg", "./other", "s3cr3t", false));
+
+        mockMvc().perform(get("/backup-jobs")).andExpect(status().isOk());
+        verify(getMachines, times(1)).getAllMachines();
+
+        mockMvc().perform(get("/backup-repositories")).andExpect(status().isOk());
+        verify(getMachines, times(2)).getAllMachines();
     }
 
     @Test
