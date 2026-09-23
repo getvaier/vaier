@@ -19,9 +19,11 @@ class VaierHostnamesTest {
     }
 
     @Test
-    void dexHost_prependsTheDexSubdomain() {
+    void dexHost_prependsTheDexSubdomain_andEveryProviderCallsBackThere() {
         assertThat(new VaierHostnames("example.com").dexHost())
             .isEqualTo("dex.example.com");
+        assertThat(new VaierHostnames("example.com").dexCallbackUrl())
+            .isEqualTo("https://dex.example.com/callback");
     }
 
     @Test

@@ -4,12 +4,18 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import net.vaier.domain.AuthMode;
+import net.vaier.domain.IdentityProvider;
+import net.vaier.domain.ProviderCredentials;
+import net.vaier.domain.SignInSettings;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.yaml.snakeyaml.Yaml;
@@ -41,8 +47,48 @@ class DockerComposeStructureTest {
         Map<String, Object> compose = (Map<String, Object>) new Yaml()
             .load(Files.readString(Path.of("docker-compose.yml")));
         Map<String, Object> vaier = (Map<String, Object>) ((Map<String, Object>) compose.get("services")).get("vaier");
-        assertThat((Map<String, Object>) vaier.get("environment"))
-            .containsKeys("VAIER_OIDC_GOOGLE_CLIENT_ID", "VAIER_OIDC_GITHUB_CLIENT_ID");
+        // #264: whether each secret is set, never the secret, so Settings can say which pair .env holds.
+        Map<String, Object> env = (Map<String, Object>) vaier.get("environment");
+        assertThat(env).containsKeys("VAIER_OIDC_GOOGLE_CLIENT_ID", "VAIER_OIDC_GITHUB_CLIENT_ID")
+            .doesNotContainKeys("VAIER_OIDC_GOOGLE_CLIENT_SECRET", "VAIER_OIDC_GITHUB_CLIENT_SECRET")
+            .containsEntry("VAIER_OIDC_GOOGLE_CLIENT_SECRET_PRESENT", "${VAIER_OIDC_GOOGLE_CLIENT_SECRET:+yes}")
+            .containsEntry("VAIER_OIDC_GITHUB_CLIENT_SECRET_PRESENT", "${VAIER_OIDC_GITHUB_CLIENT_SECRET:+yes}");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dockerProxy_letsVaierStartOnlyTheTwoSignInRenderers() throws Exception {
+        // #264: Settings re-runs dex-init and oauth2-proxy-init. Starting an existing one-shot whose command
+        // Vaier cannot change (create stays denied) only re-runs a fixed renderer; any other start would let
+        // RCE in Vaier run whatever container it could find. haproxy's `-m reg` is an unanchored search.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        String template = (String) ((Map<String, Object>) ((Map<String, Object>) compose.get("configs"))
+            .get("haproxy_template")).get("content");
+        List<String> startRules = template.lines().map(String::strip)
+            .filter(l -> l.startsWith("http-request deny") && l.contains("/start")).toList();
+        assertThat(startRules).as("one deny rule for starts").hasSize(1);
+        assertThat(template).contains("http-request deny if METH_POST { path -m end /containers/create }");
+
+        Matcher acl = Pattern.compile("(!?)\\{ path -m reg -i (\\S+) \\}").matcher(startRules.get(0));
+        record Acl(boolean negated, Pattern pattern) {}
+        List<Acl> acls = new ArrayList<>();
+        while (acl.find()) {
+            acls.add(new Acl(!acl.group(1).isEmpty(),
+                Pattern.compile(acl.group(2).replace("$$", "$"), Pattern.CASE_INSENSITIVE)));
+        }
+        record Row(String path, boolean denied) {}
+        for (Row row : List.of(
+                new Row("/containers/dex-init/start", false),
+                new Row("/v1.43/containers/oauth2-proxy-init/start", false),
+                new Row("/containers/vaier/start", true),
+                new Row("/v1.43/containers/wireguard/start", true),
+                new Row("/containers/dex-init-evil/start", true),
+                new Row("/containers/evil-dex-init/start", true),
+                new Row("/x/containers/dex-init/start", true))) {
+            boolean denied = acls.stream().allMatch(a -> a.pattern().matcher(row.path()).find() != a.negated());
+            assertThat(denied).as(row.path()).isEqualTo(row.denied());
+        }
     }
 
     // --- Public, viewer-adaptive launchpad: three-tier routing on the console host ---
@@ -503,6 +549,58 @@ class DockerComposeStructureTest {
         assertThat(again.get(1)).as("the secret is kept across restarts, so the log never lies").isEqualTo(lines.get(1));
     }
 
+    // --- #264 slice 2: providers added from Settings, in the file Vaier writes ---
+
+    private static void writeSignInSettings(Path tempDir, SignInSettings settings) throws Exception {
+        Path vaierConfig = Files.createDirectories(tempDir.resolve("vaier-config"));
+        new SignInSettingsFileAdapter(vaierConfig.toString()).save(settings);
+    }
+
+    private static SignInSettings googleFromSettings(boolean firstRunDoorOpen) {
+        return new SignInSettings(Map.of(IdentityProvider.GOOGLE, new ProviderCredentials("file-id", "file-secret")),
+            firstRunDoorOpen);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dexInit_takesAProviderFromSettings_whereDotEnvLeavesItBlank_andKeepsTheFirstRunDoorAsTheFileSays(
+            @TempDir Path tempDir) throws Exception {
+        record Row(String label, boolean doorOpen, Map<String, String> env, String googleClientId, boolean passwordDb) {}
+        for (Row row : List.of(
+                new Row("added from Settings, no admin through it yet", true, Map.of(), "file-id", true),
+                new Row("an admin came through it", false, Map.of(), "file-id", false),
+                new Row(".env wins", false, Map.of(
+                    "VAIER_OIDC_GOOGLE_CLIENT_ID", "env-id", "VAIER_OIDC_GOOGLE_CLIENT_SECRET", "env-secret"), "env-id", false))) {
+            writeSignInSettings(tempDir, googleFromSettings(row.doorOpen()));
+
+            DexInitResult result = runDexInit(tempDir, row.env());
+
+            assertThat(result.exitCode()).as("%s — stderr: %s", row.label(), result.stderr()).isEqualTo(0);
+            Map<String, Object> configYaml = (Map<String, Object>) new Yaml().load(Files.readString(tempDir.resolve("config.yaml")));
+            List<Map<String, Object>> connectors = (List<Map<String, Object>>) configYaml.get("connectors");
+            assertThat(connectors).as(row.label()).hasSize(1);
+            assertThat(((Map<String, Object>) connectors.get(0).get("config")).get("clientID"))
+                .as(row.label()).isEqualTo(row.googleClientId());
+            assertThat(configYaml.containsKey("staticPasswords")).as(row.label()).isEqualTo(row.passwordDb());
+            assertThat(Files.exists(tempDir.resolve("vaier-config/first-run-password"))).as(row.label()).isEqualTo(row.passwordDb());
+        }
+    }
+
+    @Test
+    void dexInit_neverEvaluatesTheSettingsFile_itRunsAsRoot(@TempDir Path tempDir) throws Exception {
+        // Vaier only ever writes the safe charset; this is the renderer's own guard against a hand-edited file.
+        Path pwned = tempDir.resolve("pwned");
+        Files.createDirectories(tempDir.resolve("vaier-config"));
+        Files.writeString(tempDir.resolve("vaier-config/sign-in-providers.env"),
+            "GOOGLE_CLIENT_ID=abc$(touch " + pwned + ")\nGOOGLE_CLIENT_SECRET=s`touch " + pwned + "`\n");
+
+        DexInitResult result = runDexInit(tempDir, Map.of());
+
+        assertThat(result.exitCode()).as("stderr: %s", result.stderr()).isEqualTo(0);
+        assertThat(Files.exists(pwned)).isFalse();
+        assertThat(Files.readString(tempDir.resolve("config.yaml"))).doesNotContain("$(").doesNotContain("`");
+    }
+
     @Test
     void dexInit_failsFast_whenDexClientSecretIsBlank(@TempDir Path tempDir) throws Exception {
         Map<String, String> providerEnv = new LinkedHashMap<>();
@@ -545,9 +643,11 @@ class DockerComposeStructureTest {
     // template mount is redirected at the repo's own oauth2/templates, so these tests render the
     // real sign-in page.
     private InitResult runOauth2ProxyInit(Path tempDir, Map<String, String> providerEnv) throws Exception {
+        Path vaierConfig = Files.createDirectories(tempDir.resolve("vaier-config"));
         String script = oauth2ProxyInitScript()
             .replace("$$", "$")
             .replace("/oauth2/config", tempDir.toString())
+            .replace("/vaier/config", vaierConfig.toString())
             .replace("/templates-src", Path.of("oauth2/templates").toAbsolutePath().toString());
 
         Path stubBin = Files.createDirectories(tempDir.resolve("stub-bin"));
@@ -615,6 +715,30 @@ class DockerComposeStructureTest {
             .doesNotContain("value=\"google\"").doesNotContain("value=\"github\"");
         assertThat(Files.readString(tempDir.resolve("alpha.yaml")))
             .as("oauth2-proxy forwards connector_id only when allow-listed").contains("allow: [{value: local}]");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void signInPage_keepsTheFirstRunPasswordBesideAProviderFromSettings_untilTheDoorCloses(@TempDir Path tempDir)
+            throws Exception {
+        // #264: the renderer reads the file Vaier writes, read-only.
+        Map<String, Object> init = (Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")))).get("services")).get("oauth2-proxy-init");
+        assertThat((List<String>) init.get("volumes")).contains("./vaier/config:/vaier/config:ro");
+
+        writeSignInSettings(tempDir, googleFromSettings(true));
+        InitResult open = runOauth2ProxyInit(tempDir, Map.of());
+        assertThat(open.exitCode()).as("stderr: %s", open.stderr()).isEqualTo(0);
+        String page = Files.readString(tempDir.resolve("templates/sign_in.html"));
+        assertThat(page).contains("Continue with Google").contains("value=\"local\"").doesNotContain("value=\"github\"");
+        assertThat(page.substring(page.indexOf("<!--provider:local-->")))
+            .as("beside a provider, the first-run password is the secondary choice").contains("class=\"btn btn-secondary\"");
+        assertThat(Files.readString(tempDir.resolve("alpha.yaml"))).contains("allow: [{value: local}, {value: google}]");
+
+        writeSignInSettings(tempDir, googleFromSettings(false));
+        runOauth2ProxyInit(tempDir, Map.of());
+        assertThat(Files.readString(tempDir.resolve("templates/sign_in.html")))
+            .contains("Continue with Google").doesNotContain("value=\"local\"");
     }
 
     @Test

@@ -75,8 +75,13 @@ configs:
           # otherwise POST /containers/create + POST /containers/{id}/start to launch
           # a --privileged container and escape to host root. Also block image pulls
           # and other write paths that POST=1 alone would otherwise permit.
+          #
+          # #264: the one start that passes is dex-init's and oauth2-proxy-init's, by exact name, so
+          # Settings can apply a new sign-in provider. Starting an existing one-shot whose command Vaier
+          # cannot change (create stays denied) only re-runs that fixed renderer; every other start —
+          # any other container, any lookalike name — is still denied.
           http-request deny if METH_POST { path -m end /containers/create }
-          http-request deny if METH_POST { path -m reg -i /containers/[a-zA-Z0-9_.-]+/start$$ }
+          http-request deny if METH_POST { path -m reg -i /containers/[a-zA-Z0-9_.-]+/start$$ } !{ path -m reg -i ^(/v[0-9.]+)?/containers/(dex-init|oauth2-proxy-init)/start$$ }
           http-request deny if METH_POST { path -m end /images/create }
           http-request deny if METH_POST { path -m end /images/load }
           http-request deny if METH_POST { path -m reg -i /images/[^/]+/push$$ }
@@ -415,6 +420,8 @@ services:
       - PING=1           # /_ping — health checks
       - POST=1           # global gate for POST methods (required by EXEC and ALLOW_RESTARTS)
       - ALLOW_RESTARTS=1 # /containers/{name}/restart — DockerContainerAdapter
+      # Not ALLOW_START: the template lets through only the two sign-in renderers' starts (#264), and
+      # CONTAINERS=1 already covers the /wait and /logs Vaier reads their exit code and output from.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     # Override the upstream template so the entrypoint substitutes env vars
@@ -646,6 +653,10 @@ services:
       # tells Vaier the first-run password has closed (#264).
       VAIER_OIDC_GOOGLE_CLIENT_ID: ${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
       VAIER_OIDC_GITHUB_CLIENT_ID: ${VAIER_OIDC_GITHUB_CLIENT_ID:-}
+      # Whether each secret is set in .env — never the secret — so Settings → Sign-in knows which
+      # providers .env owns (#264).
+      VAIER_OIDC_GOOGLE_CLIENT_SECRET_PRESENT: ${VAIER_OIDC_GOOGLE_CLIENT_SECRET:+yes}
+      VAIER_OIDC_GITHUB_CLIENT_SECRET_PRESENT: ${VAIER_OIDC_GITHUB_CLIENT_SECRET:+yes}
       # Seeds/keeps this identity as an admin AccessEntry so the console is never locked out
       # (self-heal in AccessFileAdapter, read via System.getenv). Must reach the container (#305).
       VAIER_ADMIN_EMAIL: ${VAIER_ADMIN_EMAIL:-}
@@ -797,6 +808,24 @@ services:
         umask 077
         printf '%s' "$$VAIER_DEX_CLIENT_SECRET" > /oauth2/config/client-secret
 
+        # #264: a provider whose pair .env leaves blank may come from Settings, in the file Vaier
+        # writes — the same lines dex-init reads. Parsed key by key and stripped to the charset Vaier
+        # validates; never sourced, because this runs as root.
+        providers_file=/vaier/config/sign-in-providers.env
+        from_settings() {
+          if [ -f "$${providers_file}" ]; then
+            sed -n "s/^$$1=//p" "$${providers_file}" | head -n 1 | tr -cd 'A-Za-z0-9._-'
+          fi
+        }
+        if [ -z "$${VAIER_OIDC_GOOGLE_CLIENT_ID}" ] || [ -z "$${VAIER_OIDC_GOOGLE_CLIENT_SECRET}" ]; then
+          VAIER_OIDC_GOOGLE_CLIENT_ID="$$(from_settings GOOGLE_CLIENT_ID)"
+          VAIER_OIDC_GOOGLE_CLIENT_SECRET="$$(from_settings GOOGLE_CLIENT_SECRET)"
+        fi
+        if [ -z "$${VAIER_OIDC_GITHUB_CLIENT_ID}" ] || [ -z "$${VAIER_OIDC_GITHUB_CLIENT_SECRET}" ]; then
+          VAIER_OIDC_GITHUB_CLIENT_ID="$$(from_settings GITHUB_CLIENT_ID)"
+          VAIER_OIDC_GITHUB_CLIENT_SECRET="$$(from_settings GITHUB_CLIENT_SECRET)"
+        fi
+
         # #332 follow-up: a provider is offered only when BOTH its client id and secret are set —
         # byte-for-byte the rule dex-init uses to decide which connectors exist. A button for a
         # provider Dex has no connector for dead-ends in "Bad Request: Connector ID does not match a
@@ -817,15 +846,20 @@ services:
         cp /templates-src/error.html /oauth2/config/templates/error.html
         cp /templates-src/sign_in.html /oauth2/config/templates/sign_in.html
         allow=""
-        # #264: with no provider at all, the one button is the first-run password — dex-init's local
-        # connector. It is deleted from the page the moment a provider exists, like the others.
-        if [ "$${google_ok}" = 0 ] && [ "$${github_ok}" = 0 ]; then
+        # #264: the first-run password — dex-init's local connector — is offered by dex-init's door
+        # rule: while no provider exists, or while Settings hold the door open because no admin has
+        # signed in through the provider added there yet.
+        first_run_open=0
+        if [ "$${google_ok}" = 0 ] && [ "$${github_ok}" = 0 ]; then first_run_open=1; fi
+        if [ "$$(from_settings FIRST_RUN_DOOR)" = open ]; then first_run_open=1; fi
+        if [ "$${first_run_open}" = 1 ]; then
           allow="{value: local}"
         else
           sed -i '/<!--provider:local-->/,/<!--\/provider:local-->/d' /oauth2/config/templates/sign_in.html
         fi
         if [ "$${google_ok}" = 1 ]; then
-          allow="{value: google}"
+          [ -n "$${allow}" ] && allow="$${allow}, "
+          allow="$${allow}{value: google}"
         else
           sed -i '/<!--provider:google-->/,/<!--\/provider:google-->/d' /oauth2/config/templates/sign_in.html
         fi
@@ -836,6 +870,10 @@ services:
           [ "$${google_ok}" = 0 ] && sed -i 's/class="btn btn-secondary"/class="btn"/' /oauth2/config/templates/sign_in.html
         else
           sed -i '/<!--provider:github-->/,/<!--\/provider:github-->/d' /oauth2/config/templates/sign_in.html
+        fi
+        # Beside a provider, the first-run password is the secondary choice.
+        if [ "$${first_run_open}" = 1 ] && { [ "$${google_ok}" = 1 ] || [ "$${github_ok}" = 1 ]; }; then
+          sed -i '/<!--provider:local-->/,/<!--\/provider:local-->/s/class="btn"/class="btn btn-secondary"/' /oauth2/config/templates/sign_in.html
         fi
 
         # Unquoted heredoc: the shell substitutes only $${VAIER_DOMAIN} and $${allow}; the alpha body
@@ -894,6 +932,8 @@ services:
     volumes:
       - ./oauth2/config:/oauth2/config
       - ./oauth2/templates:/templates-src:ro
+      # #264: sign-in-providers.env, written by Vaier from Settings → Sign-in.
+      - ./vaier/config:/vaier/config:ro
     restart: "no"
 
   oauth2-proxy:
@@ -957,6 +997,10 @@ services:
   # restarts), bcrypt-hashed into Dex's config, and left at /vaier/config/first-run-password (owner
   # 1000, mode 0600) for Vaier to print in its own log. The moment a provider exists the password
   # DB is not written and the file is removed, so the door is exactly as old as the gap it fills.
+  #
+  # #264 slice 2: a provider added from Settings lives in ./vaier/config/sign-in-providers.env, which
+  # also holds the door open until an admin signs in through that provider (Vaier then rewrites the
+  # file and re-runs this container through docker-proxy — the only start it permits).
   dex-init:
     image: alpine:3.20
     container_name: dex-init
@@ -981,6 +1025,24 @@ services:
         if [ -z "$${VAIER_DEX_CLIENT_SECRET}" ]; then
           echo "dex-init: VAIER_DEX_CLIENT_SECRET is missing or blank (the oauth2-proxy<->Dex shared secret)" >&2
           exit 1
+        fi
+
+        # #264: a provider whose pair .env leaves blank may come from Settings, in the file Vaier
+        # writes — .env wins wherever it holds both halves. Parsed key by key and stripped to the
+        # charset Vaier validates; never sourced, because this runs as root.
+        providers_file=/vaier/config/sign-in-providers.env
+        from_settings() {
+          if [ -f "$${providers_file}" ]; then
+            sed -n "s/^$$1=//p" "$${providers_file}" | head -n 1 | tr -cd 'A-Za-z0-9._-'
+          fi
+        }
+        if [ -z "$${VAIER_OIDC_GOOGLE_CLIENT_ID}" ] || [ -z "$${VAIER_OIDC_GOOGLE_CLIENT_SECRET}" ]; then
+          VAIER_OIDC_GOOGLE_CLIENT_ID="$$(from_settings GOOGLE_CLIENT_ID)"
+          VAIER_OIDC_GOOGLE_CLIENT_SECRET="$$(from_settings GOOGLE_CLIENT_SECRET)"
+        fi
+        if [ -z "$${VAIER_OIDC_GITHUB_CLIENT_ID}" ] || [ -z "$${VAIER_OIDC_GITHUB_CLIENT_SECRET}" ]; then
+          VAIER_OIDC_GITHUB_CLIENT_ID="$$(from_settings GITHUB_CLIENT_ID)"
+          VAIER_OIDC_GITHUB_CLIENT_SECRET="$$(from_settings GITHUB_CLIENT_SECRET)"
         fi
 
         # A connector is only appended when BOTH its client id and secret are non-empty, so a
@@ -1015,8 +1077,16 @@ services:
           redirectURIs: [https://oauth2.$${VAIER_DOMAIN}/oauth2/callback]
         EOF
 
+        # The first-run door: open while no provider exists, or while Settings hold it open because
+        # the provider added there has not yet let an admin in. Vaier closes it on that sign-in.
+        first_run_open=0
         if [ "$${google_ok}" = 0 ] && [ "$${github_ok}" = 0 ]; then
+          first_run_open=1
           echo "dex-init: no identity provider is configured (missing:$${missing_google}$${missing_github}) — opening the first-run door; the password is in 'docker compose logs vaier'" >&2
+        fi
+        if [ "$$(from_settings FIRST_RUN_DOOR)" = open ]; then first_run_open=1; fi
+
+        if [ "$${first_run_open}" = 1 ]; then
           # ACME_EMAIL is the operator's own address, so a provider sign-in under it later finds the
           # admin this account became — the handover needs no step of its own.
           email="$${VAIER_ADMIN_EMAIL:-$${ACME_EMAIL:-admin@$${VAIER_DOMAIN}}}"
@@ -1040,6 +1110,8 @@ services:
         EOF
         else
           rm -f "$${first_run}"
+        fi
+        if [ "$${google_ok}" = 1 ] || [ "$${github_ok}" = 1 ]; then
           echo "connectors:" >> /dex/config/config.yaml
         fi
 

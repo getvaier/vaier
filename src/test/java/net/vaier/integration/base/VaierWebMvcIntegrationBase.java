@@ -633,6 +633,13 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetConceptsUseCase getConceptsUseCase;
 
+    // --- Settings → Sign-in (#264) ---
+    @MockBean
+    protected GetSignInProvidersUseCase getSignInProvidersUseCase;
+
+    @MockBean
+    protected AddSignInProviderUseCase addSignInProviderUseCase;
+
     // --- The zone controllers say times in; a mock's null zone falls back to UTC in the domain ---
     @MockBean
     protected Clock clock;

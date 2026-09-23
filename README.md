@@ -25,7 +25,7 @@ Each row is the short version. The linked page carries the mechanism, the caveat
 | **Wildcard DNS** | One `*.yourdomain.com` record, made once, covers the console, sign-in, and every service you ever publish. Vaier checks it at every boot. → [Networking](docs/NETWORKING.md#wildcard-dns) |
 | **Reverse proxy & edge hardening** | Traefik terminates HTTPS with Let's Encrypt, enforces a security-header and TLS floor on every route, and shows a branded offline page when a backend is down. CrowdSec blocks malicious traffic at the edge; every block is listed in the Explorer, one click to lift it or trust the address. → [Networking](docs/NETWORKING.md#edge-hardening) |
 | **Service publishing & launchpad** | Publish any container's web interface in one click. A port that isn't a website — MQTT, a database — is published as a **stream** on the same HTTPS port. The launchpad shows each visitor only what they may reach. → [Networking](docs/NETWORKING.md#publishing-a-service) |
-| **Access management** | Day one needs no OAuth app: sign in with the first-run password Vaier prints in its own log, and that first sign-in becomes the admin. Add Google or GitHub sign-in to invite others, with roles (pending → user → admin) and per-service access groups. → [Auth](docs/AUTH.md) |
+| **Access management** | Day one needs no OAuth app: sign in with the first-run password Vaier prints in its own log, and that first sign-in becomes the admin. Add Google or GitHub sign-in from Settings to invite others, with roles (pending → user → admin) and per-service access groups. → [Auth](docs/AUTH.md) |
 | **The Vaier app** | A phone joins without the WireGuard app: it makes its own key, shows a four-digit join code, and connects the moment you let it in from any browser you're signed in on. The private key never leaves the phone. Get the app from your own Vaier's launchpad. → [Networking](docs/NETWORKING.md#enrolment-from-the-vaier-app) |
 | **Explorer** | One address space for the whole fleet: files, containers, services, disks and backup archives, with selection and transfer across machines and a link for every place you stand. Each machine's card says what it can do and where it stands. An in-app Concepts glossary explains every term you meet. → [Explorer](docs/EXPLORER.md) |
 | **Map** | Every machine plotted honestly: a device's own reported position beats an ISP estimate, a disconnected device with nothing reported draws no marker, and an open marker shows where that device has been over the last 30 days. → [Explorer](docs/EXPLORER.md#map) |
@@ -112,7 +112,7 @@ VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
 ```
 
-Those two are all Vaier needs before the first `docker compose up -d`. A sign-in provider — Google and/or GitHub — is optional and can come later, whenever you want to invite anyone else; the registration walkthrough is in [`docs/AUTH.md`](docs/AUTH.md). `VAIER_ADMIN_EMAIL` is optional too: set it and the first-run account uses that address instead of `admin@yourdomain.com`.
+Those two are all Vaier needs before the first `docker compose up -d`. A sign-in provider — Google and/or GitHub — is optional and can come later, from **Settings → Sign-in** in the console, whenever you want to invite anyone else; the registration walkthrough is in [`docs/AUTH.md`](docs/AUTH.md). `VAIER_ADMIN_EMAIL` is optional too: set it and the first-run account uses that address instead of `admin@yourdomain.com`.
 
 ### 4. Start the stack and sign in
 
