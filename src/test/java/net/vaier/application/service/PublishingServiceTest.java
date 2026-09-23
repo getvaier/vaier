@@ -32,10 +32,12 @@ import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForResolvingPeerIds;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingServiceGroup;
+import net.vaier.domain.port.ForPersistingServiceCredentials;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -45,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -115,6 +118,9 @@ class PublishingServiceTest {
 
     @Mock
     ForResolvingVaierServerIdentity vaierServerIdentity;
+
+    @Mock
+    ForPersistingServiceCredentials forPersistingServiceCredentials;
 
     @InjectMocks
     PublishingService service;
@@ -650,6 +656,21 @@ class PublishingServiceTest {
 
         verify(forPersistingReverseProxyRoutes).deleteReverseProxyRoute("auth");
         verify(forPersistingReverseProxyRoutes, never()).deleteReverseProxyRoute("corpo");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteService_handsTheRoutesLeftBehindToTheServiceCredentials_soAnEmptiedHostForgetsThem() {
+        ReverseProxyRoute openhab = ReverseProxyRoute.builder().name("openhab-router")
+            .domainName("openhab.example.com").middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build();
+        ServiceCredentials before = ServiceCredentials.empty().withShared("openhab.example.com",
+            new ServiceCredential("house", "pw"), List.of(openhab));
+
+        service.deleteService("openhab.example.com");
+
+        ArgumentCaptor<UnaryOperator<ServiceCredentials>> change = ArgumentCaptor.forClass(UnaryOperator.class);
+        verify(forPersistingServiceCredentials).update(change.capture());
+        assertThat(change.getValue().apply(before).getByService()).isEmpty();
     }
 
     @Test

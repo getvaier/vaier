@@ -79,6 +79,21 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected GetServiceAccessRulesUseCase getServiceAccessRulesUseCase;
 
+    @MockBean
+    protected GetServiceCredentialsUseCase getServiceCredentialsUseCase;
+
+    @MockBean
+    protected SetSharedServiceCredentialUseCase setSharedServiceCredentialUseCase;
+
+    @MockBean
+    protected ClearSharedServiceCredentialUseCase clearSharedServiceCredentialUseCase;
+
+    @MockBean
+    protected SetPersonalServiceCredentialUseCase setPersonalServiceCredentialUseCase;
+
+    @MockBean
+    protected RemovePersonalServiceCredentialUseCase removePersonalServiceCredentialUseCase;
+
     // --- Reverse proxy use cases ---
     @MockBean
     protected AddReverseProxyRouteUseCase addReverseProxyRouteUseCase;

@@ -30,6 +30,7 @@ import net.vaier.domain.ReverseProxyRoute.RouteSetting;
 import net.vaier.domain.Server;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCheckingLanReachability;
+import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers;
 import net.vaier.domain.port.ForDiscoveringPeerContainers;
 import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
@@ -94,6 +95,7 @@ public class PublishingService implements
     // The Vaier server's own identity — the one machine that appears in no store, so it cannot be found
     // by searching for it. Needed to attribute a hub route to the machine it actually runs on.
     private final ForResolvingVaierServerIdentity vaierServerIdentity;
+    private final ForPersistingServiceCredentials forPersistingServiceCredentials;
 
     private volatile List<PublishedServiceUco> cache = null;
 
@@ -122,7 +124,8 @@ public class PublishingService implements
                              ForProbingServiceVersion forProbingServiceVersion,
                              ForCheckingLanReachability forCheckingLanReachability,
                              ForResolvingServiceGroup forResolvingServiceGroup,
-                             ForResolvingVaierServerIdentity vaierServerIdentity) {
+                             ForResolvingVaierServerIdentity vaierServerIdentity,
+                             ForPersistingServiceCredentials forPersistingServiceCredentials) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -142,6 +145,7 @@ public class PublishingService implements
         this.forCheckingLanReachability = forCheckingLanReachability;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
         this.vaierServerIdentity = vaierServerIdentity;
+        this.forPersistingServiceCredentials = forPersistingServiceCredentials;
     }
 
     @Override
@@ -639,6 +643,9 @@ public class PublishingService implements
         log.info("Deleted Traefik route for {} ({})", fqdn, normalisedPath);
 
         waitForTraefikRouteDeletion(fqdn, normalisedPath);
+
+        List<ReverseProxyRoute> remaining = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        forPersistingServiceCredentials.update(credentials -> credentials.afterUnpublishing(fqdn, remaining));
 
         // Nothing else to undo: unpublishing removes the Traefik route and stops there. The name goes
         // on resolving under the operator's wildcard record, which is theirs and not Vaier's (#331).

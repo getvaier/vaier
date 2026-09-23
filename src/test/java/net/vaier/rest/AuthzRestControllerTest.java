@@ -13,6 +13,7 @@ import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
+import net.vaier.domain.ServiceCredential;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -71,7 +72,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify(aRequest(), "friend@example.com", "plex.example.com", null, null, null);
+        ResponseEntity<String> response = controller.verify(aRequest(), "friend@example.com", "plex.example.com", null, null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getFirst("Remote-User")).isEqualTo("friend@example.com");
@@ -86,7 +87,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", null, null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", null, null);
+        ResponseEntity<String> response = controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", null, null, null);
 
         assertThat(response.getHeaders().getFirst("Remote-Name")).isEqualTo("Alice Smith");
     }
@@ -98,10 +99,32 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.allow(entry));
 
-        ResponseEntity<String> response = controller.verify(aRequest(), "friend@example.com", "plex.example.com", null, null, null);
+        ResponseEntity<String> response = controller.verify(aRequest(), "friend@example.com", "plex.example.com", null, null, null, null);
 
         // Pre-approved entries have no name yet — don't emit an empty header.
         assertThat(response.getHeaders().containsKey("Remote-Name")).isFalse();
+    }
+
+    @Test
+    void verify_emitsTheAuthorizationTheDecisionHandsOn_givenWhatTheClientSent() {
+        AccessEntry entry = AccessEntry.builder().email("turid@example.com").role(Role.USER).build();
+        ServiceCredential credential = new ServiceCredential("turid", "pw");
+
+        record Row(AccessDecision decision, String expected) {}
+        for (Row row : List.of(
+                new Row(AccessDecision.allow(entry).withServiceCredential(credential), credential.authorizationHeader()),
+                new Row(AccessDecision.allow(entry), "Basic typed-by-the-client"),
+                // Traefik returns a non-2xx forward-auth response to the browser: never put a credential on it.
+                new Row(AccessDecision.deny().withServiceCredential(credential), null))) {
+            when(verifyAccessUseCase.verify("turid@example.com", "openhab.example.com", null, null, null))
+                    .thenReturn(row.decision());
+
+            ResponseEntity<String> response = controller.verify(aRequest(), "turid@example.com",
+                    "openhab.example.com", null, null, null, "Basic typed-by-the-client");
+
+            assertThat(response.getHeaders().getFirst("Authorization")).as(row.decision().toString())
+                    .isEqualTo(row.expected());
+        }
     }
 
     @Test
@@ -109,7 +132,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("p@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.deny());
 
-        ResponseEntity<String> response = controller.verify(aRequest(), "p@example.com", "plex.example.com", null, null, null);
+        ResponseEntity<String> response = controller.verify(aRequest(), "p@example.com", "plex.example.com", null, null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         // Forward-auth returns this body to the browser, so it must be the branded Vaier page.
@@ -123,7 +146,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", null, null))
                 .thenReturn(AccessDecision.deny());
 
-        controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", null, null);
+        controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", null, null, null);
 
         verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith", null, null);
     }
@@ -133,7 +156,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", "github", null))
                 .thenReturn(AccessDecision.deny());
 
-        controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", "github", null);
+        controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", "github", null, null);
 
         verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith", "github", null);
     }
@@ -143,7 +166,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("friend@example.com", "plex.example.com", "Alice Smith", "github", "98765"))
                 .thenReturn(AccessDecision.deny());
 
-        controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", "github", "98765");
+        controller.verify(aRequest(), "friend@example.com", "plex.example.com", "Alice Smith", "github", "98765", null);
 
         verify(verifyAccessUseCase).verify("friend@example.com", "plex.example.com", "Alice Smith", "github", "98765");
     }
@@ -157,7 +180,7 @@ class AuthzRestControllerTest {
                 .thenReturn(AccessDecision.allow(entry));
 
         controller.verify(requestFrom("172.20.0.5", "203.0.113.7"),
-                "friend@example.com", "plex.example.com", null, null, null);
+                "friend@example.com", "plex.example.com", null, null, null, null);
 
         verify(recordAllowedAccessUseCase)
                 .recordAllowedAccess(eq("203.0.113.7"), eq("friend@example.com"), eq("plex.example.com"),
@@ -175,7 +198,7 @@ class AuthzRestControllerTest {
                 .thenReturn(AccessDecision.allow(entry));
 
         controller.verify(requestFrom("172.20.0.5", "10.13.13.4"),
-                "friend@example.com", "grafana.example.com", null, null, null);
+                "friend@example.com", "grafana.example.com", null, null, null, null);
 
         verify(recordAllowedAccessUseCase)
                 .recordAllowedAccess(eq("10.13.13.4"), eq("friend@example.com"), eq("grafana.example.com"),
@@ -194,7 +217,7 @@ class AuthzRestControllerTest {
                 .thenReturn(AccessDecision.allow(entry));
 
         controller.verify(requestFrom("203.0.113.99", "1.2.3.4"),
-                "friend@example.com", "plex.example.com", null, null, null);
+                "friend@example.com", "plex.example.com", null, null, null, null);
 
         verify(recordAllowedAccessUseCase)
                 .recordAllowedAccess(eq("203.0.113.99"), eq("friend@example.com"), eq("plex.example.com"),
@@ -207,7 +230,7 @@ class AuthzRestControllerTest {
         when(verifyAccessUseCase.verify("p@example.com", "plex.example.com", null, null, null))
                 .thenReturn(AccessDecision.deny());
 
-        controller.verify(aRequest(), "p@example.com", "plex.example.com", null, null, null);
+        controller.verify(aRequest(), "p@example.com", "plex.example.com", null, null, null, null);
 
         verifyNoInteractions(recordAllowedAccessUseCase);
     }
@@ -228,7 +251,7 @@ class AuthzRestControllerTest {
                 .recordAllowedAccess(any(), any(), any(), any());
 
         ResponseEntity<String> response = controller.verify(aRequest(),
-                "friend@example.com", "plex.example.com", null, null, null);
+                "friend@example.com", "plex.example.com", null, null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getHeaders().getFirst("Remote-Email")).isEqualTo("friend@example.com");
@@ -243,7 +266,7 @@ class AuthzRestControllerTest {
                 .thenReturn(AccessDecision.allow(entry));
 
         ResponseEntity<String> response = controller.verify(null,
-                "friend@example.com", "plex.example.com", null, null, null);
+                "friend@example.com", "plex.example.com", null, null, null, null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
     }

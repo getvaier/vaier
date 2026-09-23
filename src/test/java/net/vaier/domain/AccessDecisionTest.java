@@ -53,6 +53,22 @@ class AccessDecisionTest {
     }
 
     @Test
+    void authorizationFor_handsOnTheServiceCredential_elseWhatTheClientSent_andNothingOnADenial() {
+        AccessEntry entry = AccessEntry.builder().email("turid@example.com").role(Role.USER).build();
+        ServiceCredential credential = new ServiceCredential("turid", "pw");
+        AccessDecision allowed = AccessDecision.allow(entry);
+
+        assertThat(allowed.withServiceCredential(credential).authorizationFor("Basic typed"))
+            .contains(credential.authorizationHeader());
+        // Traefik strips a listed response header from the request whether or not the check returned one, so
+        // passing the client's own back is what keeps it reaching the service.
+        assertThat(allowed.authorizationFor("Basic typed")).contains("Basic typed");
+        assertThat(allowed.authorizationFor(null)).isEmpty();
+        assertThat(AccessDecision.deny().withServiceCredential(credential).authorizationFor("Basic typed"))
+            .as("a denial goes back to the browser, so it carries no credential").isEmpty();
+    }
+
+    @Test
     void groupsHeader_joinsGroupsWithCommas() {
         AccessEntry entry = AccessEntry.builder()
                 .email("a@example.com").role(Role.USER).groups(List.of("family", "media")).build();

@@ -162,6 +162,8 @@
         services: [],                    // GET /published-services/discover — the whole fleet's routes
         publishable: [],                 // GET /published-services/publishable — container ports that could be published (and which are ignored)
         access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
+        serviceCredentials: {},          // GET /access/services/credentials — host -> { sharedUsername, people }
+        people: [],                      // GET /access — the access entries a personal service credential can name
         containers: new Map(),           // machine identity -> its containers, as Vaier last scraped them
         containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
         disks: new Map(),                // machine identity -> its filesystems: state, the list, the failure's words
@@ -539,7 +541,7 @@
     // The routes, and the groups allowed through them. The access rules are keyed by the route's DNS name —
     // the same key the Access page writes them under.
     async function loadServices() {
-        // Three independent reads, one wave — see loadFleet.
+        // Independent reads, one wave — see loadFleet.
         await Promise.all([
             (async () => {
                 try {
@@ -555,6 +557,22 @@
                     S.access = res.ok ? await res.json() : {};
                 } catch (e) {
                     S.access = {};
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/access/services/credentials', { cache: 'no-store' });
+                    S.serviceCredentials = res.ok ? await res.json() : {};
+                } catch (e) {
+                    S.serviceCredentials = {};
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/access', { cache: 'no-store' });
+                    S.people = res.ok ? await res.json() : [];
+                } catch (e) {
+                    S.people = [];
                 }
             })(),
             (async () => {
@@ -4491,6 +4509,86 @@
         return wrap;
     }
 
+    // --- service credentials: the login Vaier hands the service for someone it let in -----------------------
+    //
+    // Passwords are write-only: the server only ever says which username is set, so a set credential shows
+    // its username and a Clear, never a field pre-filled with something secret.
+
+    async function sendServiceCredential(url, method, body, failMsg) {
+        try {
+            const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
+                body: body ? JSON.stringify(body) : undefined });
+            if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.message || failMsg); return false; }
+            await loadServices(); render();
+            return true;
+        } catch (e) { toast(failMsg); return false; }
+    }
+    function credentialUrl(host, tail) {
+        return '/access/services/' + encodeURIComponent(host) + '/credentials/' + tail;
+    }
+    function credentialInputs(onSubmit, buttonText) {
+        const user = plainInput('', 'Username');
+        const pass = plainInput('', 'Password'); pass.type = 'password'; pass.autocomplete = 'new-password';
+        const btn = el('button', 'ex-btn'); btn.textContent = buttonText;
+        const submit = () => onSubmit(user.value.trim(), pass.value);
+        btn.onclick = submit;
+        pass.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
+        const row = el('div', 'ex-svccred-add'); row.append(user, pass, btn);
+        return row;
+    }
+    function credentialLine(who, username, actionText, onAction) {
+        const row = el('div', 'ex-svccred-row');
+        const t = el('span', 'ex-svccred-who'); t.textContent = who + ' → ' + username;
+        const b = el('button', 'ex-btn'); b.textContent = actionText; b.onclick = onAction;
+        row.append(t, b);
+        return row;
+    }
+
+    function serviceCredentialEditor(s) {
+        const host = s.dnsAddress;
+        const current = S.serviceCredentials[host] || { sharedUsername: null, people: [] };
+        const wrap = el('div', 'ex-field');
+        const l = el('label'); l.textContent = 'Service credential'; wrap.appendChild(l);
+
+        if (current.sharedUsername) {
+            wrap.appendChild(credentialLine('Everyone', current.sharedUsername, 'Clear',
+                () => sendServiceCredential(credentialUrl(host, 'shared'), 'DELETE', null,
+                    'Could not clear the shared credential.')));
+        } else {
+            wrap.appendChild(credentialInputs((username, password) =>
+                sendServiceCredential(credentialUrl(host, 'shared'), 'PUT', { username, password },
+                    'Could not save the shared credential.'), 'Save'));
+        }
+
+        (current.people || []).forEach((p) => wrap.appendChild(credentialLine(p.email, p.username, 'Remove',
+            () => sendServiceCredential(credentialUrl(host, 'people/' + encodeURIComponent(p.email)), 'DELETE',
+                null, 'Could not remove ' + p.email + '’s credential.'))));
+
+        const listed = new Set((current.people || []).map((p) => p.email));
+        const candidates = (S.people || []).filter((p) => p.role !== 'pending' && !listed.has(p.email));
+        if (candidates.length) {
+            const who = el('select', 'ex-input');
+            const blank = el('option'); blank.value = ''; blank.textContent = 'Give someone their own…';
+            who.appendChild(blank);
+            candidates.forEach((p) => {
+                const o = el('option'); o.value = p.email;
+                o.textContent = p.name ? p.name + ' (' + p.email + ')' : p.email;
+                who.appendChild(o);
+            });
+            const add = credentialInputs((username, password) => {
+                if (!who.value) { toast('Pick who this credential is for.'); return; }
+                sendServiceCredential(credentialUrl(host, 'people/' + encodeURIComponent(who.value)), 'PUT',
+                    { username, password }, 'Could not save the credential for ' + who.value + '.');
+            }, 'Add');
+            add.prepend(who);
+            wrap.appendChild(add);
+        }
+
+        wrap.appendChild(hint('Vaier signs people in to the service with this login, so they never need its '
+            + 'password. The service sees one account per credential: give someone their own to tell them apart.'));
+        return wrap;
+    }
+
     function renderService(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
@@ -4526,7 +4624,10 @@
             authSel.onchange = () => patchService(s, { authMode: authSel.value },
                 'Could not update the sign-in requirement.');
             body.appendChild(formField('Sign-in', 'Which login a visitor must pass to reach this service.', authSel));
-            if (authMode === 'social') body.appendChild(allowedGroupsEditor(s));
+            if (authMode === 'social') {
+                body.appendChild(allowedGroupsEditor(s));
+                body.appendChild(serviceCredentialEditor(s));
+            }
         }
 
         // The launchpad is a wall of links, and a stream has no link — so it has no tile and no name for one.
