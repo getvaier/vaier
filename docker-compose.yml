@@ -1,7 +1,7 @@
 # The wireguard container's bridge address, pinned so the host-netns route-sync container can name it
 # without Docker DNS. Sits high in the subnet, clear of the addresses Docker hands out sequentially from
 # .2, so it can never collide with a dynamically-assigned container. Everything else — Vaier's
-# LanRouteAdapter, traefik-lan-routes — still resolves the container by DNS name and is unaffected.
+# LanRouteAdapter, Traefik's route loop — still resolves the container by DNS name and is unaffected.
 x-wireguard-bridge-ip: &wireguard-bridge-ip "172.20.0.250"
 
 networks:
@@ -277,14 +277,23 @@ services:
                 - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
         VAIER_EDGE_POLICY
         mv /traefik/config/.security.yml.tmp /traefik/config/security.yml
-        WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
-        ip route add 10.13.13.0/24 via "$$WG_IP" 2>/dev/null || true
-        # LAN routes via relay peers — scan VAIER metadata in peer configs.
-        for f in /wireguard-config/*/*.conf; do
-          [ -f "$$f" ] || continue
-          cidr=$$(grep -oE '"lanCidr" *: *"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr" *: *"([^"]+)".*/\1/')
-          [ -n "$$cidr" ] && ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
-        done
+        # Routes to the VPN subnet and each relay's lanCidr, re-checked every 15s so a relay added later
+        # is reachable without a restart. Runs here, not in a sidecar: a sidecar sharing this netns dies
+        # whenever traefik is recreated and then leaves every new relay silently unrouted.
+        (
+          while true; do
+            WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
+            if [ -n "$$WG_IP" ]; then
+              ip route replace 10.13.13.0/24 via "$$WG_IP" 2>/dev/null || true
+              for f in /wireguard-config/*/*.conf; do
+                [ -f "$$f" ] || continue
+                cidr=$$(grep -oE '"lanCidr" *: *"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr" *: *"([^"]+)".*/\1/')
+                [ -n "$$cidr" ] && ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
+              done
+            fi
+            sleep 15
+          done
+        ) &
         # Fresh-install ACME race guard. Vaier writes no DNS (#331) — the operator's one `*.<domain>` A
         # record answers for all three infra names — but on a fresh install that record may have been made
         # minutes ago, or not at all. If we launch traefik before it answers, the first Let's Encrypt
@@ -484,7 +493,7 @@ services:
     restart: unless-stopped
 
   # The Vaier host is the one machine in the fleet that IS the Docker host rather than something behind
-  # the tunnel, so it inherits no LAN routes: `traefik-lan-routes` and Vaier's own LanRouteAdapter write
+  # the tunnel, so it inherits no LAN routes: Traefik's route loop and Vaier's own LanRouteAdapter write
   # into container netns, never the host's. That left the host unable to reach a relay's LAN — so a backup
   # job for the Vaier server itself couldn't reach the borg server, and neither could any host-level tool.
   #
@@ -525,40 +534,6 @@ services:
           sleep 15
         done
     depends_on:
-      - wireguard
-    restart: unless-stopped
-
-  traefik-lan-routes:
-    image: lscr.io/linuxserver/wireguard:1.0.20250521-r1-ls110
-    container_name: traefik-lan-routes
-    mem_limit: 64m
-    network_mode: "service:traefik"
-    cap_add:
-      - NET_ADMIN
-    volumes:
-      - ./wireguard/config:/wireguard-config:ro
-    entrypoint:
-      - /bin/bash
-      - -c
-      - |
-        # Keep Traefik's route table in sync with relay peers' lanCidr metadata.
-        # Re-scans every 15s so newly-set lanCidrs are picked up without a Traefik restart.
-        while true; do
-          WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
-          if [ -n "$$WG_IP" ]; then
-            for f in /wireguard-config/*/*.conf; do
-              [ -f "$$f" ] || continue
-              cidr=$$(grep -oE '"lanCidr" *: *"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr" *: *"([^"]+)".*/\1/')
-              if [ -n "$$cidr" ]; then
-                ip route show "$$cidr" 2>/dev/null | grep -q "via $$WG_IP" || \
-                  ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
-              fi
-            done
-          fi
-          sleep 15
-        done
-    depends_on:
-      - traefik
       - wireguard
     restart: unless-stopped
 
