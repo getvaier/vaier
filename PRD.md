@@ -4297,3 +4297,45 @@ afternoon, the last per-peer cost went too: each peer's view resolved its name a
 with two directory scans, on a list whose roster had already read every config once — 51 debug lines per
 request. The refresh now indexes that one read by tunnel address and builds every view from it; a peer with
 no stored config is identified by its address, as the resolver already answered for an unknown one.
+
+### 6.60 The recovery doors: a banned operator can still sign in and lift the ban ✅ (implemented 2026-09-23, closes [#351](https://github.com/getvaier/vaier/issues/351))
+
+**The incident.** Staging broke and answered every route with a 500 for an hour. The operator reloaded it while
+they worked on the fix, and CrowdSec's Traefik scenarios read that run of errors from one address as probing.
+Once the stack was healthy, the operator was banned. The bouncer rode the `websecure` entry point in front of
+every router, so the ban covered the Security view that exists to lift it. The only way out was SSH and
+`cscli decisions delete`. An outage produces exactly this traffic pattern, so the ban is most likely at the
+worst moment. Trusting an address would not have helped: CrowdSec reads its allowlist only at restart
+(`SourceAddress.trust()`).
+
+**The decision.** The bouncer does not judge the **recovery doors**, Vaier's own sign-in path: every router on
+`vaier.<domain>` except `vaier-enrolment`, plus `oauth2.<domain>` and `dex.<domain>`, because a sign-in
+redirects through both. In compose terms that is `vaier`, `vaier-public`, `vaier-identity`, `vaier-oauth2`,
+`vaier-offline`, `oauth2-proxy` and `dex`. `vaier-enrolment`, the phone's anonymous and rate-limited join
+routes, is not part of signing in and keeps the bouncer. This opens nothing: the console is still behind
+oauth2-proxy and the pending → admin gate. Detection is unchanged, because CrowdSec still reads every request
+from the access log. A banned address is still refused by every published service. Only enforcement on the
+doors is skipped. The alternative in the issue, auto-trusting the operator's last sign-in address, was not
+built. It depends on a recent sign-in, does nothing from a new location and still waits for a CrowdSec restart.
+
+**How.** The bouncer plugin (v1.7.1, stream mode) can exempt only a static `ClientTrustedIPs` list, not a host
+or a path, and Traefik cannot take an entry-point middleware off one router. So `crowdsec-bouncer@file` left
+the entry point, which now carries only `vaier-security-headers@file`, and moved onto each router. Of the eight
+compose-label routers, only `vaier-enrolment` names it. For the routers Vaier writes, the order is a domain
+rule on `ReverseProxyRoute`: `middlewareChain` is bouncer, then the auth mode's links, then the root redirect,
+then `vaier-errors`. `rechained` does an auth-mode switch without moving the bouncer. `upToDateChain` brings
+an older chain up to date. `TraefikReverseProxyAdapter` writes only what those return, including on the
+per-host `/oauth2/` helper router and the update path. Routes that were already published pick it up at
+startup: the offline-page backfill became `backfillRouterChains`, which gives every http router in
+`remote-apps.yml` the bouncer first and the offline page last, idempotently. So a deploy is enough and nothing
+has to be republished. `DockerComposeStructureTest` pins the recovery doors as an exact set. A compose router
+outside that set without the bouncer first fails the build, and so does any widening of the set.
+
+**Streams are unchanged.** The bouncer is an HTTP middleware and a TCP router takes none. Traefik's API
+confirmed the live `mqtt` stream router carried no middleware even while the bouncer was on the entry point,
+because `entrypoints.websecure.http.middlewares` applies only to HTTP routers. The backlog item in §6.52 still
+stands.
+
+**Worth knowing.** A route Vaier published on `vaier.<domain>` itself now carries the
+bouncer too. It is shadowed and never matches: its default priority, the length of its rule, is below the
+compose routers' explicit 100–300 and below `vaier-offline`'s 50. So it does not narrow the recovery doors.

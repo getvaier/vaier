@@ -221,9 +221,11 @@ services:
         # browser has seen it, so it is a decision of its own — deferred, tracked as issue #342.
         http:
           middlewares:
-            # #329 Slice 1: applied to EVERY router via the websecure entrypoint, ahead of every
-            # other middleware — a CrowdSec block decision is refused before it ever reaches
-            # oauth2-proxy or a published backend.
+            # #351: FIRST on every router EXCEPT the recovery doors — Vaier's own sign-in path (the
+            # console on vaier.<domain> bar the phone-join router, oauth2.<domain>, dex.<domain>) —
+            # so a banned operator can still sign in and lift the ban. Vaier's routers name it in
+            # their labels; every route Vaier writes to its file carries it first. The console stays
+            # behind oauth2-proxy and the admin gate: only the ban is not enforced there.
             # Traefik's CrowdSec plugin in STREAM mode: the block list is pulled from the Security
             # Engine once a minute and every request is answered from memory. The standalone
             # bouncer this replaced asked the engine about each request, and under one page load's
@@ -355,10 +357,11 @@ services:
       # the vaier, oauth2-proxy, dex and vaier-offline services). The middleware itself is rendered by
       # this service's entrypoint above, before traefik starts, so this reference always resolves.
       #
-      # #329 Slice 1: crowdsec-bouncer goes FIRST — every router's effective chain gets it ahead of
-      # the security headers (and, on Vaier's own routers, ahead of the Social auth chain too), so a
-      # CrowdSec block decision is refused before Traefik does anything else with the request.
-      - --entrypoints.websecure.http.middlewares=crowdsec-bouncer@file,vaier-security-headers@file
+      # #351: crowdsec-bouncer is deliberately NOT here. An entrypoint middleware cannot be taken off
+      # one router, and on the entrypoint it banned an operator from the very console that lifts bans.
+      # It rides each router instead, first in its chain, everywhere but the recovery doors (see the
+      # crowdsec-bouncer middleware above).
+      - --entrypoints.websecure.http.middlewares=vaier-security-headers@file
       # The bouncer is this plugin (the crowdsec-bouncer middleware rendered above), pinned like every
       # other upstream. Fetched from the plugin registry once and kept in plugins-storage.
       - --experimental.plugins.bouncer.modulename=github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
@@ -726,11 +729,13 @@ services:
       # proof asked as a question — "am I still in?" — and changes nothing. The approve, refuse and
       # pending routes stay on the Tier 3 admin catch-all, which is where the real decisions are.
       # Rate-limited on a middleware of its own so the anonymous POSTs cannot be used to churn.
+      # #351: the one router on this host that keeps the CrowdSec bouncer — it is anonymous and no
+      # part of signing in, so it is not a recovery door. Every other router here is one.
       - traefik.http.routers.vaier-enrolment.rule=Host(`vaier.${VAIER_DOMAIN}`) && ((Path(`/vpn/enrolments`) && Method(`POST`)) || PathRegexp(`^/vpn/enrolments/[A-Za-z0-9_-]{43}/events$`) || (Path(`/vpn/peers/leave`) && Method(`POST`)) || (Path(`/vpn/peers/standing`) && Method(`POST`)))
       - traefik.http.routers.vaier-enrolment.entrypoints=websecure
       - traefik.http.routers.vaier-enrolment.tls.certresolver=letsencrypt
       - traefik.http.routers.vaier-enrolment.priority=210
-      - traefik.http.routers.vaier-enrolment.middlewares=vaier-enrolment-ratelimit,vaier-down,vaier-frame-guard@file
+      - traefik.http.routers.vaier-enrolment.middlewares=crowdsec-bouncer@file,vaier-enrolment-ratelimit,vaier-down,vaier-frame-guard@file
       - traefik.http.middlewares.vaier-enrolment-ratelimit.ratelimit.average=10
       - traefik.http.middlewares.vaier-enrolment-ratelimit.ratelimit.period=1m
       - traefik.http.middlewares.vaier-enrolment-ratelimit.ratelimit.burst=5

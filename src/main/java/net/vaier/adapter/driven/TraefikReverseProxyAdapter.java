@@ -16,6 +16,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.LinkedHashMap;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.DumperOptions;
@@ -962,13 +964,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
 
-        // Build middleware list. The auth chain (which the AuthMode owns) comes first, then any
-        // redirect, then the errors middleware last so a backend failure lands on Vaier's branded
-        // offline page.
-        List<String> middlewareList = new ArrayList<>(authMode.authMiddlewareNames());
-        if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
-        middlewareList.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
-        routerConfig.put("middlewares", middlewareList);
+        routerConfig.put("middlewares", new ArrayList<>(ReverseProxyRoute.middlewareChain(
+            authMode, rootRedirectPath == null ? null : redirectMiddlewareName)));
 
         routers.put(routerName, routerConfig);
 
@@ -1081,10 +1078,8 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         Map<String, Object> tlsMap = new LinkedHashMap<>();
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
         routerConfig.put("tls", tlsMap);
-        List<String> middlewareList = new ArrayList<>(authMode.authMiddlewareNames());
-        if (rootRedirectPath != null) middlewareList.add(redirectMiddlewareName);
-        middlewareList.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
-        routerConfig.put("middlewares", middlewareList);
+        routerConfig.put("middlewares", new ArrayList<>(ReverseProxyRoute.middlewareChain(
+            authMode, rootRedirectPath == null ? null : redirectMiddlewareName)));
         routers.put(routerName, routerConfig);
 
         Map<String, Object> serviceConfig = new LinkedHashMap<>();
@@ -1235,15 +1230,11 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             }
             // If updatedRoute.getTlsConfig() is null, keep existing value
 
-            // Update or preserve middlewares
+            // Null keeps the existing chain; any chain written is brought up to date.
             if (updatedRoute.getMiddlewares() != null) {
-                if (updatedRoute.getMiddlewares().isEmpty()) {
-                    routerConfig.remove("middlewares");
-                } else {
-                    routerConfig.put("middlewares", new ArrayList<>(updatedRoute.getMiddlewares()));
-                }
+                routerConfig.put("middlewares",
+                    new ArrayList<>(ReverseProxyRoute.upToDateChain(updatedRoute.getMiddlewares())));
             }
-            // If updatedRoute.getMiddlewares() is null, keep existing value
         }
 
         // Update service configuration
@@ -1486,20 +1477,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
 
         Map<String, Object> routerConfig = castToMap(routers.get(routerName));
 
-        // Strip every known auth link (any mode's), preserving redirect/errors, then prepend the
-        // new mode's chain in order. Stripping the whole union means a mode switch never leaves a
-        // stale link from the prior gateway behind.
-        @SuppressWarnings("unchecked")
-        List<String> existing = routerConfig.get("middlewares") instanceof List
-            ? new ArrayList<>((List<String>) routerConfig.get("middlewares"))
-            : new ArrayList<>();
-        existing.removeAll(AuthMode.allAuthMiddlewareNames());
-        List<String> chain = authMode.authMiddlewareNames();
-        for (int i = chain.size() - 1; i >= 0; i--) {
-            existing.add(0, chain.get(i));
-        }
-        if (existing.isEmpty()) routerConfig.remove("middlewares");
-        else routerConfig.put("middlewares", existing);
+        List<String> existing = extractMiddlewareList(routerConfig);
+        routerConfig.put("middlewares", new ArrayList<>(
+            ReverseProxyRoute.rechained(existing == null ? List.of() : existing, authMode)));
 
         ensureAuthInfraExists(http, authMode, dnsName);
 
@@ -1734,6 +1714,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         entryPoints.add(ServiceNames.ENTRY_POINT_WEBSECURE);
         routerConfig.put("entryPoints", entryPoints);
         routerConfig.put("service", ServiceNames.OAUTH2_PROXY_SERVICE);
+        routerConfig.put("middlewares", new ArrayList<>(ReverseProxyRoute.upToDateChain(List.of())));
         routerConfig.put("priority", 100);
         Map<String, Object> tlsMap = new LinkedHashMap<>();
         tlsMap.put("certResolver", ServiceNames.CERT_RESOLVER);
@@ -1780,18 +1761,18 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
     }
 
     /**
-     * Backfill the offline-page middleware onto every existing http router that lacks it, and ensure
-     * the shared service+middleware exist. Idempotent and additive: a router's existing middleware
-     * list (auth, redirects) is preserved and {@code vaier-errors} is appended only if missing;
-     * load-balancer servers and {@code x-vaier-*} metadata are never touched. Run on startup so
-     * routes that predate the offline page benefit immediately.
+     * Bring every existing http router's chain up to what the domain writes today: the CrowdSec bouncer
+     * at its head (#351) and the offline page at its tail, and ensure the offline page's shared
+     * service+middleware exist. Idempotent; the rest of a chain (auth, redirects), load-balancer servers
+     * and {@code x-vaier-*} metadata are never touched. Run on startup so routes published before either
+     * existed pick them up without being republished. TCP routers take no HTTP middleware and are left alone.
      */
-    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
-    public void backfillErrorPagesOnStartup() {
+    @EventListener(ApplicationReadyEvent.class)
+    public void backfillRouterChainsOnStartup() {
         try {
-            backfillErrorPages();
+            backfillRouterChains();
         } catch (Exception e) {
-            log.warn("Offline-page backfill on startup failed", e);
+            log.warn("Router-chain backfill on startup failed", e);
         }
     }
 
@@ -1811,7 +1792,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * other config are left untouched. The per-host {@code /oauth2/} helper router for the console is
      * declared via compose labels, so it is not generated here.
      */
-    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    @EventListener(ApplicationReadyEvent.class)
     public void ensureConsoleAuthMiddlewaresOnStartup() {
         try {
             loadConfig();
@@ -1832,7 +1813,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
      * {@code oauth2-proxy-svc} and {@code vaier-errors} are left untouched. Mirrors the
      * {@code backfill*OnStartup} pattern.
      */
-    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    @EventListener(ApplicationReadyEvent.class)
     public void removeAutheliaTraefikObjectsOnStartup() {
         try {
             removeAutheliaTraefikObjects();
@@ -1916,7 +1897,7 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         return false;
     }
 
-    public void backfillErrorPages() {
+    public void backfillRouterChains() {
         loadConfig();
         if (config == null) return;
         Map<String, Object> http = getNestedMap(config, "http");
@@ -1928,10 +1909,10 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
         for (Object value : routers.values()) {
             Map<String, Object> routerConfig = castToMap(value);
             if (routerConfig == null) continue;
-            List<String> middlewares = extractMiddlewareList(routerConfig);
-            if (middlewares == null) middlewares = new ArrayList<>();
-            if (!middlewares.contains(ServiceNames.ERROR_PAGES_MIDDLEWARE)) {
-                middlewares.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+            List<String> before = extractMiddlewareList(routerConfig);
+            List<String> middlewares =
+                new ArrayList<>(ReverseProxyRoute.upToDateChain(before == null ? List.of() : before));
+            if (!middlewares.equals(before)) {
                 routerConfig.put("middlewares", middlewares);
                 changed = true;
             }

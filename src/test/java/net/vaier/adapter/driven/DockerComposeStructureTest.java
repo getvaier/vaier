@@ -7,10 +7,12 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -1105,7 +1107,7 @@ class DockerComposeStructureTest {
         // and without touching remote-apps.yml, so the adapter's middleware readers cannot regress.
         assertThat(traefikCommand())
             .as("the safe headers must be bound to the entrypoint, not to individual routers")
-            .contains("--entrypoints.websecure.http.middlewares=crowdsec-bouncer@file,vaier-security-headers@file");
+            .contains("--entrypoints.websecure.http.middlewares=vaier-security-headers@file");
 
         // ...and the middleware it names has to exist, or Traefik disables every websecure router.
         Path configDir = runTraefikEntrypoint(tempDir);
@@ -1118,14 +1120,13 @@ class DockerComposeStructureTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void crowdsecBouncer_ridesTheEntrypointFirst_soABlockDecisionIsRefusedBeforeAnythingElse(@TempDir Path tempDir)
+    void crowdsecBouncer_isTheStreamModePlugin_andNoLongerRidesTheEntrypoint(@TempDir Path tempDir)
             throws Exception {
-        // #329 Slice 1: crowdsec-bouncer must come BEFORE vaier-security-headers (and, on Vaier's
-        // own routers, before the Social auth chain) in the entrypoint chain — a CrowdSec block
-        // decision is refused before Traefik does anything else with the request.
+        // #351: on the entrypoint it judged the recovery doors too, and an entrypoint middleware
+        // cannot be taken off one router. It rides each router instead (see the recovery-door guard).
         assertThat(traefikCommand())
-            .as("crowdsec-bouncer must be the first entry in the entrypoint's middleware chain")
-            .contains("--entrypoints.websecure.http.middlewares=crowdsec-bouncer@file,vaier-security-headers@file");
+            .filteredOn(arg -> arg.startsWith("--entrypoints."))
+            .noneMatch(arg -> arg.contains("crowdsec-bouncer"));
 
         // The bouncer is Traefik's CrowdSec plugin in STREAM mode, not a forward-auth hop. The standalone
         // bouncer it replaced asked the Security Engine about every request, and under one page load's
@@ -1159,6 +1160,42 @@ class DockerComposeStructureTest {
         assertThat((List<String>) traefik.get("volumes")).contains("./traefik/plugins-storage:/plugins-storage");
         // ...and the standalone bouncer container is gone.
         assertThat(composeServices()).doesNotContainKey("crowdsec-bouncer");
+    }
+
+    /**
+     * #351: the recovery doors — Vaier's own sign-in path — are the only routers the bouncer does not
+     * judge, so a banned operator can still sign in and lift the ban. Every other router carries it
+     * first. A router added without it fails here, so the exemption cannot quietly widen.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void everyComposeRouterCarriesTheBouncerFirst_exceptExactlyTheRecoveryDoors() throws Exception {
+        Set<String> recoveryDoors = Set.of("vaier", "vaier-public", "vaier-identity", "vaier-oauth2",
+            "vaier-offline", "oauth2-proxy", "dex");
+        Pattern routerRule = Pattern.compile("traefik\\.(http|tcp)\\.routers\\.([^.]+)\\.rule");
+
+        Map<String, String> chains = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> service : composeServices().entrySet()) {
+            if (((Map<String, Object>) service.getValue()).get("labels") == null) continue;
+            Map<String, String> labels = labelsOf(service.getKey());
+            for (String key : labels.keySet()) {
+                Matcher router = routerRule.matcher(key);
+                if (router.matches()) {
+                    chains.put(router.group(2), labels.getOrDefault(
+                        "traefik." + router.group(1) + ".routers." + router.group(2) + ".middlewares", ""));
+                }
+            }
+        }
+
+        Set<String> withoutBouncer = new HashSet<>();
+        chains.forEach((router, chain) -> {
+            if (!(chain + ",").startsWith("crowdsec-bouncer@file,")) withoutBouncer.add(router);
+            assertThat(chain).as("%s: the bouncer goes first or not at all", router)
+                .doesNotContain(",crowdsec-bouncer");
+        });
+        assertThat(withoutBouncer).containsExactlyInAnyOrderElementsOf(recoveryDoors);
+        // Anonymous and rate-limited, the phone's join door is exactly what CrowdSec should judge.
+        assertThat(chains.get("vaier-enrolment")).startsWith("crowdsec-bouncer@file,");
     }
 
     @Test

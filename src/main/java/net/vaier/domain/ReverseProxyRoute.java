@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.ToString;
 
+import net.vaier.config.ServiceNames;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForProbingServiceSignIn;
@@ -15,6 +16,7 @@ import net.vaier.domain.port.ForResolvingServiceGroup;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -371,6 +373,45 @@ public class ReverseProxyRoute {
     /** The router key of the {@code /oauth2/} helper router for {@code dnsName}. */
     public static String oauth2EndpointsRouterName(String dnsName) {
         return dnsName.replace(".", "-") + "-oauth2-router";
+    }
+
+    /**
+     * The chain a new HTTP route is written with: the CrowdSec bouncer first, so a banned address is
+     * refused before anything else runs; then the auth mode's links, the root redirect when there is one,
+     * and the offline page last. Every route Vaier writes carries the bouncer — only the recovery doors,
+     * Vaier's own sign-in path declared in {@code docker-compose.yml}, go without it.
+     */
+    public static List<String> middlewareChain(AuthMode authMode, String redirectMiddlewareName) {
+        List<String> chain = new ArrayList<>(authMode.authMiddlewareNames());
+        if (redirectMiddlewareName != null) chain.add(redirectMiddlewareName);
+        chain.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        return withBouncerFirst(chain);
+    }
+
+    /** {@code existing} re-gated for {@code authMode}: every mode's auth links swapped for this mode's. */
+    public static List<String> rechained(List<String> existing, AuthMode authMode) {
+        List<String> rest = new ArrayList<>(existing);
+        rest.removeAll(AuthMode.allAuthMiddlewareNames());
+        List<String> chain = new ArrayList<>(authMode.authMiddlewareNames());
+        chain.addAll(rest);
+        return withBouncerFirst(chain);
+    }
+
+    /**
+     * {@code existing} as the domain writes a chain today — the bouncer at its head and the offline page
+     * at its tail, each once, the rest untouched. How a route published before either existed gets them.
+     */
+    public static List<String> upToDateChain(List<String> existing) {
+        List<String> chain = new ArrayList<>(existing);
+        if (!chain.contains(ServiceNames.ERROR_PAGES_MIDDLEWARE)) chain.add(ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        return withBouncerFirst(chain);
+    }
+
+    private static List<String> withBouncerFirst(List<String> existing) {
+        List<String> chain = new ArrayList<>(existing);
+        chain.removeIf(ServiceNames.CROWDSEC_BOUNCER_MIDDLEWARE::equals);
+        chain.addFirst(ServiceNames.CROWDSEC_BOUNCER_MIDDLEWARE);
+        return chain;
     }
 
     public ReverseProxyRoute(String name, String domainName, String address, int port, String service, AuthInfo authInfo) {

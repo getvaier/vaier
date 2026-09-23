@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -152,14 +153,36 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
-    void addReverseProxyRoute_socialMode_attachesTheTwoStageChainInOrder() throws IOException {
-        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080,
-            net.vaier.domain.AuthMode.SOCIAL, null, null);
+    void addReverseProxyRoute_socialMode_writesTheDomainsChain() throws IOException {
+        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8080, AuthMode.SOCIAL, null, null);
 
-        var routers = (java.util.Map<String, Object>) http().get("routers");
-        var router = (java.util.Map<String, Object>) routers.get("secure-example-com-router");
+        var routers = (Map<String, Object>) http().get("routers");
+        var router = (Map<String, Object>) routers.get("secure-example-com-router");
         assertThat((List<String>) router.get("middlewares"))
-            .containsExactly("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors");
+            .isEqualTo(ReverseProxyRoute.middlewareChain(AuthMode.SOCIAL, null));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void everyHttpRouterVaierWrites_carriesTheBouncerFirst() throws IOException {
+        // #351: the bouncer left the entrypoint, so each router Vaier writes must carry it itself —
+        // through every write path, the per-host /oauth2/ helper router included.
+        adapter.addReverseProxyRoute("open.example.com", "10.13.13.2", 8080, AuthMode.NONE, "/home", null);
+        adapter.addReverseProxyRoute("secure.example.com", "10.13.13.2", 8081, AuthMode.SOCIAL, null, null);
+        adapter.addLanReverseProxyRoute("nas.example.com", "192.168.1.5", 5000, "https", AuthMode.NONE,
+            false, null, "/dsm");
+        adapter.setRouteAuthMode("open.example.com", null, AuthMode.SOCIAL);
+        adapter.setRouteRootRedirectPath("secure.example.com", null, "/start");
+        adapter.updateReverseProxyRoute(ReverseProxyRoute.routerName("nas.example.com", "/dsm"),
+            ReverseProxyRoute.builder().domainName("nas.example.com")
+                .service(ReverseProxyRoute.serviceName("nas.example.com", "/dsm")).address("192.168.1.6").port(5001)
+                .middlewares(List.of()).build());
+        adapter.addStreamRoute("mqtt.example.com", "10.13.13.2", 8883, false);
+
+        var routers = (Map<String, Object>) http().get("routers");
+        assertThat(routers).hasSizeGreaterThanOrEqualTo(5);
+        routers.forEach((name, router) -> assertThat((List<String>) ((Map<String, Object>) router).get("middlewares"))
+            .as(name).first().isEqualTo(ServiceNames.CROWDSEC_BOUNCER_MIDDLEWARE));
     }
 
     @Test
@@ -199,12 +222,12 @@ class TraefikReverseProxyAdapterTest {
     void setRouteAuthMode_switchesAutheliaRouteToSocial_strippingTheOldChain() throws IOException {
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, true, null);
 
-        adapter.setRouteAuthMode("app.example.com", null, net.vaier.domain.AuthMode.SOCIAL);
+        adapter.setRouteAuthMode("app.example.com", null, AuthMode.SOCIAL);
 
-        var routers = (java.util.Map<String, Object>) http().get("routers");
-        var router = (java.util.Map<String, Object>) routers.get("app-example-com-router");
+        var routers = (Map<String, Object>) http().get("routers");
+        var router = (Map<String, Object>) routers.get("app-example-com-router");
         assertThat((List<String>) router.get("middlewares"))
-            .containsExactly("oauth2-signin", "oauth2-authn", "vaier-authz", "vaier-errors")
+            .isEqualTo(ReverseProxyRoute.middlewareChain(AuthMode.SOCIAL, null))
             .doesNotContain("auth-middleware");
         assertThat(routers).containsKey("app-example-com-oauth2-router");
     }
@@ -950,9 +973,10 @@ class TraefikReverseProxyAdapterTest {
     // --- backfill ---
 
     @Test
-    void backfillErrorPages_addsVaierErrorsToRouterMissingIt_andCreatesInfra() throws IOException {
-        // Pre-existing config: a router that predates the offline page, with auth + redirect
-        // middlewares and x-vaier metadata that must all survive the backfill untouched.
+    void backfillRouterChains_givesARouterThatPredatesThem_theBouncerFirstAndTheOfflinePageLast() throws IOException {
+        // Pre-existing config: a router that predates the offline page and the per-router bouncer
+        // (#351), with auth + redirect middlewares and x-vaier metadata that must all survive the
+        // backfill untouched — and a stream, which takes no HTTP middleware at all.
         String preExisting = """
             http:
               routers:
@@ -979,19 +1003,33 @@ class TraefikReverseProxyAdapterTest {
                   redirectRegex:
                     regex: "^https://legacy\\\\.example\\\\.com/?$"
                     replacement: https://legacy.example.com/home
+            tcp:
+              routers:
+                mqtt-router:
+                  rule: "HostSNI(`mqtt.example.com`)"
+                  entryPoints:
+                  - websecure
+                  service: mqtt-service
+              services:
+                mqtt-service:
+                  loadBalancer:
+                    servers:
+                    - address: 10.0.0.9:1883
             x-vaier-launchpad-alias:
               legacy-router: My Legacy App
             """;
         Files.writeString(tempDir.resolve("remote-apps.yml"), preExisting);
 
-        adapter.backfillErrorPages();
+        adapter.backfillRouterChains();
 
         String content = Files.readString(tempDir.resolve("remote-apps.yml"));
-        // vaier-errors attached to the legacy router
-        ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
-        assertThat(route.getMiddlewares()).contains(ServiceNames.ERROR_PAGES_MIDDLEWARE);
-        // pre-existing middlewares are preserved on the router
-        assertThat(route.getMiddlewares()).contains("auth-middleware", "legacy-redirect");
+        ReverseProxyRoute route = adapter.getReverseProxyRoutes().stream()
+            .filter(r -> r.getName().equals("legacy-router")).findFirst().orElseThrow();
+        assertThat(route.getMiddlewares()).containsExactly(
+            ServiceNames.CROWDSEC_BOUNCER_MIDDLEWARE, "auth-middleware", "legacy-redirect",
+            ServiceNames.ERROR_PAGES_MIDDLEWARE);
+        assertThat((Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) loadYaml().get("tcp"))
+            .get("routers")).get("mqtt-router")).doesNotContainKey("middlewares");
         // infra created
         assertThat(content).contains(ServiceNames.ERROR_PAGES_SERVICE);
         assertThat(content).contains("http://vaier:8080");
@@ -1154,21 +1192,20 @@ class TraefikReverseProxyAdapterTest {
     }
 
     @Test
-    void backfillErrorPages_isIdempotent_doesNotDuplicateMiddlewareOnRouter() {
+    void backfillRouterChains_isIdempotent_doesNotDuplicateMiddlewareOnRouter() {
         adapter.addReverseProxyRoute("app.example.com", "10.13.13.2", 8080, false, null);
 
-        adapter.backfillErrorPages();
-        adapter.backfillErrorPages();
+        adapter.backfillRouterChains();
+        adapter.backfillRouterChains();
 
         ReverseProxyRoute route = adapter.getReverseProxyRoutes().getFirst();
-        long count = route.getMiddlewares().stream()
-            .filter(ServiceNames.ERROR_PAGES_MIDDLEWARE::equals).count();
-        assertThat(count).isEqualTo(1);
+        assertThat(route.getMiddlewares()).containsExactly(
+            ServiceNames.CROWDSEC_BOUNCER_MIDDLEWARE, ServiceNames.ERROR_PAGES_MIDDLEWARE);
     }
 
     @Test
-    void backfillErrorPages_emptyConfig_doesNotThrow() {
-        adapter.backfillErrorPages();
+    void backfillRouterChains_emptyConfig_doesNotThrow() {
+        adapter.backfillRouterChains();
 
         assertThat(adapter.getReverseProxyRoutes()).isEmpty();
     }
