@@ -282,7 +282,7 @@ services:
         # LAN routes via relay peers — scan VAIER metadata in peer configs.
         for f in /wireguard-config/*/*.conf; do
           [ -f "$$f" ] || continue
-          cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+          cidr=$$(grep -oE '"lanCidr" *: *"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr" *: *"([^"]+)".*/\1/')
           [ -n "$$cidr" ] && ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
         done
         # Fresh-install ACME race guard. Vaier writes no DNS (#331) — the operator's one `*.<domain>` A
@@ -515,7 +515,7 @@ services:
           if [ -n "$$WG_IP" ]; then
             for f in /wireguard-config/*/*.conf; do
               [ -f "$$f" ] || continue
-              cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+              cidr=$$(grep -oE '"lanCidr" *: *"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr" *: *"([^"]+)".*/\1/')
               if [ -n "$$cidr" ]; then
                 ip route show "$$cidr" 2>/dev/null | grep -q "via $$WG_IP" || \
                   ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true
@@ -548,7 +548,7 @@ services:
           if [ -n "$$WG_IP" ]; then
             for f in /wireguard-config/*/*.conf; do
               [ -f "$$f" ] || continue
-              cidr=$$(grep -oE '"lanCidr":"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr":"([^"]+)".*/\1/')
+              cidr=$$(grep -oE '"lanCidr" *: *"[^"]+"' "$$f" 2>/dev/null | head -1 | sed -E 's/.*"lanCidr" *: *"([^"]+)".*/\1/')
               if [ -n "$$cidr" ]; then
                 ip route show "$$cidr" 2>/dev/null | grep -q "via $$WG_IP" || \
                   ip route replace "$$cidr" via "$$WG_IP" 2>/dev/null || true

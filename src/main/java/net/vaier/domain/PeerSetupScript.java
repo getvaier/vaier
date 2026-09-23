@@ -129,6 +129,9 @@ public final class PeerSetupScript {
                 .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\\n");
             sb.append("  || sudo iptables -A FORWARD -s ").append(lan).append(" -d ").append(vpnSubnet)
                 .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT\n");
+            // Tiny embedded stacks (OpenSprinkler) ignore MSS and "need to frag", so a full-size DF reply
+            // never fits wg0. Clearing DF lets the relay fragment it inside the tunnel.
+            sb.append("sudo ").append(clearDontFragment(lan)).append("\n");
 
             // Persist relay rules across reboots via a systemd oneshot. Distro-agnostic
             // (no iptables-persistent dependency) and idempotent (-C ... || -A ...).
@@ -152,6 +155,7 @@ public final class PeerSetupScript {
             sb.append("ExecStart=/bin/sh -c 'iptables -C FORWARD -s ").append(lan)
                 .append(" -d ").append(vpnSubnet).append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ")
                 .append(lan).append(" -d ").append(vpnSubnet).append(" -m state --state RELATED,ESTABLISHED -j ACCEPT'\n");
+            sb.append("ExecStart=/bin/sh -c \"").append(clearDontFragment(lan)).append("\"\n");
             sb.append("\n");
             sb.append("[Install]\n");
             sb.append("WantedBy=multi-user.target\n");
@@ -241,5 +245,11 @@ public final class PeerSetupScript {
         sb.append("echo \"Verify VPN connection:\"\n");
         sb.append("echo \"  docker exec wireguard-client wg show\"\n");
         return sb.toString();
+    }
+
+    private static String clearDontFragment(String lan) {
+        return "nft 'add table ip vaier-relay; flush table ip vaier-relay; "
+            + "add chain ip vaier-relay pre { type filter hook prerouting priority -150; }; "
+            + "add rule ip vaier-relay pre ct direction reply ip saddr " + lan + " ip frag-off set 0'";
     }
 }

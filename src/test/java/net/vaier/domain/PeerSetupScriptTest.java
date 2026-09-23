@@ -84,6 +84,23 @@ class PeerSetupScriptTest {
     }
 
     @Test
+    void generate_relayClearsDontFragmentOnLanReplies_nowAndOnEveryBoot() {
+        // Colina 27, 2026-09-23: OpenSprinkler ignores the MSS and the relay's "need to frag", sending
+        // 1468-byte DF replies that wg0 (MTU 1420) drops — every multi-packet answer died in the relay.
+        String nft = "nft 'add table ip vaier-relay; flush table ip vaier-relay; "
+            + "add chain ip vaier-relay pre { type filter hook prerouting priority -150; }; "
+            + "add rule ip vaier-relay pre ct direction reply ip saddr 192.168.1.0/24 ip frag-off set 0'";
+
+        String relay = PeerSetupScript.generate("Colina 27", "10.13.13.3", "vaier.vaier.net", "51820",
+            CONF, "192.168.1.0/24", "10.13.13.0/24");
+        int unit = relay.indexOf("vaier-wg-relay-iptables.service");
+
+        assertThat(relay.substring(0, unit)).contains("sudo " + nft);
+        assertThat(relay.substring(unit, relay.indexOf("UNIT_FILE\n", unit))).contains(nft);
+        assertThat(script()).doesNotContain("vaier-relay");
+    }
+
+    @Test
     void generate_stampsTheMachineSoALaterWrongScriptRefuses() {
         String s = script();
 
