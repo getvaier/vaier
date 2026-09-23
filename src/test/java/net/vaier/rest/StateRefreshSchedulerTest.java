@@ -1,6 +1,8 @@
 package net.vaier.rest;
 
 import net.vaier.application.DetectOwnSignInsUseCase;
+import net.vaier.application.JudgeOpenServicesUseCase;
+import net.vaier.application.NotifyAdminsOfOpenServiceUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachinesUseCase;
@@ -16,6 +18,7 @@ import net.vaier.domain.Machine;
 import net.vaier.domain.MachineContainerStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.OpenService;
 import net.vaier.domain.TestMachineIds;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +47,8 @@ class StateRefreshSchedulerTest {
     NotifyAdminsOfContainerTroubleUseCase containerNotifier;
     GetMachinesUseCase machines;
     DetectOwnSignInsUseCase ownSignIns;
+    JudgeOpenServicesUseCase openServices;
+    NotifyAdminsOfOpenServiceUseCase openServiceNotifier;
     StateRefreshScheduler scheduler;
 
     @BeforeEach
@@ -56,8 +61,11 @@ class StateRefreshSchedulerTest {
         containerNotifier = mock(NotifyAdminsOfContainerTroubleUseCase.class);
         machines = mock(GetMachinesUseCase.class);
         ownSignIns = mock(DetectOwnSignInsUseCase.class);
+        openServices = mock(JudgeOpenServicesUseCase.class);
+        openServiceNotifier = mock(NotifyAdminsOfOpenServiceUseCase.class);
         scheduler = new StateRefreshScheduler(containerState, lanServerScrape,
-            lanServerReachability, launchpadVersions, containerStandings, containerNotifier, machines, ownSignIns);
+            lanServerReachability, launchpadVersions, containerStandings, containerNotifier, machines, ownSignIns,
+            openServices, openServiceNotifier);
     }
 
     private static MachineContainerStanding standing(String containerName, ContainerStanding where) {
@@ -87,6 +95,18 @@ class StateRefreshSchedulerTest {
         // The containers were just re-read, so this is the moment to say what the reading means (#356).
         verify(containerStandings).judgeContainerStandings();
         verify(ownSignIns).detectOwnSignIns();
+    }
+
+    @Test
+    void refresh_anOpenServiceIsMailed_andOneMailFailingNeverCostsTheOthersTheirs() {
+        OpenService rack = new OpenService("rack-router", "rack.example.com", null);
+        OpenService site = new OpenService("site-router", "site.example.com", null);
+        when(openServices.judgeOpenServices()).thenReturn(List.of(rack, site));
+        doThrow(new RuntimeException("smtp down")).when(openServiceNotifier).notifyAdminsOfOpenService(rack);
+
+        scheduler.refresh();
+
+        verify(openServiceNotifier).notifyAdminsOfOpenService(site);
     }
 
     @Test

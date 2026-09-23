@@ -5,6 +5,8 @@ import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DetectOwnSignInsUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
 import net.vaier.application.GetOwnSignInsUseCase;
+import net.vaier.application.JudgeOpenServicesUseCase;
+import net.vaier.application.MarkMeantToBePublicUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
@@ -23,6 +25,9 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.OpenService;
+import net.vaier.domain.OpenServiceState;
+import net.vaier.domain.OpenServiceTracker;
 import net.vaier.domain.OwnSignIn;
 import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.PublishableService;
@@ -37,6 +42,7 @@ import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForProbingServiceSignIn;
+import net.vaier.domain.port.ForPersistingOpenServiceState;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers;
 import net.vaier.domain.port.ForDiscoveringPeerContainers;
 import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
@@ -82,7 +88,9 @@ public class PublishingService implements
     UnignorePublishableServiceUseCase,
     RefreshLaunchpadVersionsUseCase,
     DetectOwnSignInsUseCase,
-    GetOwnSignInsUseCase {
+    GetOwnSignInsUseCase,
+    JudgeOpenServicesUseCase,
+    MarkMeantToBePublicUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
@@ -107,6 +115,8 @@ public class PublishingService implements
     private final ForResolvingVaierServerIdentity vaierServerIdentity;
     private final ForPersistingServiceCredentials forPersistingServiceCredentials;
     private final ForProbingServiceSignIn forProbingServiceSignIn;
+    private final ForPersistingOpenServiceState forPersistingOpenServiceState;
+    private final OpenServiceTracker openServiceTracker;
     private final Clock clock;
     // Route name -> what its backend asked for at the last look. In memory: a restart simply looks again.
     private final Map<String, OwnSignIn> ownSignIns = new ConcurrentHashMap<>();
@@ -141,6 +151,7 @@ public class PublishingService implements
                              ForResolvingVaierServerIdentity vaierServerIdentity,
                              ForPersistingServiceCredentials forPersistingServiceCredentials,
                              ForProbingServiceSignIn forProbingServiceSignIn,
+                             ForPersistingOpenServiceState forPersistingOpenServiceState,
                              Clock clock) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
@@ -163,6 +174,9 @@ public class PublishingService implements
         this.vaierServerIdentity = vaierServerIdentity;
         this.forPersistingServiceCredentials = forPersistingServiceCredentials;
         this.forProbingServiceSignIn = forProbingServiceSignIn;
+        this.forPersistingOpenServiceState = forPersistingOpenServiceState;
+        // The domain owns the port call; on disk, so a redeploy never mails about the same hole twice.
+        this.openServiceTracker = new OpenServiceTracker(forPersistingOpenServiceState);
         this.clock = clock;
     }
 
@@ -329,14 +343,34 @@ public class PublishingService implements
     @Override
     public List<ServiceOwnSignIn> getOwnSignIns() {
         ServiceCredentials credentials = forPersistingServiceCredentials.read();
+        OpenServiceState openServices = forPersistingOpenServiceState.read();
         return forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
             .filter(r -> ownSignIns.containsKey(r.getName()))
             .map(r -> {
                 OwnSignIn seen = ownSignIns.get(r.getName());
                 return new ServiceOwnSignIn(r.getDomainName(), r.getPathPrefix(), seen,
-                    seen.advice(r.authMode(), credentials.hasAnyFor(r.getDomainName())).orElse(null));
+                    seen.advice(r.authMode(), credentials.hasAnyFor(r.getDomainName())).orElse(null),
+                    OpenService.isOpen(r, seen), openServices.isMeantToBePublic(r.getName()));
             })
             .toList();
+    }
+
+    // --- JudgeOpenServicesUseCase / MarkMeantToBePublicUseCase ---
+
+    @Override
+    public List<OpenService> judgeOpenServices() {
+        return openServiceTracker.observe(forPersistingReverseProxyRoutes.getReverseProxyRoutes(), Map.copyOf(ownSignIns));
+    }
+
+    @Override
+    public void markMeantToBePublic(String dnsName, String pathPrefix, boolean meantToBePublic) {
+        String normalisedPath = ReverseProxyRoute.normalisePathPrefix(pathPrefix);
+        ReverseProxyRoute route = ReverseProxyRoute.findByFqdnAndPath(
+                forPersistingReverseProxyRoutes.getReverseProxyRoutes(), dnsName, normalisedPath)
+            .orElseThrow(() -> new IllegalArgumentException("No published service at " + dnsName
+                + (normalisedPath == null ? "" : normalisedPath)));
+        openServiceTracker.meantToBePublic(route.getName(), meantToBePublic);
+        forPublishingEvents.publish("published-services", "service-updated", dnsName);
     }
 
     private PublishedServiceUco toUco(ReverseProxyRoute route,

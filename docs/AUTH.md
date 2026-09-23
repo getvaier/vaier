@@ -135,3 +135,12 @@ Vaier looks at each published service's own sign-in, so the service pane can tel
 **OpenSprinkler** is recognised by its root page: `ipas=0` means it still enforces its own password, and behind Vaier's sign-in the pane suggests turning on **Ignore password** in the controller's options.
 
 The look rides the state-refresh round that already runs every 30 seconds: a service is looked at when it is first seen, again after an edit, and otherwise every ten minutes. When what a service asks for changes, the pane updates by itself. Nothing is stored — a restart simply looks again.
+
+## Open services
+
+A published service whose auth mode is **Public** and whose own sign-in Vaier read as **none** is an **open service**: anyone on the internet who finds the name can use it. Vaier mails admins about each one **once**, when it is first found. The mail names the address and the two ways out, and a restart never sends it again — what was mailed is kept in `./vaier/config/open-services.yml`.
+
+- **Put Vaier's sign-in in front** in the service's pane switches its auth mode to Social, the same change the Sign-in picker makes.
+- **This is meant to be public** says the service is open on purpose. Vaier keeps that per route, stops mentioning the service, and shows a quiet note in its pane with a way to take it back. Unpublishing the route forgets it.
+
+Only a service Vaier could actually read counts. A service with its own sign-in page, basic auth or any other challenge is never open, and neither is one Vaier could not read — a backend that is down, a page that is only a script shell, an answer that is not a web page. Unknown is not no. While a service Vaier already mailed about is unreadable, it stays quiet; once it is really closed — Vaier's sign-in on, its own sign-in on, or unpublished — the record is dropped silently, so opening it again is news again. Streams are never open services: nothing in them is a web request.

@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.application.GetOwnSignInsUseCase;
+import net.vaier.application.MarkMeantToBePublicUseCase;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.OwnSignIn;
 import net.vaier.domain.ServiceOwnSignIn;
@@ -51,6 +52,7 @@ class PublishedServiceRestControllerTest {
     @Mock ForPublishingEvents forPublishingEvents;
     @Mock ForSubscribingToEvents forSubscribingToEvents;
     @Mock GetOwnSignInsUseCase getOwnSignInsUseCase;
+    @Mock MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
 
     @InjectMocks
     PublishedServiceRestController controller;
@@ -60,13 +62,21 @@ class PublishedServiceRestControllerTest {
         OwnSignIn basic = OwnSignIn.classify(Optional.of(new ServiceProbeAnswer(401, "Basic realm=\"openHAB\"",
             null, "text/html", "")), Instant.parse("2026-09-23T10:00:00Z"));
         when(getOwnSignInsUseCase.getOwnSignIns())
-            .thenReturn(List.of(new ServiceOwnSignIn("openhab.example.com", null, basic, OwnSignIn.Advice.SET_SERVICE_CREDENTIAL)));
+            .thenReturn(List.of(new ServiceOwnSignIn("openhab.example.com", null, basic, OwnSignIn.Advice.SET_SERVICE_CREDENTIAL,
+                false, false)));
 
         String json = new ObjectMapper().writeValueAsString(controller.signIns());
 
         assertThat(json).isEqualTo("[{\"dnsName\":\"openhab.example.com\",\"pathPrefix\":null,\"kind\":\"basic\","
             + "\"detail\":\"openHAB\",\"app\":null,\"observedAt\":\"2026-09-23T10:00:00Z\","
-            + "\"advice\":\"set_service_credential\"}]");
+            + "\"advice\":\"set_service_credential\",\"open\":false,\"meantToBePublic\":false}]");
+    }
+
+    @Test
+    void meantToBePublic_handsTheRouteAndTheAnswerToTheUseCase() {
+        controller.meantToBePublic("rack.example.com", "/ui", new PublishedServiceRestController.MeantToBePublicRequest(true));
+
+        verify(markMeantToBePublicUseCase).markMeantToBePublic("rack.example.com", "/ui", true);
     }
 
     @Test

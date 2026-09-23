@@ -210,6 +210,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected GetOwnSignInsUseCase getOwnSignInsUseCase;
 
     @MockBean
+    protected MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
+
+    @MockBean
     protected DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @MockBean
