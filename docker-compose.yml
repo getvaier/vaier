@@ -408,6 +408,10 @@ services:
     image: tecnativa/docker-socket-proxy:v0.4.2
     container_name: docker-proxy
     mem_limit: 64m
+    labels:
+      # The haproxy_template's digest (DockerComposeStructureTest names the value). Compose misses an edit
+      # inside an inline config, so without this an upgrade keeps the old proxy rules.
+      - vaier.rules-digest=faf92e82124a
     environment:
       # Allowlist flags for Vaier + Traefik. Combined with the haproxy_template
       # config below (which adds explicit denies for /containers/create and

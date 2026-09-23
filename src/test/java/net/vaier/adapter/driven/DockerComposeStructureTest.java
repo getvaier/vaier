@@ -1,10 +1,13 @@
 package net.vaier.adapter.driven;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -975,6 +978,22 @@ class DockerComposeStructureTest {
     // file. It is RENDERED by Traefik's own entrypoint before `exec traefik`. These tests run that
     // real entrypoint under `sh` (stubbing only the binaries a test JVM cannot have — getent, ip,
     // nslookup, traefik) and assert on the file it actually produces, rather than regexing YAML.
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dockerProxy_carriesItsRulesDigest_soComposeRecreatesItWhenTheRulesChange() throws Exception {
+        // Compose does not notice an edit inside an inline `configs:` template, so an upgrade kept the old
+        // haproxy rules (#264: every Settings save got 403). A changed label does force the recreate.
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        String template = (String) ((Map<String, Object>) ((Map<String, Object>) compose.get("configs"))
+            .get("haproxy_template")).get("content");
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+            .digest(template.getBytes(StandardCharsets.UTF_8))).substring(0, 12);
+        List<String> labels = (List<String>) ((Map<String, Object>) composeServices().get("docker-proxy")).get("labels");
+
+        assertThat(labels).as("set the docker-proxy label to this digest").contains("vaier.rules-digest=" + digest);
+    }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> composeServices() throws Exception {
