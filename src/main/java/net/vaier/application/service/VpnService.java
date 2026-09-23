@@ -96,6 +96,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.Map;
 import net.vaier.domain.port.ForGettingServerPublicKey;
 
 @Service
@@ -223,6 +224,9 @@ public class VpnService implements
 
     @Override
     public List<VpnPeerView> getVpnPeers() {
+        // Every stored config, read once: the roster needs them all, and each peer's view is built from its
+        // own — it used to cost two directory scans more per peer to find that same config again.
+        List<ForGettingPeerConfigurations.PeerConfiguration> configs = peerConfigProvider.getAllPeerConfigs();
         RefreshContext context = new RefreshContext(
             // Resolve the live server render inputs once per refresh (not per peer) so the
             // out-of-date check is a pure string compare against each peer's on-disk config.
@@ -231,9 +235,10 @@ public class VpnService implements
             forPersistingLastServicesReached.getAll(),
             forPersistingReverseProxyRoutes.getReverseProxyRoutes(),
             configResolver.getDomain(),
-            Instant.now());
+            Instant.now(),
+            PeerRoster.byAddress(configs));
         // Configured peers the interface has forgotten are listed too, or nothing could ever remove them.
-        return PeerRoster.reconcile(forGettingVpnClients.getClients(), peerConfigProvider.getAllPeerConfigs())
+        return PeerRoster.reconcile(forGettingVpnClients.getClients(), configs)
             .stream()
             .map(client -> toVpnPeerView(client, context))
             .toList();
@@ -245,7 +250,8 @@ public class VpnService implements
      */
     private record RefreshContext(ServerRenderContext server, MachinePositions positions,
                                   LastServicesReached reached, List<ReverseProxyRoute> routes,
-                                  String baseDomain, Instant now) {}
+                                  String baseDomain, Instant now,
+                                  Map<String, ForGettingPeerConfigurations.PeerConfiguration> configsByAddress) {}
 
     /**
      * The current server-side inputs to {@link WireGuardPeerConfig#reissue}. Null when they can't
@@ -269,13 +275,12 @@ public class VpnService implements
     private VpnPeerView toVpnPeerView(VpnClient client, RefreshContext context) {
         ServerRenderContext serverContext = context.server();
         String peerIp = client.vpnIp();
-        String id = forResolvingPeerIds.resolvePeerIdByIp(peerIp);
         // The raw PeerConfiguration carries the device-category override and owns the effective-
         // category decision; the PeerConfigResult below is the existing view of the same config.
+        // A peer with no stored config has no name to resolve either: its address is its id.
         Optional<ForGettingPeerConfigurations.PeerConfiguration> rawCfg =
-            peerConfigProvider.getPeerConfigByIp(peerIp);
-        // Reuse the already-loaded raw config rather than re-reading it via getPeerConfigByIp —
-        // one filesystem scan/parse per peer per refresh, not two.
+            Optional.ofNullable(context.configsByAddress().get(peerIp));
+        String id = rawCfg.map(ForGettingPeerConfigurations.PeerConfiguration::id).orElse(peerIp);
         Optional<GetPeerConfigUseCase.PeerConfigResult> cfg = rawCfg
             .map(c -> new GetPeerConfigUseCase.PeerConfigResult(c.id(), c.name(), c.ipAddress(),
                 c.configContent(), c.peerType(), c.lanCidr(), c.lanAddress(), c.description(), c.deviceHeldKey()));

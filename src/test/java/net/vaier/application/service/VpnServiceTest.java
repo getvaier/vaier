@@ -1108,9 +1108,6 @@ class VpnServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(List.of());
         when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("Ruten", "10.13.13.8", "[Interface]", MachineType.MOBILE_CLIENT, null, null)));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.8")).thenReturn("Ruten");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.8")).thenReturn(Optional.of(
-            new PeerConfiguration("Ruten", "10.13.13.8", "[Interface]", MachineType.MOBILE_CLIENT, null, null)));
 
         var views = service.getVpnPeers();
 
@@ -1124,8 +1121,7 @@ class VpnServiceTest {
     void getVpnPeers_assemblesFromClientPlusPeerConfigPlusGeo() {
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("alice-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("alice-1", "Alice", "10.13.13.2", "[Interface]",
                 MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10", "alice's box")));
         when(forGeolocatingIps.locate("203.0.113.10"))
@@ -1152,27 +1148,30 @@ class VpnServiceTest {
     }
 
     @Test
-    void getVpnPeers_readsEachPeerConfigOnlyOnce() {
-        // The peer view derives both its device category and its config fields from the same
-        // on-disk config — it must load that config once per peer, not twice (perf regression guard).
+    void getVpnPeers_readsThePeerConfigsOnceForTheWholeList_neverPerPeer() {
+        // The roster already reads every stored config once; a peer then cost two directory scans more —
+        // one to resolve its name, one to load the same config again — 51 debug lines per request on a
+        // fleet of a handful. Both come from the one read now.
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("alice-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("alice-1", "Alice", "10.13.13.2", "[Interface]",
                 MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.10", "alice's box")));
 
-        service.getVpnPeers();
+        var view = service.getVpnPeers().get(0);
 
-        verify(peerConfigProvider, times(1)).getPeerConfigByIp("10.13.13.2");
+        assertThat(view.id()).isEqualTo("alice-1");
+        assertThat(view.name()).isEqualTo("Alice");
+        verify(peerConfigProvider, times(1)).getAllPeerConfigs();
+        verify(peerConfigProvider, never()).getPeerConfigByIp(any());
+        verify(forResolvingPeerIds, never()).resolvePeerIdByIp(any());
     }
 
     @Test
     void getVpnPeers_mobileClient_isClientNotServer_andOffersQrCode() {
         VpnClient client = new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.5")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.5")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("phone", "Phone", "10.13.13.5", "",
                 MachineType.MOBILE_CLIENT, null, null, null)));
 
@@ -1193,8 +1192,7 @@ class VpnServiceTest {
         // photograph, so the machine pane must offer neither — the decision is PeerArtifact's.
         VpnClient client = new VpnClient("pub", "10.13.13.7/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.7")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.7")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("phone", "Phone", "10.13.13.7", "", MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, mid("phone"), DEVICE_KEY)));
 
@@ -1207,8 +1205,7 @@ class VpnServiceTest {
         // whether Reissue and Regenerate are offered at all.
         VpnClient client = new VpnClient("pub", "10.13.13.7/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.7")).thenReturn("ruten");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.7")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("ruten", "Ruten", "10.13.13.7", "", MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, mid("ruten"), DEVICE_KEY)));
 
@@ -1219,8 +1216,7 @@ class VpnServiceTest {
     void getVpnPeers_anOrdinaryPeer_holdsNoDeviceHeldKey() {
         VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.6")).thenReturn("apalveien5");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", "[Interface]",
                 MachineType.UBUNTU_SERVER, null, null, null)));
 
@@ -1240,8 +1236,7 @@ class VpnServiceTest {
             mid("ruten"), DEVICE_KEY);
         VpnClient client = new VpnClient("pub", "10.13.13.7/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.7")).thenReturn("ruten");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.7")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("ruten", "Ruten", "10.13.13.7", existing, MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, mid("ruten"), DEVICE_KEY)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
@@ -1255,13 +1250,12 @@ class VpnServiceTest {
     void getVpnPeers_fallsBackToDefaultTypeAndDisplayLabelWhenNoPeerConfig() {
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("orphan-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
 
         var view = service.getVpnPeers().get(0);
 
         assertThat(view.peerType()).isEqualTo(MachineType.defaultType());
-        assertThat(view.name()).isEqualTo(net.vaier.domain.PeerId.display("orphan-1"));
+        // No stored config means no name to resolve either: the address is all there is to show.
+        assertThat(view.name()).isEqualTo(net.vaier.domain.PeerId.display("10.13.13.2"));
         assertThat(view.lanCidr()).isNull();
         assertThat(view.lanAddress()).isNull();
         assertThat(view.description()).isNull();
@@ -1276,8 +1270,7 @@ class VpnServiceTest {
         MachineId identity = MachineId.generate();
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("alice-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("alice-1", "Alice", "10.13.13.2", "[Interface]",
                 MachineType.UBUNTU_SERVER, null, null, null, null, null, identity, null)));
 
@@ -1293,8 +1286,6 @@ class VpnServiceTest {
     void getVpnPeers_hasNoIdentityForAPeerWithNoStoredConfig() {
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("orphan-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
 
         assertThat(service.getVpnPeers().get(0).machineId()).isNull();
     }
@@ -1308,8 +1299,7 @@ class VpnServiceTest {
         Instant reachedAt = Instant.parse("2026-08-11T20:14:00Z");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0")));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.5")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.5")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("phone", "Phone", "10.13.13.5", "", MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, phone, null)));
         when(forPersistingLastServicesReached.getAll()).thenReturn(LastServicesReached.of(List.of(
@@ -1328,8 +1318,7 @@ class VpnServiceTest {
     void getVpnPeers_hasNoLastServiceForAMachineThatHasReachedNothing() {
         when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0")));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.5")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.5")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("phone", "Phone", "10.13.13.5", "", MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, MachineId.generate(), null)));
 
@@ -1341,8 +1330,6 @@ class VpnServiceTest {
     void getVpnPeers_hasNoLastServiceForAPeerWithNoStoredConfig() {
         when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0")));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.5")).thenReturn("orphan");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.5")).thenReturn(Optional.empty());
         when(forPersistingLastServicesReached.getAll()).thenReturn(LastServicesReached.of(List.of(
             new LastServiceReached(MachineId.generate(), "grafana.example.com", Instant.now()))));
 
@@ -1355,8 +1342,7 @@ class VpnServiceTest {
         MachineId phone = MachineId.generate();
         when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("pub", "10.13.13.5/32", "", "", "0", "0", "0")));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.5")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.5")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("phone", "Phone", "10.13.13.5", "", MachineType.MOBILE_CLIENT,
                 null, null, null, null, null, phone, null)));
         when(forPersistingLastServicesReached.getAll()).thenReturn(LastServicesReached.of(List.of(
@@ -1373,7 +1359,6 @@ class VpnServiceTest {
         when(forGettingVpnClients.getClients()).thenReturn(List.of(
             new VpnClient("a", "10.13.13.5/32", "", "", "0", "0", "0"),
             new VpnClient("b", "10.13.13.6/32", "", "", "0", "0", "0")));
-        when(peerConfigProvider.getPeerConfigByIp(any())).thenReturn(Optional.empty());
 
         service.getVpnPeers();
 
@@ -1385,8 +1370,6 @@ class VpnServiceTest {
     void getVpnPeers_skipsGeolocationWhenEndpointIsBlank() {
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("alice-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
 
         var view = service.getVpnPeers().get(0);
 
@@ -1398,8 +1381,6 @@ class VpnServiceTest {
     void getVpnPeers_emptyGeoOptionalWhenLookupFails() {
         VpnClient client = new VpnClient("pub", "10.13.13.2/32", "203.0.113.10", "51820", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.2")).thenReturn("alice-1");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.2")).thenReturn(Optional.empty());
         when(forGeolocatingIps.locate("203.0.113.10")).thenReturn(Optional.empty());
 
         assertThat(service.getVpnPeers().get(0).geoLocation()).isEmpty();
@@ -1510,8 +1491,7 @@ class VpnServiceTest {
             MachineType.UBUNTU_SERVER, null, null, "10.13.13.0/24", null, "apalveien5", null);
         VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.6")).thenReturn("apalveien5");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", existing,
                 MachineType.UBUNTU_SERVER, null, null, null)));
         when(configResolver.getDomain()).thenReturn("eilertsen.family");
@@ -1527,8 +1507,7 @@ class VpnServiceTest {
         when(forGettingServerPublicKey.getServerPublicKey()).thenThrow(new RuntimeException("wg0 is down"));
         VpnClient client = new VpnClient("pub", "10.13.13.6/32", "", "", "0", "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.6")).thenReturn("apalveien5");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
             new PeerConfiguration("apalveien5", "apalveien5", "10.13.13.6", "[Interface]",
                 MachineType.UBUNTU_SERVER, null, null, null)));
 
@@ -1551,8 +1530,7 @@ class VpnServiceTest {
     private void livePeerAt(String endpointIp, GeoLocation estimate) {
         VpnClient client = new VpnClient("pub", "10.13.13.6/32", endpointIp, "51820", justNow(), "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(client));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.6")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(phoneConfig()));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(phoneConfig()));
         when(forGeolocatingIps.locate(endpointIp)).thenReturn(Optional.ofNullable(estimate));
     }
 
@@ -1577,8 +1555,8 @@ class VpnServiceTest {
         VpnClient stale = new VpnClient("pub", "10.13.13.6/32", "77.16.37.23", "51820",
             String.valueOf(System.currentTimeMillis() / 1000 - 35 * 3600), "0", "0");
         when(forGettingVpnClients.getClients()).thenReturn(List.of(stale));
-        when(forResolvingPeerIds.resolvePeerIdByIp("10.13.13.6")).thenReturn("phone");
-        when(peerConfigProvider.getPeerConfigByIp("10.13.13.6")).thenReturn(Optional.of(phoneConfig()));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(List.of(
+            phoneConfig()));
         when(forGeolocatingIps.locate("77.16.37.23"))
             .thenReturn(Optional.of(new GeoLocation(59.8989, 10.6324, "Oslo", "Norway")));
 

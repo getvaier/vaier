@@ -4245,4 +4245,8 @@ exec on every request to render the server context — ~130 ms alone — from `V
 execed it directly in three places. The read is now a driven port, `ForGettingServerPublicKey`, that
 `WireGuardVpnAdapter` implements on the same ten-second tunnel read as the peer list: one tick's view of
 the interface is its peers and its own key, read together, so a request waits on neither. `VpnService`
-takes the key from the port; the two INFO lines it logged per request went with the exec.
+takes the key from the port; the two INFO lines it logged per request went with the exec. The same
+afternoon, the last per-peer cost went too: each peer's view resolved its name and re-read its own config
+with two directory scans, on a list whose roster had already read every config once — 51 debug lines per
+request. The refresh now indexes that one read by tunnel address and builds every view from it; a peer with
+no stored config is identified by its address, as the resolver already answered for an unknown one.

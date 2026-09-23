@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 
 /**
@@ -17,10 +19,23 @@ public final class PeerRoster {
         List<VpnClient> roster = new ArrayList<>(live);
         for (PeerConfiguration config : configured) {
             String ip = config.ipAddress();
-            if (ip == null || ip.isBlank()) continue;
+            if (!hasAddress(config)) continue;
             if (live.stream().anyMatch(client -> client.containsAddress(ip))) continue;
             roster.add(VpnClient.absent(config.publicKey(), ip));
         }
         return roster;
+    }
+
+    /** The configs that count, keyed by tunnel address; two claiming one address resolve to the first. */
+    public static Map<String, PeerConfiguration> byAddress(List<PeerConfiguration> configured) {
+        Map<String, PeerConfiguration> byAddress = new LinkedHashMap<>();
+        for (PeerConfiguration config : configured) {
+            if (hasAddress(config)) byAddress.putIfAbsent(config.ipAddress(), config);
+        }
+        return byAddress;
+    }
+
+    private static boolean hasAddress(PeerConfiguration config) {
+        return config.ipAddress() != null && !config.ipAddress().isBlank();
     }
 }

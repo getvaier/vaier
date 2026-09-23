@@ -3,6 +3,7 @@ package net.vaier.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.Map;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
@@ -46,6 +47,18 @@ class PeerRosterTest {
         List<VpnClient> roster = PeerRoster.reconcile(List.of(relay), List.of(configured("Colina-27", "10.13.13.3")));
 
         assertThat(roster).containsExactly(relay);
+    }
+
+    @Test
+    void byAddress_keysEveryAddressedConfigOnce_theFirstWinsAndAnAddresslessOneIsLeftOut() {
+        // The refresh builds each peer's view from the one read of every config; the rule for which configs
+        // count, keyed by address, lives here beside reconcile rather than being restated by the service.
+        Map<String, PeerConfiguration> byAddress = PeerRoster.byAddress(List.of(
+            configured("Ruten", "10.13.13.8"), configured("Ruten-twin", "10.13.13.8"),
+            configured("nameless", ""), configured("Geir-pc", "10.13.13.7")));
+
+        assertThat(byAddress).containsOnlyKeys("10.13.13.8", "10.13.13.7");
+        assertThat(byAddress.get("10.13.13.8").id()).isEqualTo("Ruten");
     }
 
     @Test
