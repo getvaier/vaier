@@ -62,7 +62,7 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
     @Autowired
     public AccessFileAdapter(ConfigResolver configResolver) {
         this(System.getenv().getOrDefault("VAIER_CONFIG_PATH", "/vaier/config"),
-                System.getenv("VAIER_ADMIN_EMAIL"), configResolver.isSocialAuthAvailable());
+                System.getenv("VAIER_ADMIN_EMAIL"), !configResolver.isFirstRunDoorOpen());
     }
 
     public AccessFileAdapter(String configDir, String adminEmail) {

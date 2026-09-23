@@ -1,9 +1,11 @@
 package net.vaier.application.service;
 
+import net.vaier.application.AddSignInProviderUseCase;
 import net.vaier.application.AssignGroupsUseCase;
 import net.vaier.application.CaptureViewerIdentityUseCase;
 import net.vaier.application.GetFirstRunPasswordUseCase;
 import net.vaier.application.GetServiceAccessRulesUseCase;
+import net.vaier.application.GetSignInProvidersUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
 import net.vaier.application.ResolveViewerUseCase;
@@ -15,14 +17,23 @@ import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.AccessRoster;
 import net.vaier.domain.FirstRunPassword;
+import net.vaier.domain.IdentityProvider;
 import net.vaier.domain.LastAdminException;
+import net.vaier.domain.ProviderCredentials;
 import net.vaier.domain.Role;
+import net.vaier.domain.SignInApplyOutcome;
+import net.vaier.domain.SignInRenderers;
+import net.vaier.domain.SignInSettings;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
+import net.vaier.domain.port.ForPersistingSignInSettings;
 import net.vaier.domain.port.ForReadingFirstRunPassword;
+import net.vaier.domain.port.ForRerunningContainers;
 import net.vaier.domain.port.ForResolvingServiceGroup;
+import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.domain.port.ForRunningInBackground;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -31,13 +42,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @Slf4j
 public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
         RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase,
-        ResolveViewerUseCase, CaptureViewerIdentityUseCase, GetFirstRunPasswordUseCase {
+        ResolveViewerUseCase, CaptureViewerIdentityUseCase, GetFirstRunPasswordUseCase,
+        GetSignInProvidersUseCase, AddSignInProviderUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
@@ -45,6 +58,14 @@ public class UserService implements
     private final ForNotifyingAdmins forNotifyingAdmins;
     private final ConfigResolver configResolver;
     private final ForReadingFirstRunPassword forReadingFirstRunPassword;
+    private final ForPersistingSignInSettings forPersistingSignInSettings;
+    private final ForRerunningContainers forRerunningContainers;
+    private final ForRestartingContainers forRestartingContainers;
+    private final ForRunningInBackground forRunningInBackground;
+    // One apply at a time: a save from Settings and the first-run door closing both rewrite the same file.
+    private final Object signInApply = new Object();
+    // Once per boot: a close that failed is not retried on every forward-auth request.
+    private final AtomicBoolean firstRunDoorCloseStarted = new AtomicBoolean();
 
     public UserService(ForPersistingAccessEntries forPersistingAccessEntries,
                        ForResolvingServiceGroup forResolvingServiceGroup,
@@ -53,13 +74,72 @@ public class UserService implements
                        // it never lands on the forward-auth hot path's critical construction timing.
                        @Lazy ForNotifyingAdmins forNotifyingAdmins,
                        ConfigResolver configResolver,
-                       ForReadingFirstRunPassword forReadingFirstRunPassword) {
+                       ForReadingFirstRunPassword forReadingFirstRunPassword,
+                       ForPersistingSignInSettings forPersistingSignInSettings,
+                       ForRerunningContainers forRerunningContainers,
+                       ForRestartingContainers forRestartingContainers,
+                       ForRunningInBackground forRunningInBackground) {
         this.forPersistingAccessEntries = forPersistingAccessEntries;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
         this.forPersistingServiceAccessRules = forPersistingServiceAccessRules;
         this.forNotifyingAdmins = forNotifyingAdmins;
         this.configResolver = configResolver;
         this.forReadingFirstRunPassword = forReadingFirstRunPassword;
+        this.forPersistingSignInSettings = forPersistingSignInSettings;
+        this.forRerunningContainers = forRerunningContainers;
+        this.forRestartingContainers = forRestartingContainers;
+        this.forRunningInBackground = forRunningInBackground;
+    }
+
+    // === Sign-in providers added from Settings (#264) ===
+
+    @Override
+    public SignInOverview getSignInProviders() {
+        return new SignInOverview(
+                forPersistingSignInSettings.read().standings(configResolver.providersSetInEnvironment()),
+                new VaierHostnames(configResolver.getDomain()).dexCallbackUrl(),
+                configResolver.isFirstRunDoorOpen());
+    }
+
+    @Override
+    public SignInApplyOutcome addSignInProvider(IdentityProvider provider, String clientId, String clientSecret) {
+        ProviderCredentials credentials = new ProviderCredentials(clientId, clientSecret);
+        synchronized (signInApply) {
+            SignInSettings before = forPersistingSignInSettings.read();
+            SignInSettings after = before.withProvider(provider, credentials,
+                    configResolver.providersSetInEnvironment().keySet());
+            SignInApplyOutcome outcome = SignInRenderers.apply(before, after, forPersistingSignInSettings,
+                    forRerunningContainers, forRestartingContainers);
+            log.info("Sign-in provider {} added from Settings: {}", provider.displayName(), outcome.message());
+            return outcome;
+        }
+    }
+
+    /** Off the forward-auth thread, and at most once per boot however many requests arrive meanwhile. */
+    private void closeFirstRunDoorIfDue(AccessEntry entry) {
+        try {
+            if (forPersistingSignInSettings.read().closesFirstRunDoorOn(entry)
+                    && firstRunDoorCloseStarted.compareAndSet(false, true)) {
+                log.info("{} signed in through a provider as admin — closing the first-run door", entry.getEmail());
+                forRunningInBackground.run(this::closeFirstRunDoor);
+            }
+        } catch (RuntimeException e) {
+            log.error("Could not start closing the first-run door: {}", e.getMessage());
+        }
+    }
+
+    private void closeFirstRunDoor() {
+        synchronized (signInApply) {
+            SignInSettings before = forPersistingSignInSettings.read();
+            SignInApplyOutcome outcome = SignInRenderers.apply(before, before.withFirstRunDoorClosed(),
+                    forPersistingSignInSettings, forRerunningContainers, forRestartingContainers);
+            if (outcome.applied()) {
+                log.info("First-run door closed: the first-run password no longer signs in");
+            } else {
+                log.error("Could not close the first-run door; Vaier tries again after its next restart. {}",
+                        outcome.message());
+            }
+        }
     }
 
     @Override
@@ -106,6 +186,7 @@ public class UserService implements
         if (entry.isPending()) {
             return AccessDecision.deny();
         }
+        closeFirstRunDoorIfDue(entry);
 
         boolean allowed;
         if (isConsoleHost(host)) {

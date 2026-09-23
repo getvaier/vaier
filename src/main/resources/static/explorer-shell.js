@@ -7516,7 +7516,7 @@
         if (S.settings.state === 'loading') return;
         S.settings = { ...S.settings, state: 'loading' };
         try {
-            const [cfg, ver, upd, audit, preflight] = await Promise.all([
+            const [cfg, ver, upd, audit, preflight, signIn] = await Promise.all([
                 fetch('/settings/config', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)),
                 fetch('/settings/version').then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
                 // Whether a newer Vaier is being served, and how the last update went. Read with the rest of
@@ -7533,11 +7533,15 @@
                 // polled, and almost always an empty list.
                 fetch('/settings/pre-flight', { cache: 'no-store' })
                     .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+                // Which identity providers exist and where each comes from (#264). Never a secret.
+                fetch('/settings/sign-in', { cache: 'no-store' })
+                    .then((r) => (r.ok ? r.json() : null)).catch(() => null),
             ]);
             S.settings = { state: cfg ? 'ready' : 'error', config: cfg,
-                version: (ver || {}).version || '', update: upd || {}, audit: audit || {}, preflight: preflight || {} };
+                version: (ver || {}).version || '', update: upd || {}, audit: audit || {}, preflight: preflight || {},
+                signIn: signIn };
         } catch (e) {
-            S.settings = { state: 'error', config: null, version: '', update: {}, audit: {}, preflight: {} };
+            S.settings = { state: 'error', config: null, version: '', update: {}, audit: {}, preflight: {}, signIn: null };
         }
         render();
     }
@@ -7705,6 +7709,87 @@
             return noteEl;
         };
 
+        // --- Sign-in (#264): add Google or GitHub without touching .env ---
+        //
+        // One redirect URI serves both providers, so it is said once. A provider .env owns is shown and left
+        // alone — .env wins. The secret is write-only: the field starts empty every time. Save waits for the
+        // apply (seconds), so the note ends on what actually happened, never on a promise.
+        const signInSection = () => {
+            const si = S.settings.signIn;
+            if (!si) return;
+            const form = sectionForm('Sign-in');
+            if (si.firstRunDoorOpen) {
+                form.appendChild(note('The first-run password keeps working until an admin signs in with a '
+                    + 'provider added here. Then Vaier closes that door by itself.', false));
+            }
+            const uri = input(si.redirectUri);
+            uri.readOnly = true;
+            const uriRow = el('div', 'ex-set-actions');
+            const copy = el('button', 'ex-btn'); copy.textContent = 'Copy';
+            copy.onclick = () => navigator.clipboard.writeText(si.redirectUri)
+                .then(() => toast('Redirect URI copied.')).catch(() => toast('Could not copy the redirect URI.'));
+            uriRow.appendChild(copy);
+            const uriField = field('Redirect URI', 'Register this exact address with the provider — both hand back to Dex here.', uri);
+            uriField.appendChild(uriRow);
+            form.appendChild(uriField);
+
+            (si.providers || []).forEach((p) => {
+                const block = el('div', 'ex-form ex-signin-provider');
+                const head = el('div', 'ex-runline');
+                const state = () => p.source === 'ENVIRONMENT' ? p.name + ' is set in .env (client id ' + p.clientId + ').'
+                    : p.source === 'SETTINGS' ? p.name + ' is set here (client id ' + p.clientId + ').'
+                    : p.name + ' is not set up.';
+                head.textContent = state();
+                block.appendChild(head);
+                if (p.source === 'ENVIRONMENT') {
+                    block.appendChild(hint('.env wins over Settings, so change it there and run docker compose up -d.'));
+                    form.appendChild(block);
+                    return;
+                }
+                const how = el('div', 'ex-hint');
+                const link = el('a', 'ex-link');
+                link.href = p.consoleUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
+                link.textContent = p.name === 'GitHub' ? 'GitHub developer settings' : 'Google Cloud console';
+                how.append('Create an OAuth app in the ', link, ' with the redirect URI above, then paste what it gives you.');
+                const id = input(p.clientId, 'Client id');
+                const secret = input('', p.source === 'SETTINGS' ? 'Paste the secret again to change anything' : 'Client secret', 'password');
+                block.append(how, field('Client id', null, id), field('Client secret', null, secret));
+                const row = el('div', 'ex-set-actions');
+                const save = el('button', 'ex-btn is-accent'); save.textContent = 'Save ' + p.name;
+                const n = el('span', 'ex-set-note');
+                row.append(save, n);
+                block.appendChild(row);
+                save.onclick = async () => {
+                    if (!id.value.trim() || !secret.value.trim()) {
+                        n.className = 'ex-set-note is-err'; n.textContent = 'Paste both the client id and the secret.'; return;
+                    }
+                    save.disabled = true;
+                    n.className = 'ex-set-note';
+                    n.textContent = 'Applying — Dex and the sign-in page restart, which takes a few seconds…';
+                    try {
+                        const res = await fetch('/settings/sign-in/' + p.id, { method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ clientId: id.value.trim(), clientSecret: secret.value.trim() }) });
+                        const out = await res.json().catch(() => ({}));
+                        if (res.ok && out.applied) {
+                            n.className = 'ex-set-note is-ok'; n.textContent = out.message;
+                            p.source = 'SETTINGS'; p.clientId = id.value.trim(); head.textContent = state();
+                        } else {
+                            n.className = 'ex-set-note is-err'; n.textContent = out.message || 'Could not save.';
+                        }
+                    } catch (e) {
+                        n.className = 'ex-set-note is-err'; n.textContent = 'Could not save.';
+                    }
+                    secret.value = '';
+                    save.disabled = false;
+                };
+                form.appendChild(block);
+            });
+        };
+        // While the first-run door is open, inviting anyone starts here; afterwards it sits with the others.
+        const signInFirst = !!(S.settings.signIn && S.settings.signIn.firstRunDoorOpen);
+        if (signInFirst) signInSection();
+
         // --- Nightly backups: the fleet-wide "when" (the one backup knob the operator owns) ---
         const sched = sectionForm('Nightly backups');
         const hour = el('select', 'ex-input');
@@ -7841,6 +7926,8 @@
                 smtpNote, 'Test email sent to ' + test.value.trim() + '.');
         };
         smtp.querySelector('.ex-set-actions').insertBefore(testBtn, smtp.querySelector('.ex-set-note'));
+
+        if (!signInFirst) signInSection();
 
         // --- Chat: your own Anthropic API key, and nothing else about it ---
         const ask = sectionForm('Chat');

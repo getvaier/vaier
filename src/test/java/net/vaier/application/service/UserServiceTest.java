@@ -1,17 +1,29 @@
 package net.vaier.application.service;
 
+import net.vaier.application.GetSignInProvidersUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.ContainerRun;
 import net.vaier.domain.FirstRunPassword;
+import net.vaier.domain.IdentityProvider;
 import net.vaier.domain.LastAdminException;
+import net.vaier.domain.ProviderCredentials;
 import net.vaier.domain.Role;
+import net.vaier.domain.SignInApplyOutcome;
+import net.vaier.domain.SignInSettings;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
+import net.vaier.domain.port.ForPersistingSignInSettings;
 import net.vaier.domain.port.ForReadingFirstRunPassword;
+import net.vaier.domain.port.ForRerunningContainers;
 import net.vaier.domain.port.ForResolvingServiceGroup;
+import net.vaier.domain.port.ForRestartingContainers;
+import net.vaier.domain.port.ForRunningInBackground;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -22,10 +34,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
@@ -49,6 +63,18 @@ class UserServiceTest {
 
     @Mock
     ForReadingFirstRunPassword forReadingFirstRunPassword;
+
+    @Mock
+    ForPersistingSignInSettings forPersistingSignInSettings;
+
+    @Mock
+    ForRerunningContainers forRerunningContainers;
+
+    @Mock
+    ForRestartingContainers forRestartingContainers;
+
+    @Mock
+    ForRunningInBackground forRunningInBackground;
 
     @InjectMocks
     UserService service;
@@ -88,6 +114,62 @@ class UserServiceTest {
         when(forReadingFirstRunPassword.read()).thenReturn(minted);
 
         assertThat(service.firstRunPassword()).isSameAs(minted);
+    }
+
+    // --- sign-in providers from Settings (#264 slice 2): the rules are SignInSettings'/SignInRenderers' ---
+
+    private static final SignInSettings GOOGLE_DOOR_OPEN =
+        new SignInSettings(Map.of(IdentityProvider.GOOGLE, new ProviderCredentials("g-id", "g-secret")), true);
+
+    @BeforeEach
+    void noSignInSettings() {
+        lenient().when(forPersistingSignInSettings.read()).thenReturn(SignInSettings.none());
+        lenient().when(forRerunningContainers.rerun(anyString())).thenReturn(new ContainerRun(0, ""));
+    }
+
+    @Test
+    void getSignInProviders_isTheDomainsStandingsWithTheDexCallbackAndTheDoor() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(configResolver.providersSetInEnvironment()).thenReturn(Map.of(IdentityProvider.GITHUB, "gh-id"));
+        when(configResolver.isFirstRunDoorOpen()).thenReturn(true);
+        when(forPersistingSignInSettings.read()).thenReturn(GOOGLE_DOOR_OPEN);
+
+        assertThat(service.getSignInProviders()).isEqualTo(new GetSignInProvidersUseCase.SignInOverview(
+            GOOGLE_DOOR_OPEN.standings(Map.of(IdentityProvider.GITHUB, "gh-id")),
+            "https://dex.example.com/callback", true));
+    }
+
+    @Test
+    void addSignInProvider_writesItAndAppliesItThroughTheRenderers() {
+        when(configResolver.providersSetInEnvironment()).thenReturn(Map.of());
+
+        SignInApplyOutcome outcome = service.addSignInProvider(IdentityProvider.GOOGLE, "g-id", "g-secret");
+
+        assertThat(outcome.applied()).isTrue();
+        verify(forPersistingSignInSettings).save(GOOGLE_DOOR_OPEN);
+        verify(forRerunningContainers).rerun("dex-init");
+        verify(forRestartingContainers).restartContainer("oauth2-proxy");
+    }
+
+    @Test
+    void verify_anAdminArrivingThroughAProvider_closesTheOpenFirstRunDoor_onceAndOffTheRequestThread() {
+        AccessEntry admin = AccessEntry.builder().email("you@example.com").role(Role.ADMIN)
+            .groups(List.of()).provider("google").build();
+        when(forPersistingAccessEntries.getEntries()).thenReturn(List.of(admin));
+        when(forPersistingAccessEntries.findByEmail("you@example.com")).thenReturn(Optional.of(admin));
+        when(configResolver.getDomain()).thenReturn("example.com");
+        when(forPersistingSignInSettings.read()).thenReturn(GOOGLE_DOOR_OPEN);
+
+        assertThat(service.verify("you@example.com", "vaier.example.com", null, "google", null).isAllowed()).isTrue();
+        service.verify("you@example.com", "vaier.example.com", null, "google", null);
+
+        ArgumentCaptor<Runnable> task = ArgumentCaptor.forClass(Runnable.class);
+        verify(forRunningInBackground).run(task.capture());
+        verifyNoInteractions(forRerunningContainers);
+
+        task.getValue().run();
+        verify(forPersistingSignInSettings).save(GOOGLE_DOOR_OPEN.withFirstRunDoorClosed());
+        verify(forRestartingContainers).restartContainer("dex");
     }
 
     // --- verify: unknown identity is auto-created as pending and denied ---

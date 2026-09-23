@@ -18,7 +18,7 @@ public final class AccessRoster {
 
     /**
      * The first-run claim: a sign-in through Dex's local connector — the first-run password, which
-     * exists only while no identity provider is configured — becomes the admin while the store has
+     * exists only while the first-run door is open — becomes the admin while the store has
      * none. Once any admin exists the door is closed for everyone, and a provider sign-in never
      * claims: that is the pending path.
      */

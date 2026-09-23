@@ -41,6 +41,11 @@ public record VaierHostnames(String baseDomain) {
         return ServiceNames.DEX + "." + baseDomain;
     }
 
+    /** The redirect URI every identity provider's app is registered with: providers hand back to Dex. */
+    public String dexCallbackUrl() {
+        return "https://" + dexHost() + "/callback";
+    }
+
     /**
      * The URL that logs a social-login session out: oauth2-proxy's {@code /oauth2/sign_out}, which
      * clears the domain-wide SSO cookie, then redirects back to {@code redirectTarget}. The

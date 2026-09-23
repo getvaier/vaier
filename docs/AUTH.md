@@ -32,7 +32,7 @@ That sign-in is the **first-run claim**: while the access store holds no admin, 
 
 The password is minted once and kept across restarts in `./vaier/config/first-run-password` (owner `1000`, mode `0600`), so `docker compose up -d` doesn't change it under you. Reading it means having a shell on the server, which is the boundary the door leans on — anyone who can read that log could already read every secret in the stack.
 
-**The door closes on its own.** The moment either provider's client id *and* secret are set and the stack is brought up again, `dex-init` writes no password database, deletes the file, and strips the button from the sign-in page. So the first-run door is exactly as old as the gap it fills. Nothing in the UI adds a provider yet: you put the credentials in `.env` and run `docker compose up -d`, as below.
+**The door closes on its own.** Add a provider from **Settings → Sign-in** (below) and the first-run password keeps working beside it — the sign-in page shows both — until an **admin signs in through the new provider**. That sign-in proves the provider works, and Vaier then closes the door in the background: `dex-init` writes no password database, deletes the file, and the button leaves the sign-in page. Nothing locks you out between the save and that sign-in. Add a provider through `.env` instead and the door closes the moment the stack is brought up with it, as it always has.
 
 **Handing over to a provider.** Sign in with Google or GitHub under the *same* email the first-run account used, and you are the admin you already were — which is why the account defaults to `ACME_EMAIL`. If you sign in under a different address, set `VAIER_ADMIN_EMAIL` to it before bringing the stack up: once a provider exists and every admin is a first-run account that can no longer sign in, Vaier restores that email to admin on startup. With neither, Vaier's log says so as an error, naming the fix, rather than leave you to find a console nobody can open.
 
@@ -42,8 +42,22 @@ Each provider is independently optional — configure Google, GitHub, both, or (
 
 Configure the providers you want. The sign-in page offers a button per configured provider, so an install with only Google credentials never shows a GitHub button. Both providers hand the user back to **Dex** (not oauth2-proxy), so register their redirect URIs at Dex:
 
-- **Google** — create an OAuth 2.0 Web application client in the [Google Cloud console](https://console.cloud.google.com/apis/credentials), set its authorized redirect URI to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET`.
-- **GitHub** — register an OAuth App in [GitHub developer settings](https://github.com/settings/developers), set its authorization callback URL to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GITHUB_CLIENT_ID` / `VAIER_OIDC_GITHUB_CLIENT_SECRET`. Any GitHub account may sign in — Vaier's pending → admin-approval gate decides who's actually let in.
+- **Google** — create an OAuth 2.0 Web application client in the [Google Cloud console](https://console.cloud.google.com/apis/credentials) and set its authorized redirect URI to `https://dex.yourdomain.com/callback`.
+- **GitHub** — register an OAuth App in [GitHub developer settings](https://github.com/settings/developers) and set its authorization callback URL to `https://dex.yourdomain.com/callback`. Any GitHub account may sign in — Vaier's pending → admin-approval gate decides who's actually let in.
+
+Then hand Vaier the client id and secret, one of two ways.
+
+**From Settings → Sign-in.** The section shows the exact redirect URI with a copy button, a link to each provider's console, and a client id and client secret field per provider. **Save** applies it there and then and waits for the outcome — a few seconds:
+
+1. Vaier writes the pair to `./vaier/config/sign-in-providers.env` (owner `1000`, mode `0600`), together with whether the first-run door is held open.
+2. It re-runs `dex-init`, waits for it to exit, and only on success restarts Dex; then the same for `oauth2-proxy-init` and oauth2-proxy. Both renderers read the file line by line and strip every value to letters, digits, `.`, `_` and `-` — they never `source` it, because they run as root — and Vaier refuses any id or secret outside that charset before writing anything.
+3. If a renderer fails, its service is **not** restarted: the running one keeps the config that works. Vaier puts the previous file back, re-renders from it, and shows the renderer's own error under the Save button.
+
+The secret is write-only: no response ever carries it, and the field is empty every time you open Settings.
+
+Vaier reaches `dex-init` and `oauth2-proxy-init` through `docker-proxy`, whose template denies every container start **except those two, by exact name**. Creating containers stays denied, so a start can only re-run the fixed renderer each was created with — which is why this is the one start Vaier is allowed.
+
+**From `.env`.** Set `VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET` and/or `VAIER_OIDC_GITHUB_CLIENT_ID` / `VAIER_OIDC_GITHUB_CLIENT_SECRET` and run `docker compose up -d`. **`.env` wins**: a provider whose id *and* secret are both set there ignores its lines in the Settings file, and Settings shows it read-only as *set in .env*. An install that never uses Settings behaves exactly as before.
 
 Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin — optional, but it is also what names the first-run account, and it is the identity Vaier restores to admin whenever the store has none. Three secrets are **generated for you by `install.sh`** into `.env` — you don't author any of them: the oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`), the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`), and the CrowdSec bouncer API key (`VAIER_CROWDSEC_BOUNCER_KEY`).
 

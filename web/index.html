@@ -556,7 +556,7 @@
                     <path d="M22 15c0-2.5-2-4.5-4.5-4.5"/>
                 </svg>
                 <h3>Access management</h3>
-                <p>Day one needs no OAuth app: the first-run password in Vaier's log lets the first person in, and that sign-in is the admin. After that, every Google or GitHub identity is an access entry with a role — pending, user, or admin — and free-form per-service groups. Approve newcomers and gate services from the UI, no YAML.</p>
+                <p>Day one needs no OAuth app: the first-run password in Vaier's log lets the first person in, and that sign-in is the admin. Add Google or GitHub from Settings when you want company. After that, every identity is an access entry with a role — pending, user, or admin — and free-form per-service groups. Approve newcomers and gate services from the UI, no YAML.</p>
             </div>
             <div class="feature">
                 <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -710,7 +710,7 @@
                 <div class="step-num">05</div>
                 <div class="step-body">
                     <h3>Start the stack and sign in</h3>
-                    <p>Bring everything up, then read the <strong>first-run password</strong> from the bordered block at the bottom of Vaier's own log. Open <code>https://vaier.yourdomain.com</code>, press <strong>Sign in with the first-run password</strong>, and you're in — that first sign-in becomes the admin. Register a Google or GitHub OAuth client (callback <code>https://dex.yourdomain.com/callback</code>) in <code>.env</code> when you want to invite others; that closes the first-run door. Anyone who signs in after you lands as a <strong>pending</strong> request until you approve them on the Users page.</p>
+                    <p>Bring everything up, then read the <strong>first-run password</strong> from the bordered block at the bottom of Vaier's own log. Open <code>https://vaier.yourdomain.com</code>, press <strong>Sign in with the first-run password</strong>, and you're in — that first sign-in becomes the admin. When you want to invite others, register a Google or GitHub OAuth client and paste its id and secret under <strong>Settings → Sign-in</strong> (or into <code>.env</code>); the first-run door closes once you sign in with it. Anyone who signs in after you lands as a <strong>pending</strong> request until you approve them on the Users page.</p>
 <pre class="code"><span class="cmd">docker</span> compose up -d
 <span class="cmd">docker</span> compose logs vaier   <span class="comment"># the first-run password is at the bottom</span></pre>
                 </div>

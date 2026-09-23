@@ -1632,6 +1632,13 @@ select.ex-input { cursor: pointer; }
 .ex-set-note.is-err { color: var(--red); }
 .ex-set-note.is-warn { color: var(--yellow); }
 
+/* Settings → Sign-in: one block per identity provider, divided by a rule rather than boxed. A client id is one
+   long unbroken token, so the state line may break anywhere rather than push a phone's page sideways. */
+.ex-signin-provider { margin: 4px 0 0; padding-top: 13px; border-top: 1px solid var(--border); }
+.ex-signin-provider .ex-runline { display: block; overflow-wrap: anywhere; color: var(--text); }
+.ex-hint .ex-link { color: var(--accent); text-decoration: none; }
+.ex-hint .ex-link:hover { text-decoration: underline; }
+
 /* Where the survival kit's copies went, and why. The same two-line shape as a nudge — a name, and the
    reasoning under it — because it is the same act: Vaier stating a decision it made on the operator's
    behalf. No icon and no button, since there is nothing here to do; a host that refused takes the red edge,

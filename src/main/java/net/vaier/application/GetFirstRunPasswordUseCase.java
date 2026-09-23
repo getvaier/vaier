@@ -6,6 +6,6 @@ import java.util.Optional;
 
 public interface GetFirstRunPasswordUseCase {
 
-    /** The first-run password the stack is on, or empty once an identity provider is configured. */
+    /** The first-run password the stack is on, or empty once the first-run door has closed. */
     Optional<FirstRunPassword> firstRunPassword();
 }
