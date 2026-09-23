@@ -1,5 +1,6 @@
 package net.vaier.rest;
 
+import net.vaier.application.DetectOwnSignInsUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachinesUseCase;
@@ -42,6 +43,7 @@ class StateRefreshSchedulerTest {
     JudgeContainerStandingsUseCase containerStandings;
     NotifyAdminsOfContainerTroubleUseCase containerNotifier;
     GetMachinesUseCase machines;
+    DetectOwnSignInsUseCase ownSignIns;
     StateRefreshScheduler scheduler;
 
     @BeforeEach
@@ -53,8 +55,9 @@ class StateRefreshSchedulerTest {
         containerStandings = mock(JudgeContainerStandingsUseCase.class);
         containerNotifier = mock(NotifyAdminsOfContainerTroubleUseCase.class);
         machines = mock(GetMachinesUseCase.class);
+        ownSignIns = mock(DetectOwnSignInsUseCase.class);
         scheduler = new StateRefreshScheduler(containerState, lanServerScrape,
-            lanServerReachability, launchpadVersions, containerStandings, containerNotifier, machines);
+            lanServerReachability, launchpadVersions, containerStandings, containerNotifier, machines, ownSignIns);
     }
 
     private static MachineContainerStanding standing(String containerName, ContainerStanding where) {
@@ -83,6 +86,7 @@ class StateRefreshSchedulerTest {
         verify(launchpadVersions).refreshLaunchpadVersions();
         // The containers were just re-read, so this is the moment to say what the reading means (#356).
         verify(containerStandings).judgeContainerStandings();
+        verify(ownSignIns).detectOwnSignIns();
     }
 
     @Test

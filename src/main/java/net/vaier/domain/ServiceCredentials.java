@@ -57,6 +57,11 @@ public class ServiceCredentials {
         return Optional.ofNullable(personal != null ? personal : entry.shared());
     }
 
+    /** Whether the service at {@code host} carries any credential, shared or personal. */
+    public boolean hasAnyFor(String host) {
+        return host != null && byService.containsKey(normalise(host));
+    }
+
     public ServiceCredentials withShared(String host, ServiceCredential credential, List<ReverseProxyRoute> routes) {
         requireSocialService(host, routes);
         return changed(host, entry -> new Entry(credential, entry.personal()));

@@ -164,6 +164,7 @@
         access: {},                      // GET /access/services — dnsAddress -> the groups allowed through
         serviceCredentials: {},          // GET /access/services/credentials — host -> { sharedUsername, people }
         people: [],                      // GET /access — the access entries a personal service credential can name
+        ownSignIns: [],                  // GET /published-services/sign-ins — what each route's backend asks for by itself
         containers: new Map(),           // machine identity -> its containers, as Vaier last scraped them
         containersRead: false,           // whether the fleet-wide Docker scrape has landed at least once
         disks: new Map(),                // machine identity -> its filesystems: state, the list, the failure's words
@@ -565,6 +566,14 @@
                     S.serviceCredentials = res.ok ? await res.json() : {};
                 } catch (e) {
                     S.serviceCredentials = {};
+                }
+            })(),
+            (async () => {
+                try {
+                    const res = await fetch('/published-services/sign-ins', { cache: 'no-store' });
+                    S.ownSignIns = res.ok ? await res.json() : [];
+                } catch (e) {
+                    S.ownSignIns = [];
                 }
             })(),
             (async () => {
@@ -4589,6 +4598,33 @@
         return wrap;
     }
 
+    // --- the service's own sign-in, as Vaier last saw its backend ------------------------------------------
+    //
+    // Only what calls for a word gets one. A service with nothing of its own, or one Vaier could not read,
+    // paints nothing here and keeps no space for it.
+
+    function ownSignInOf(s) {
+        return (S.ownSignIns || []).find((o) => o.dnsName === s.dnsAddress
+            && (o.pathPrefix || '') === (s.pathPrefix || '')) || null;
+    }
+    // The verdict is the server's (OwnSignIn.advice); this only chooses the words.
+    const OWN_SIGN_IN_ADVICE = {
+        set_service_credential: (own) => note('This service asks for a username and password. Enter them once '
+            + 'under Service credential and Vaier signs people in, so nobody needs to know them.', false),
+        switch_to_social: (own) => note('This service asks for a username and password. Switch it to social '
+            + 'login and give it a service credential, and Vaier signs people in for it.', false),
+        ignore_opensprinkler_password: (own) => hint('OpenSprinkler still asks for its own password. Turn on '
+            + 'Ignore password in the controller’s options and Vaier’s sign-in is the only one people meet.'),
+        own_sign_in_page: (own) => hint('It has its own sign-in page too — people sign in to it themselves.'),
+        cannot_sign_in_for_them: (own) => hint('It asks for a ' + (own.detail || 'kind of') + ' sign-in, which '
+            + 'Vaier cannot answer for people — they sign in to it themselves.'),
+    };
+    function ownSignInLine(s) {
+        const own = ownSignInOf(s);
+        const say = own && own.advice && OWN_SIGN_IN_ADVICE[own.advice];
+        return say ? say(own) : null;
+    }
+
     function renderService(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
@@ -4624,6 +4660,8 @@
             authSel.onchange = () => patchService(s, { authMode: authSel.value },
                 'Could not update the sign-in requirement.');
             body.appendChild(formField('Sign-in', 'Which login a visitor must pass to reach this service.', authSel));
+            const own = ownSignInLine(s);
+            if (own) body.appendChild(own);
             if (authMode === 'social') {
                 body.appendChild(allowedGroupsEditor(s));
                 body.appendChild(serviceCredentialEditor(s));

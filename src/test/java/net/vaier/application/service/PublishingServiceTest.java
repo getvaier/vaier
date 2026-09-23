@@ -33,6 +33,7 @@ import net.vaier.domain.port.ForResolvingPeerIds;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
+import net.vaier.domain.port.ForProbingServiceSignIn;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,6 +44,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -122,6 +125,12 @@ class PublishingServiceTest {
     @Mock
     ForPersistingServiceCredentials forPersistingServiceCredentials;
 
+    @Mock
+    ForProbingServiceSignIn forProbingServiceSignIn;
+
+    @Mock
+    Clock clock;
+
     @InjectMocks
     PublishingService service;
 
@@ -135,6 +144,7 @@ class PublishingServiceTest {
         // relay-only tests behave as before. (Mockito would return Optional.empty() anyway — this is
         // just explicit.) Tests that exercise the server-LAN-CIDR path override it.
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
+        lenient().when(clock.instant()).thenReturn(Instant.parse("2026-09-23T10:00:00Z"));
         // Every publish activates on the common pool. A test that never stubs the route in would otherwise
         // leave a 15 s poller behind, and enough of them starve the pool on a 4-core runner (CI went red
         // with parallelism 3 while the 2-core dev box, which runs a thread per task, stayed green).
@@ -671,6 +681,49 @@ class PublishingServiceTest {
         ArgumentCaptor<UnaryOperator<ServiceCredentials>> change = ArgumentCaptor.forClass(UnaryOperator.class);
         verify(forPersistingServiceCredentials).update(change.capture());
         assertThat(change.getValue().apply(before).getByService()).isEmpty();
+    }
+
+    // --- own sign-in detection: the rules are OwnSignIn's; the service picks routes, caches and tells ---
+
+    private static ReverseProxyRoute httpRoute(String name, String host) {
+        return ReverseProxyRoute.builder().name(name).domainName(host).address("192.168.1.40").port(8080)
+            .protocol("http").build();
+    }
+
+    @Test
+    void detectOwnSignIns_asksEachRouteOnceUntilItIsDue_andSaysSoWhenWhatItAsksForChanges() {
+        ReverseProxyRoute openhab = httpRoute("openhab-router", "openhab.example.com");
+        ReverseProxyRoute stream = httpRoute("mqtt-router", "mqtt.example.com").toBuilder().stream(true).build();
+        ReverseProxyRoute label = httpRoute("vaier@docker", "vaier.example.com");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(openhab, stream, label));
+        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.empty());
+        when(forProbingServiceSignIn.probe("http://192.168.1.40:8080/")).thenReturn(Optional.of(
+            new ServiceProbeAnswer(401, "Basic realm=\"openHAB\"", null, "text/html", "")));
+
+        service.detectOwnSignIns();
+        service.detectOwnSignIns();
+
+        verify(forProbingServiceSignIn, times(1)).probe(anyString());
+        verify(forPublishingEvents, times(1)).publish("published-services", "service-updated", "openhab.example.com");
+        assertThat(service.getOwnSignIns()).singleElement().satisfies(found -> {
+            assertThat(found.dnsName()).isEqualTo("openhab.example.com");
+            assertThat(found.ownSignIn().kind()).isEqualTo(OwnSignIn.Kind.BASIC);
+            // Public, with a basic-auth challenge: the verdict is the domain's, handed through.
+            assertThat(found.advice()).isEqualTo(OwnSignIn.Advice.SWITCH_TO_SOCIAL);
+        });
+    }
+
+    @Test
+    void updateService_forgetsWhatTheRouteAskedFor_soTheNextRoundAsksAgain() {
+        ReverseProxyRoute openhab = httpRoute("openhab-router", "openhab.example.com");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(openhab));
+        when(forProbingServiceSignIn.probe(anyString())).thenReturn(Optional.empty());
+        service.detectOwnSignIns();
+
+        service.updateService("openhab.example.com", null, patch(null, null, null, "/start", null, null, null));
+        service.detectOwnSignIns();
+
+        verify(forProbingServiceSignIn, times(2)).probe(anyString());
     }
 
     @Test

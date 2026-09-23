@@ -5,6 +5,7 @@ import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.ReverseProxyRoute.RouteSetting;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerIds;
 import net.vaier.domain.port.ForResolvingServiceGroup;
@@ -13,6 +14,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,6 +26,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 class ReverseProxyRouteTest {
+
+    private static final Instant NOW = Instant.parse("2026-09-23T10:00:00Z");
 
     private static ReverseProxyRoute routeWithMiddlewares(List<String> middlewares) {
         return new ReverseProxyRoute("app-router", "app.example.com", "10.0.0.1", 8080, "app-service",
@@ -1008,6 +1013,30 @@ class ReverseProxyRouteTest {
         };
 
         assertThat(route.probeVersion(prober)).isEmpty();
+    }
+
+    @Test
+    void detectOwnSignIn_asksTheBackendItselfWhereTheRouteLands_followingOneSameOriginRedirect() {
+        record Row(String pathPrefix, String rootRedirect, String firstUrl) {}
+        for (Row row : List.of(
+                new Row(null, null, "http://192.168.3.50:9000/"),
+                new Row(null, "/dashboard", "http://192.168.3.50:9000/dashboard"),
+                new Row("/api", null, "http://192.168.3.50:9000/api"))) {
+            ReverseProxyRoute route = versionRoute(null, null).toBuilder()
+                .pathPrefix(row.pathPrefix()).rootRedirectPath(row.rootRedirect()).build();
+            List<String> asked = new ArrayList<>();
+            ForProbingServiceSignIn prober = url -> {
+                asked.add(url);
+                return Optional.of(asked.size() == 1
+                    ? new ServiceProbeAnswer(302, null, "/admin/", "text/html", "")
+                    : new ServiceProbeAnswer(302, null, "/admin/login", "text/html", ""));
+            };
+
+            OwnSignIn signIn = route.detectOwnSignIn(prober, NOW);
+
+            assertThat(asked).as(row.firstUrl()).containsExactly(row.firstUrl(), "http://192.168.3.50:9000/admin/");
+            assertThat(signIn.kind()).isEqualTo(OwnSignIn.Kind.SIGN_IN_PAGE);
+        }
     }
 
     private static ReverseProxyRoute versionRoute(String endpoint, String property) {

@@ -121,3 +121,17 @@ Some services keep a login of their own behind social login — openHAB's API, s
 **openHAB** accepts basic auth only once it is allowed: **Settings → API Security → Allow Basic Authentication**. A credential the service rejects answers 401, which the social chain turns into the sign-in page — if signing in loops, check the username and password.
 
 **Storage.** Credentials live in `./vaier/config/service-credentials.yml` (mode `0600`), passwords sealed by the same cipher as the host credentials. Vaier reads the file once and answers every request from memory. Passwords are write-only: the console shows only the username and a Clear or Remove. Unpublishing a service's last route forgets its credentials, and revoking a person forgets theirs. Like access rules, credentials key on the service's host, so path-scoped services that share a host share them.
+
+## What a service asks for by itself
+
+Vaier looks at each published service's own sign-in, so the service pane can tell you what to do about it. It asks the **backend itself** — the address and port the route points at, over the tunnel, exactly where the version probe goes — never the public name, which would only show Vaier's own sign-in. One plain GET of where a visitor lands (the path prefix, else the root redirect, else `/`), three-second timeout, and at most one redirect followed, and only back to the same backend. Vaier reads the answer as one of:
+
+- **Basic auth** — a `401` with a `WWW-Authenticate: Basic` challenge. A service credential can answer it; with none set, the pane says so and points at the field.
+- **Another challenge** — a `401` with `Bearer`, `Digest` or anything else. Vaier names it and says it cannot sign in for people.
+- **Its own sign-in page** — a password field, a page that offers a sign-in, or a redirect to a sign-in path. People sign in to it after Vaier's; the pane says so in one quiet line.
+- **None** — a real page with nothing sign-in-like on it.
+- **Unknown** — no answer, an error, a redirect elsewhere, a page that is only a shell a script fills in, or anything that is not a web page. Unknown is never read as none.
+
+**OpenSprinkler** is recognised by its root page: `ipas=0` means it still enforces its own password, and behind Vaier's sign-in the pane suggests turning on **Ignore password** in the controller's options.
+
+The look rides the state-refresh round that already runs every 30 seconds: a service is looked at when it is first seen, again after an edit, and otherwise every ten minutes. When what a service asks for changes, the pane updates by itself. Nothing is stored — a restart simply looks again.

@@ -7,12 +7,14 @@ import lombok.ToString;
 
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerIds;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -719,6 +721,32 @@ public class ReverseProxyRoute {
     public Optional<String> probeVersion(ForProbingServiceVersion prober) {
         if (!hasVersionEndpoint()) return Optional.empty();
         return prober.probeVersion(versionProbeUrl(), versionProperty);
+    }
+
+    /** Whether this route leads to a web backend of Vaier's own publishing, whose sign-in Vaier can look at. */
+    public boolean hasOwnSignInToDetect() {
+        return isVaierManaged() && !stream && !isOauth2EndpointsRouter();
+    }
+
+    /**
+     * What this route's backend asks for by itself, asked at its {@link #originUrl} — never through Traefik,
+     * which would only show Vaier's own sign-in. One same-origin redirect is followed; the rest is the
+     * domain's reading of the answer.
+     */
+    public OwnSignIn detectOwnSignIn(ForProbingServiceSignIn prober, Instant now) {
+        String first = originUrl() + ownSignInPath();
+        Optional<ServiceProbeAnswer> answer = prober.probe(first);
+        Optional<ServiceProbeAnswer> landed = OwnSignIn.followOnce(first, answer).map(prober::probe).orElse(answer);
+        return OwnSignIn.classify(landed, now);
+    }
+
+    /** Where a visitor lands: the path prefix, else the root redirect, else the root. */
+    private String ownSignInPath() {
+        String path = pathPrefix != null ? pathPrefix : rootRedirectPath;
+        if (path == null || path.isBlank()) {
+            return "/";
+        }
+        return path.startsWith("/") ? path : "/" + path;
     }
 
     public String displayName(String baseDomain, List<DockerService> localServices,

@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.DetectOwnSignInsUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachinesUseCase;
@@ -45,6 +46,7 @@ public class StateRefreshScheduler {
     private final NotifyAdminsOfContainerTroubleUseCase containerNotifier;
     // Only ever asked when something actually moved: a name is for a mail, and a healthy fleet sends none.
     private final GetMachinesUseCase machines;
+    private final DetectOwnSignInsUseCase ownSignIns;
 
     @Scheduled(fixedDelay = 30_000, initialDelay = 5_000)
     public void refresh() {
@@ -53,6 +55,7 @@ public class StateRefreshScheduler {
         refreshStep("LAN server reachability", lanServerReachability::refreshAll);
         refreshStep("launchpad version probes", launchpadVersions::refreshLaunchpadVersions);
         refreshStep("container standings", this::judgeContainerStandings);
+        refreshStep("own sign-in detection", ownSignIns::detectOwnSignIns);
     }
 
     /**

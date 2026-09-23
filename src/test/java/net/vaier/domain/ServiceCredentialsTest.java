@@ -39,6 +39,9 @@ class ServiceCredentialsTest {
         assertThat(credentials.credentialFor("plex.example.com", "turid@example.com")).isEmpty();
         assertThat(credentials.withoutShared(OPENHAB).credentialFor(OPENHAB, "geir@example.com"))
             .as("neither: nothing is handed on").isEmpty();
+        assertThat(credentials.withoutShared(OPENHAB).hasAnyFor("OpenHAB.example.com"))
+            .as("a personal one alone still counts").isTrue();
+        assertThat(credentials.hasAnyFor("plex.example.com")).isFalse();
     }
 
     @Test

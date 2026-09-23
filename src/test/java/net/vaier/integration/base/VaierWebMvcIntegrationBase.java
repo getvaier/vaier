@@ -207,6 +207,9 @@ public abstract class VaierWebMvcIntegrationBase {
     protected GetPublishableServicesUseCase getPublishableServicesUseCase;
 
     @MockBean
+    protected GetOwnSignInsUseCase getOwnSignInsUseCase;
+
+    @MockBean
     protected DeletePublishedServiceUseCase deletePublishedServiceUseCase;
 
     @MockBean
