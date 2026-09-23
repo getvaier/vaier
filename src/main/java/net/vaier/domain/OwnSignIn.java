@@ -60,7 +60,8 @@ public record OwnSignIn(Kind kind, String detail, String app, Instant observedAt
     private static final Pattern OPENSPRINKLER_PASSWORD = Pattern.compile("\\bipas=([01])\\b");
     private static final Pattern SCRIPT_OR_STYLE = Pattern.compile(
         "<(script|style)[^>]*>.*?</\\1>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-    private static final Pattern TAG = Pattern.compile("<[^>]*>");
+    // A quoted attribute may hold a `>` (Portainer's ng-class does); the tag ends at the first one outside quotes.
+    private static final Pattern TAG = Pattern.compile("<(?:[^>\"']|\"[^\"]*\"|'[^']*')*>");
 
     public static OwnSignIn classify(Optional<ServiceProbeAnswer> probed, Instant at) {
         if (probed.isEmpty()) {

@@ -48,6 +48,14 @@ class OwnSignInTest {
                 new Row("an app shell that draws itself in script",
                     answer(200, null, null, HTML, "<html><body><app-root></app-root><script src=\"main.js\"></script></body></html>"),
                     Kind.UNKNOWN, null, null),
+                // Portainer, 2026-09-23: a `>` inside a quoted attribute ended the tag early, the template code
+                // read as page text, and a login-guarded shell was mailed as an open service.
+                new Row("an app shell whose attribute holds a >", answer(200, null, null, HTML,
+                    "<html><body><div id=\"page-wrapper\" ng-class=\"{ open: isSidebarOpen() && "
+                        + "['portainer.init.admin'].indexOf($state.current.name) === -1, nopadding: "
+                        + "['portainer.logout'].indexOf($state.current.name) > -1 || applicationState.loading }\">"
+                        + "Loading Portainer...</div></body></html>"),
+                    Kind.UNKNOWN, null, null),
                 new Row("not a web page", answer(200, null, null, "application/json", "{\"ok\":true}"),
                     Kind.UNKNOWN, null, null),
                 new Row("forbidden", answer(403, null, null, HTML, realContent), Kind.UNKNOWN, null, null),
