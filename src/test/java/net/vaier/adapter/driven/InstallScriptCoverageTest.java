@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import net.vaier.domain.SelfUpdateScript;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -208,6 +209,17 @@ class InstallScriptCoverageTest {
                     .isGreaterThan(2);
             }
         }
+    }
+
+    @Test
+    void theSelfUpdateBacksUpExactlyWhatInstallScriptFetches_andCanFetchItAtACommit() throws Exception {
+        // #343: the self-update runs the target commit's install.sh, and backs up RUNTIME_PATHS first so a
+        // rollback can put them back. A path fetched but not backed up would survive a rollback new.
+        assertThat(SelfUpdateScript.RUNTIME_PATHS).containsExactlyElementsOf(installScriptRuntimePaths());
+        // refs/heads/<ref> only names a branch; the update pins the commit its image was built from.
+        assertThat(Files.readString(Path.of("install.sh")))
+            .contains("tar.gz/${REF}")
+            .doesNotContain("refs/heads");
     }
 
     @Test

@@ -24,6 +24,11 @@ COPY --from=build --chown=1000:1000 /app/target/*.jar app.jar
 # has nothing to offer — FilesystemAndroidAppAdapter reads the absence as "no app", never as an error.
 COPY --chown=1000:1000 apk/ /app/apk/
 EXPOSE 8080
+# The commit this image was built from: the self-update fetches the runtime files from the same one.
+# Empty on a local build, which the self-update reads as "leave the runtime files alone". Last, so a
+# new commit does not bust the cache of the layers above.
+ARG VAIER_REVISION=
+LABEL org.opencontainers.image.revision="${VAIER_REVISION}"
 # Entrypoint starts as root (so setpriv can manage caps), uses cap_add: NET_ADMIN
 # from compose, adds NET_ADMIN to inheritable+ambient sets (so it transfers to ip
 # spawned by Java's ProcessBuilder), then drops to UID 1000 before exec'ing java.

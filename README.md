@@ -138,6 +138,8 @@ docker compose up -d
 
 It is safe to re-run: it refreshes the compose file and the assets the stack bind-mounts, leaves your `.env` untouched, and adds any secret a newer release generates but your `.env` predates. There is no DNS record to add and nothing to edit.
 
+Or press **Settings → Update Vaier**, which does the same and rolls it all back if the new Vaier doesn't answer. See [Monitoring](docs/MONITORING.md#updating-vaier-itself).
+
 If `docker compose up -d` stops with something like
 
 ```

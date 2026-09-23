@@ -18,7 +18,7 @@
 # .env without it, and compose now refuses to start rather than interpolate an empty one (see the
 # ${VAIER_..._SECRET:?} guards in docker-compose.yml). Re-running here is what clears that.
 #
-# Override the ref (branch or tag) with VAIER_REF, e.g. VAIER_REF=v1.2.3.
+# Override the ref (branch, tag or commit) with VAIER_REF, e.g. VAIER_REF=v1.2.3.
 set -euo pipefail
 
 REPO="${VAIER_REPO:-getvaier/vaier}"
@@ -28,7 +28,9 @@ REF="${VAIER_REF:-main}"
 # plus every committed asset tree it bind-mounts. Everything else (wireguard/config, traefik/config,
 # vaier/config, geoip, dex/config, oauth2/config, icons, acme) is created at runtime by an init
 # container or named volume, so it must NOT be fetched here. Keep this list in sync with the compose
-# file's bind mounts — InstallScriptCoverageTest fails the build if it drifts.
+# file's bind mounts — InstallScriptCoverageTest fails the build if it drifts. Vaier's self-update runs
+# this script at the commit its new image was built from, after backing up these same paths
+# (SelfUpdateScript.RUNTIME_PATHS, held equal to this list by the same test).
 RUNTIME_PATHS=(
   docker-compose.yml
   offline
@@ -76,7 +78,7 @@ for p in "${RUNTIME_PATHS[@]}"; do
   tar_members+=( "*/${p}" )
 done
 
-curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${REF}" \
+curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/${REF}" \
   | tar -xz --strip-components=1 --wildcards "${tar_members[@]}" \
   || die "Failed to fetch runtime files — check the ref (VAIER_REF='${REF}'), your network, and that no
    target dir is root-owned from an earlier 'docker compose up' (see the writability check above)."
