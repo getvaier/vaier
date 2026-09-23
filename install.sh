@@ -98,7 +98,9 @@ else
 VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
 
-# Social sign-in. Register redirect URI https://dex.<VAIER_DOMAIN>/callback for each provider.
+# Social sign-in — optional, and it can wait. With none configured the stack opens a first-run
+# door: 'docker compose logs vaier' prints a one-account password, and that first sign-in becomes
+# the admin. Register redirect URI https://dex.<VAIER_DOMAIN>/callback for each provider you add.
 #   Google — https://console.cloud.google.com/apis/credentials
 #   GitHub — https://github.com/settings/developers
 VAIER_OIDC_GOOGLE_CLIENT_ID=
@@ -106,8 +108,8 @@ VAIER_OIDC_GOOGLE_CLIENT_SECRET=
 VAIER_OIDC_GITHUB_CLIENT_ID=
 VAIER_OIDC_GITHUB_CLIENT_SECRET=
 
-# The email that becomes the first admin.
-VAIER_ADMIN_EMAIL=you@gmail.com
+# The email that becomes the first admin (optional: the first-run door uses ACME_EMAIL if blank).
+VAIER_ADMIN_EMAIL=
 
 # The zone Vaier reads local time in (the nightly backup hour is this zone, not UTC). Defaults to UTC.
 VAIER_TZ=UTC
@@ -142,10 +144,13 @@ cat <<EOF
 
 $(say "Done.")
 Next:
-  1. Edit .env       — set your domain, admin email, and OAuth client ids/secrets.
+  1. Edit .env       — set your domain and Let's Encrypt email; nothing else is required.
                        (every auto-generated secret is already filled in for you.)
   2. Point DNS       — one record, once:  *.<domain>  A  <this server's public IP>
   3. Start the stack — docker compose up -d
+  4. Sign in         — docker compose logs vaier   prints the first-run password at the bottom;
+                       that first sign-in becomes the admin. Add Google or GitHub whenever you
+                       want to invite anyone else.
 
 Upgrading an existing install? Steps 1 and 2 are already done — just: docker compose up -d
 EOF

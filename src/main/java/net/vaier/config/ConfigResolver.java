@@ -22,6 +22,7 @@ public class ConfigResolver {
     private int diskMonitorThresholdPercent;
     private int backupScheduleHour;
     private String googleClientId;
+    private String githubClientId;
 
     @Autowired
     public ConfigResolver(ForPersistingAppConfiguration configPersistence) {
@@ -45,6 +46,7 @@ public class ConfigResolver {
         this.diskMonitorThresholdPercent = config.effectiveDiskMonitorThresholdPercent();
         this.backupScheduleHour = config.effectiveBackupScheduleHour();
         this.googleClientId = envLookup.apply("VAIER_OIDC_GOOGLE_CLIENT_ID");
+        this.githubClientId = envLookup.apply("VAIER_OIDC_GITHUB_CLIENT_ID");
         if (domain != null) {
             log.info("Configuration resolved for domain: {}", domain);
         }
@@ -66,10 +68,10 @@ public class ConfigResolver {
     /** The hour of day (0–23) at which Vaier-owned nightly fleet-backup scheduling fires due jobs. */
     public int getBackupScheduleHour() { return backupScheduleHour; }
     /**
-     * Whether social login (#305) is configured: true once a Google OAuth client id is present. When
-     * false, the {@code social} auth mode isn't offered in the UI and oauth2-proxy need not run.
+     * Whether social login (#305) is configured: true once either provider's OAuth client id is
+     * present (#332 made each optional). When false the stack is on its first-run password.
      */
     public boolean isSocialAuthAvailable() {
-        return googleClientId != null && !googleClientId.isBlank();
+        return firstNonBlank(googleClientId, githubClientId) != null;
     }
 }

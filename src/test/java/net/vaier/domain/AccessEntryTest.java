@@ -179,6 +179,7 @@ class AccessEntryTest {
         AccessEntry e = AccessEntry.builder().email("a@e.com").role(Role.USER).groups(List.of()).build();
         assertThat(e.resolvedProvider("  Google ")).isEqualTo("google");
         assertThat(e.resolvedProvider("GITHUB")).isEqualTo("github");
+        assertThat(e.resolvedProvider("local")).as("Dex's first-run password connector").isEqualTo("local");
     }
 
     @Test

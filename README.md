@@ -25,7 +25,7 @@ Each row is the short version. The linked page carries the mechanism, the caveat
 | **Wildcard DNS** | One `*.yourdomain.com` record, made once, covers the console, sign-in, and every service you ever publish. Vaier checks it at every boot. → [Networking](docs/NETWORKING.md#wildcard-dns) |
 | **Reverse proxy & edge hardening** | Traefik terminates HTTPS with Let's Encrypt, enforces a security-header and TLS floor on every route, and shows a branded offline page when a backend is down. CrowdSec blocks malicious traffic at the edge; every block is listed in the Explorer, one click to lift it or trust the address. → [Networking](docs/NETWORKING.md#edge-hardening) |
 | **Service publishing & launchpad** | Publish any container's web interface in one click. A port that isn't a website — MQTT, a database — is published as a **stream** on the same HTTPS port. The launchpad shows each visitor only what they may reach. → [Networking](docs/NETWORKING.md#publishing-a-service) |
-| **Access management** | Google or GitHub sign-in via oauth2-proxy and Dex, with roles (pending → user → admin) and per-service access groups. → [Auth](docs/AUTH.md) |
+| **Access management** | Day one needs no OAuth app: sign in with the first-run password Vaier prints in its own log, and that first sign-in becomes the admin. Add Google or GitHub sign-in to invite others, with roles (pending → user → admin) and per-service access groups. → [Auth](docs/AUTH.md) |
 | **The Vaier app** | A phone joins without the WireGuard app: it makes its own key, shows a four-digit join code, and connects the moment you let it in from any browser you're signed in on. The private key never leaves the phone. Get the app from your own Vaier's launchpad. → [Networking](docs/NETWORKING.md#enrolment-from-the-vaier-app) |
 | **Explorer** | One address space for the whole fleet: files, containers, services, disks and backup archives, with selection and transfer across machines and a link for every place you stand. Each machine's card says what it can do and where it stands. An in-app Concepts glossary explains every term you meet. → [Explorer](docs/EXPLORER.md) |
 | **Map** | Every machine plotted honestly: a device's own reported position beats an ISP estimate, a disconnected device with nothing reported draws no marker, and an open marker shows where that device has been over the last 30 days. → [Explorer](docs/EXPLORER.md#map) |
@@ -110,12 +110,9 @@ Step 1 already created `.env` with three secrets generated for you. Open it and 
 ```ini
 VAIER_DOMAIN=yourdomain.com
 ACME_EMAIL=you@yourdomain.com
-VAIER_OIDC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-VAIER_OIDC_GOOGLE_CLIENT_SECRET=...
-VAIER_ADMIN_EMAIL=you@gmail.com
 ```
 
-At least one sign-in provider — Google and/or GitHub — is required; the full registration walkthrough (OAuth client setup, redirect URIs, GitHub as an alternative or an addition) is in [`docs/AUTH.md`](docs/AUTH.md). `VAIER_ADMIN_EMAIL` becomes the first admin on first login.
+Those two are all Vaier needs before the first `docker compose up -d`. A sign-in provider — Google and/or GitHub — is optional and can come later, whenever you want to invite anyone else; the registration walkthrough is in [`docs/AUTH.md`](docs/AUTH.md). `VAIER_ADMIN_EMAIL` is optional too: set it and the first-run account uses that address instead of `admin@yourdomain.com`.
 
 ### 4. Start the stack and sign in
 
@@ -123,7 +120,7 @@ At least one sign-in provider — Google and/or GitHub — is required; the full
 docker compose up -d
 ```
 
-Once `docker compose ps` shows every service `Up`, open `https://vaier.yourdomain.com` and sign in with your admin account. Anyone else who signs in lands as **pending** until you approve them on the **Users** page.
+Once `docker compose ps` shows every service `Up`, run `docker compose logs vaier` and read the **first-run password** from the bordered block at the bottom: it gives the console URL, the email and the password. Open `https://vaier.yourdomain.com`, press **Sign in with the first-run password**, and sign in — that first sign-in becomes the admin. Anyone who signs in after that lands as **pending** until you approve them on the **Users** page. What the first-run door is, and how configuring a provider closes it, is in [`docs/AUTH.md`](docs/AUTH.md).
 
 From here: add your machines and publish their services from the **Explorer** — see [`docs/NETWORKING.md`](docs/NETWORKING.md). Want to ask Vaier about your fleet instead of clicking through it? Paste your own Anthropic API key under **Settings** and the **Chat** pane appears in the **Vaier** menu — see [`docs/CHAT.md`](docs/CHAT.md). For optional environment variables, secret-file hardening, and other advanced topics, see [`docs/ADVANCED.md`](docs/ADVANCED.md).
 

@@ -3,11 +3,13 @@ package net.vaier.rest;
 import java.util.List;
 import java.util.Optional;
 import net.vaier.application.AuditReverseProxyConfigUseCase;
+import net.vaier.application.GetFirstRunPasswordUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.config.SetupStateHolder;
 import net.vaier.config.WildcardDnsStatusHolder;
+import net.vaier.domain.FirstRunPassword;
 import net.vaier.domain.ReverseProxyAudit;
 import net.vaier.domain.ReverseProxyAuditTracker;
 import net.vaier.domain.ReverseProxyConfig;
@@ -42,6 +44,7 @@ class StartupLifecycleRunnerTest {
     @Mock SyncLanRoutesUseCase syncLanRoutesUseCase;
     @Mock AuditReverseProxyConfigUseCase reverseProxyAudit;
     @Mock NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
+    @Mock GetFirstRunPasswordUseCase getFirstRunPasswordUseCase;
     @Mock ApplicationReadyEvent event;
 
     private StartupLifecycleRunner runner() {
@@ -54,7 +57,8 @@ class StartupLifecycleRunnerTest {
             configResolver,
             syncLanRoutesUseCase,
             reverseProxyAudit,
-            reverseProxyAuditNotifier
+            reverseProxyAuditNotifier,
+            getFirstRunPasswordUseCase
         );
     }
 
@@ -83,6 +87,19 @@ class StartupLifecycleRunnerTest {
         runner().handle(event);
 
         verify(syncLanRoutesUseCase).syncLanRoutes();
+    }
+
+    @Test
+    void asksForTheFirstRunPassword_onceTheLifecycleHasRun_soItsBannerIsTheLastThingInTheBootLog() {
+        configured();
+        when(dnsResolver.resolveAddresses(any())).thenReturn(List.of("52.29.74.114"));
+        when(publicHostResolver.resolvePublicIp()).thenReturn(Optional.of("52.29.74.114"));
+        when(getFirstRunPasswordUseCase.firstRunPassword())
+            .thenReturn(Optional.of(new FirstRunPassword("you@example.com", "abc")));
+
+        runner().handle(event);
+
+        verify(getFirstRunPasswordUseCase).firstRunPassword();
     }
 
     @Test

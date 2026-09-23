@@ -17,6 +17,48 @@ class AccessRosterTest {
         return AccessEntry.builder().email(email).role(role).groups(List.of()).build();
     }
 
+    // --- claimsFirstAdmin: the first-run claim (#264) ---
+
+    @Test
+    void claimsFirstAdmin_onlyForASignInThroughTheLocalConnector_whileNoAdminExists() {
+        record Row(List<AccessEntry> entries, String provider, boolean claims) {}
+        List<AccessEntry> nobody = List.of();
+        List<AccessEntry> someAdmin = List.of(entry("boss@example.com", Role.ADMIN));
+        List<AccessEntry> onlyPending = List.of(entry("new@example.com", Role.PENDING));
+        for (Row row : List.of(
+                new Row(nobody, "local", true),
+                new Row(nobody, " Local ", true),
+                new Row(onlyPending, "local", true),      // pending entries are not admins; the store is still unclaimed
+                new Row(nobody, "google", false),         // a provider sign-in never claims: that is the pending path
+                new Row(nobody, null, false),
+                new Row(someAdmin, "local", false))) {    // once an admin exists the door is closed, whoever knocks
+            assertThat(new AccessRoster(row.entries()).claimsFirstAdmin(row.provider()))
+                .as("%s via %s", row.entries(), row.provider()).isEqualTo(row.claims());
+        }
+    }
+
+    // --- needsConfiguredAdmin: who can still reach the console (#264 handover) ---
+
+    @Test
+    void needsConfiguredAdmin_whenNoAdminCanStillSignIn() {
+        record Row(List<AccessEntry> entries, boolean providerConfigured, boolean needs, boolean lockedOut) {}
+        AccessEntry firstRunAdmin = entry("admin@example.com", Role.ADMIN).toBuilder().provider("local").build();
+        AccessEntry googleAdmin = entry("you@gmail.com", Role.ADMIN).toBuilder().provider("google").build();
+        AccessEntry seededAdmin = entry("owner@gmail.com", Role.ADMIN);
+        for (Row row : List.of(
+                new Row(List.of(), false, true, false),                      // never had an admin: expected, not locked out
+                new Row(List.of(), true, true, false),
+                new Row(List.of(firstRunAdmin), false, false, false),        // the first-run door is still open
+                new Row(List.of(firstRunAdmin), true, true, true),           // a provider closed it: locked out
+                new Row(List.of(firstRunAdmin, googleAdmin), true, false, false),
+                new Row(List.of(firstRunAdmin, seededAdmin), true, false, false))) { // seeded, never signed in: may yet
+            AccessRoster roster = new AccessRoster(row.entries());
+            String label = row.entries() + ", provider configured: " + row.providerConfigured();
+            assertThat(roster.needsConfiguredAdmin(row.providerConfigured())).as(label).isEqualTo(row.needs());
+            assertThat(roster.isLockedOut(row.providerConfigured())).as(label).isEqualTo(row.lockedOut());
+        }
+    }
+
     // --- adminCount ---
 
     @Test

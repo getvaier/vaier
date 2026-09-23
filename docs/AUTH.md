@@ -6,23 +6,46 @@ How sign-in is set up, how roles and per-service access rules work, and how the 
 
 ---
 
-## Setting up sign-in (Google and/or GitHub)
+## Setting up sign-in
 
-Vaier delegates authentication to Google and/or GitHub and owns authorization itself. oauth2-proxy (mandatory infrastructure — it always starts with the stack) is the forward-auth gatekeeper; behind it, the **Dex** identity broker federates whichever provider(s) you configure:
+Vaier delegates authentication to Google and/or GitHub — or, until you have registered either, to a **first-run password** of its own — and owns authorization itself. oauth2-proxy (mandatory infrastructure — it always starts with the stack) is the forward-auth gatekeeper; behind it, the **Dex** identity broker federates whichever provider(s) you configure:
 
 ```
 Traefik → oauth2-proxy → Dex ─┬→ Google
-                              └→ GitHub
+                              ├→ GitHub
+                              └→ local (the first-run password, while no provider exists)
 ```
 
-Each provider is independently optional — configure Google, GitHub, or both. `dex-init` only adds a connector for a provider once both its client id and its client secret are set; **at least one provider is required**, or the stack refuses to start Dex (rather than starting it with no way to sign in). With only one provider configured, Dex skips its connector-selection screen and sign-in goes straight there.
+### The first-run password, before you have registered anything
 
-Configure the providers you want — at least one. The sign-in page offers a button per configured provider, so an install with only Google credentials never shows a GitHub button. Both providers hand the user back to **Dex** (not oauth2-proxy), so register their redirect URIs at Dex:
+Registering an OAuth app is the slowest thing between a fresh server and a working console, and it is a poor first task: you don't yet know whether the rest of the stack came up. So a stack with **no provider configured at all** doesn't refuse to start — it opens one door, for one account.
+
+`dex-init` mints a **first-run password** and hands it to Dex's own local connector, bcrypt-hashed, as the single account it knows. The account's email is `VAIER_ADMIN_EMAIL` if you set one, otherwise your `ACME_EMAIL` — your own address, which matters for the handover below — and only as a last resort `admin@yourdomain.com`. Vaier reads the password back and prints it at the bottom of its own boot log:
+
+```bash
+docker compose logs vaier
+```
+
+The bordered block there gives the console URL, the email and the password. Open the console, press **Sign in with the first-run password** — the only button on the sign-in page while no provider exists — and sign in.
+
+That sign-in is the **first-run claim**: while the access store holds no admin, an identity arriving through the local connector *becomes* the admin, so you land straight in the console with nothing pre-seeded. Once an admin exists the claim is spent; a local sign-in for some other email lands as **pending** like anyone else.
+
+The password is minted once and kept across restarts in `./vaier/config/first-run-password` (owner `1000`, mode `0600`), so `docker compose up -d` doesn't change it under you. Reading it means having a shell on the server, which is the boundary the door leans on — anyone who can read that log could already read every secret in the stack.
+
+**The door closes on its own.** The moment either provider's client id *and* secret are set and the stack is brought up again, `dex-init` writes no password database, deletes the file, and strips the button from the sign-in page. So the first-run door is exactly as old as the gap it fills. Nothing in the UI adds a provider yet: you put the credentials in `.env` and run `docker compose up -d`, as below.
+
+**Handing over to a provider.** Sign in with Google or GitHub under the *same* email the first-run account used, and you are the admin you already were — which is why the account defaults to `ACME_EMAIL`. If you sign in under a different address, set `VAIER_ADMIN_EMAIL` to it before bringing the stack up: once a provider exists and every admin is a first-run account that can no longer sign in, Vaier restores that email to admin on startup. With neither, Vaier's log says so as an error, naming the fix, rather than leave you to find a console nobody can open.
+
+### Registering Google or GitHub
+
+Each provider is independently optional — configure Google, GitHub, both, or (until you want to invite anyone) neither. `dex-init` only adds a connector for a provider once both its client id and its client secret are set. With only one provider configured, Dex skips its connector-selection screen and sign-in goes straight there.
+
+Configure the providers you want. The sign-in page offers a button per configured provider, so an install with only Google credentials never shows a GitHub button. Both providers hand the user back to **Dex** (not oauth2-proxy), so register their redirect URIs at Dex:
 
 - **Google** — create an OAuth 2.0 Web application client in the [Google Cloud console](https://console.cloud.google.com/apis/credentials), set its authorized redirect URI to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GOOGLE_CLIENT_ID` / `VAIER_OIDC_GOOGLE_CLIENT_SECRET`.
 - **GitHub** — register an OAuth App in [GitHub developer settings](https://github.com/settings/developers), set its authorization callback URL to `https://dex.yourdomain.com/callback`, and put the client id and secret in `.env` as `VAIER_OIDC_GITHUB_CLIENT_ID` / `VAIER_OIDC_GITHUB_CLIENT_SECRET`. Any GitHub account may sign in — Vaier's pending → admin-approval gate decides who's actually let in.
 
-Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin. Three secrets are **generated for you by `install.sh`** into `.env` — you don't author any of them: the oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`), the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`), and the CrowdSec bouncer API key (`VAIER_CROWDSEC_BOUNCER_KEY`).
+Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin — optional, but it is also what names the first-run account, and it is the identity Vaier restores to admin whenever the store has none. Three secrets are **generated for you by `install.sh`** into `.env` — you don't author any of them: the oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`), the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`), and the CrowdSec bouncer API key (`VAIER_CROWDSEC_BOUNCER_KEY`).
 
 If you hand-write `.env`, generate all three — a missing one now stops `docker compose` at config-parse time with a message naming the variable, rather than starting the stack in a broken state. That guard matters most for the bouncer key: its forward-auth sits ahead of every other middleware and fails closed, so an empty value takes down *every* route, console included — not just the service it belongs to.
 
@@ -33,7 +56,7 @@ printf 'VAIER_DEX_CLIENT_SECRET=%s\nVAIER_OAUTH2_COOKIE_SECRET=%s\nVAIER_CROWDSE
 
 Re-running `install.sh` in place does the same thing and is the simpler answer — it tops up whatever your `.env` is missing and never overwrites a value you set.
 
-Once `docker compose ps` shows every service as `Up`, open `https://vaier.yourdomain.com` and sign in with the account you set as `VAIER_ADMIN_EMAIL`. Vaier seeds that identity as the first admin, so you land straight in the console.
+Once `docker compose ps` shows every service as `Up`, open `https://vaier.yourdomain.com` and sign in with the account you set as `VAIER_ADMIN_EMAIL`. Vaier seeds that identity as the first admin, so you land straight in the console. (If you came in through the first-run password, you are already the admin and nothing is seeded.)
 
 Anyone else who signs in for the first time is recorded as a **pending** access request — authenticated but blocked until you approve them on the **Users** page. Promote them to **user** (or **admin**) there.
 
@@ -43,13 +66,13 @@ The oauth2-proxy sign-in and error pages — and the Dex broker's own screens �
 
 ## Access management
 
-Manage who can sign in from the **Users** page: each Google or GitHub identity is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. Each person's card shows their provider photo (GitHub picture, else Gravatar, else a coloured monogram) with a small corner glyph for the identity provider (Google or GitHub) they last signed in with.
+Manage who can sign in from the **Users** page: each signed-in identity — Google, GitHub, or the first-run account — is an access entry with a **role** (pending → user → admin) and free-form per-service **access groups**. Approve or deny newcomers, promote admins, and gate individual services by group. Each person's card shows their provider photo (GitHub picture, else Gravatar, else a coloured monogram) with a small corner glyph for the connector they last signed in with — Google, GitHub, or the first-run password.
 
 When someone signs in for the first time, Vaier records them as a **pending** access request (authenticated but blocked) and denies access until an admin approves them. The moment that pending entry is created, Vaier emails every admin so the request doesn't sit unseen — the mail names the email and links straight to the **Users** page to approve or deny. It reuses the same SMTP configuration as the other alerts, so with SMTP unconfigured (or no admins to notify) it stays silent, and the send is fire-and-forget so it never slows the sign-in check.
 
 Admin-vs-user is decided **only by the role** (pending → user → admin) — promote an entry with the role control. **Access groups** are a separate, per-service concept: free-form tags (e.g. `devs`, `family`) that gate individual services. Each Social service can carry an **access rule** — a set of *allowed groups* — and a user reaches the service if their entry holds **at least one** of them (any-of). Admins reach everything; pending identities reach nothing. The names `admins` and `users` are never access groups; the group picker won't suggest or accept them.
 
-The console is admin-only, so Vaier keeps a **last-admin protection** invariant: the access store always holds at least one admin. Revoking or demoting the sole remaining admin is refused (the Access page disables those controls with an inline note, and the API answers `409 Conflict`), and on startup the configured administrator (`VAIER_ADMIN_EMAIL`) is restored to admin whenever no admin exists — promoting an existing entry in place or creating one — so the console can never be locked out for everyone.
+The console is admin-only, so Vaier keeps a **last-admin protection** invariant: the access store always holds at least one admin. Revoking or demoting the sole remaining admin is refused (the Access page disables those controls with an inline note, and the API answers `409 Conflict`), and on startup the configured administrator (`VAIER_ADMIN_EMAIL`, when one is set) is restored to admin whenever no admin exists — promoting an existing entry in place or creating one — so the console can never be locked out for everyone.
 
 Vaier also captures each identity's Google **display name** (the provider's `name` claim, forwarded by oauth2-proxy) and shows it on the **Users** page with the email beneath it — so an admin recognises who's asking by name, not just by address. A pre-approved entry stays nameless until its first sign-in fills the name in; later sign-ins keep it current, and it's never wiped if a sign-in arrives without one. The same captured name follows the identity into the Vaier console — which always runs on Social login — greeting them in the topbar with their provider photo when one is available (the same GitHub-picture-else-Gravatar chain as the Users cards), falling back to their name text (or email until a name is known) when no photo loads.
 

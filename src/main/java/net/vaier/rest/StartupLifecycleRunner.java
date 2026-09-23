@@ -3,6 +3,7 @@ package net.vaier.rest;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.AuditReverseProxyConfigUseCase;
+import net.vaier.application.GetFirstRunPasswordUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.SyncLanRoutesUseCase;
 import net.vaier.config.ConfigResolver;
@@ -50,6 +51,7 @@ public class StartupLifecycleRunner {
     private final SyncLanRoutesUseCase syncLanRoutesUseCase;
     private final AuditReverseProxyConfigUseCase reverseProxyAudit;
     private final NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier;
+    private final GetFirstRunPasswordUseCase getFirstRunPasswordUseCase;
 
     public StartupLifecycleRunner(
         ForInitialisingVpnRouting forInitialisingVpnRouting,
@@ -60,7 +62,8 @@ public class StartupLifecycleRunner {
         ConfigResolver configResolver,
         SyncLanRoutesUseCase syncLanRoutesUseCase,
         AuditReverseProxyConfigUseCase reverseProxyAudit,
-        NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier
+        NotifyAdminsOfReverseProxyFindingsUseCase reverseProxyAuditNotifier,
+        GetFirstRunPasswordUseCase getFirstRunPasswordUseCase
     ) {
         this.forInitialisingVpnRouting = forInitialisingVpnRouting;
         this.publicHostResolver = publicHostResolver;
@@ -71,6 +74,7 @@ public class StartupLifecycleRunner {
         this.syncLanRoutesUseCase = syncLanRoutesUseCase;
         this.reverseProxyAudit = reverseProxyAudit;
         this.reverseProxyAuditNotifier = reverseProxyAuditNotifier;
+        this.getFirstRunPasswordUseCase = getFirstRunPasswordUseCase;
     }
 
     @EventListener
@@ -83,6 +87,9 @@ public class StartupLifecycleRunner {
 
         log.info("Application is ready, starting lifecycle...");
         runLifecycle();
+        // Last, so it is the bottom of `docker compose logs vaier` on a first-run stack (#264).
+        getFirstRunPasswordUseCase.firstRunPassword()
+            .ifPresent(p -> log.info(p.banner(configResolver.getDomain())));
     }
 
     public void runLifecycle() {

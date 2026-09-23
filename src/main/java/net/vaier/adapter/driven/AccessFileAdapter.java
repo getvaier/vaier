@@ -4,9 +4,11 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.AccessRoster;
 import net.vaier.domain.Role;
+import net.vaier.config.ConfigResolver;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
 import net.vaier.domain.port.ForResolvingServiceGroup;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -57,12 +59,17 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
     private final String filePath;
     private final Yaml dumper;
 
-    public AccessFileAdapter() {
+    @Autowired
+    public AccessFileAdapter(ConfigResolver configResolver) {
         this(System.getenv().getOrDefault("VAIER_CONFIG_PATH", "/vaier/config"),
-                System.getenv("VAIER_ADMIN_EMAIL"));
+                System.getenv("VAIER_ADMIN_EMAIL"), configResolver.isSocialAuthAvailable());
     }
 
     public AccessFileAdapter(String configDir, String adminEmail) {
+        this(configDir, adminEmail, false);
+    }
+
+    public AccessFileAdapter(String configDir, String adminEmail, boolean providerConfigured) {
         this.filePath = configDir + "/" + FILE_NAME;
 
         DumperOptions options = new DumperOptions();
@@ -71,7 +78,7 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
         options.setIndent(2);
         this.dumper = new Yaml(options);
 
-        ensureConfiguredAdminExists(adminEmail);
+        ensureConfiguredAdminExists(adminEmail, providerConfigured);
     }
 
     /**
@@ -79,7 +86,7 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
      * lock everyone out. Idempotent and self-healing:
      *
      * <ul>
-     *   <li>If any entry is already an admin, do nothing.</li>
+     *   <li>If an admin can still sign in, do nothing — see {@link AccessRoster#needsConfiguredAdmin}.</li>
      *   <li>Otherwise, if {@code VAIER_ADMIN_EMAIL} is set: promote that identity to {@code
      *       role=admin} — preserving its existing groups and name if it already exists as a
      *       non-admin, or creating it with empty groups if it doesn't. The Role alone is the
@@ -88,13 +95,22 @@ public class AccessFileAdapter implements ForPersistingAccessEntries, ForResolvi
      *       there is nothing safe to heal with.</li>
      * </ul>
      */
-    private synchronized void ensureConfiguredAdminExists(String adminEmail) {
-        if (new AccessRoster(getEntries()).adminCount() > 0) {
+    private synchronized void ensureConfiguredAdminExists(String adminEmail, boolean providerConfigured) {
+        AccessRoster roster = new AccessRoster(getEntries());
+        if (!roster.needsConfiguredAdmin(providerConfigured)) {
+            return;
+        }
+        if ((adminEmail == null || adminEmail.isBlank()) && roster.isLockedOut(providerConfigured)) {
+            log.error("Every administrator in {} signed in with the first-run password, which closed when a "
+                    + "sign-in provider was configured — nobody can reach the console. Set VAIER_ADMIN_EMAIL "
+                    + "to the address you sign in with and restart Vaier.", FILE_NAME);
             return;
         }
         if (adminEmail == null || adminEmail.isBlank()) {
-            log.warn("No administrator in {} and VAIER_ADMIN_EMAIL is unset — the console may be "
-                    + "locked out. Set VAIER_ADMIN_EMAIL so an admin can be restored.", FILE_NAME);
+            // Not a warning: on a first-run stack this is the expected state until the first-run
+            // claim, and the banner that says so is a few lines further down the same log.
+            log.info("No administrator in {} yet. The first sign-in with the first-run password claims "
+                    + "the role; set VAIER_ADMIN_EMAIL to seed one instead.", FILE_NAME);
             return;
         }
         String normalised = adminEmail.trim().toLowerCase(java.util.Locale.ROOT);

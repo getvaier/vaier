@@ -579,9 +579,13 @@
         }
 
         // Monochrome provider marks (currentColor, dark disc badge) worn on the corner of the avatar.
-        // Only the two Dex connectors we recognise render a glyph; anything else (or an entry that has
-        // never signed in) renders nothing.
+        // Only the Dex connectors we recognise render a glyph — the two providers and the first-run
+        // password's local account; anything else (or an entry that has never signed in) renders nothing.
         const PROVIDER_GLYPHS = {
+            local: {
+                label: 'the first-run password',
+                svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14a3 3 0 1 0 0 .01zM7 10a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm3.5 1.6 8.8-8.8 1.4 1.4-1.4 1.4 2 2-1.4 1.4-2-2-1.1 1.1 2 2-1.4 1.4-2-2-3.5 3.5a5 5 0 0 0-1.4-1.4z"/></svg>'
+            },
             google: {
                 label: 'Google',
                 svg: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972a6.033 6.033 0 1 1 0-12.064c1.498 0 2.866.549 3.921 1.453l2.814-2.814A9.969 9.969 0 0 0 12.545 2C7.021 2 2.543 6.477 2.543 12s4.478 10 10.002 10c8.396 0 10.249-7.85 9.426-11.748l-9.426-.013z"/></svg>'

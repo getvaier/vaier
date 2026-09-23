@@ -16,7 +16,7 @@ This document covers configuration and workflows beyond the basic Quick Start. I
 | `VAIER_OIDC_GOOGLE_CLIENT_SECRET` | At least one provider required | Google OAuth 2.0 client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
 | `VAIER_OIDC_GITHUB_CLIENT_ID` | At least one provider required | GitHub OAuth App client id — a **Dex** connector uses it for sign-in. Register its callback URL at Dex (`https://dex.<domain>/callback`). Any GitHub account may sign in; the pending → admin-approval gate decides access. Only rendered as a connector — and only offered as a sign-in button — when both `VAIER_OIDC_GITHUB_CLIENT_ID` and `VAIER_OIDC_GITHUB_CLIENT_SECRET` are set |
 | `VAIER_OIDC_GITHUB_CLIENT_SECRET` | At least one provider required | GitHub OAuth App client secret. Written by `dex-init` to a mode-0600 secret file, never inlined |
-| `VAIER_ADMIN_EMAIL` | Yes | The email seeded as the first **admin** access entry, and restored to admin on startup whenever no admin remains, so the console can't lock everyone out |
+| `VAIER_ADMIN_EMAIL` | No | The email seeded as the first **admin** access entry, and restored to admin on startup whenever no admin remains, so the console can't lock everyone out |
 | `VAIER_OAUTH2_COOKIE_SECRET` | Auto | oauth2-proxy session cookie secret — generated automatically into `.env`, not operator-authored |
 | `VAIER_DEX_CLIENT_SECRET` | Auto | oauth2-proxy↔Dex shared client secret — generated automatically into `.env`, not operator-authored |
 | `VAIER_CROWDSEC_BOUNCER_KEY` | Auto | API key the CrowdSec bouncer authenticates to the Security Engine with — generated automatically into `.env`, not operator-authored |

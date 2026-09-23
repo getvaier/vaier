@@ -3,11 +3,13 @@ package net.vaier.application.service;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
+import net.vaier.domain.FirstRunPassword;
 import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
+import net.vaier.domain.port.ForReadingFirstRunPassword;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +47,9 @@ class UserServiceTest {
     @Mock
     ConfigResolver configResolver;
 
+    @Mock
+    ForReadingFirstRunPassword forReadingFirstRunPassword;
+
     @InjectMocks
     UserService service;
 
@@ -55,6 +60,34 @@ class UserServiceTest {
 
     private static AccessEntry accessEntry(String email, Role role, List<String> groups) {
         return AccessEntry.builder().email(email).role(role).groups(groups).build();
+    }
+
+    // --- verify: the first-run claim (#264) — the decision is AccessRoster's; the service persists it ---
+
+    @Test
+    void verify_aLocalSignIn_claimsAdminWhileTheStoreHasNone_andIsPendingLikeAnyoneOnceItHas() {
+        record Row(List<AccessEntry> roster, Role expectedRole, boolean allowed) {}
+        for (Row row : List.of(
+                new Row(List.of(), Role.ADMIN, true),
+                new Row(List.of(accessEntry("boss@example.com", Role.ADMIN, List.of())), Role.PENDING, false))) {
+            reset(forPersistingAccessEntries);
+            when(forPersistingAccessEntries.getEntries()).thenReturn(row.roster());
+            when(forPersistingAccessEntries.findByEmail("you@example.com")).thenReturn(Optional.empty());
+
+            AccessDecision decision = service.verify("you@example.com", "vaier.example.com", null, "local", null);
+
+            assertThat(decision.isAllowed()).as("allowed with %s", row.roster()).isEqualTo(row.allowed());
+            verify(forPersistingAccessEntries, atLeastOnce()).upsert(argThat(e ->
+                    e.getEmail().equals("you@example.com") && e.getRole() == row.expectedRole()));
+        }
+    }
+
+    @Test
+    void firstRunPassword_isWhatThePortReads() {
+        Optional<FirstRunPassword> minted = Optional.of(new FirstRunPassword("you@example.com", "abc"));
+        when(forReadingFirstRunPassword.read()).thenReturn(minted);
+
+        assertThat(service.firstRunPassword()).isSameAs(minted);
     }
 
     // --- verify: unknown identity is auto-created as pending and denied ---

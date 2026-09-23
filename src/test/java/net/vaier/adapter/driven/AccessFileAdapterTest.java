@@ -415,6 +415,17 @@ class AccessFileAdapterTest {
     }
 
     @Test
+    void construction_seedsConfiguredAdminWhenAProviderHasLockedOutEveryFirstRunAdmin() {
+        // #264: the first-run admin can no longer sign in once a provider closes the password door.
+        adapter().upsert(entry("admin@example.com", Role.ADMIN, List.of()).toBuilder().provider("local").build());
+
+        assertThat(new AccessFileAdapter(tempDir.toString(), "owner@gmail.com", false).findByEmail("owner@gmail.com"))
+                .as("door still open: nothing to heal").isEmpty();
+        assertThat(new AccessFileAdapter(tempDir.toString(), "owner@gmail.com", true).findByEmail("owner@gmail.com"))
+                .hasValueSatisfying(e -> assertThat(e.getRole()).isEqualTo(Role.ADMIN));
+    }
+
+    @Test
     void construction_doesNotSeedWhenAdminEmailBlankAndStoreEmpty() {
         AccessFileAdapter a = new AccessFileAdapter(tempDir.toString(), "  ");
 

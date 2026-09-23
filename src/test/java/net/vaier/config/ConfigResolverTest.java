@@ -7,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -94,16 +95,18 @@ class ConfigResolverTest {
     }
 
     @Test
-    void socialAuthAvailable_isTrueOnlyWhenGoogleClientIdIsSet() {
+    void socialAuthAvailable_isTrueOnceEitherProviderHasAClientId() {
         when(configPersistence.load()).thenReturn(Optional.empty());
-
-        assertThat(new ConfigResolver(configPersistence, Map.<String, String>of()::get)
-            .isSocialAuthAvailable()).isFalse();
-        assertThat(new ConfigResolver(configPersistence,
-            Map.of("VAIER_OIDC_GOOGLE_CLIENT_ID", "")::get).isSocialAuthAvailable()).isFalse();
-        assertThat(new ConfigResolver(configPersistence,
-            Map.of("VAIER_OIDC_GOOGLE_CLIENT_ID", "abc.apps.googleusercontent.com")::get)
-            .isSocialAuthAvailable()).isTrue();
+        // #332 made each provider optional; a GitHub-only install signs in fine and must say so.
+        record Row(Map<String, String> env, boolean available) {}
+        for (Row row : List.of(
+                new Row(Map.of(), false),
+                new Row(Map.of("VAIER_OIDC_GOOGLE_CLIENT_ID", ""), false),
+                new Row(Map.of("VAIER_OIDC_GOOGLE_CLIENT_ID", "abc.apps.googleusercontent.com"), true),
+                new Row(Map.of("VAIER_OIDC_GITHUB_CLIENT_ID", "Iv1.abc"), true))) {
+            assertThat(new ConfigResolver(configPersistence, row.env()::get).isSocialAuthAvailable())
+                .as("%s", row.env()).isEqualTo(row.available());
+        }
     }
 
 

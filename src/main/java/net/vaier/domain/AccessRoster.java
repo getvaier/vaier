@@ -16,6 +16,32 @@ public final class AccessRoster {
         this.entries = entries == null ? List.of() : List.copyOf(entries);
     }
 
+    /**
+     * The first-run claim: a sign-in through Dex's local connector — the first-run password, which
+     * exists only while no identity provider is configured — becomes the admin while the store has
+     * none. Once any admin exists the door is closed for everyone, and a provider sign-in never
+     * claims: that is the pending path.
+     */
+    public boolean claimsFirstAdmin(String provider) {
+        return provider != null
+                && AccessEntry.LOCAL_CONNECTOR.equalsIgnoreCase(provider.trim())
+                && adminCount() == 0;
+    }
+
+    /**
+     * Whether the configured admin must be seeded: no admin at all, or a provider has closed the
+     * first-run door and every admin is a first-run account that can no longer sign in.
+     */
+    public boolean needsConfiguredAdmin(boolean providerConfigured) {
+        return entries.stream().filter(AccessEntry::isAdmin)
+                .allMatch(admin -> providerConfigured && admin.isFirstRunAccount());
+    }
+
+    /** Admins exist, but none of them can sign in any more — as opposed to a store that never had one. */
+    public boolean isLockedOut(boolean providerConfigured) {
+        return adminCount() > 0 && needsConfiguredAdmin(providerConfigured);
+    }
+
     /** How many entries currently hold the {@link Role#ADMIN} role. */
     public int adminCount() {
         return (int) entries.stream().filter(AccessEntry::isAdmin).count();

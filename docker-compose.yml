@@ -642,8 +642,10 @@ services:
       # Also threaded into server peers' client-side AllowedIPs so they can initiate connections
       # back into the server's LAN through the tunnel (#204).
       VAIER_SERVER_LAN_CIDR: ${VAIER_SERVER_LAN_CIDR:-}
-      # Presence of the Google client id enables the per-service "Social" auth mode (#305).
+      # Presence of either provider's client id enables the per-service "Social" auth mode (#305) and
+      # tells Vaier the first-run password has closed (#264).
       VAIER_OIDC_GOOGLE_CLIENT_ID: ${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
+      VAIER_OIDC_GITHUB_CLIENT_ID: ${VAIER_OIDC_GITHUB_CLIENT_ID:-}
       # Seeds/keeps this identity as an admin AccessEntry so the console is never locked out
       # (self-heal in AccessFileAdapter, read via System.getenv). Must reach the container (#305).
       VAIER_ADMIN_EMAIL: ${VAIER_ADMIN_EMAIL:-}
@@ -815,6 +817,13 @@ services:
         cp /templates-src/error.html /oauth2/config/templates/error.html
         cp /templates-src/sign_in.html /oauth2/config/templates/sign_in.html
         allow=""
+        # #264: with no provider at all, the one button is the first-run password — dex-init's local
+        # connector. It is deleted from the page the moment a provider exists, like the others.
+        if [ "$${google_ok}" = 0 ] && [ "$${github_ok}" = 0 ]; then
+          allow="{value: local}"
+        else
+          sed -i '/<!--provider:local-->/,/<!--\/provider:local-->/d' /oauth2/config/templates/sign_in.html
+        fi
         if [ "$${google_ok}" = 1 ]; then
           allow="{value: google}"
         else
@@ -941,14 +950,20 @@ services:
   #
   # #332: each provider is independently optional — a connector is only appended when BOTH its
   # client id and secret are non-empty, so an operator who wants only Google sign-in never has to
-  # register a GitHub OAuth App. If zero providers end up configured, or the oauth2-proxy<->Dex
-  # shared secret is blank, dex-init fails fast naming exactly what's missing instead of writing a
-  # config with an empty connector — that would crash-loop Dex behind the only way into the UI.
+  # register a GitHub OAuth App. A blank oauth2-proxy<->Dex shared secret fails fast by name.
+  #
+  # #264: with ZERO providers configured, Dex opens its own local connector for one account instead
+  # of refusing to start — the first-run password. It is minted once (the file is the truth across
+  # restarts), bcrypt-hashed into Dex's config, and left at /vaier/config/first-run-password (owner
+  # 1000, mode 0600) for Vaier to print in its own log. The moment a provider exists the password
+  # DB is not written and the file is removed, so the door is exactly as old as the gap it fills.
   dex-init:
     image: alpine:3.20
     container_name: dex-init
     environment:
       - VAIER_DOMAIN=${VAIER_DOMAIN:-}
+      - VAIER_ADMIN_EMAIL=${VAIER_ADMIN_EMAIL:-}
+      - ACME_EMAIL=${ACME_EMAIL:-}
       - VAIER_OIDC_GOOGLE_CLIENT_ID=${VAIER_OIDC_GOOGLE_CLIENT_ID:-}
       - VAIER_OIDC_GOOGLE_CLIENT_SECRET=${VAIER_OIDC_GOOGLE_CLIENT_SECRET:-}
       - VAIER_OIDC_GITHUB_CLIENT_ID=${VAIER_OIDC_GITHUB_CLIENT_ID:-}
@@ -981,16 +996,12 @@ services:
         [ -z "$${VAIER_OIDC_GITHUB_CLIENT_ID}" ] && { github_ok=0; missing_github="$${missing_github} VAIER_OIDC_GITHUB_CLIENT_ID"; }
         [ -z "$${VAIER_OIDC_GITHUB_CLIENT_SECRET}" ] && { github_ok=0; missing_github="$${missing_github} VAIER_OIDC_GITHUB_CLIENT_SECRET"; }
 
-        if [ "$${google_ok}" = 0 ] && [ "$${github_ok}" = 0 ]; then
-          echo "dex-init: no identity provider is configured — set the client id and secret for at least one provider; missing:$${missing_google}$${missing_github}" >&2
-          exit 1
-        fi
+        first_run=/vaier/config/first-run-password
 
         # Unquoted heredocs: the shell substitutes $${VAIER_DOMAIN}, $${VAIER_DEX_CLIENT_SECRET} and
         # each configured provider's client id/secret; the config body contains no other $$ so
-        # nothing else is interpolated. The connectors list starts empty and each configured
-        # provider's block is appended in its own heredoc, so an unconfigured provider's block is
-        # simply never written.
+        # nothing else is interpolated. Each configured provider's block is appended in its own
+        # heredoc, so an unconfigured provider's block is simply never written.
         cat > /dex/config/config.yaml <<EOF
         issuer: https://dex.$${VAIER_DOMAIN}
         storage: {type: memory}
@@ -1002,8 +1013,35 @@ services:
           name: Vaier
           secret: $${VAIER_DEX_CLIENT_SECRET}
           redirectURIs: [https://oauth2.$${VAIER_DOMAIN}/oauth2/callback]
-        connectors:
         EOF
+
+        if [ "$${google_ok}" = 0 ] && [ "$${github_ok}" = 0 ]; then
+          echo "dex-init: no identity provider is configured (missing:$${missing_google}$${missing_github}) — opening the first-run door; the password is in 'docker compose logs vaier'" >&2
+          # ACME_EMAIL is the operator's own address, so a provider sign-in under it later finds the
+          # admin this account became — the handover needs no step of its own.
+          email="$${VAIER_ADMIN_EMAIL:-$${ACME_EMAIL:-admin@$${VAIER_DOMAIN}}}"
+          secret=""
+          [ -f "$${first_run}" ] && secret="$$(sed -n 2p "$${first_run}")"
+          [ -n "$${secret}" ] || secret="$$(head -c 33 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')"
+          printf '%s\n%s\n' "$${email}" "$${secret}" > "$${first_run}"
+          chmod 600 "$${first_run}"
+          chown 1000:1000 "$${first_run}"
+          # Dex takes bcrypt only; alpine has no bcrypt tool, so this branch — and only this one —
+          # fetches apache2-utils for htpasswd.
+          apk add --no-cache -q apache2-utils >/dev/null
+          hash="$$(htpasswd -nbBC 10 "" "$${secret}" | cut -d: -f2)"
+          cat >> /dex/config/config.yaml <<EOF
+        enablePasswordDB: true
+        staticPasswords:
+        - email: $${email}
+          username: $${email}
+          userID: first-run
+          hash: "$${hash}"
+        EOF
+        else
+          rm -f "$${first_run}"
+          echo "connectors:" >> /dex/config/config.yaml
+        fi
 
         if [ "$${google_ok}" = 1 ]; then
           cat >> /dex/config/config.yaml <<EOF
@@ -1026,6 +1064,7 @@ services:
         chown 1001:1001 /dex/config/config.yaml
     volumes:
       - ./dex/config:/dex/config
+      - ./vaier/config:/vaier/config
     restart: "no"
 
   dex:

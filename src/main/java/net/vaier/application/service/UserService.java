@@ -2,6 +2,7 @@ package net.vaier.application.service;
 
 import net.vaier.application.AssignGroupsUseCase;
 import net.vaier.application.CaptureViewerIdentityUseCase;
+import net.vaier.application.GetFirstRunPasswordUseCase;
 import net.vaier.application.GetServiceAccessRulesUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
@@ -13,12 +14,14 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
 import net.vaier.domain.AccessEntry;
 import net.vaier.domain.AccessRoster;
+import net.vaier.domain.FirstRunPassword;
 import net.vaier.domain.LastAdminException;
 import net.vaier.domain.Role;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
+import net.vaier.domain.port.ForReadingFirstRunPassword;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -34,13 +37,14 @@ import java.util.Optional;
 public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
         RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase,
-        ResolveViewerUseCase, CaptureViewerIdentityUseCase {
+        ResolveViewerUseCase, CaptureViewerIdentityUseCase, GetFirstRunPasswordUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
     private final ForPersistingServiceAccessRules forPersistingServiceAccessRules;
     private final ForNotifyingAdmins forNotifyingAdmins;
     private final ConfigResolver configResolver;
+    private final ForReadingFirstRunPassword forReadingFirstRunPassword;
 
     public UserService(ForPersistingAccessEntries forPersistingAccessEntries,
                        ForResolvingServiceGroup forResolvingServiceGroup,
@@ -48,12 +52,19 @@ public class UserService implements
                        // @Lazy defers resolving NotificationService until the first notification, so
                        // it never lands on the forward-auth hot path's critical construction timing.
                        @Lazy ForNotifyingAdmins forNotifyingAdmins,
-                       ConfigResolver configResolver) {
+                       ConfigResolver configResolver,
+                       ForReadingFirstRunPassword forReadingFirstRunPassword) {
         this.forPersistingAccessEntries = forPersistingAccessEntries;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
         this.forPersistingServiceAccessRules = forPersistingServiceAccessRules;
         this.forNotifyingAdmins = forNotifyingAdmins;
         this.configResolver = configResolver;
+        this.forReadingFirstRunPassword = forReadingFirstRunPassword;
+    }
+
+    @Override
+    public Optional<FirstRunPassword> firstRunPassword() {
+        return forReadingFirstRunPassword.read();
     }
 
     // === Social-login authorization (AccessEntry domain) ===
@@ -66,6 +77,16 @@ public class UserService implements
         String normalised = normaliseEmail(email);
 
         Optional<AccessEntry> existing = forPersistingAccessEntries.findByEmail(normalised);
+        if (new AccessRoster(forPersistingAccessEntries.getEntries()).claimsFirstAdmin(provider)) {
+            // The first-run claim (#264): the store has no admin and this sign-in came through the
+            // first-run password, so this identity is the admin. Name and provider land just below.
+            AccessEntry claimed = existing
+                    .orElse(AccessEntry.builder().email(normalised).groups(List.of()).build())
+                    .toBuilder().role(Role.ADMIN).build();
+            forPersistingAccessEntries.upsert(claimed);
+            log.info("First-run claim: {} is now the admin", normalised);
+            existing = Optional.of(claimed);
+        }
         if (existing.isEmpty()) {
             // First sighting of a social identity: record it as pending so it surfaces for the
             // admin to action — capturing the display name, provider, and provider user id it

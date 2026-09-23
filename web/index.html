@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vaier — Self-hosted infrastructure for homelab developers</title>
-    <meta name="description" content="Vaier wires together WireGuard, Traefik, and Google or GitHub sign-in (via oauth2-proxy) into a single web UI. One wildcard DNS record, made once, covers everything — add a Docker container on any VPN peer, pick a subdomain, and Vaier handles the reverse proxy and HTTPS automatically.">
+    <meta name="description" content="Vaier wires together WireGuard, Traefik, and Google or GitHub sign-in (via oauth2-proxy) into a single web UI. A domain and an email are all it needs to boot: sign in with the first-run password from its own log, add a provider when you want to invite others. One wildcard DNS record covers everything — add a Docker container on any VPN peer, pick a subdomain, and Vaier handles the reverse proxy and HTTPS automatically.">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22%234fc3f7%22 stroke-width=%221.5%22 stroke-linecap=%22round%22><circle cx=%228%22 cy=%228%22 r=%222.2%22 fill=%22%234fc3f7%22 stroke=%22none%22/><line x1=%222.5%22 y1=%223.5%22 x2=%226%22 y2=%226.5%22/><line x1=%2213.5%22 y1=%223.5%22 x2=%2210%22 y2=%226.5%22/><line x1=%222.5%22 y1=%2212.5%22 x2=%226%22 y2=%229.5%22/><line x1=%2213.5%22 y1=%2212.5%22 x2=%2210%22 y2=%229.5%22/><circle cx=%222.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%223.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%222.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/><circle cx=%2213.5%22 cy=%2212.5%22 r=%221.5%22 fill=%22%234fc3f7%22 stroke=%22none%22/></svg>">
     <link rel="stylesheet" href="styles.css">
     <style>
@@ -411,8 +411,10 @@
         <p class="lede">
             <strong>Vaier</strong> — Norwegian for <em>wire</em>, pronounced <strong>VY-er</strong> — wires
             together WireGuard, Traefik, and Google or GitHub sign-in (via oauth2-proxy) into a single web
-            UI. One wildcard DNS record, made once, covers everything from here: add a Docker container on
-            any VPN peer, pick a subdomain, and Vaier handles the reverse proxy and HTTPS automatically.
+            UI. A domain and an email are all it needs to boot — sign in with the first-run password Vaier
+            prints in its own log, add Google or GitHub when you want to invite others. One wildcard DNS
+            record, made once, covers everything from here: add a Docker container on any VPN peer, pick a
+            subdomain, and Vaier handles the reverse proxy and HTTPS automatically.
         </p>
         <div class="hero-actions">
             <a href="#quickstart" class="btn btn-primary btn-large">Get started</a>
@@ -554,7 +556,7 @@
                     <path d="M22 15c0-2.5-2-4.5-4.5-4.5"/>
                 </svg>
                 <h3>Access management</h3>
-                <p>Every Google or GitHub identity is an access entry with a role — pending, user, or admin — and free-form per-service groups. Approve newcomers and gate services from the UI, no YAML.</p>
+                <p>Day one needs no OAuth app: the first-run password in Vaier's log lets the first person in, and that sign-in is the admin. After that, every Google or GitHub identity is an access entry with a role — pending, user, or admin — and free-form per-service groups. Approve newcomers and gate services from the UI, no YAML.</p>
             </div>
             <div class="feature">
                 <svg class="feature-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -696,24 +698,21 @@
             <div class="step">
                 <div class="step-num">04</div>
                 <div class="step-body">
-                    <h3>Point DNS, then configure sign-in</h3>
+                    <h3>Point DNS, then fill in two values</h3>
                     <p>Make one wildcard record, before first boot, at whatever DNS host your domain lives on — it covers the console, sign-in, and every service you'll ever publish:</p>
 <pre class="code"><span class="comment"># *.yourdomain.com   A   &lt;this server's public IP&gt;</span></pre>
-                    <p>Then open the <code>.env</code> that step 3 created. Register a Google (and/or GitHub) OAuth client with the callback URL <code>https://dex.yourdomain.com/callback</code>, and drop the ids in — at least one provider is required. Set <code>VAIER_ADMIN_EMAIL</code> to the account that becomes the first admin. Don't recreate the file — it already holds three secrets <code>install.sh</code> generated for you.</p>
+                    <p>Then open the <code>.env</code> that step 3 created and set two things. That's the lot — no OAuth app yet. Don't recreate the file; it already holds three secrets <code>install.sh</code> generated for you.</p>
 <pre class="code"><span class="var">VAIER_DOMAIN</span>=<span class="str">yourdomain.com</span>
-<span class="var">ACME_EMAIL</span>=<span class="str">you@yourdomain.com</span>
-<span class="var">VAIER_ADMIN_EMAIL</span>=<span class="str">you@gmail.com</span>
-<span class="var">VAIER_OIDC_GOOGLE_CLIENT_ID</span>=<span class="str">...apps.googleusercontent.com</span>
-<span class="var">VAIER_OIDC_GOOGLE_CLIENT_SECRET</span>=<span class="str">...</span></pre>
+<span class="var">ACME_EMAIL</span>=<span class="str">you@yourdomain.com</span></pre>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">05</div>
                 <div class="step-body">
                     <h3>Start the stack and sign in</h3>
-                    <p>Bring everything up, open <code>https://vaier.yourdomain.com</code>, and sign in with the account you set as <code>VAIER_ADMIN_EMAIL</code> — Vaier seeds it as the first admin, so you land straight in the console. Anyone else who signs in lands as a <strong>pending</strong> request until you approve them on the Users page.</p>
+                    <p>Bring everything up, then read the <strong>first-run password</strong> from the bordered block at the bottom of Vaier's own log. Open <code>https://vaier.yourdomain.com</code>, press <strong>Sign in with the first-run password</strong>, and you're in — that first sign-in becomes the admin. Register a Google or GitHub OAuth client (callback <code>https://dex.yourdomain.com/callback</code>) in <code>.env</code> when you want to invite others; that closes the first-run door. Anyone who signs in after you lands as a <strong>pending</strong> request until you approve them on the Users page.</p>
 <pre class="code"><span class="cmd">docker</span> compose up -d
-<span class="comment"># then open https://vaier.yourdomain.com and sign in</span></pre>
+<span class="cmd">docker</span> compose logs vaier   <span class="comment"># the first-run password is at the bottom</span></pre>
                 </div>
             </div>
         </div>

@@ -3,6 +3,7 @@ package net.vaier.adapter.driven;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,17 @@ class DockerComposeStructureTest {
             }
         }
         return byKey;
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void vaier_receivesEveryProviderClientId() throws Exception {
+        // ConfigResolver.isSocialAuthAvailable reads both; a GitHub-only install once read as "no provider".
+        Map<String, Object> compose = (Map<String, Object>) new Yaml()
+            .load(Files.readString(Path.of("docker-compose.yml")));
+        Map<String, Object> vaier = (Map<String, Object>) ((Map<String, Object>) compose.get("services")).get("vaier");
+        assertThat((Map<String, Object>) vaier.get("environment"))
+            .containsKeys("VAIER_OIDC_GOOGLE_CLIENT_ID", "VAIER_OIDC_GITHUB_CLIENT_ID");
     }
 
     // --- Public, viewer-adaptive launchpad: three-tier routing on the console host ---
@@ -355,19 +367,32 @@ class DockerComposeStructureTest {
         // docker-compose itself collapses the $${...} escaping to a single $ before the shell ever
         // sees the command — we bypass compose entirely here, so that collapse has to happen in the
         // test too, or the shell reads a literal "$$" as its own PID special parameter.
+        Path vaierConfig = Files.createDirectories(tempDir.resolve("vaier-config"));
         String script = dexInitScript()
             .replace("$$", "$")
-            .replace("/dex/config", tempDir.toString());
+            .replace("/dex/config", tempDir.toString())
+            .replace("/vaier/config", vaierConfig.toString());
 
+        // #264: the zero-provider branch fetches apache2-utils for bcrypt; neither apk nor htpasswd
+        // exists in the test JVM's PATH, so both are shimmed — the shape of the config is what is
+        // pinned here, not bcrypt itself.
         Path stubBin = Files.createDirectories(tempDir.resolve("stub-bin"));
         Path chownStub = stubBin.resolve("chown");
         Files.writeString(chownStub, "#!/bin/sh\nexit 0\n");
         chownStub.toFile().setExecutable(true);
+        Path apkStub = stubBin.resolve("apk");
+        Files.writeString(apkStub, "#!/bin/sh\nexit 0\n");
+        apkStub.toFile().setExecutable(true);
+        Path htpasswdStub = stubBin.resolve("htpasswd");
+        Files.writeString(htpasswdStub, "#!/bin/sh\necho ':$2y$10$stubbedbcrypthashstubbedbcrypthashstubbedbcrypthashstub'\n");
+        htpasswdStub.toFile().setExecutable(true);
 
         ProcessBuilder builder = new ProcessBuilder("sh", "-c", script);
         Map<String, String> env = builder.environment();
         env.put("PATH", stubBin + File.pathSeparator + env.get("PATH"));
         env.put("VAIER_DOMAIN", "example.com");
+        env.put("VAIER_ADMIN_EMAIL", providerEnv.getOrDefault("VAIER_ADMIN_EMAIL", ""));
+        env.put("ACME_EMAIL", providerEnv.getOrDefault("ACME_EMAIL", ""));
         env.put("VAIER_DEX_CLIENT_SECRET", providerEnv.getOrDefault("VAIER_DEX_CLIENT_SECRET", "dex-shared-secret"));
         env.put("VAIER_OIDC_GOOGLE_CLIENT_ID", providerEnv.getOrDefault("VAIER_OIDC_GOOGLE_CLIENT_ID", ""));
         env.put("VAIER_OIDC_GOOGLE_CLIENT_SECRET", providerEnv.getOrDefault("VAIER_OIDC_GOOGLE_CLIENT_SECRET", ""));
@@ -388,6 +413,11 @@ class DockerComposeStructureTest {
     @Test
     @SuppressWarnings("unchecked")
     void dexInit_emitsOnlyTheGoogleConnector_whenOnlyGoogleCredentialsAreSet(@TempDir Path tempDir) throws Exception {
+        // A first-run password left over from before the provider was registered (#264): the door
+        // closes the moment a provider exists, so the password DB is gone and the file with it.
+        Path leftover = Files.createDirectories(tempDir.resolve("vaier-config")).resolve("first-run-password");
+        Files.writeString(leftover, "you@example.com\nold-secret\n");
+
         DexInitResult result = runDexInit(tempDir, Map.of(
             "VAIER_OIDC_GOOGLE_CLIENT_ID", "google-id",
             "VAIER_OIDC_GOOGLE_CLIENT_SECRET", "google-secret"));
@@ -399,6 +429,8 @@ class DockerComposeStructureTest {
 
         assertThat(connectors).hasSize(1);
         assertThat(connectors.get(0).get("type")).isEqualTo("google");
+        assertThat(configYaml).doesNotContainKey("enablePasswordDB").doesNotContainKey("staticPasswords");
+        assertThat(Files.exists(leftover)).as("the first-run password is withdrawn once a provider exists").isFalse();
     }
 
     @Test
@@ -436,17 +468,39 @@ class DockerComposeStructureTest {
     }
 
     @Test
-    void dexInit_failsFastNamingTheMissingVariables_whenNoProviderIsConfigured(@TempDir Path tempDir) throws Exception {
-        DexInitResult result = runDexInit(tempDir, Map.of());
+    @SuppressWarnings("unchecked")
+    void dexInit_mintsAFirstRunPassword_whenNoProviderIsConfigured(@TempDir Path tempDir) throws Exception {
+        // #264: zero providers used to fail fast, which left a newcomer with no way in before an OAuth
+        // registration. Now Dex opens its own local connector for exactly one account, with a password
+        // Vaier prints in its log. The secret survives restarts (the file is the truth); the email
+        // follows VAIER_ADMIN_EMAIL, else ACME_EMAIL (the operator's own address, so a later provider
+        // sign-in under it finds the admin it already is), else a placeholder on the domain.
+        DexInitResult first = runDexInit(tempDir, Map.of());
+        assertThat(first.exitCode()).as("stderr: %s", first.stderr()).isEqualTo(0);
 
-        assertThat(result.exitCode()).as("must fail fast, never render two empty connectors").isNotEqualTo(0);
-        assertThat(result.stderr())
-            .contains("VAIER_OIDC_GOOGLE_CLIENT_ID")
-            .contains("VAIER_OIDC_GOOGLE_CLIENT_SECRET")
-            .contains("VAIER_OIDC_GITHUB_CLIENT_ID")
-            .contains("VAIER_OIDC_GITHUB_CLIENT_SECRET");
-        assertThat(Files.exists(tempDir.resolve("config.yaml")))
-            .as("must never write a config with two empty connectors").isFalse();
+        Map<String, Object> configYaml = (Map<String, Object>) new Yaml().load(Files.readString(tempDir.resolve("config.yaml")));
+        assertThat(configYaml.get("enablePasswordDB")).isEqualTo(true);
+        assertThat(configYaml).as("no connectors key, so Dex has no empty list to choke on").doesNotContainKey("connectors");
+        List<Map<String, Object>> accounts = (List<Map<String, Object>>) configYaml.get("staticPasswords");
+        assertThat(accounts).hasSize(1);
+        assertThat(accounts.get(0).get("email")).isEqualTo("admin@example.com");
+        assertThat((String) accounts.get(0).get("hash")).startsWith("$2y$");
+
+        Path file = tempDir.resolve("vaier-config").resolve("first-run-password");
+        List<String> lines = Files.readAllLines(file);
+        assertThat(lines.get(0)).isEqualTo("admin@example.com");
+        assertThat(lines.get(1)).as("an unguessable secret").hasSizeGreaterThanOrEqualTo(32).matches("[A-Za-z0-9_-]+");
+        assertThat(Files.getPosixFilePermissions(file)).as("readable by its owner only")
+            .containsExactlyInAnyOrder(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+
+        runDexInit(tempDir, Map.of("ACME_EMAIL", "ops@example.com"));
+        assertThat(Files.readAllLines(file).get(0)).as("falls back to ACME_EMAIL").isEqualTo("ops@example.com");
+
+        DexInitResult second = runDexInit(tempDir, Map.of("VAIER_ADMIN_EMAIL", "you@example.com", "ACME_EMAIL", "ops@example.com"));
+        assertThat(second.exitCode()).as("stderr: %s", second.stderr()).isEqualTo(0);
+        List<String> again = Files.readAllLines(file);
+        assertThat(again.get(0)).as("VAIER_ADMIN_EMAIL wins").isEqualTo("you@example.com");
+        assertThat(again.get(1)).as("the secret is kept across restarts, so the log never lies").isEqualTo(lines.get(1));
     }
 
     @Test
@@ -545,7 +599,22 @@ class DockerComposeStructureTest {
 
         assertThat(page).contains("value=\"google\"").contains("Continue with Google");
         assertThat(page).as("a button for an unconfigured provider dead-ends in a Dex Bad Request")
-            .doesNotContain("value=\"github\"").doesNotContain("Continue with GitHub");
+            .doesNotContain("value=\"github\"").doesNotContain("Continue with GitHub")
+            .doesNotContain("value=\"local\"");
+    }
+
+    @Test
+    void signInPage_offersOnlyTheFirstRunPassword_whenNoProviderIsConfigured(@TempDir Path tempDir) throws Exception {
+        // #264: the button pairs with dex-init's local connector; it is the only way in until a
+        // provider exists, and it is gone the moment one does (the test above).
+        InitResult result = runOauth2ProxyInit(tempDir, Map.of());
+
+        assertThat(result.exitCode()).as("stderr: %s", result.stderr()).isEqualTo(0);
+        String page = Files.readString(tempDir.resolve("templates/sign_in.html"));
+        assertThat(page).contains("value=\"local\"").contains("first-run password")
+            .doesNotContain("value=\"google\"").doesNotContain("value=\"github\"");
+        assertThat(Files.readString(tempDir.resolve("alpha.yaml")))
+            .as("oauth2-proxy forwards connector_id only when allow-listed").contains("allow: [{value: local}]");
     }
 
     @Test

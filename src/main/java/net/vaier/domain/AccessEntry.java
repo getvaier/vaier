@@ -49,8 +49,11 @@ public class AccessEntry {
      */
     private final String providerUserId;
 
-    /** The Dex connector ids Vaier recognises as identity providers. */
-    private static final Set<String> KNOWN_PROVIDERS = Set.of("google", "github");
+    /** The Dex connector id of the first-run password's local account. */
+    public static final String LOCAL_CONNECTOR = "local";
+
+    /** The Dex connector ids Vaier recognises: the providers, and the first-run password's local account. */
+    private static final Set<String> KNOWN_PROVIDERS = Set.of("google", "github", LOCAL_CONNECTOR);
 
     /**
      * The display name this entry should carry after an authentication that presented
@@ -118,6 +121,11 @@ public class AccessEntry {
     /** Authenticated but not yet approved — no access until an admin promotes the role. */
     public boolean isPending() {
         return role == Role.PENDING;
+    }
+
+    /** Signed in only through the first-run password, which a configured provider closes. */
+    public boolean isFirstRunAccount() {
+        return LOCAL_CONNECTOR.equals(provider);
     }
 
     /** A Vaier administrator — may administer the console and reach every service. */
