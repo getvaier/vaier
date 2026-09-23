@@ -861,6 +861,18 @@ touches published-service routers/services or other config.
   memory on the forward-auth path. Write-only passwords: `GET /access/services/credentials` returns usernames.
 - UI: a **Service credential** field under Allowed groups in the Explorer's service pane.
 
+**Delivered (own sign-in — Vaier sees what a published service asks for by itself, TDD-first):** ✅
+- Each web route's backend is asked directly (its origin URL, where the version probe goes — never through Traefik):
+  one GET of where a visitor lands, at most one same-origin redirect followed. `OwnSignIn.classify` reads the answer
+  as basic auth (with realm), another challenge (named), its own sign-in page, none, or unknown — and unknown is
+  never none. OpenSprinkler is recognised by `ipas=0`/`ipas=1` on its root page.
+- Rides the 30-second state-refresh round (`DetectOwnSignInsUseCase`); a route is looked at when first seen, after an
+  edit, and then every ten minutes. A change pushes `service-updated`, so an open pane updates without polling.
+  `GET /published-services/sign-ins` serves the last look.
+- Service pane: basic auth with no service credential → a prompt pointing at the field; its own sign-in page → one
+  quiet line (OpenSprinkler: turn on Ignore password); another challenge → named, and Vaier cannot answer it; none
+  or unknown → nothing.
+
 **Delivered (GitHub sign-in via the Dex identity broker, TDD-first):** ✅ (#305 follow-up)
 - A user can now sign in with **Google or GitHub**. Rather than teach oauth2-proxy two providers, a **Dex**
   OIDC broker is inserted behind it: `Traefik → oauth2-proxy → Dex → Google / GitHub`. oauth2-proxy stays

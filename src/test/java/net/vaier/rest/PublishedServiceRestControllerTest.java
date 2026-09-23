@@ -1,6 +1,11 @@
 package net.vaier.rest;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import net.vaier.application.GetOwnSignInsUseCase;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.OwnSignIn;
+import net.vaier.domain.ServiceOwnSignIn;
+import net.vaier.domain.ServiceProbeAnswer;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
@@ -22,6 +27,10 @@ import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
@@ -41,9 +50,24 @@ class PublishedServiceRestControllerTest {
     @Mock UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     @Mock ForPublishingEvents forPublishingEvents;
     @Mock ForSubscribingToEvents forSubscribingToEvents;
+    @Mock GetOwnSignInsUseCase getOwnSignInsUseCase;
 
     @InjectMocks
     PublishedServiceRestController controller;
+
+    @Test
+    void signIns_sayWhatEachServiceAsksForByItself() throws Exception {
+        OwnSignIn basic = OwnSignIn.classify(Optional.of(new ServiceProbeAnswer(401, "Basic realm=\"openHAB\"",
+            null, "text/html", "")), Instant.parse("2026-09-23T10:00:00Z"));
+        when(getOwnSignInsUseCase.getOwnSignIns())
+            .thenReturn(List.of(new ServiceOwnSignIn("openhab.example.com", null, basic, OwnSignIn.Advice.SET_SERVICE_CREDENTIAL)));
+
+        String json = new ObjectMapper().writeValueAsString(controller.signIns());
+
+        assertThat(json).isEqualTo("[{\"dnsName\":\"openhab.example.com\",\"pathPrefix\":null,\"kind\":\"basic\","
+            + "\"detail\":\"openHAB\",\"app\":null,\"observedAt\":\"2026-09-23T10:00:00Z\","
+            + "\"advice\":\"set_service_credential\"}]");
+    }
 
     @Test
     void subscribeToEvents_subscribesToPublishedServicesTopicViaPort() {

@@ -2,7 +2,9 @@ package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.DetectOwnSignInsUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
+import net.vaier.application.GetOwnSignInsUseCase;
 import net.vaier.application.GetPublishableServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IgnorePublishableServiceUseCase;
@@ -21,6 +23,7 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.OwnSignIn;
 import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.PublishableService;
 import net.vaier.domain.PublishableService.PublishableSource;
@@ -28,9 +31,12 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ReverseProxyRoute.RouteSetting;
 import net.vaier.domain.Server;
+import net.vaier.domain.ServiceCredentials;
+import net.vaier.domain.ServiceOwnSignIn;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
+import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForDiscoveringLanServerContainers;
 import net.vaier.domain.port.ForDiscoveringPeerContainers;
 import net.vaier.domain.port.ForDiscoveringVaierServerContainers;
@@ -51,6 +57,8 @@ import net.vaier.domain.port.ForResolvingServiceGroup;
 import net.vaier.domain.port.ForResolvingVaierServerIdentity;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -72,7 +80,9 @@ public class PublishingService implements
     UpdatePublishedServiceUseCase,
     IgnorePublishableServiceUseCase,
     UnignorePublishableServiceUseCase,
-    RefreshLaunchpadVersionsUseCase {
+    RefreshLaunchpadVersionsUseCase,
+    DetectOwnSignInsUseCase,
+    GetOwnSignInsUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
@@ -96,6 +106,10 @@ public class PublishingService implements
     // by searching for it. Needed to attribute a hub route to the machine it actually runs on.
     private final ForResolvingVaierServerIdentity vaierServerIdentity;
     private final ForPersistingServiceCredentials forPersistingServiceCredentials;
+    private final ForProbingServiceSignIn forProbingServiceSignIn;
+    private final Clock clock;
+    // Route name -> what its backend asked for at the last look. In memory: a restart simply looks again.
+    private final Map<String, OwnSignIn> ownSignIns = new ConcurrentHashMap<>();
 
     private volatile List<PublishedServiceUco> cache = null;
 
@@ -125,7 +139,9 @@ public class PublishingService implements
                              ForCheckingLanReachability forCheckingLanReachability,
                              ForResolvingServiceGroup forResolvingServiceGroup,
                              ForResolvingVaierServerIdentity vaierServerIdentity,
-                             ForPersistingServiceCredentials forPersistingServiceCredentials) {
+                             ForPersistingServiceCredentials forPersistingServiceCredentials,
+                             ForProbingServiceSignIn forProbingServiceSignIn,
+                             Clock clock) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -146,6 +162,8 @@ public class PublishingService implements
         this.forResolvingServiceGroup = forResolvingServiceGroup;
         this.vaierServerIdentity = vaierServerIdentity;
         this.forPersistingServiceCredentials = forPersistingServiceCredentials;
+        this.forProbingServiceSignIn = forProbingServiceSignIn;
+        this.clock = clock;
     }
 
     @Override
@@ -282,6 +300,43 @@ public class PublishingService implements
             .filter(java.util.Objects::nonNull)
             .collect(java.util.stream.Collectors.toMap(
                 Map.Entry::getKey, Map.Entry::getValue, (a, b) -> a));
+    }
+
+    // --- DetectOwnSignInsUseCase / GetOwnSignInsUseCase ---
+
+    @Override
+    public void detectOwnSignIns() {
+        // Rides the state-refresh round; a route is looked at again only once its last look is due.
+        Instant now = clock.instant();
+        List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+            .filter(ReverseProxyRoute::hasOwnSignInToDetect)
+            .toList();
+        ownSignIns.keySet().retainAll(routes.stream().map(ReverseProxyRoute::getName).toList());
+        List<CompletableFuture<Map.Entry<ReverseProxyRoute, OwnSignIn>>> looks = routes.stream()
+            .filter(r -> OwnSignIn.isDue(ownSignIns.get(r.getName()), now))
+            .map(r -> CompletableFuture.supplyAsync(() ->
+                Map.entry(r, r.detectOwnSignIn(forProbingServiceSignIn, now))))
+            .toList();
+        for (CompletableFuture<Map.Entry<ReverseProxyRoute, OwnSignIn>> look : looks) {
+            Map.Entry<ReverseProxyRoute, OwnSignIn> seen = look.join();
+            OwnSignIn previous = ownSignIns.put(seen.getKey().getName(), seen.getValue());
+            if (seen.getValue().isNewsAfter(previous)) {
+                forPublishingEvents.publish("published-services", "service-updated", seen.getKey().getDomainName());
+            }
+        }
+    }
+
+    @Override
+    public List<ServiceOwnSignIn> getOwnSignIns() {
+        ServiceCredentials credentials = forPersistingServiceCredentials.read();
+        return forPersistingReverseProxyRoutes.getReverseProxyRoutes().stream()
+            .filter(r -> ownSignIns.containsKey(r.getName()))
+            .map(r -> {
+                OwnSignIn seen = ownSignIns.get(r.getName());
+                return new ServiceOwnSignIn(r.getDomainName(), r.getPathPrefix(), seen,
+                    seen.advice(r.authMode(), credentials.hasAnyFor(r.getDomainName())).orElse(null));
+            })
+            .toList();
     }
 
     private PublishedServiceUco toUco(ReverseProxyRoute route,
@@ -749,7 +804,11 @@ public class PublishingService implements
         // half-applied edit is worse than a refused one.
         ReverseProxyRoute.findByFqdnAndPath(
                 forPersistingReverseProxyRoutes.getReverseProxyRoutes(), dnsName, normalisedPath)
-            .ifPresent(route -> route.validateUpdate(settingsIn(patch)));
+            .ifPresent(route -> {
+                route.validateUpdate(settingsIn(patch));
+                // Where it lands may have moved: look at it again on the next round.
+                ownSignIns.remove(route.getName());
+            });
 
         // authMode supersedes the legacy requiresAuth toggle; either may be set, not both from the UI.
         if (patch.authMode() != null) {

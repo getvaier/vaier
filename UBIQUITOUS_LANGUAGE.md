@@ -388,6 +388,7 @@ These pairs come up often. Use the left, never the right.
 | clear pinned key | reset the host key, forget the host, re-trust |
 | fleet credential | shared secret, global credential, fleet secret, cluster credential |
 | service credential | injected credential, basic-auth injection, service password, proxy login, stored login |
+| own sign-in | detected auth, service auth, native login, backend auth |
 | distribute | push, sync, roll out, deploy (said of a **fleet credential**) |
 | withdraw | revoke, un-distribute, unpush, remove (when it means taking a secret off the fleet) |
 | sign in / sign-in | log in, login (reserved for the SSH sense — the login name in a **host credential**) |
@@ -451,6 +452,7 @@ is delegated to an external **identity provider**; Vaier owns **authorization** 
 | **Service credential** | A username and password Vaier hands a **published service** on **social** **auth mode**, as HTTP basic auth, for a person it has let in — so that person never needs the service's own password. Keyed, like an **access rule**, by the service's host. Either **shared** or **personal**. The service sees one account per credential. The password is write-only: Vaier never shows it again. Distinct from a **host credential**, which Vaier uses to reach a machine. |
 | **Shared service credential** | The **service credential** a service is handed for everyone who has no **personal service credential** of their own. At most one per service. |
 | **Personal service credential** | The **service credential** a service is handed for one **access entry** instead of the shared one. |
+| **Own sign-in** | What sign-in a **published service** asks for by itself, as Vaier last saw its backend — asked at the address the route points at, never through Traefik. One of: basic auth, another challenge Vaier cannot answer, its own sign-in page, none, or unknown. Unknown is never read as none. |
 | **Auth mode** | How a gated surface signs a user in (`domain.AuthMode`): **none** (public) or **social** (the oauth2-proxy → Vaier authorization chain). Set per published service (one mode per route); the Vaier console is always social. Every gated route runs on **social**. A **stream** is always **none**, and the domain refuses **social** on one. Replaces the earlier per-route "requires auth" on/off toggle. |
 | **oauth2-proxy** | The external component that performs **social login** authentication (the sign-in dance and the domain-wide SSO session) and asserts the signed-in email to Vaier. It does not talk to the **identity providers** directly — it federates them through **Dex**. Mandatory, always-on stack infrastructure — the sole runtime auth gateway since Authelia was decommissioned. |
 

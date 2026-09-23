@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.MachineId;
 import net.vaier.application.DeletePublishedServiceUseCase;
+import net.vaier.application.GetOwnSignInsUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import java.util.Locale;
 
 @RestController
 @RequestMapping("/published-services")
@@ -39,6 +41,7 @@ public class PublishedServiceRestController {
     private final UnignorePublishableServiceUseCase unignorePublishableServiceUseCase;
     private final ForPublishingEvents forPublishingEvents;
     private final ForSubscribingToEvents forSubscribingToEvents;
+    private final GetOwnSignInsUseCase getOwnSignInsUseCase;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
@@ -48,6 +51,17 @@ public class PublishedServiceRestController {
     @GetMapping("/discover")
     public List<PublishedServiceUco> getPublishedServices() {
         return getPublishedServicesUseCase.getPublishedServices();
+    }
+
+    /** What each published service asks for by itself, as Vaier last saw its backend. */
+    @GetMapping("/sign-ins")
+    public List<OwnSignInResponse> signIns() {
+        return getOwnSignInsUseCase.getOwnSignIns().stream()
+            .map(found -> new OwnSignInResponse(found.dnsName(), found.pathPrefix(),
+                found.ownSignIn().kind().name().toLowerCase(Locale.ROOT), found.ownSignIn().detail(),
+                found.ownSignIn().app(), found.ownSignIn().observedAt().toString(),
+                found.advice() == null ? null : found.advice().name().toLowerCase(Locale.ROOT)))
+            .toList();
     }
 
     @GetMapping("/publishable")
@@ -137,4 +151,6 @@ public class PublishedServiceRestController {
                              boolean directUrlDisabled, String rootRedirectPath, String pathPrefix) {}
     record PublishStatusResponse(boolean traefikActive) {}
     record IgnoreRequest(String key) {}
+    record OwnSignInResponse(String dnsName, String pathPrefix, String kind, String detail, String app,
+                             String observedAt, String advice) {}
 }
