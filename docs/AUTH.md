@@ -118,7 +118,7 @@ Some services keep a login of their own behind social login — openHAB's API, s
 
 **One account per credential.** The service sees exactly the login Vaier handed it: everyone on the shared credential is the same user to it, with that user's rights. Give someone a personal credential when the service must tell them apart or grant them less.
 
-**openHAB** accepts basic auth only once it is allowed: **Settings → API Security → Allow Basic Authentication**. A credential the service rejects answers 401, which the social chain turns into the sign-in page — if signing in loops, check the username and password.
+**openHAB** accepts basic auth only once it is allowed: **Settings → API Security → Allow Basic Authentication**. A credential the service rejects answers 401, which the social chain turns into the sign-in page — if signing in loops, check the username and password. The credential signs in every request, admin ones included, but openHAB's web UI shows its **admin menus** only after its *own* sign-in in that browser: sign in to openHAB once through its Vaier address and it remembers you there. Someone with the `user` role never sees those menus anyway, so for them nothing more is needed.
 
 **Storage.** Credentials live in `./vaier/config/service-credentials.yml` (mode `0600`), passwords sealed by the same cipher as the host credentials. Vaier reads the file once and answers every request from memory. Passwords are write-only: the console shows only the username and a Clear or Remove. Unpublishing a service's last route forgets its credentials, and revoking a person forgets theirs. Like access rules, credentials key on the service's host, so path-scoped services that share a host share them.
 
