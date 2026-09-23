@@ -23,9 +23,15 @@ public record SelfUpdateStatus(String runId, SelfUpdateStatus.Outcome outcome, S
         NONE,
         /** The new image came up and answered. */
         UPGRADED,
-        /** It did not answer, so the previously running image was put back. Vaier is up — on the old build. */
+        /**
+         * It did not come up or did not answer, so the previous image and runtime files were put back. Vaier is
+         * up — on the old build.
+         */
         ROLLED_BACK,
-        /** The update could not be carried out at all: no compose project, a failed pull, a failed recreate. */
+        /**
+         * The update could not be carried out at all: no compose project, a failed pull, or a failed sync of the
+         * runtime files (which are put back).
+         */
         FAILED,
         /** There is a line, and it is not one of ours. */
         UNKNOWN,

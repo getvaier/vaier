@@ -58,7 +58,7 @@ jobs:
     - name: Build Docker image
       run: |
         VAIER_VERSION=$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)
-        docker build --build-arg VAIER_VERSION="${VAIER_VERSION}" -t vaier:${{ github.sha }} .
+        docker build --build-arg VAIER_VERSION="${VAIER_VERSION}" --build-arg VAIER_REVISION=${{ github.sha }} -t vaier:${{ github.sha }} .
         docker tag vaier:${{ github.sha }} vaier:latest
 
     - name: Log in to Docker Hub
