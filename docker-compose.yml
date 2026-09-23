@@ -279,9 +279,10 @@ services:
         mv /traefik/config/.security.yml.tmp /traefik/config/security.yml
         # Routes to the VPN subnet and each relay's lanCidr, re-checked every 15s so a relay added later
         # is reachable without a restart. Runs here, not in a sidecar: a sidecar sharing this netns dies
-        # whenever traefik is recreated and then leaves every new relay silently unrouted.
+        # whenever traefik is recreated and then leaves every new relay silently unrouted. $$$$ is this
+        # shell, which `exec` below turns into traefik, so the loop ends with it and holds no output open.
         (
-          while true; do
+          while kill -0 "$$$$" 2>/dev/null; do
             WG_IP=$$(getent hosts wireguard | awk '{print $$1}')
             if [ -n "$$WG_IP" ]; then
               ip route replace 10.13.13.0/24 via "$$WG_IP" 2>/dev/null || true
@@ -293,7 +294,7 @@ services:
             fi
             sleep 15
           done
-        ) &
+        ) >/dev/null 2>&1 &
         # Fresh-install ACME race guard. Vaier writes no DNS (#331) — the operator's one `*.<domain>` A
         # record answers for all three infra names — but on a fresh install that record may have been made
         # minutes ago, or not at all. If we launch traefik before it answers, the first Let's Encrypt
