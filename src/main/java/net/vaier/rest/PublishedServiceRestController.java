@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.MachineId;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.GetOwnSignInsUseCase;
+import net.vaier.application.MarkMeantToBePublicUseCase;
 import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetPublishableServicesUseCase;
@@ -42,6 +43,7 @@ public class PublishedServiceRestController {
     private final ForPublishingEvents forPublishingEvents;
     private final ForSubscribingToEvents forSubscribingToEvents;
     private final GetOwnSignInsUseCase getOwnSignInsUseCase;
+    private final MarkMeantToBePublicUseCase markMeantToBePublicUseCase;
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribeToEvents() {
@@ -60,8 +62,18 @@ public class PublishedServiceRestController {
             .map(found -> new OwnSignInResponse(found.dnsName(), found.pathPrefix(),
                 found.ownSignIn().kind().name().toLowerCase(Locale.ROOT), found.ownSignIn().detail(),
                 found.ownSignIn().app(), found.ownSignIn().observedAt().toString(),
-                found.advice() == null ? null : found.advice().name().toLowerCase(Locale.ROOT)))
+                found.advice() == null ? null : found.advice().name().toLowerCase(Locale.ROOT),
+                found.open(), found.meantToBePublic()))
             .toList();
+    }
+
+    /** The operator's word that an open service is meant to be public — or, with false, no longer. */
+    @PutMapping("/{dnsName}/meant-to-be-public")
+    public ResponseEntity<Void> meantToBePublic(@PathVariable String dnsName,
+                                                @RequestParam(required = false) String pathPrefix,
+                                                @RequestBody MeantToBePublicRequest request) {
+        markMeantToBePublicUseCase.markMeantToBePublic(dnsName, pathPrefix, request.meantToBePublic());
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/publishable")
@@ -152,5 +164,6 @@ public class PublishedServiceRestController {
     record PublishStatusResponse(boolean traefikActive) {}
     record IgnoreRequest(String key) {}
     record OwnSignInResponse(String dnsName, String pathPrefix, String kind, String detail, String app,
-                             String observedAt, String advice) {}
+                             String observedAt, String advice, boolean open, boolean meantToBePublic) {}
+    record MeantToBePublicRequest(boolean meantToBePublic) {}
 }

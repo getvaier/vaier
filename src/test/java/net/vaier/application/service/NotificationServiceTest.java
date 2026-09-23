@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import net.vaier.config.ConfigResolver;
+import net.vaier.domain.OpenService;
 import net.vaier.domain.Bundle;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
@@ -122,6 +123,16 @@ class NotificationServiceTest {
     }
 
     // --- the reverse proxy audit (#354) ---
+
+    @Test
+    void notifyAdminsOfOpenService_sendsTheDomainsMail() {
+        when(configResolver.getDomain()).thenReturn("example.com");
+        OpenService rack = new OpenService("rack-router", "rack.example.com", null);
+
+        service.notifyAdminsOfOpenService(rack);
+
+        verify(adminNotifier).sendToAdmins(eq(rack.subject()), eq(rack.body("example.com")), any());
+    }
 
     @Test
     void notifyAdminsOfReverseProxyFindings_namesEachFindingAndSaysVaierChangedNothing() {

@@ -861,6 +861,18 @@ touches published-service routers/services or other config.
   memory on the forward-auth path. Write-only passwords: `GET /access/services/credentials` returns usernames.
 - UI: a **Service credential** field under Allowed groups in the Explorer's service pane.
 
+**Delivered (open services — a hole is mailed once and offered its fix, TDD-first):** ✅
+- `OpenService.isOpen`: a Vaier-managed web route with auth mode none whose own sign-in is none. Basic auth, another
+  challenge, its own sign-in page and unknown are never open; streams are out of scope.
+- `OpenServiceTracker` (mirrors the reverse-proxy audit tracker): mails admins once per open service, latched in
+  `open-services.yml` across restarts. The latch holds while the service is open or unknown, and clears silently
+  once it is closed (social on, its own sign-in on) or unpublished. Rides the same state-refresh round
+  (`JudgeOpenServicesUseCase` → `NotifyAdminsOfOpenServiceUseCase`).
+- Explorer service pane: a warning with **Put Vaier's sign-in in front** (the existing PATCH, auth mode social) and
+  **This is meant to be public** (`PUT /published-services/{dnsName}/meant-to-be-public`), which is kept per route,
+  silences the mail, shows as a quiet note and can be taken back. Not added to the fleet nudge ladder: that is an
+  onboarding ladder, not a list of warnings.
+
 **Delivered (own sign-in — Vaier sees what a published service asks for by itself, TDD-first):** ✅
 - Each web route's backend is asked directly (its origin URL, where the version probe goes — never through Traefik):
   one GET of where a visitor lands, at most one same-origin redirect followed. `OwnSignIn.classify` reads the answer

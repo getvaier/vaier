@@ -34,6 +34,7 @@ import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingServiceGroup;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForProbingServiceSignIn;
+import net.vaier.domain.port.ForPersistingOpenServiceState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -129,6 +130,9 @@ class PublishingServiceTest {
     ForProbingServiceSignIn forProbingServiceSignIn;
 
     @Mock
+    ForPersistingOpenServiceState forPersistingOpenServiceState;
+
+    @Mock
     Clock clock;
 
     @InjectMocks
@@ -145,6 +149,7 @@ class PublishingServiceTest {
         // just explicit.) Tests that exercise the server-LAN-CIDR path override it.
         lenient().when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.empty());
         lenient().when(clock.instant()).thenReturn(Instant.parse("2026-09-23T10:00:00Z"));
+        lenient().when(forPersistingOpenServiceState.read()).thenReturn(OpenServiceState.empty());
         // Every publish activates on the common pool. A test that never stubs the route in would otherwise
         // leave a 15 s poller behind, and enough of them starve the pool on a 4-core runner (CI went red
         // with parallelism 3 while the 2-core dev box, which runs a thread per task, stayed green).
@@ -711,6 +716,39 @@ class PublishingServiceTest {
             // Public, with a basic-auth challenge: the verdict is the domain's, handed through.
             assertThat(found.advice()).isEqualTo(OwnSignIn.Advice.SWITCH_TO_SOCIAL);
         });
+    }
+
+    private static final String RACK_PAGE = "<html><body><h1>Rack</h1><p>Server one at 42 degrees, server two at 39 "
+        + "degrees, fans at 1200 rpm.</p></body></html>";
+
+    @Test
+    void judgeOpenServices_handsTheRoutesAndTheirLastLooksToTheTracker_andThePaneSeesTheVerdict() {
+        ReverseProxyRoute rack = httpRoute("rack-router", "rack.example.com");
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(rack));
+        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.empty());
+        when(forProbingServiceSignIn.probe(anyString()))
+            .thenReturn(Optional.of(new ServiceProbeAnswer(200, null, null, "text/html", RACK_PAGE)));
+        service.detectOwnSignIns();
+
+        assertThat(service.judgeOpenServices()).extracting(OpenService::dnsName).containsExactly("rack.example.com");
+        verify(forPersistingOpenServiceState).save(new OpenServiceState(Set.of("rack-router"), Set.of()));
+        assertThat(service.getOwnSignIns()).singleElement().satisfies(found -> {
+            assertThat(found.open()).isTrue();
+            assertThat(found.meantToBePublic()).isFalse();
+        });
+    }
+
+    @Test
+    void markMeantToBePublic_remembersItForThatRoute_andRefusesARouteThatIsNotPublished() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes())
+            .thenReturn(List.of(httpRoute("rack-router", "rack.example.com")));
+
+        service.markMeantToBePublic("rack.example.com", null, true);
+
+        verify(forPersistingOpenServiceState).save(new OpenServiceState(Set.of(), Set.of("rack-router")));
+        verify(forPublishingEvents).publish("published-services", "service-updated", "rack.example.com");
+        assertThrows(IllegalArgumentException.class,
+            () -> service.markMeantToBePublic("gone.example.com", null, true));
     }
 
     @Test

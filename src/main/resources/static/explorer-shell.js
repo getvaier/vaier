@@ -4625,6 +4625,38 @@
         return say ? say(own) : null;
     }
 
+    // An open service: public here, and nothing of its own behind it. Both verdicts are the server's; this
+    // offers the two ways out — the fix, and the operator's word that it is meant to be that way.
+    function setMeantToBePublic(s, meant) {
+        const url = '/published-services/' + encodeURIComponent(s.dnsAddress) + '/meant-to-be-public'
+            + (s.pathPrefix ? '?pathPrefix=' + encodeURIComponent(s.pathPrefix) : '');
+        return sendServiceCredential(url, 'PUT', { meantToBePublic: meant },
+            'Could not save whether this service is meant to be public.');
+    }
+    function openServiceBlock(s) {
+        const own = ownSignInOf(s);
+        if (!own || !own.open) return null;
+        const wrap = el('div');
+        const actions = el('div', 'ex-lactions is-static');
+        if (own.meantToBePublic) {
+            wrap.appendChild(hint('You said this is meant to be public: anyone can use it, and Vaier does not '
+                + 'mention it.'));
+            const back = el('button', 'ex-btn is-quiet'); back.textContent = 'It is not meant to be public';
+            back.onclick = () => setMeantToBePublic(s, false);
+            actions.appendChild(back);
+        } else {
+            wrap.appendChild(note('Anyone on the internet can use this service: Vaier’s sign-in is off, and it '
+                + 'has no sign-in of its own.', true));
+            const fix = el('button', 'ex-btn is-accent'); fix.textContent = 'Put Vaier’s sign-in in front';
+            fix.onclick = () => patchService(s, { authMode: 'social' }, 'Could not put Vaier’s sign-in in front.');
+            const meant = el('button', 'ex-btn'); meant.textContent = 'This is meant to be public';
+            meant.onclick = () => setMeantToBePublic(s, true);
+            actions.append(fix, meant);
+        }
+        wrap.appendChild(actions);
+        return wrap;
+    }
+
     function renderService(pane) {
         const machineId = S.path[1];
         const machineName = nameOf(machineId);
@@ -4660,6 +4692,8 @@
             authSel.onchange = () => patchService(s, { authMode: authSel.value },
                 'Could not update the sign-in requirement.');
             body.appendChild(formField('Sign-in', 'Which login a visitor must pass to reach this service.', authSel));
+            const hole = openServiceBlock(s);
+            if (hole) body.appendChild(hole);
             const own = ownSignInLine(s);
             if (own) body.appendChild(own);
             if (authMode === 'social') {

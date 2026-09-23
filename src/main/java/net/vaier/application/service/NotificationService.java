@@ -12,6 +12,7 @@ import net.vaier.application.NotifyAdminsOfPeerTransitionUseCase;
 import net.vaier.application.NotifyAdminsOfContainerTroubleUseCase;
 import net.vaier.application.NotifyAdminsOfMissingDefaultRouteUseCase;
 import net.vaier.application.NotifyAdminsOfRemoteDiskPressureUseCase;
+import net.vaier.application.NotifyAdminsOfOpenServiceUseCase;
 import net.vaier.application.NotifyAdminsOfReverseProxyFindingsUseCase;
 import net.vaier.application.NotifyAdminsOfUpdateAvailableUseCase;
 import net.vaier.config.ConfigResolver;
@@ -31,6 +32,7 @@ import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.JoinRequestNotice;
 import net.vaier.domain.LockoutWarning;
 import net.vaier.domain.RemoteDiskUsage;
+import net.vaier.domain.OpenService;
 import net.vaier.domain.ReverseProxyAudit;
 import net.vaier.domain.PeerSnapshot;
 import net.vaier.domain.port.ForProbingTcp.ProbeResult;
@@ -56,7 +58,7 @@ public class NotificationService implements
         NotifyAdminsOfBreachAttemptUseCase,
         NotifyAdminsOfLockoutWarningUseCase,
         NotifyAdminsOfEnrolmentRequestUseCase,
-        NotifyAdminsOfReverseProxyFindingsUseCase {
+        NotifyAdminsOfReverseProxyFindingsUseCase, NotifyAdminsOfOpenServiceUseCase {
 
     private final ForSendingAdminNotification adminNotifier;
     private final ConfigResolver configResolver;
@@ -105,6 +107,13 @@ public class NotificationService implements
         adminNotifier.sendToAdmins(audit.findingsSubject(),
                 audit.findingsBody(configResolver.getDomain()),
                 "reverse proxy audit");
+    }
+
+    /** A published service anyone can use (see {@link OpenService}); said once, with both ways to close it. */
+    @Override
+    public void notifyAdminsOfOpenService(OpenService openService) {
+        adminNotifier.sendToAdmins(openService.subject(), openService.body(configResolver.getDomain()),
+                "open service " + openService.dnsName());
     }
 
     @Override

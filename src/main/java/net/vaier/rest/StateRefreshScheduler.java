@@ -3,6 +3,8 @@ package net.vaier.rest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.DetectOwnSignInsUseCase;
+import net.vaier.application.JudgeOpenServicesUseCase;
+import net.vaier.application.NotifyAdminsOfOpenServiceUseCase;
 import net.vaier.application.GetLanServerReachabilityUseCase;
 import net.vaier.application.GetLanServerScrapeUseCase;
 import net.vaier.application.GetMachinesUseCase;
@@ -12,6 +14,7 @@ import net.vaier.application.RefreshContainerStateUseCase;
 import net.vaier.application.RefreshLaunchpadVersionsUseCase;
 import net.vaier.domain.ContainerStandingTracker.Verdict;
 import net.vaier.domain.Machine;
+import net.vaier.domain.OpenService;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -47,6 +50,8 @@ public class StateRefreshScheduler {
     // Only ever asked when something actually moved: a name is for a mail, and a healthy fleet sends none.
     private final GetMachinesUseCase machines;
     private final DetectOwnSignInsUseCase ownSignIns;
+    private final JudgeOpenServicesUseCase openServices;
+    private final NotifyAdminsOfOpenServiceUseCase openServiceNotifier;
 
     @Scheduled(fixedDelay = 30_000, initialDelay = 5_000)
     public void refresh() {
@@ -56,6 +61,7 @@ public class StateRefreshScheduler {
         refreshStep("launchpad version probes", launchpadVersions::refreshLaunchpadVersions);
         refreshStep("container standings", this::judgeContainerStandings);
         refreshStep("own sign-in detection", ownSignIns::detectOwnSignIns);
+        refreshStep("open services", this::judgeOpenServices);
     }
 
     /**
@@ -89,6 +95,17 @@ public class StateRefreshScheduler {
         } catch (Exception e) {
             log.warn("Could not tell admins that {} on {} changed: {}", verdict.standing().containerName(),
                 machineName, e.getMessage());
+        }
+    }
+
+    /** Each open service found this round, told once; one mail failing never costs the others theirs. */
+    private void judgeOpenServices() {
+        for (OpenService open : openServices.judgeOpenServices()) {
+            try {
+                openServiceNotifier.notifyAdminsOfOpenService(open);
+            } catch (Exception e) {
+                log.warn("Could not tell admins that {} is open: {}", open.dnsName(), e.getMessage());
+            }
         }
     }
 
