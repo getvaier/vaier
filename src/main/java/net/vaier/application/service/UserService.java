@@ -2,15 +2,20 @@ package net.vaier.application.service;
 
 import net.vaier.application.AddSignInProviderUseCase;
 import net.vaier.application.AssignGroupsUseCase;
+import net.vaier.application.ClearSharedServiceCredentialUseCase;
 import net.vaier.application.CaptureViewerIdentityUseCase;
 import net.vaier.application.GetFirstRunPasswordUseCase;
 import net.vaier.application.GetServiceAccessRulesUseCase;
+import net.vaier.application.GetServiceCredentialsUseCase;
 import net.vaier.application.GetSignInProvidersUseCase;
 import net.vaier.application.GrantRoleUseCase;
 import net.vaier.application.ListAccessEntriesUseCase;
+import net.vaier.application.RemovePersonalServiceCredentialUseCase;
 import net.vaier.application.ResolveViewerUseCase;
 import net.vaier.application.RevokeAccessUseCase;
+import net.vaier.application.SetPersonalServiceCredentialUseCase;
 import net.vaier.application.SetServiceAccessRuleUseCase;
+import net.vaier.application.SetSharedServiceCredentialUseCase;
 import net.vaier.application.VerifyAccessUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessDecision;
@@ -20,14 +25,19 @@ import net.vaier.domain.FirstRunPassword;
 import net.vaier.domain.IdentityProvider;
 import net.vaier.domain.LastAdminException;
 import net.vaier.domain.ProviderCredentials;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Role;
+import net.vaier.domain.ServiceCredential;
+import net.vaier.domain.ServiceCredentials;
 import net.vaier.domain.SignInApplyOutcome;
 import net.vaier.domain.SignInRenderers;
 import net.vaier.domain.SignInSettings;
 import net.vaier.domain.VaierHostnames;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
+import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
+import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForPersistingSignInSettings;
 import net.vaier.domain.port.ForReadingFirstRunPassword;
 import net.vaier.domain.port.ForRerunningContainers;
@@ -41,6 +51,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -50,7 +61,9 @@ public class UserService implements
         VerifyAccessUseCase, ListAccessEntriesUseCase, GrantRoleUseCase, AssignGroupsUseCase,
         RevokeAccessUseCase, SetServiceAccessRuleUseCase, GetServiceAccessRulesUseCase,
         ResolveViewerUseCase, CaptureViewerIdentityUseCase, GetFirstRunPasswordUseCase,
-        GetSignInProvidersUseCase, AddSignInProviderUseCase {
+        GetSignInProvidersUseCase, AddSignInProviderUseCase, GetServiceCredentialsUseCase,
+        SetSharedServiceCredentialUseCase, ClearSharedServiceCredentialUseCase,
+        SetPersonalServiceCredentialUseCase, RemovePersonalServiceCredentialUseCase {
 
     private final ForPersistingAccessEntries forPersistingAccessEntries;
     private final ForResolvingServiceGroup forResolvingServiceGroup;
@@ -62,6 +75,8 @@ public class UserService implements
     private final ForRerunningContainers forRerunningContainers;
     private final ForRestartingContainers forRestartingContainers;
     private final ForRunningInBackground forRunningInBackground;
+    private final ForPersistingServiceCredentials forPersistingServiceCredentials;
+    private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     // One apply at a time: a save from Settings and the first-run door closing both rewrite the same file.
     private final Object signInApply = new Object();
     // Once per boot: a close that failed is not retried on every forward-auth request.
@@ -78,7 +93,9 @@ public class UserService implements
                        ForPersistingSignInSettings forPersistingSignInSettings,
                        ForRerunningContainers forRerunningContainers,
                        ForRestartingContainers forRestartingContainers,
-                       ForRunningInBackground forRunningInBackground) {
+                       ForRunningInBackground forRunningInBackground,
+                       ForPersistingServiceCredentials forPersistingServiceCredentials,
+                       ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes) {
         this.forPersistingAccessEntries = forPersistingAccessEntries;
         this.forResolvingServiceGroup = forResolvingServiceGroup;
         this.forPersistingServiceAccessRules = forPersistingServiceAccessRules;
@@ -89,6 +106,8 @@ public class UserService implements
         this.forRerunningContainers = forRerunningContainers;
         this.forRestartingContainers = forRestartingContainers;
         this.forRunningInBackground = forRunningInBackground;
+        this.forPersistingServiceCredentials = forPersistingServiceCredentials;
+        this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
     }
 
     // === Sign-in providers added from Settings (#264) ===
@@ -197,7 +216,11 @@ public class UserService implements
             List<String> allowedGroups = forResolvingServiceGroup.allowedGroupsForHost(host);
             allowed = entry.mayAccessService(allowedGroups);
         }
-        return allowed ? AccessDecision.allow(entry) : AccessDecision.deny();
+        if (!allowed) {
+            return AccessDecision.deny();
+        }
+        return AccessDecision.allow(entry).withServiceCredential(
+                forPersistingServiceCredentials.read().credentialFor(host, normalised).orElse(null));
     }
 
     /**
@@ -218,9 +241,9 @@ public class UserService implements
         String resolvedName = entry.resolvedName(incomingName);
         String resolvedProvider = entry.resolvedProvider(incomingProvider);
         String resolvedProviderUserId = entry.resolvedProviderUserId(incomingProviderUserId);
-        if (java.util.Objects.equals(resolvedName, entry.getName())
-                && java.util.Objects.equals(resolvedProvider, entry.getProvider())
-                && java.util.Objects.equals(resolvedProviderUserId, entry.getProviderUserId())) {
+        if (Objects.equals(resolvedName, entry.getName())
+                && Objects.equals(resolvedProvider, entry.getProvider())
+                && Objects.equals(resolvedProviderUserId, entry.getProviderUserId())) {
             return entry;
         }
         AccessEntry updated = entry.toBuilder().name(resolvedName).provider(resolvedProvider)
@@ -332,6 +355,40 @@ public class UserService implements
                     "Cannot remove the last administrator — promote another admin first.");
         }
         forPersistingAccessEntries.delete(normalised);
+        forPersistingServiceCredentials.update(credentials -> credentials.withoutPerson(normalised));
+    }
+
+    // === Service credentials: the login Vaier hands a social-gated service for someone it let in ===
+
+    @Override
+    public ServiceCredentials getServiceCredentials() {
+        return forPersistingServiceCredentials.read();
+    }
+
+    @Override
+    public void setSharedServiceCredential(String host, String username, String password) {
+        ServiceCredential credential = new ServiceCredential(username, password);
+        List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        forPersistingServiceCredentials.update(credentials -> credentials.withShared(host, credential, routes));
+    }
+
+    @Override
+    public void clearSharedServiceCredential(String host) {
+        forPersistingServiceCredentials.update(credentials -> credentials.withoutShared(host));
+    }
+
+    @Override
+    public void setPersonalServiceCredential(String host, String email, String username, String password) {
+        ServiceCredential credential = new ServiceCredential(username, password);
+        List<ReverseProxyRoute> routes = forPersistingReverseProxyRoutes.getReverseProxyRoutes();
+        List<AccessEntry> people = forPersistingAccessEntries.getEntries();
+        forPersistingServiceCredentials.update(
+                credentials -> credentials.withPersonal(host, email, credential, routes, people));
+    }
+
+    @Override
+    public void removePersonalServiceCredential(String host, String email) {
+        forPersistingServiceCredentials.update(credentials -> credentials.withoutPersonal(host, email));
     }
 
     private static void validateEmail(String email) {

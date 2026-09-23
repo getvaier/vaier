@@ -179,8 +179,10 @@ class ExplorerShellTest {
         // /fleet (#336) is the fleet root's own read — the nudge ladder at fleet altitude, GET /fleet/nudges —
         // and has the /fleet-credentials kind of justification: a genuinely new capability whose REST surface
         // and view shipped together, composed at the driving edge from use cases that already existed.
+        // /access widens /access/services: a service credential's person picker reads the access entries the
+        // Users page already lists, and its own /access/services/…/credentials shipped with the pane section.
         List<String> allowed = List.of("/machines", "/vpn/peers", "/lan-servers", "/users/me",
-                                       "/docker-services", "/published-services", "/access/services",
+                                       "/docker-services", "/published-services", "/access",
                                        "/transfers", "/backup-servers", "/backup-repositories", "/backup-jobs",
                                        "/settings", "/lan-scan", "/survival-kit", "/security",
                                        "/fleet-credentials", "/vpn/enrolments", "/chat", "/fleet/nudges");

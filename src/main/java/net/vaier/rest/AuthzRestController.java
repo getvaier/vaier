@@ -14,6 +14,7 @@ import net.vaier.domain.AccessDecision;
 import net.vaier.domain.CallerIp;
 import net.vaier.domain.Role;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -95,7 +96,8 @@ public class AuthzRestController {
             @RequestHeader(value = "X-Forwarded-Host", required = false) String host,
             @RequestHeader(value = "X-Auth-Request-Name", required = false) String name,
             @RequestHeader(value = "X-Auth-Request-Connector", required = false) String provider,
-            @RequestHeader(value = "X-Auth-Request-Connector-Uid", required = false) String providerUserId) {
+            @RequestHeader(value = "X-Auth-Request-Connector-Uid", required = false) String providerUserId,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String presentedAuthorization) {
         AccessDecision decision = verifyAccessUseCase.verify(email, host, name, provider, providerUserId);
         if (!decision.isAllowed()) {
             // Traefik forward-auth returns this body to the browser on a non-2xx, so a denied
@@ -113,6 +115,8 @@ public class AuthzRestController {
         if (displayName != null && !displayName.isBlank()) {
             ok.header("Remote-Name", displayName);
         }
+        decision.authorizationFor(presentedAuthorization)
+                .ifPresent(authorization -> ok.header(HttpHeaders.AUTHORIZATION, authorization));
         return ok.body(null);
     }
 

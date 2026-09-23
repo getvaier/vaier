@@ -1708,6 +1708,9 @@ public class TraefikReverseProxyAdapter implements ForPersistingReverseProxyRout
             // The display name Vaier resolves from the access entry, so the console topbar / My Page
             // can greet a social user by name rather than email.
             headers.add("Remote-Name");
+            // A service credential for the person let in, or the client's own Authorization handed back:
+            // Traefik strips every listed header from the request whether or not the check returns it.
+            headers.add("Authorization");
             forwardAuth.put("authResponseHeaders", headers);
             Map<String, Object> authz = new LinkedHashMap<>();
             authz.put("forwardAuth", forwardAuth);

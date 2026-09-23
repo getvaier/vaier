@@ -846,6 +846,21 @@ touches published-service routers/services or other config.
 - Known limitation: rules key on host (matching the forward-auth `X-Forwarded-Host`), so path-scoped
   services that share a host share one rule.
 
+**Delivered (service credentials — Vaier signs people in to a gated service, TDD-first):** ✅
+- A Social published service can carry a **shared service credential** (username + password) and, per
+  **access entry**, a **personal service credential** that wins over it. When `/authz/verify` allows a
+  request it answers with `Authorization: Basic …` for that person on that host, and `vaier-authz` lists
+  `Authorization` in `authResponseHeaders`, so Traefik puts it on the request to the backend. The person
+  never learns the service's password (openHAB: Turid signs in with Google, openHAB sees its own user).
+- Never on a denial. With no credential Vaier hands back whatever `Authorization` the client sent, because
+  Traefik strips a listed header from the forwarded request even when the check returns none.
+- Rules in the domain (`ServiceCredential`, `ServiceCredentials`): no `:` in the username, no control
+  characters, length caps; only a host with a Vaier-managed Social route; a personal one names an existing
+  access entry. Unpublishing the last route on a host forgets its credentials; revoking a person forgets theirs.
+- `service-credentials.yml`, passwords sealed by the vault cipher; read and decrypted once and served from
+  memory on the forward-auth path. Write-only passwords: `GET /access/services/credentials` returns usernames.
+- UI: a **Service credential** field under Allowed groups in the Explorer's service pane.
+
 **Delivered (GitHub sign-in via the Dex identity broker, TDD-first):** ✅ (#305 follow-up)
 - A user can now sign in with **Google or GitHub**. Rather than teach oauth2-proxy two providers, a **Dex**
   OIDC broker is inserted behind it: `Traefik → oauth2-proxy → Dex → Google / GitHub`. oauth2-proxy stays

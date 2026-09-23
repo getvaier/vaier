@@ -8,13 +8,19 @@ import net.vaier.domain.ContainerRun;
 import net.vaier.domain.FirstRunPassword;
 import net.vaier.domain.IdentityProvider;
 import net.vaier.domain.LastAdminException;
+import net.vaier.domain.AuthMode;
 import net.vaier.domain.ProviderCredentials;
+import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.Role;
+import net.vaier.domain.ServiceCredential;
+import net.vaier.domain.ServiceCredentials;
 import net.vaier.domain.SignInApplyOutcome;
 import net.vaier.domain.SignInSettings;
 import net.vaier.domain.port.ForNotifyingAdmins;
 import net.vaier.domain.port.ForPersistingAccessEntries;
+import net.vaier.domain.port.ForPersistingReverseProxyRoutes;
 import net.vaier.domain.port.ForPersistingServiceAccessRules;
+import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForPersistingSignInSettings;
 import net.vaier.domain.port.ForReadingFirstRunPassword;
 import net.vaier.domain.port.ForRerunningContainers;
@@ -36,6 +42,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,6 +82,12 @@ class UserServiceTest {
 
     @Mock
     ForRunningInBackground forRunningInBackground;
+
+    @Mock
+    ForPersistingServiceCredentials forPersistingServiceCredentials;
+
+    @Mock
+    ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
 
     @InjectMocks
     UserService service;
@@ -125,6 +138,7 @@ class UserServiceTest {
     void noSignInSettings() {
         lenient().when(forPersistingSignInSettings.read()).thenReturn(SignInSettings.none());
         lenient().when(forRerunningContainers.rerun(anyString())).thenReturn(new ContainerRun(0, ""));
+        lenient().when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.empty());
     }
 
     @Test
@@ -383,6 +397,69 @@ class UserServiceTest {
         when(forPersistingServiceAccessRules.allServiceAccessRules()).thenReturn(rules);
 
         assertThat(service.getServiceAccessRules()).isEqualTo(rules);
+    }
+
+    // --- service credentials: the rules are ServiceCredentials'; the service hands them the stores ---
+
+    private static final ServiceCredential TURIDS = new ServiceCredential("turid", "turids-pw");
+    private static final ReverseProxyRoute SOCIAL_OPENHAB = ReverseProxyRoute.builder().name("openhab-router")
+            .domainName("openhab.example.com").middlewares(AuthMode.SOCIAL.authMiddlewareNames()).build();
+
+    /** What the service's change does to a store that held {@code before}. */
+    @SuppressWarnings("unchecked")
+    private ServiceCredentials changed(ServiceCredentials before) {
+        ArgumentCaptor<UnaryOperator<ServiceCredentials>> change = ArgumentCaptor.forClass(UnaryOperator.class);
+        verify(forPersistingServiceCredentials).update(change.capture());
+        return change.getValue().apply(before);
+    }
+
+    @Test
+    void verify_anAllowedRequest_carriesTheCredentialForThatPersonOnThatHost_readFromMemory() {
+        when(forPersistingAccessEntries.findByEmail("turid@example.com"))
+                .thenReturn(Optional.of(accessEntry("turid@example.com", Role.USER, List.of())));
+        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.empty().withPersonal(
+                "openhab.example.com", "turid@example.com", TURIDS, List.of(SOCIAL_OPENHAB),
+                List.of(accessEntry("turid@example.com", Role.USER, List.of()))));
+
+        AccessDecision decision = service.verify(" Turid@Example.com ", "openhab.example.com", null, null, null);
+
+        assertThat(decision.authorizationFor(null)).contains(TURIDS.authorizationHeader());
+    }
+
+    @Test
+    void settingAndClearingCredentials_changeTheStoreThroughTheDomain_againstThePublishedRoutesAndPeople() {
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(SOCIAL_OPENHAB));
+        when(forPersistingAccessEntries.getEntries())
+                .thenReturn(List.of(accessEntry("turid@example.com", Role.USER, List.of())));
+
+        service.setSharedServiceCredential("openhab.example.com", "house", "shared-pw");
+        ServiceCredentials withShared = changed(ServiceCredentials.empty());
+        assertThat(withShared.credentialFor("openhab.example.com", "anyone@example.com"))
+                .contains(new ServiceCredential("house", "shared-pw"));
+
+        reset(forPersistingServiceCredentials);
+        service.setPersonalServiceCredential("openhab.example.com", "turid@example.com", "turid", "turids-pw");
+        ServiceCredentials withBoth = changed(withShared);
+        assertThat(withBoth.credentialFor("openhab.example.com", "turid@example.com")).contains(TURIDS);
+
+        reset(forPersistingServiceCredentials);
+        service.removePersonalServiceCredential("openhab.example.com", "turid@example.com");
+        assertThat(changed(withBoth)).isEqualTo(withShared);
+
+        reset(forPersistingServiceCredentials);
+        service.clearSharedServiceCredential("openhab.example.com");
+        assertThat(changed(withShared).getByService()).isEmpty();
+    }
+
+    @Test
+    void revokeAccess_forgetsThePersonsServiceCredentials() {
+        ServiceCredentials before = ServiceCredentials.empty().withPersonal("openhab.example.com",
+                "gone@example.com", TURIDS, List.of(SOCIAL_OPENHAB),
+                List.of(accessEntry("gone@example.com", Role.USER, List.of())));
+
+        service.revokeAccess("  Gone@Example.com ");
+
+        assertThat(changed(before).getByService()).isEmpty();
     }
 
     // --- verify: the Vaier console host requires admin ---

@@ -105,3 +105,19 @@ Each published service card carries an **auth mode** picker — **Public** (no s
 For a **Social** published service you can restrict *which* signed-in users get through. Open the published service's entry in the **Explorer** and use the **Allowed groups** chip picker to name the groups allowed to reach it. Suggestions come from the groups already assigned to your access entries, and you can free-type a new group name. Leave it empty and any signed-in, approved user can reach the service; add one or more groups and only users holding at least one of them (plus every admin) get in. A service with a non-empty rule shows a **restricted** badge so you can see at a glance it isn't open to every approved user. Rules apply only in Social auth mode — switch a service to Public and the control disappears.
 
 Rules are keyed by the service's host, so path-scoped services that share one subdomain currently share a single rule (a known limitation for now).
+
+## Service credentials
+
+Some services keep a login of their own behind social login — openHAB's API, say. Rather than tell everyone its password, give the service a **service credential**: a username and password Vaier hands it for every person it lets in. In the **Explorer**, open the published service and fill in **Service credential** under Allowed groups. It is offered only in Social auth mode, because only there does Vaier's own check run on each request.
+
+- The **shared** credential is used for everyone who has no credential of their own.
+- A **personal** credential is for one access entry — Turid gets her own openHAB user, and the service can tell her apart. Pick the person, then their username and password.
+- With neither, Vaier hands nothing on, and whatever the browser or app sent reaches the service as before.
+
+**How it works.** When `/authz/verify` allows a request, its answer carries `Authorization: Basic …` for that person on that host (their own credential first, else the shared one), and the `vaier-authz` middleware lists `Authorization` among the headers Traefik copies onto the request to the backend. A refused request never carries one — Traefik shows that answer to the browser. Traefik strips every listed header from the forwarded request even when the check returns none, so when no credential applies Vaier hands back the `Authorization` the client itself sent; a service people sign in to by hand keeps working.
+
+**One account per credential.** The service sees exactly the login Vaier handed it: everyone on the shared credential is the same user to it, with that user's rights. Give someone a personal credential when the service must tell them apart or grant them less.
+
+**openHAB** accepts basic auth only once it is allowed: **Settings → API Security → Allow Basic Authentication**. A credential the service rejects answers 401, which the social chain turns into the sign-in page — if signing in loops, check the username and password.
+
+**Storage.** Credentials live in `./vaier/config/service-credentials.yml` (mode `0600`), passwords sealed by the same cipher as the host credentials. Vaier reads the file once and answers every request from memory. Passwords are write-only: the console shows only the username and a Clear or Remove. Unpublishing a service's last route forgets its credentials, and revoking a person forgets theirs. Like access rules, credentials key on the service's host, so path-scoped services that share a host share them.

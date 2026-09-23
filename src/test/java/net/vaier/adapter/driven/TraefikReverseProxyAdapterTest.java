@@ -1085,7 +1085,7 @@ class TraefikReverseProxyAdapterTest {
         var middlewares = (java.util.Map<String, Object>) http().get("middlewares");
         var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
         assertThat((List<String>) authz.get("authResponseHeaders"))
-            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups", "Remote-Name");
+            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups", "Remote-Name", "Authorization");
     }
 
     @Test
@@ -1117,7 +1117,7 @@ class TraefikReverseProxyAdapterTest {
         var authz = (java.util.Map<String, Object>) ((java.util.Map<String, Object>) middlewares.get("vaier-authz")).get("forwardAuth");
         assertThat(authz.get("address")).isEqualTo("http://vaier:8080/authz/verify");
         assertThat((List<String>) authz.get("authResponseHeaders"))
-            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups", "Remote-Name");
+            .containsExactly("Remote-User", "Remote-Email", "Remote-Groups", "Remote-Name", "Authorization");
 
         // oauth2-proxy-svc: the shared file-service the sign-in errors middleware points at
         var svc = (java.util.Map<String, Object>) services.get("oauth2-proxy-svc");
