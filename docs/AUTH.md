@@ -61,7 +61,7 @@ Vaier reaches `dex-init` and `oauth2-proxy-init` through `docker-proxy`, whose t
 
 Set `VAIER_ADMIN_EMAIL` to the email that should become the first admin — optional, but it is also what names the first-run account, and it is the identity Vaier restores to admin whenever the store has none. Three secrets are **generated for you by `install.sh`** into `.env` — you don't author any of them: the oauth2-proxy session cookie secret (`VAIER_OAUTH2_COOKIE_SECRET`), the oauth2-proxy↔Dex shared secret (`VAIER_DEX_CLIENT_SECRET`), and the CrowdSec bouncer API key (`VAIER_CROWDSEC_BOUNCER_KEY`).
 
-If you hand-write `.env`, generate all three — a missing one now stops `docker compose` at config-parse time with a message naming the variable, rather than starting the stack in a broken state. That guard matters most for the bouncer key: its forward-auth sits ahead of every other middleware and fails closed, so an empty value takes down *every* route, console included — not just the service it belongs to.
+If you hand-write `.env`, generate all three — a missing one now stops `docker compose` at config-parse time with a message naming the variable, rather than starting the stack in a broken state. The bouncer key matters most. The bouncer is first on every published service, so a blank key would break all of them, not just one.
 
 ```bash
 printf 'VAIER_DEX_CLIENT_SECRET=%s\nVAIER_OAUTH2_COOKIE_SECRET=%s\nVAIER_CROWDSEC_BOUNCER_KEY=%s\n' \
@@ -75,6 +75,8 @@ Once `docker compose ps` shows every service as `Up`, open `https://vaier.yourdo
 Anyone else who signs in for the first time is recorded as a **pending** access request — authenticated but blocked until you approve them on the **Users** page. Promote them to **user** (or **admin**) there.
 
 The oauth2-proxy sign-in and error pages — and the Dex broker's own screens — all share Vaier's dark theme, so the sign-in hand-off (Google or GitHub) feels seamless end to end.
+
+A CrowdSec ban on your own address does not stop you signing in. The console, oauth2-proxy and Dex are the [recovery doors](NETWORKING.md#the-recovery-doors), and the bouncer does not judge them, so you can reach the Security view and lift the block. All the usual sign-in and approval checks still apply there.
 
 ---
 

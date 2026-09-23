@@ -1652,4 +1652,52 @@ class ReverseProxyRouteTest {
         assertThatCode(() -> ReverseProxyRoute.validateSubdomain("a".repeat(63)))
             .doesNotThrowAnyException();
     }
+
+    // --- #351: the CrowdSec bouncer rides every route Vaier writes, first ---
+
+    @Test
+    void aWrittenRouteChain_startsWithTheBouncer_thenAuth_thenRedirect_thenTheOfflinePage() {
+        record Row(AuthMode mode, String redirect, List<String> expected) {}
+        for (Row row : List.of(
+                new Row(AuthMode.NONE, null, List.of("crowdsec-bouncer@file", "vaier-errors")),
+                new Row(AuthMode.NONE, "app-redirect",
+                    List.of("crowdsec-bouncer@file", "app-redirect", "vaier-errors")),
+                new Row(AuthMode.SOCIAL, "app-redirect", List.of("crowdsec-bouncer@file",
+                    "oauth2-signin", "oauth2-authn", "vaier-authz", "app-redirect", "vaier-errors")))) {
+            assertThat(ReverseProxyRoute.middlewareChain(row.mode(), row.redirect()))
+                .as(row.toString()).containsExactlyElementsOf(row.expected());
+        }
+    }
+
+    @Test
+    void anAuthModeSwitch_swapsOnlyTheAuthLinks_andKeepsTheBouncerFirst() {
+        List<String> social = List.of("crowdsec-bouncer@file",
+            "oauth2-signin", "oauth2-authn", "vaier-authz", "app-redirect", "vaier-errors");
+
+        assertThat(ReverseProxyRoute.rechained(social, AuthMode.NONE))
+            .containsExactly("crowdsec-bouncer@file", "app-redirect", "vaier-errors");
+        // A chain written before the bouncer existed comes out of a switch with it, in front.
+        assertThat(ReverseProxyRoute.rechained(List.of("vaier-errors"), AuthMode.SOCIAL))
+            .containsExactly("crowdsec-bouncer@file", "oauth2-signin", "oauth2-authn", "vaier-authz",
+                "vaier-errors");
+    }
+
+    @Test
+    void anOlderChain_isBroughtUpToDate_bouncerFirstAndOfflinePageLast_eachExactlyOnce() {
+        record Row(List<String> existing, List<String> expected) {}
+        for (Row row : List.of(
+                new Row(List.of(), List.of("crowdsec-bouncer@file", "vaier-errors")),
+                new Row(List.of("auth-middleware", "legacy-redirect"),
+                    List.of("crowdsec-bouncer@file", "auth-middleware", "legacy-redirect", "vaier-errors")),
+                new Row(List.of("oauth2-signin", "vaier-errors"),
+                    List.of("crowdsec-bouncer@file", "oauth2-signin", "vaier-errors")),
+                // Anywhere but first is as good as missing: the auth hop would run before the ban.
+                new Row(List.of("oauth2-signin", "crowdsec-bouncer@file", "vaier-errors"),
+                    List.of("crowdsec-bouncer@file", "oauth2-signin", "vaier-errors")),
+                new Row(List.of("crowdsec-bouncer@file", "vaier-errors"),
+                    List.of("crowdsec-bouncer@file", "vaier-errors")))) {
+            assertThat(ReverseProxyRoute.upToDateChain(row.existing()))
+                .as(row.existing().toString()).containsExactlyElementsOf(row.expected());
+        }
+    }
 }

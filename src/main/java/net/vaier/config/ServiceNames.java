@@ -21,6 +21,8 @@ public final class ServiceNames {
     public static final String VAIER_AUTHZ_MIDDLEWARE = "vaier-authz";
     public static final String OAUTH2_PROXY_SERVICE = "oauth2-proxy-svc";
     public static final String ERROR_PAGES_MIDDLEWARE = "vaier-errors";
+    // Rendered by the traefik entrypoint into security.yml, hence provider-qualified.
+    public static final String CROWDSEC_BOUNCER_MIDDLEWARE = "crowdsec-bouncer@file";
     public static final String ERROR_PAGES_SERVICE = "vaier-error-pages";
     public static final String CERT_RESOLVER = "letsencrypt";
     public static final String ENTRY_POINT_WEBSECURE = "websecure";
