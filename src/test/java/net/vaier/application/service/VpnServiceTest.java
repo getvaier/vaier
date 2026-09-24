@@ -15,6 +15,7 @@ import net.vaier.domain.LastServiceReached;
 import net.vaier.domain.LastServicesReached;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.PeerSetupScript;
 import net.vaier.domain.DeviceClaim;
 import net.vaier.domain.MachinePosition;
 import net.vaier.domain.MachinePositions;
@@ -284,128 +285,19 @@ class VpnServiceTest {
         assertThat(script).doesNotContain("10.13.13.0/24");
     }
 
-    // --- generateSetupScript: relay-peer LAN forwarding (#170) ---
+    // --- generateSetupScript: a relay's forwarding follows its stored config (#170, #191, #250) ---
 
     @Test
-    void generateSetupScript_lanCidrSet_enablesIpForwardingSysctl() {
-        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
+    void generateSetupScript_handsTheRelaysStoredConfigAndLanToTheDomainScript() {
+        String stored = "[Peer]\nAllowedIPs = 10.13.13.0/24,172.31.16.0/20,192.168.3.0/24\n";
         when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
-            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
+            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", stored,
                 MachineType.UBUNTU_SERVER, "192.168.1.0/24", null))
         );
 
-        String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
-
-        assertThat(script).contains("sysctl -w net.ipv4.ip_forward=1");
-        assertThat(script).contains("net.ipv4.ip_forward=1");
-        assertThat(script).contains("/etc/sysctl.d/99-wireguard.conf");
-    }
-
-    @Test
-    void generateSetupScript_lanCidrSet_addsMasqueradeAndForwardRulesIdempotently() {
-        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
-        when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
-            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
-                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null))
-        );
-
-        String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
-
-        // POSTROUTING MASQUERADE for vpn -> lan
-        assertThat(script).contains(
-            "iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
-        assertThat(script).contains(
-            "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
-        // FORWARD vpn -> lan
-        assertThat(script).contains(
-            "iptables -C FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
-        assertThat(script).contains(
-            "iptables -A FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
-        // FORWARD lan -> vpn (RELATED,ESTABLISHED only)
-        assertThat(script).contains(
-            "iptables -C FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
-        assertThat(script).contains(
-            "iptables -A FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
-    }
-
-    @Test
-    void generateSetupScript_lanCidrAbsent_omitsForwardingBlock() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
-        assertThat(script).doesNotContain("net.ipv4.ip_forward=1");
-        assertThat(script).doesNotContain("MASQUERADE");
-        assertThat(script).doesNotContain("FORWARD");
-    }
-
-    // --- generateSetupScript: relay iptables survive reboot (#191) ---
-
-    @Test
-    void generateSetupScript_lanCidrSet_installsBootTimeUnitToReapplyIptables() {
-        ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
-        when(peerConfigProvider.getPeerConfigByName("homelab")).thenReturn(
-            Optional.of(new PeerConfiguration("homelab", "10.13.13.5", "wg-config",
-                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null))
-        );
-
-        String script = service.generateSetupScript("homelab", "vpn.example.com", "51820").orElseThrow();
-
-        // Writes a systemd unit and enables it at boot.
-        assertThat(script).contains("/etc/systemd/system/vaier-wg-relay-iptables.service");
-        assertThat(script).contains("systemctl daemon-reload");
-        assertThat(script).contains("systemctl enable");
-        assertThat(script).contains("vaier-wg-relay-iptables");
-
-        // The unit re-applies the same idempotent iptables rules on every boot.
-        // Take everything between the unit file's heredoc markers and assert against that.
-        int unitStart = script.indexOf("vaier-wg-relay-iptables.service");
-        int unitEnd = script.indexOf("UNIT_FILE\n", unitStart);
-        assertThat(unitStart).isPositive();
-        assertThat(unitEnd).isGreaterThan(unitStart);
-        String unitBody = script.substring(unitStart, unitEnd);
-
-        assertThat(unitBody).contains(
-            "iptables -t nat -C POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
-        assertThat(unitBody).contains(
-            "iptables -t nat -A POSTROUTING -s 10.13.13.0/24 -d 192.168.1.0/24 -j MASQUERADE");
-        assertThat(unitBody).contains(
-            "iptables -C FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
-        assertThat(unitBody).contains(
-            "iptables -A FORWARD -s 10.13.13.0/24 -d 192.168.1.0/24 -j ACCEPT");
-        assertThat(unitBody).contains(
-            "iptables -C FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
-        assertThat(unitBody).contains(
-            "iptables -A FORWARD -s 192.168.1.0/24 -d 10.13.13.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT");
-
-        // Boot-time service runs after networking is ready; otherwise iptables -t nat fails.
-        assertThat(unitBody).contains("After=network");
-    }
-
-    @Test
-    void generateSetupScript_lanCidrAbsent_omitsBootTimeIptablesUnit() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config"))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
-        assertThat(script).doesNotContain("vaier-wg-relay-iptables");
-    }
-
-    @Test
-    void generateSetupScript_lanCidrBlank_omitsForwardingBlock() {
-        when(peerConfigProvider.getPeerConfigByName("alice")).thenReturn(
-            Optional.of(new PeerConfiguration("alice", "10.13.13.2", "wg-config",
-                MachineType.UBUNTU_SERVER, "   ", null))
-        );
-
-        String script = service.generateSetupScript("alice", "vpn.example.com", "51820").orElseThrow();
-
-        assertThat(script).doesNotContain("net.ipv4.ip_forward=1");
-        assertThat(script).doesNotContain("MASQUERADE");
+        assertThat(service.generateSetupScript("homelab", "vpn.example.com", "51820")).contains(
+            PeerSetupScript.generate("homelab", "10.13.13.5", "vpn.example.com", "51820", stored,
+                "192.168.1.0/24", "10.13.13.0/24"));
     }
 
     // --- generateSetupScript: wireguard image pinning (drift guard, #175) ---
@@ -1512,6 +1404,64 @@ class VpnServiceTest {
                 MachineType.UBUNTU_SERVER, null, null, null)));
 
         assertThat(service.getVpnPeers().get(0).configOutOfDate()).isFalse();
+    }
+
+    // --- site-to-site routing: every render sees the whole fleet (#250) ---
+
+    private static final String COLINA_BEFORE_APALVEIEN = WireGuardPeerConfig.generate(
+        "PRIVKEY", "10.13.13.3", "SERVER_PUB", "PSK", "vaier.eilertsen.family:51820",
+        MachineType.UBUNTU_SERVER, "192.168.1.0/24", null, "10.13.13.0/24", null, "Colina 27",
+        "172.31.16.0/20");
+
+    private List<PeerConfiguration> colinaAndApalveien() {
+        when(configResolver.getDomain()).thenReturn("eilertsen.family");
+        when(forResolvingServerLanCidr.resolve()).thenReturn(Optional.of("172.31.16.0/20"));
+        when(forGettingServerPublicKey.getServerPublicKey()).thenReturn("SERVER_PUB");
+        List<PeerConfiguration> fleet = List.of(
+            new PeerConfiguration("colina-27", "Colina 27", "10.13.13.3", COLINA_BEFORE_APALVEIEN,
+                MachineType.UBUNTU_SERVER, "192.168.1.0/24", null, null),
+            new PeerConfiguration("apalveien-5", "Apalveien 5", "10.13.13.6", "",
+                MachineType.UBUNTU_SERVER, "192.168.3.0/24", null, null));
+        when(peerConfigProvider.getAllPeerConfigs()).thenReturn(fleet);
+        return fleet;
+    }
+
+    @Test
+    void getVpnPeers_aSiblingRelayJoining_marksTheRelaysConfigOutOfDate() {
+        colinaAndApalveien();
+        when(forGettingVpnClients.getClients()).thenReturn(List.of(
+            new VpnClient("pub", "10.13.13.3/32", "", "", "0", "0", "0")));
+
+        assertThat(service.getVpnPeers().get(0).configOutOfDate()).isTrue();
+    }
+
+    @Test
+    void reissuePeerConfig_rendersAgainstTheWholeFleet() throws Exception {
+        ReflectionTestUtils.setField(service, "wireguardContainerName", "wireguard");
+        List<PeerConfiguration> fleet = colinaAndApalveien();
+        when(peerConfigProvider.getPeerConfigByName("colina-27")).thenReturn(Optional.of(fleet.get(0)));
+        when(forExecutingInContainer.executeWithInput(eq("wireguard"), any(), eq("wg"), eq("pubkey")))
+            .thenReturn("PEER_PUB\n");
+
+        service.reissuePeerConfig("colina-27");
+
+        verify(forUpdatingPeerConfigurations).rewriteConfig("colina-27", WireGuardPeerConfig.reissue(
+            COLINA_BEFORE_APALVEIEN, MachineType.UBUNTU_SERVER, "192.168.1.0/24", null, null, "Colina 27",
+            "SERVER_PUB", "vaier.eilertsen.family:51820", "10.13.13.0/24", "172.31.16.0/20", null, fleet));
+    }
+
+    @Test
+    void createPeer_aNewServerPeerRoutesEveryRelaysLan(@TempDir Path dir) throws Exception {
+        wireguardIsReachable(dir);
+        colinaAndApalveien();
+        when(forExecutingInContainer.execute("wireguard", "wg", "genkey")).thenReturn("PRIV\n");
+        when(forExecutingInContainer.execute("wireguard", "wg", "genpsk")).thenReturn("PSK\n");
+        when(forExecutingInContainer.executeWithInput("wireguard", "PRIV", "wg", "pubkey")).thenReturn("PUB\n");
+
+        var created = service.createPeer("VPS", MachineType.UBUNTU_SERVER, null, null);
+
+        assertThat(WireGuardPeerConfig.readDirective(created.clientConfigFile(), "AllowedIPs"))
+            .isEqualTo("10.13.13.0/24,172.31.16.0/20,192.168.1.0/24,192.168.3.0/24");
     }
 
 

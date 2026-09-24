@@ -1,5 +1,10 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,6 +72,17 @@ public final class WireGuardPeerConfig {
                                   MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
                                   String description, String name, String serverLanCidr,
                                   String deviceCategory, MachineId machineId, String publicKey) {
+        return generate(privateKey, ipAddress, serverPublicKey, presharedKey, serverEndpoint,
+            peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr,
+            deviceCategory, machineId, publicKey, List.of());
+    }
+
+    public static String generate(String privateKey, String ipAddress, String serverPublicKey,
+                                  String presharedKey, String serverEndpoint,
+                                  MachineType peerType, String lanCidr, String lanAddress, String vpnSubnet,
+                                  String description, String name, String serverLanCidr,
+                                  String deviceCategory, MachineId machineId, String publicKey,
+                                  List<PeerConfiguration> fleet) {
         // lanCidr is intentionally NOT appended to the client-side AllowedIPs: doing so makes
         // wg-quick install a route for that CIDR via wg0 on the relay peer, which hijacks the
         // relay's own LAN. lanCidr is still recorded in the # VAIER metadata below so that
@@ -79,9 +95,14 @@ public final class WireGuardPeerConfig {
         // hijacking the peer's own local connectivity. Mobile/Windows clients already cover this
         // via their default 0.0.0.0/0 AllowedIPs, so the value is only applied when the peer is a
         // server type.
+        //
+        // Every sibling relay LAN is appended for server-type peers too (#250) — see siblingRelayLans.
         String allowedIps = peerType.defaultAllowedIps(vpnSubnet);
-        if (peerType.isServerType() && serverLanCidr != null && !serverLanCidr.isBlank()) {
-            allowedIps = allowedIps + "," + serverLanCidr.trim();
+        if (peerType.isServerType()) {
+            LinkedHashSet<String> cidrs = new LinkedHashSet<>(List.of(allowedIps));
+            if (serverLanCidr != null && !serverLanCidr.isBlank()) cidrs.add(serverLanCidr.trim());
+            cidrs.addAll(siblingRelayLans(lanCidr, lanAddress, fleet));
+            allowedIps = String.join(",", cidrs);
         }
 
         String vaierJson = vaierJson(peerType, lanCidr, lanAddress, description, name, deviceCategory,
@@ -111,6 +132,45 @@ public final class WireGuardPeerConfig {
     }
 
     /**
+     * Every relay's {@code lanCidr} in {@code fleet} that a server peer should reach through the tunnel:
+     * normalised, de-duplicated and sorted, so a render never depends on the order peers were read in.
+     *
+     * <p>A LAN that overlaps the peer's own {@code lanCidr}, or contains its {@code lanAddress}, is left
+     * out — routing it into the tunnel would cut the peer off from the network it sits on (the peer's own
+     * LAN is always such a LAN). Where Vaier knows neither, the LAN is kept: unknown is not "on it", and
+     * the setup-script guard still refuses a host that would sever its own uplink.
+     */
+    public static List<String> siblingRelayLans(String ownLanCidr, String ownLanAddress,
+                                                List<PeerConfiguration> fleet) {
+        String own = normalise(ownLanCidr);
+        TreeSet<String> lans = new TreeSet<>();
+        for (PeerConfiguration peer : fleet) {
+            String lan = normalise(peer.lanCidr());
+            if (lan == null) continue;
+            if (own != null && overlap(lan, own)) continue;
+            if (ownLanAddress != null && Cidr.parse(lan).contains(ownLanAddress.trim())) continue;
+            lans.add(lan);
+        }
+        return List.copyOf(lans);
+    }
+
+    private static String normalise(String cidr) {
+        if (cidr == null || cidr.isBlank()) return null;
+        String[] parts = cidr.trim().split("/");
+        if (parts.length != 2) return null;
+        try {
+            return Cidr.networkOf(parts[0], Integer.parseInt(parts[1]));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Two normalised CIDRs overlap exactly when one holds the other's network address. */
+    private static boolean overlap(String a, String b) {
+        return Cidr.parse(a).contains(b.split("/")[0]) || Cidr.parse(b).contains(a.split("/")[0]);
+    }
+
+    /**
      * Re-renders a peer's installable config from the <em>current</em> generation logic while
      * preserving the secrets and tunnel IP baked into {@code existingContent} — its
      * {@code PrivateKey}, {@code PresharedKey} and {@code Address}. The identity fields
@@ -132,6 +192,14 @@ public final class WireGuardPeerConfig {
                                  String lanAddress, String description, String name,
                                  String serverPublicKey, String serverEndpoint, String vpnSubnet,
                                  String serverLanCidr, String deviceCategory) {
+        return reissue(existingContent, peerType, lanCidr, lanAddress, description, name,
+                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, deviceCategory, List.of());
+    }
+
+    public static String reissue(String existingContent, MachineType peerType, String lanCidr,
+                                 String lanAddress, String description, String name,
+                                 String serverPublicKey, String serverEndpoint, String vpnSubnet,
+                                 String serverLanCidr, String deviceCategory, List<PeerConfiguration> fleet) {
         // The identity is READ off the config being reissued, never minted: a Reissue re-renders the
         // whole file, so an id that is not carried through is an id that is erased — and the peer's
         // credential, host-key pin and backup job all hang off it.
@@ -142,7 +210,7 @@ public final class WireGuardPeerConfig {
                 readDirective(existingContent, "PresharedKey"),
                 serverEndpoint,
                 peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr,
-                deviceCategory, readMachineId(existingContent), readPublicKey(existingContent));
+                deviceCategory, readMachineId(existingContent), readPublicKey(existingContent), fleet);
     }
 
     /**
@@ -168,6 +236,14 @@ public final class WireGuardPeerConfig {
                                       String lanAddress, String description, String name,
                                       String serverPublicKey, String serverEndpoint, String vpnSubnet,
                                       String serverLanCidr) {
+        return isOutOfDate(existingContent, peerType, lanCidr, lanAddress, description, name,
+                serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, List.of());
+    }
+
+    public static boolean isOutOfDate(String existingContent, MachineType peerType, String lanCidr,
+                                      String lanAddress, String description, String name,
+                                      String serverPublicKey, String serverEndpoint, String vpnSubnet,
+                                      String serverLanCidr, List<PeerConfiguration> fleet) {
         // A Device-held key is never out of date: a Reissue of one is refused, so the mark would name a
         // divergence with no action behind it — and nothing is marked that nobody can act on.
         if (deviceHeldKey(existingContent)) return false;
@@ -177,7 +253,7 @@ public final class WireGuardPeerConfig {
         // only, so strip that comment line from both sides before comparing.
         return !stripVaierMetadata(existingContent).equals(stripVaierMetadata(
                 reissue(existingContent, peerType, lanCidr, lanAddress, description, name,
-                        serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr)));
+                        serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, null, fleet)));
     }
 
     /** Removes the single {@code # VAIER:} metadata comment line from a config string. */
