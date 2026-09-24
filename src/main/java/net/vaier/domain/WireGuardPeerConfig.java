@@ -1,9 +1,13 @@
 package net.vaier.domain;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -203,7 +207,7 @@ public final class WireGuardPeerConfig {
         // The identity is READ off the config being reissued, never minted: a Reissue re-renders the
         // whole file, so an id that is not carried through is an id that is erased — and the peer's
         // credential, host-key pin and backup job all hang off it.
-        return generate(
+        String rendered = generate(
                 readDirective(existingContent, "PrivateKey"),
                 readIpAddress(existingContent),
                 serverPublicKey,
@@ -211,6 +215,42 @@ public final class WireGuardPeerConfig {
                 serverEndpoint,
                 peerType, lanCidr, lanAddress, vpnSubnet, description, name, serverLanCidr,
                 deviceCategory, readMachineId(existingContent), readPublicKey(existingContent), fleet);
+        return carryUnrenderedMetadata(existingContent, rendered);
+    }
+
+    /** The metadata fields {@link #vaierJson} renders; a Reissue re-decides these and keeps every other. */
+    private static final Set<String> RENDERED_METADATA = Set.of(
+        "peerType", "name", "lanCidr", "lanAddress", "description", "deviceCategory", "publicKey", "id");
+
+    private static final Pattern METADATA_LINE = Pattern.compile("(?m)^# VAIER: (.*)$");
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * Copies onto {@code rendered}'s metadata every field of {@code existing}'s that the render does not
+     * own — {@code sshAccess} among them, written later by other operations. Dropping it would silently
+     * turn a relay's SSH access off, since a gateway's default is off. Unreadable metadata is left as rendered.
+     */
+    private static String carryUnrenderedMetadata(String existing, String rendered) {
+        Matcher old = METADATA_LINE.matcher(existing == null ? "" : existing);
+        Matcher fresh = METADATA_LINE.matcher(rendered);
+        if (!old.find() || !fresh.find()) return rendered;
+        try {
+            ObjectNode kept = (ObjectNode) JSON.readTree(fresh.group(1));
+            boolean carried = false;
+            var fields = JSON.readTree(old.group(1)).fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                if (RENDERED_METADATA.contains(field.getKey())) continue;
+                kept.set(field.getKey(), field.getValue());
+                carried = true;
+            }
+            if (!carried) return rendered;
+            return rendered.substring(0, fresh.start(1)) + JSON.writeValueAsString(kept)
+                + rendered.substring(fresh.end(1));
+        } catch (JsonProcessingException | ClassCastException e) {
+            return rendered;
+        }
     }
 
     /**

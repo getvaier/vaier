@@ -1,9 +1,11 @@
 package net.vaier.domain;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -557,6 +559,30 @@ class WireGuardPeerConfigTest {
     }
 
     // --- reissue preserves the operator's device-category override (Part 2) ---
+
+    @Test
+    void reissue_carriesEveryMetadataFieldThrough_sshAccessIncluded() throws Exception {
+        // Colina 27's line as the adapter wrote it: a GATEWAY relay, so dropping sshAccess falls back to
+        // "off" — a Reissue used to cut Vaier's SSH to the relay it was rolling out to.
+        String colina = "{\"peerType\": \"UBUNTU_SERVER\", \"lanCidr\": \"192.168.1.0/24\", "
+            + "\"lanAddress\": \"192.168.1.118\", \"description\": \"Spain \\\"server\\\"\", \"name\": \"Colina 27\", "
+            + "\"deviceCategory\": \"GATEWAY\", %s\"id\": \"636a121f-1da5-4b02-9b3a-1e80256e0a01\"}";
+        ObjectMapper json = new ObjectMapper();
+        for (String sshAccess : new String[] { "\"sshAccess\": true, ", "\"sshAccess\": false, ", "" }) {
+            String metadata = colina.formatted(sshAccess);
+            String existing = "# VAIER: " + metadata + "\n" + WireGuardPeerConfig.generate(
+                "PRIV", "10.13.13.3", "SERVER_PUB", "PSK", "vaier.example.com:51820", MachineType.UBUNTU_SERVER,
+                "192.168.1.0/24", "192.168.1.118", "10.13.13.0/24", null, "Colina 27", "172.31.16.0/20")
+                .lines().skip(1).collect(Collectors.joining("\n", "", "\n"));
+
+            String reissued = WireGuardPeerConfig.reissue(existing, MachineType.UBUNTU_SERVER, "192.168.1.0/24",
+                "192.168.1.118", "Spain \"server\"", "Colina 27", "SERVER_PUB", "vaier.example.com:51820",
+                "10.13.13.0/24", "172.31.16.0/20", "GATEWAY", List.of());
+
+            String reissuedMetadata = reissued.lines().findFirst().orElseThrow().substring("# VAIER: ".length());
+            assertThat(json.readTree(reissuedMetadata)).as(sshAccess).isEqualTo(json.readTree(metadata));
+        }
+    }
 
     @Test
     void reissue_retainsDeviceCategoryOverrideInRegeneratedMetadata() {
