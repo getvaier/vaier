@@ -236,7 +236,8 @@ public class VpnService implements
             forPersistingReverseProxyRoutes.getReverseProxyRoutes(),
             configResolver.getDomain(),
             Instant.now(),
-            PeerRoster.byAddress(configs));
+            PeerRoster.byAddress(configs),
+            configs);
         // Configured peers the interface has forgotten are listed too, or nothing could ever remove them.
         return PeerRoster.reconcile(forGettingVpnClients.getClients(), configs)
             .stream()
@@ -251,7 +252,8 @@ public class VpnService implements
     private record RefreshContext(ServerRenderContext server, MachinePositions positions,
                                   LastServicesReached reached, List<ReverseProxyRoute> routes,
                                   String baseDomain, Instant now,
-                                  Map<String, ForGettingPeerConfigurations.PeerConfiguration> configsByAddress) {}
+                                  Map<String, ForGettingPeerConfigurations.PeerConfiguration> configsByAddress,
+                                  List<ForGettingPeerConfigurations.PeerConfiguration> fleet) {}
 
     /**
      * The current server-side inputs to {@link WireGuardPeerConfig#reissue}. Null when they can't
@@ -303,7 +305,7 @@ public class VpnService implements
             && WireGuardPeerConfig.isOutOfDate(
                 cfg.get().configContent(), peerType, lanCidr, lanAddress, description,
                 storedName(cfg.get().configContent(), name), serverContext.serverPublicKey(),
-                serverContext.serverEndpoint(), vpnSubnet, serverContext.serverLanCidr());
+                serverContext.serverEndpoint(), vpnSubnet, serverContext.serverLanCidr(), context.fleet());
         // The domain owns the effective-category decision (override else detect). For a peer with no
         // on-disk config yet, detect from the live name + type (no override, never overridden).
         DeviceCategory deviceCategory = rawCfg
@@ -642,7 +644,7 @@ public class VpnService implements
             String clientConfig = WireGuardPeerConfig.generate(
                     privateKey, slot.ipAddress(), slot.serverPublicKey(), slot.presharedKey(),
                     slot.serverEndpoint(), resolvedType, lanCidr, lanAddress, vpnSubnet,
-                    description, name, slot.serverLanCidr(), null, slot.machineId());
+                    description, name, slot.serverLanCidr(), null, slot.machineId(), null, allPeers);
 
             writePeerConfig(id, clientConfig);
 
@@ -850,7 +852,8 @@ public class VpnService implements
         String newContent = WireGuardPeerConfig.reissue(
             peer.configContent(), peer.peerType(), peer.lanCidr(), peer.lanAddress(),
             peer.description(), storedName(peer.configContent(), peer.name()),
-            serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, deviceCategoryOverride);
+            serverPublicKey, serverEndpoint, vpnSubnet, serverLanCidr, deviceCategoryOverride,
+            peerConfigProvider.getAllPeerConfigs());
 
         forUpdatingPeerConfigurations.rewriteConfig(peer.id(), newContent);
         // Deliberate operator-initiated re-exposure: re-open the one-shot retrieval budget.

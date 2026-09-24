@@ -2,6 +2,8 @@ package net.vaier.domain;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -98,6 +100,36 @@ class PeerSetupScriptTest {
         assertThat(relay.substring(0, unit)).contains("sudo " + nft);
         assertThat(relay.substring(unit, relay.indexOf("UNIT_FILE\n", unit))).contains(nft);
         assertThat(script()).doesNotContain("vaier-relay");
+    }
+
+    @Test
+    void generate_relayForwardsEveryNetworkItsTunnelCarries_bothWays_nowAndOnEveryBoot() {
+        // #250: a relay's tunnel accepts exactly its AllowedIPs, so those are the networks it must
+        // forward and masquerade to its LAN — and the ones its LAN hosts may reach through it.
+        String conf = CONF.replace("AllowedIPs = 10.13.13.0/24,172.31.32.0/20",
+            "AllowedIPs = 10.13.13.0/24,172.31.16.0/20,192.168.3.0/24");
+        String relay = PeerSetupScript.generate("Colina 27", "10.13.13.3", "vaier.vaier.net", "51820",
+            conf, "192.168.1.0/24", "10.13.13.0/24");
+        int unit = relay.indexOf("vaier-wg-relay-iptables.service");
+        String now = relay.substring(0, unit);
+        String onBoot = relay.substring(unit, relay.indexOf("UNIT_FILE\n", unit));
+
+        assertThat(now).contains("sudo sysctl -w net.ipv4.ip_forward=1");
+        assertThat(onBoot).contains("After=network-online.target");
+        for (String network : List.of("10.13.13.0/24", "172.31.16.0/20", "192.168.3.0/24")) {
+            for (String rule : List.of(
+                "-t nat %s POSTROUTING -s " + network + " -d 192.168.1.0/24 -j MASQUERADE",
+                "%s FORWARD -s " + network + " -d 192.168.1.0/24 -j ACCEPT",
+                "%s FORWARD -s 192.168.1.0/24 -d " + network + " -j ACCEPT")) {
+                String check = "iptables " + rule.formatted("-C") + " 2>/dev/null";
+                String add = "iptables " + rule.formatted("-A");
+                assertThat(now).as(rule).contains("sudo " + check + " \\\n  || sudo " + add + "\n");
+                assertThat(onBoot).as(rule).contains("'" + check + " || " + add + "'");
+            }
+        }
+        assertThat(relay).doesNotContain("-s 192.168.1.0/24 -d 192.168.1.0/24");
+        assertThat(script()).doesNotContain("ip_forward").doesNotContain("FORWARD").doesNotContain("MASQUERADE")
+            .doesNotContain("vaier-wg-relay-iptables");
     }
 
     @Test

@@ -1,5 +1,9 @@
 package net.vaier.domain;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+
 /**
  * Generates the bootstrap shell script a new VPN peer runs to install Docker, write its
  * WireGuard config and {@code docker-compose.yml}, configure the remote Docker API, and — for a
@@ -113,22 +117,15 @@ public final class PeerSetupScript {
         if (lanCidr != null && !lanCidr.isBlank()) {
             String lan = lanCidr.trim();
             sb.append("\n");
-            sb.append("# --- Relay peer: forward VPN traffic to LAN ").append(lan).append(" ---\n");
+            sb.append("# --- Relay peer: forward between the Vaier network and LAN ").append(lan).append(" ---\n");
             sb.append("sudo sysctl -w net.ipv4.ip_forward=1\n");
             sb.append("grep -qxF 'net.ipv4.ip_forward=1' /etc/sysctl.d/99-wireguard.conf 2>/dev/null \\\n");
             sb.append("  || echo 'net.ipv4.ip_forward=1' | sudo tee -a /etc/sysctl.d/99-wireguard.conf > /dev/null\n");
-            sb.append("sudo iptables -t nat -C POSTROUTING -s ").append(vpnSubnet).append(" -d ").append(lan)
-                .append(" -j MASQUERADE 2>/dev/null \\\n");
-            sb.append("  || sudo iptables -t nat -A POSTROUTING -s ").append(vpnSubnet).append(" -d ").append(lan)
-                .append(" -j MASQUERADE\n");
-            sb.append("sudo iptables -C FORWARD -s ").append(vpnSubnet).append(" -d ").append(lan)
-                .append(" -j ACCEPT 2>/dev/null \\\n");
-            sb.append("  || sudo iptables -A FORWARD -s ").append(vpnSubnet).append(" -d ").append(lan)
-                .append(" -j ACCEPT\n");
-            sb.append("sudo iptables -C FORWARD -s ").append(lan).append(" -d ").append(vpnSubnet)
-                .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \\\n");
-            sb.append("  || sudo iptables -A FORWARD -s ").append(lan).append(" -d ").append(vpnSubnet)
-                .append(" -m state --state RELATED,ESTABLISHED -j ACCEPT\n");
+            List<String> networks = forwardedNetworks(wgConfig, vpnSubnet, lan);
+            for (String rule : relayRules(networks, lan)) {
+                sb.append("sudo iptables ").append(rule.formatted("-C")).append(" 2>/dev/null \\\n");
+                sb.append("  || sudo iptables ").append(rule.formatted("-A")).append("\n");
+            }
             // Tiny embedded stacks (OpenSprinkler) ignore MSS and "need to frag", so a full-size DF reply
             // never fits wg0. Clearing DF lets the relay fragment it inside the tunnel.
             sb.append("sudo ").append(clearDontFragment(lan)).append("\n");
@@ -146,15 +143,10 @@ public final class PeerSetupScript {
             sb.append("[Service]\n");
             sb.append("Type=oneshot\n");
             sb.append("RemainAfterExit=yes\n");
-            sb.append("ExecStart=/bin/sh -c 'iptables -t nat -C POSTROUTING -s ").append(vpnSubnet)
-                .append(" -d ").append(lan).append(" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ")
-                .append(vpnSubnet).append(" -d ").append(lan).append(" -j MASQUERADE'\n");
-            sb.append("ExecStart=/bin/sh -c 'iptables -C FORWARD -s ").append(vpnSubnet)
-                .append(" -d ").append(lan).append(" -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ")
-                .append(vpnSubnet).append(" -d ").append(lan).append(" -j ACCEPT'\n");
-            sb.append("ExecStart=/bin/sh -c 'iptables -C FORWARD -s ").append(lan)
-                .append(" -d ").append(vpnSubnet).append(" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -s ")
-                .append(lan).append(" -d ").append(vpnSubnet).append(" -m state --state RELATED,ESTABLISHED -j ACCEPT'\n");
+            for (String rule : relayRules(networks, lan)) {
+                sb.append("ExecStart=/bin/sh -c 'iptables ").append(rule.formatted("-C"))
+                    .append(" 2>/dev/null || iptables ").append(rule.formatted("-A")).append("'\n");
+            }
             sb.append("ExecStart=/bin/sh -c \"").append(clearDontFragment(lan)).append("\"\n");
             sb.append("\n");
             sb.append("[Install]\n");
@@ -245,6 +237,32 @@ public final class PeerSetupScript {
         sb.append("echo \"Verify VPN connection:\"\n");
         sb.append("echo \"  docker exec wireguard-client wg show\"\n");
         return sb.toString();
+    }
+
+    /**
+     * The networks a relay forwards to and from its LAN: exactly what its tunnel accepts — the config's
+     * AllowedIPs (VPN subnet, server LAN CIDR, sibling relay LANs) — never its own LAN.
+     */
+    private static List<String> forwardedNetworks(String wgConfig, String vpnSubnet, String lan) {
+        LinkedHashSet<String> networks = new LinkedHashSet<>();
+        networks.add(vpnSubnet);
+        networks.addAll(SetupScriptGuard.tunneledCidrs(wgConfig, vpnSubnet));
+        networks.remove(lan);
+        return List.copyOf(networks);
+    }
+
+    /**
+     * Per network: masquerade and accept it into the LAN, so far-LAN hosts need no route back; and accept
+     * the LAN out to it, which carries both replies and connections LAN hosts start. {@code %s} is -C or -A.
+     */
+    private static List<String> relayRules(List<String> networks, String lan) {
+        List<String> rules = new ArrayList<>();
+        for (String network : networks) {
+            rules.add("-t nat %s POSTROUTING -s " + network + " -d " + lan + " -j MASQUERADE");
+            rules.add("%s FORWARD -s " + network + " -d " + lan + " -j ACCEPT");
+            rules.add("%s FORWARD -s " + lan + " -d " + network + " -j ACCEPT");
+        }
+        return rules;
     }
 
     private static String clearDontFragment(String lan) {

@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -417,6 +418,66 @@ class WireGuardPeerConfigTest {
 
         assertThat(reissued).contains("AllowedIPs = 0.0.0.0/0");
         assertThat(reissued).doesNotContain("172.31.16.0/20");
+    }
+
+    // --- sibling relay LANs: site-to-site routing (#250) ---
+
+    private static PeerConfiguration relay(String name, String lanCidr, String lanAddress) {
+        return new PeerConfiguration(name, name, "10.13.13.9", "", MachineType.UBUNTU_SERVER, lanCidr,
+            lanAddress, null);
+    }
+
+    private static final List<PeerConfiguration> FLEET = List.of(
+        relay("Colina 27", "192.168.1.0/24", "192.168.1.118"),
+        relay("Apalveien 5", "192.168.3.0/24", "192.168.3.121"),
+        relay("Cabin", "10.0.5.7/24", null),                 // typed unaligned: normalised to 10.0.5.0/24
+        relay("Cabin twin", "10.0.5.0/24", null),            // same network again: listed once
+        new PeerConfiguration("phone", "10.13.13.20", ""));  // no LAN: not a relay
+
+    @Test
+    void generate_serverPeer_tunnelsEveryOtherRelaysLan_neverItsOwnNorOneItSitsOn() {
+        record Row(String why, MachineType type, String lanCidr, String lanAddress, String allowedIps) {}
+        for (Row row : List.of(
+            // Colina 27 on the live fleet: exactly the line that was hand-edited on 2026-07-09.
+            new Row("relay, own LAN left out", MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.118",
+                "10.13.13.0/24,172.31.16.0/20,10.0.5.0/24,192.168.3.0/24"),
+            new Row("server peer on no relay's LAN", MachineType.WINDOWS_SERVER, null, null,
+                "10.13.13.0/24,172.31.16.0/20,10.0.5.0/24,192.168.1.0/24,192.168.3.0/24"),
+            // A server peer physically on Apalveien's LAN would route its own network into the tunnel.
+            new Row("server peer sitting on a relay's LAN", MachineType.UBUNTU_SERVER, null, "192.168.3.40",
+                "10.13.13.0/24,172.31.16.0/20,10.0.5.0/24,192.168.1.0/24"),
+            new Row("relay whose LAN overlaps a sibling's", MachineType.UBUNTU_SERVER, "192.168.0.0/16", null,
+                "10.13.13.0/24,172.31.16.0/20,10.0.5.0/24"),
+            new Row("full-tunnel device already routes everything", MachineType.MOBILE_CLIENT, null, null,
+                "0.0.0.0/0"))) {
+            String config = WireGuardPeerConfig.generate("PRIV", "10.13.13.3", "SERVER_PUB", "PSK",
+                "vaier.example.com:51820", row.type(), row.lanCidr(), row.lanAddress(), "10.13.13.0/24",
+                null, "peer", "172.31.16.0/20", null, null, null, FLEET);
+
+            assertThat(WireGuardPeerConfig.readDirective(config, "AllowedIPs")).as(row.why())
+                .isEqualTo(row.allowedIps());
+        }
+    }
+
+    @Test
+    void isOutOfDate_aRelayJoiningTheFleet_leavesItsSiblingsConfigOutOfDate_untilReissued() {
+        List<PeerConfiguration> before = List.of(FLEET.get(0));
+        String colina = WireGuardPeerConfig.generate("PRIV", "10.13.13.3", "SERVER_PUB", "PSK",
+            "vaier.example.com:51820", MachineType.UBUNTU_SERVER, "192.168.1.0/24", "192.168.1.118",
+            "10.13.13.0/24", null, "Colina 27", "172.31.16.0/20", null, null, null, before);
+
+        assertThat(WireGuardPeerConfig.isOutOfDate(colina, MachineType.UBUNTU_SERVER, "192.168.1.0/24",
+            "192.168.1.118", null, "Colina 27", "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24",
+            "172.31.16.0/20", before)).as("fleet unchanged").isFalse();
+        assertThat(WireGuardPeerConfig.isOutOfDate(colina, MachineType.UBUNTU_SERVER, "192.168.1.0/24",
+            "192.168.1.118", null, "Colina 27", "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24",
+            "172.31.16.0/20", FLEET)).as("Apalveien 5 joined").isTrue();
+
+        String reissued = WireGuardPeerConfig.reissue(colina, MachineType.UBUNTU_SERVER, "192.168.1.0/24",
+            "192.168.1.118", null, "Colina 27", "SERVER_PUB", "vaier.example.com:51820", "10.13.13.0/24",
+            "172.31.16.0/20", null, FLEET);
+        assertThat(WireGuardPeerConfig.readDirective(reissued, "AllowedIPs"))
+            .isEqualTo("10.13.13.0/24,172.31.16.0/20,10.0.5.0/24,192.168.3.0/24");
     }
 
     // --- isOutOfDate: on-disk differs from current rendered config (#247) ---

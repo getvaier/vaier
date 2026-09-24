@@ -284,8 +284,6 @@ public final class LanServerSetupScript {
     private static String routeBlock(String gateway, List<String> cidrs) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n# === Routes via relay peer ").append(gateway).append(" ===\n");
-        sb.append("# NOTE: routes to other sites' LANs only carry traffic once Vaier issue #250 ships\n");
-        sb.append("# (sibling-relay LANs in peer AllowedIPs + relay forwarding). Server-subnet routing works now.\n");
         sb.append("echo \"==> Installing routes via ").append(gateway).append("\"\n");
         for (String cidr : cidrs) {
             sb.append("ip route replace ").append(cidr).append(" via ").append(gateway).append("\n");
