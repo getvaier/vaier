@@ -199,6 +199,8 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
             // Vaier's own marker plus an admin email a signed-in session already vouches for.
             log.info("Blocked {} for {}: {}", address.value(), duration.cscliDuration(), output.strip());
         } catch (Exception e) {
+            // The 502 carries only the wrapper's message; the root cause is what makes a failure diagnosable.
+            log.warn("Could not block {}: {}", address.value(), rootCause(e).toString());
             throw new BlockNotPlacedException(
                 "Vaier could not block " + address.value() + ": " + e.getMessage(), e);
         }
@@ -254,5 +256,11 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
     private static Double numberOrNull(JsonNode node, String field) {
         JsonNode value = node.path(field);
         return value.isNumber() ? value.asDouble() : null;
+    }
+
+    private static Throwable rootCause(Throwable e) {
+        Throwable cause = e;
+        while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+        return cause;
     }
 }
