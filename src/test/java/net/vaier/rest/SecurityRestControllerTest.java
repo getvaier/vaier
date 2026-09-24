@@ -1,6 +1,7 @@
 package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.vaier.application.BlockAddressUseCase;
 import net.vaier.application.GetAccessSourcesUseCase;
 import net.vaier.application.GetBlockDecisionsUseCase;
 import net.vaier.application.GetTrustedAddressesUseCase;
@@ -12,6 +13,7 @@ import net.vaier.domain.AccessSource;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.BlockDecisionsUnreadableException;
 import net.vaier.domain.BlockNotLiftedException;
+import net.vaier.domain.BlockNotPlacedException;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
@@ -53,6 +55,7 @@ class SecurityRestControllerTest {
 
     GetBlockDecisionsUseCase getBlockDecisions = mock(GetBlockDecisionsUseCase.class);
     LiftBlockUseCase liftBlock = mock(LiftBlockUseCase.class);
+    BlockAddressUseCase blockAddress = mock(BlockAddressUseCase.class);
     TrustAddressUseCase trustAddress = mock(TrustAddressUseCase.class);
     GetTrustedAddressesUseCase getTrustedAddresses = mock(GetTrustedAddressesUseCase.class);
     UntrustAddressUseCase untrustAddress = mock(UntrustAddressUseCase.class);
@@ -65,7 +68,7 @@ class SecurityRestControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new SecurityRestController(getBlockDecisions, liftBlock, trustAddress,
+        controller = new SecurityRestController(getBlockDecisions, liftBlock, blockAddress, trustAddress,
             getTrustedAddresses, untrustAddress, getAccessSources, forPublishingEvents,
             forSubscribingToEvents, new ObjectMapper());
         mvc = MockMvcBuilders.standaloneSetup(controller)
@@ -121,6 +124,26 @@ class SecurityRestControllerTest {
             .andExpect(status().isBadGateway())
             .andExpect(jsonPath("$.code").value("BLOCK_DECISIONS_UNREADABLE"))
             .andExpect(jsonPath("$.message").value("Vaier could not read who CrowdSec is blocking."));
+    }
+
+    /**
+     * The other half of #349's distinguishability requirement: the Security view marks a hand block as
+     * "blocked by you/&lt;admin&gt;" from the same list CrowdSec's own decisions already ride in, so the
+     * wire shape has to carry the domain's own classification rather than leaving the browser to guess
+     * from the scenario text.
+     */
+    @Test
+    void getDecisions_marksAHandBlockAsBlockedByTheAdminWhoPlacedIt() throws Exception {
+        BlockDecision handBlock = BlockDecision.builder()
+            .id(50L).scenario(BlockDecision.handBlockReason("admin@example.com"))
+            .sourceIp("203.0.113.9").type("ban").duration("4h0m0s").build();
+        when(getBlockDecisions.getBlockDecisions()).thenReturn(List.of(handBlock, PLACED));
+
+        mvc.perform(get("/security/decisions"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].handBlocked").value(true))
+            .andExpect(jsonPath("$[0].blockedByAdmin").value("admin@example.com"))
+            .andExpect(jsonPath("$[1].handBlocked").value(false));
     }
 
     @Test
@@ -188,6 +211,63 @@ class SecurityRestControllerTest {
             .when(liftBlock).liftBlock("evil.example.com");
 
         mvc.perform(delete("/security/decisions/evil.example.com"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+
+        verifyNoInteractions(forPublishingEvents);
+    }
+
+    // --- blocking an address by hand (#349) -------------------------------------------------------------
+
+    @Test
+    void postDecision_blocksTheAddressWithTheChosenDurationAndTheSignedInAdmin() throws Exception {
+        mvc.perform(post("/security/decisions").contentType("application/json")
+                .header("X-Auth-Request-Email", "admin@example.com")
+                .content("{\"sourceIp\":\"1.2.3.4\",\"duration\":\"4h\"}"))
+            .andExpect(status().isOk());
+
+        // MockMvc's own remote address, with no trusted-proxy header set — the same resolution the
+        // launchpad and the position endpoints already share via domain.CallerIp.
+        verify(blockAddress).blockAddress("1.2.3.4", "4h", "admin@example.com", "127.0.0.1");
+    }
+
+    @Test
+    void postDecision_pushesTheRefreshedDecisionsAtOnce() throws Exception {
+        when(getBlockDecisions.getBlockDecisions()).thenReturn(List.of(UNPLACED));
+
+        mvc.perform(post("/security/decisions").contentType("application/json")
+            .content("{\"sourceIp\":\"1.2.3.4\",\"duration\":\"4h\"}"));
+
+        verify(forPublishingEvents).publish(eq(BreachAttemptWatcher.SECURITY_TOPIC),
+            eq(BreachAttemptWatcher.DECISIONS_EVENT), contains("\"sourceIp\":\"1.2.3.4\""));
+    }
+
+    @Test
+    void postDecision_whenTheBlockFails_saysSoRatherThanReportingSuccess() throws Exception {
+        doThrow(new BlockNotPlacedException("Vaier could not block 1.2.3.4"))
+            .when(blockAddress).blockAddress("1.2.3.4", "4h", null, "127.0.0.1");
+
+        mvc.perform(post("/security/decisions").contentType("application/json")
+                .content("{\"sourceIp\":\"1.2.3.4\",\"duration\":\"4h\"}"))
+            .andExpect(status().isBadGateway())
+            .andExpect(jsonPath("$.code").value("BLOCK_NOT_PLACED"));
+
+        // Nothing changed, so nothing is pushed — same rule as an unban that failed.
+        verify(forPublishingEvents, never()).publish(any(), any(), any());
+    }
+
+    /**
+     * The domain's own refusal — a trusted-network address, or the admin's own current address — surfaces
+     * the same way every other domain validation does in this controller: a plain {@code 400}.
+     */
+    @Test
+    void postDecision_whenTheDomainRefusesTheAddress_isABadRequest() throws Exception {
+        doThrow(new IllegalArgumentException("Vaier will not block 10.13.13.6: it is inside the fleet's "
+            + "own trusted networks."))
+            .when(blockAddress).blockAddress("10.13.13.6", "4h", null, "127.0.0.1");
+
+        mvc.perform(post("/security/decisions").contentType("application/json")
+                .content("{\"sourceIp\":\"10.13.13.6\",\"duration\":\"4h\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
 

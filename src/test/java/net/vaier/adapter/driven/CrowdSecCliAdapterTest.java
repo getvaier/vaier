@@ -2,7 +2,9 @@ package net.vaier.adapter.driven;
 
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.BlockDecisionsUnreadableException;
+import net.vaier.domain.BlockDuration;
 import net.vaier.domain.BlockNotLiftedException;
+import net.vaier.domain.BlockNotPlacedException;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.port.ForExecutingInContainer;
@@ -379,6 +381,61 @@ class CrowdSecCliAdapterTest {
         assertThatThrownBy(() -> adapter.liftBlock(SourceAddress.of("1.2.3.4")))
             .isInstanceOf(BlockNotLiftedException.class)
             .hasMessageContaining("1.2.3.4");
+    }
+
+    // --- blocking an address by hand (#349) ---------------------------------------------------------
+
+    @Test
+    void blockAddress_addsTheDecisionWithTheChosenDurationAndReasonAsSeparateArguments() {
+        cscliPrints("Decision successfully added\n");
+
+        adapter.blockAddress(SourceAddress.of("1.2.3.4"), BlockDuration.FOUR_HOURS,
+            "vaier: blocked by admin@example.com");
+
+        // Every part its own array element, exactly like liftBlock: no shell, no string concatenation, so
+        // the reason text (which carries an operator-chosen email) can never be read as a second argument.
+        verify(forExecutingInContainer).execute("crowdsec", "cscli", "decisions", "add",
+            "--ip", "1.2.3.4", "--duration", "4h", "--reason", "vaier: blocked by admin@example.com");
+    }
+
+    @Test
+    void blockAddress_sendsSevenDaysAsOneHundredAndSixtyEightHours() {
+        cscliPrints("Decision successfully added\n");
+
+        adapter.blockAddress(SourceAddress.of("1.2.3.4"), BlockDuration.SEVEN_DAYS, "vaier: blocked by an admin");
+
+        verify(forExecutingInContainer).execute("crowdsec", "cscli", "decisions", "add",
+            "--ip", "1.2.3.4", "--duration", "168h", "--reason", "vaier: blocked by an admin");
+    }
+
+    /**
+     * The deliberate opposite of the read path, exactly as {@link #liftBlock_reportsAFailureInsteadOfSwallowingIt()}
+     * is: a block that failed to place must never read as success.
+     */
+    @Test
+    void blockAddress_reportsAFailureInsteadOfSwallowingIt() {
+        when(forExecutingInContainer.execute(anyString(), any(String[].class)))
+            .thenThrow(new RuntimeException("no such container: crowdsec"));
+
+        assertThatThrownBy(() -> adapter.blockAddress(SourceAddress.of("1.2.3.4"), BlockDuration.FOUR_HOURS,
+            "vaier: blocked by an admin"))
+            .isInstanceOf(BlockNotPlacedException.class)
+            .hasMessageContaining("1.2.3.4");
+    }
+
+    // A block changes what cscli would report, exactly as a lift does — the next read must not serve the
+    // memoised list from before the click.
+    @Test
+    void blockAddress_forgetsTheMemoisedReadJustLikeALiftDoes() {
+        cscliPrints("null");
+        adapter.getActiveDecisionsOrFail();
+        verify(forExecutingInContainer, times(1)).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
+
+        cscliPrints("Decision successfully added\n");
+        adapter.blockAddress(SourceAddress.of("1.2.3.4"), BlockDuration.FOUR_HOURS, "vaier: blocked by an admin");
+        cscliPrints("null");
+        adapter.getActiveDecisionsOrFail();
+        verify(forExecutingInContainer, times(2)).execute("crowdsec", "cscli", "decisions", "list", "-o", "json");
     }
 
     // One unreadable alert must not cost the whole sweep — the same per-entry tolerance

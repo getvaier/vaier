@@ -126,4 +126,38 @@ public record BlockDecision(Long id, String scenario, String sourceIp, String ty
     private static String presentOrNull(String value) {
         return value == null || value.isBlank() ? null : value;
     }
+
+    // --- distinguishing a hand block from CrowdSec's own (#349) -----------------------------------------
+
+    /**
+     * The marker a {@link SourceAddress#block hand-placed block} carries in its {@code scenario} field —
+     * the only field {@code cscli decisions add --reason} actually writes into on the wire shape this class
+     * already reads. Public so {@link net.vaier.domain.port.ForAddingBlocks} and the read side
+     * ({@link #handBlocked()}) share one literal rather than two copies that could drift.
+     */
+    private static final String HAND_BLOCK_MARKER = "vaier: blocked by ";
+
+    /**
+     * The {@code --reason} text for a hand block: this marker plus who asked for it. Falls back to
+     * {@code "an admin"} rather than leaving the marker bare — a decision the Security view shows as
+     * "blocked by you" must never read as blocked by nobody in particular because the request happened to
+     * carry no {@code X-Auth-Request-Email}.
+     */
+    public static String handBlockReason(String adminEmail) {
+        return HAND_BLOCK_MARKER + (adminEmail == null || adminEmail.isBlank() ? "an admin" : adminEmail);
+    }
+
+    /**
+     * Whether this decision is the operator's own hand block rather than one of CrowdSec's scenarios —
+     * read straight off the marker {@link #handBlockReason} writes, since CrowdSec's wire format carries no
+     * field of its own for "who asked for this ban".
+     */
+    public boolean handBlocked() {
+        return scenario != null && scenario.startsWith(HAND_BLOCK_MARKER);
+    }
+
+    /** Who placed this hand block, or null when {@link #handBlocked()} is false. */
+    public String blockedByAdmin() {
+        return handBlocked() ? scenario.substring(HAND_BLOCK_MARKER.length()) : null;
+    }
 }

@@ -4,8 +4,10 @@ package net.vaier.application;
  * Undoes {@link TrustAddressUseCase} (#348): the address stops being one the fleet's bouncer must never
  * block, and goes back to being judged on its behaviour like any other.
  *
- * <p><b>It blocks nobody.</b> Vaier never blocks an address — CrowdSec's own scenarios decide that — so
- * untrusting is not the opposite of {@link LiftBlockUseCase}, it is the opposite of trusting.
+ * <p><b>It places no block itself.</b> Untrusting only forgets the operator's earlier decision; who
+ * ends up kept out from there is CrowdSec's own scenarios again, or {@link BlockAddressUseCase a hand
+ * block} the operator places separately (#349) — so untrusting is not the opposite of
+ * {@link LiftBlockUseCase}, it is the opposite of trusting.
  *
  * <p><b>And the same restart asymmetry applies as on the way in.</b> The whitelist file is rewritten
  * without the address on the next scheduled refresh, but CrowdSec re-reads its parser files only when it

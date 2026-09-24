@@ -517,6 +517,10 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected LiftBlockUseCase liftBlockUseCase;
 
+    // #349: blocking an address by hand.
+    @MockBean
+    protected BlockAddressUseCase blockAddressUseCase;
+
     @MockBean
     protected TrustAddressUseCase trustAddressUseCase;
 

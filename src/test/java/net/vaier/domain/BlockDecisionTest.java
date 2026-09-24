@@ -156,4 +156,43 @@ class BlockDecisionTest {
     void withoutAnyTrustedNetworksNothingLocksTheOperatorOut() {
         assertThat(banOn("10.13.13.6").build().locksOut(null)).isFalse();
     }
+
+    // --- distinguishing a hand block from CrowdSec's own (#349) ----------------------------------------
+
+    /**
+     * The whole of #349's distinguishability requirement: a decision Vaier placed by hand carries the same
+     * marker {@link SourceAddress#block} asks {@code cscli --reason} to write, and the read side classifies
+     * by it rather than needing a second field CrowdSec's own wire format would have to carry.
+     */
+    @Test
+    void handBlocked_recognisesTheReasonMarkerVaierWritesOnAHandBlock() {
+        BlockDecision decision = banOn("1.2.3.4")
+            .scenario(BlockDecision.handBlockReason("admin@example.com")).build();
+
+        assertThat(decision.handBlocked()).isTrue();
+        assertThat(decision.blockedByAdmin()).isEqualTo("admin@example.com");
+    }
+
+    @Test
+    void handBlocked_isFalseForAnOrdinaryCrowdSecScenario() {
+        BlockDecision decision = banOn("1.2.3.4").scenario("crowdsecurity/http-probing").build();
+
+        assertThat(decision.handBlocked()).isFalse();
+        assertThat(decision.blockedByAdmin()).isNull();
+    }
+
+    @Test
+    void handBlocked_isFalseWithNoScenarioAtAll() {
+        BlockDecision decision = banOn("1.2.3.4").scenario(null).build();
+
+        assertThat(decision.handBlocked()).isFalse();
+        assertThat(decision.blockedByAdmin()).isNull();
+    }
+
+    /** Whoever placed a hand block, an admin with no email on record still reads as one, not as nobody. */
+    @Test
+    void handBlockReason_fallsBackToAnAdminWhenNoEmailIsKnown() {
+        assertThat(BlockDecision.handBlockReason(null)).isEqualTo("vaier: blocked by an admin");
+        assertThat(BlockDecision.handBlockReason("  ")).isEqualTo("vaier: blocked by an admin");
+    }
 }

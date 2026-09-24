@@ -2847,7 +2847,7 @@ class ExplorerShellTest {
         // The same restart asymmetry the trust dialog already owns, said on the way out: the whitelist file
         // loses the address on the next refresh, but CrowdSec reads its parser files only at startup and
         // Vaier will not restart it. And the one thing an operator is most likely to fear here is wrong —
-        // untrusting blocks nobody, because Vaier never blocks anyone.
+        // untrusting places no block itself — CrowdSec's scenarios judge the address again from there.
         String js = read("explorer-shell.js");
         int from = js.indexOf("async function untrustAddress(");
         assertThat(from).isPositive();
@@ -2881,6 +2881,65 @@ class ExplorerShellTest {
         String js = read("explorer-shell.js");
         assertThat(js).contains("events.addEventListener('trusted-addresses'");
         assertThat(js).doesNotContain("setInterval");
+    }
+
+    // --- blocking an address by hand (#349) --------------------------------------------------------
+
+    /**
+     * The whole point of #349's separation requirement: the two opposite verbs must never sit in the same
+     * row where a misclick could confuse them. {@code threatRow} draws "Lift the block" and "Trust this
+     * address" together; the block control must not be one of its buttons.
+     */
+    @Test
+    void theBlockControlIsNotAButtonOnAThreatRow() throws IOException {
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function threatRow(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).as("blocking must never be a third verb beside Lift/Trust on the same row")
+            .doesNotContain("blockAddressByHand")
+            .doesNotContain("'Block'");
+    }
+
+    @Test
+    void theSecurityViewOffersASeparateBlockSectionAfterTrustedAddresses() throws IOException {
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("function renderSecurity(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        // 'Block an address' has its own heading, reached only after the trusted-addresses section — never
+        // adjacent to a threat row's own "Trust this address" button.
+        assertThat(body.indexOf("'Trusted addresses'")).isLessThan(body.indexOf("'Block an address'"));
+        assertThat(body).contains("renderBlockForm(body)");
+    }
+
+    @Test
+    void blockingOffersExactlyTheFourChoicesWithFourHoursDefault_andNoPermanentOption() throws IOException {
+        String js = read("explorer-shell.js");
+        assertThat(js).contains(
+            "const BLOCK_DURATIONS = [['1h', '1 hour'], ['4h', '4 hours'], ['24h', '24 hours'], "
+                + "['7d', '7 days']];");
+        assertThat(js).contains("if (v === '4h') o.selected = true;");
+        int from = js.indexOf("function renderBlockForm(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        // The select is built from BLOCK_DURATIONS alone — no fifth, hand-added <option> could sneak in a
+        // wider or permanent choice the domain would refuse anyway.
+        assertThat(body).contains("BLOCK_DURATIONS.forEach(([v, t]) => {");
+    }
+
+    @Test
+    void blockingPostsTheAddressAndDurationAndSaysBothRefusalsUpFront() throws IOException {
+        String js = read("explorer-shell.js");
+        int from = js.indexOf("async function blockAddressByHand(");
+        assertThat(from).isPositive();
+        String body = js.substring(from, js.indexOf("\n    }", from));
+        assertThat(body).contains("'/security/decisions', 'POST', { sourceIp: sourceIp, duration: duration }");
+        assertThat(body).as("both domain refusals are stated before the click, not only after a 400")
+            .contains("your own trusted networks")
+            .contains("the one you are asking from right now");
+        assertThat(body).as("draft state is cleared only after a real success")
+            .contains("S.blockDraft = '';");
     }
 
     @Test

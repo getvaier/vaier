@@ -44,6 +44,9 @@ public record BreachAttemptRollup(List<BlockDecision> decisions) {
         return new BreachAttemptRollup(newlyAppeared.stream()
             .filter(decision -> decision.threatKind().worthEmailing())
             .filter(decision -> !decision.locksOut(trustedNetworks))
+            // #349: a decision the operator placed themselves is never a breach attempt, whatever its
+            // reason marker happens to read as to ThreatKind — nobody is attacking on this one.
+            .filter(decision -> !decision.handBlocked())
             .toList());
     }
 

@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.BlockAddressUseCase;
 import net.vaier.application.FlushAccessSourcesUseCase;
 import net.vaier.application.FlushLastServicesReachedUseCase;
 import net.vaier.application.GetAccessSourcesUseCase;
@@ -16,12 +17,14 @@ import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AccessSource;
 import net.vaier.domain.AccessSources;
 import net.vaier.domain.BlockDecision;
+import net.vaier.domain.BlockDuration;
 import net.vaier.domain.LastServiceReached;
 import net.vaier.domain.ServerLocationResolver;
 import net.vaier.domain.ServerLocationResolver.ResolvedHost;
 import net.vaier.domain.ServerPublicAddress;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.TrustedNetworks;
+import net.vaier.domain.port.ForAddingBlocks;
 import net.vaier.domain.port.ForDetectingIntrusions;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -65,9 +68,9 @@ import java.util.Optional;
 @Service
 @Slf4j
 public class SecurityService implements RefreshTrustedNetworksUseCase, GetTrustedNetworksUseCase,
-    GetBlockDecisionsUseCase, LiftBlockUseCase, TrustAddressUseCase, GetTrustedAddressesUseCase,
-    UntrustAddressUseCase, RecordAllowedAccessUseCase, GetAccessSourcesUseCase, FlushAccessSourcesUseCase,
-    FlushLastServicesReachedUseCase {
+    GetBlockDecisionsUseCase, LiftBlockUseCase, BlockAddressUseCase, TrustAddressUseCase,
+    GetTrustedAddressesUseCase, UntrustAddressUseCase, RecordAllowedAccessUseCase, GetAccessSourcesUseCase,
+    FlushAccessSourcesUseCase, FlushLastServicesReachedUseCase {
 
     @Value("${wireguard.vpn.subnet:10.13.13.0/24}")
     private String vpnSubnet;
@@ -85,6 +88,7 @@ public class SecurityService implements RefreshTrustedNetworksUseCase, GetTruste
     private final ForWritingCrowdSecWhitelist forWritingCrowdSecWhitelist;
     private final ForDetectingIntrusions forDetectingIntrusions;
     private final ForLiftingBlocks forLiftingBlocks;
+    private final ForAddingBlocks forAddingBlocks;
     private final ForPersistingTrustedAddresses forPersistingTrustedAddresses;
     private final ForPersistingAccessSources forPersistingAccessSources;
     private final ForPersistingLastServicesReached forPersistingLastServicesReached;
@@ -131,6 +135,7 @@ public class SecurityService implements RefreshTrustedNetworksUseCase, GetTruste
                            ForWritingCrowdSecWhitelist forWritingCrowdSecWhitelist,
                            ForDetectingIntrusions forDetectingIntrusions,
                            ForLiftingBlocks forLiftingBlocks,
+                           ForAddingBlocks forAddingBlocks,
                            ForPersistingTrustedAddresses forPersistingTrustedAddresses,
                            ForPersistingAccessSources forPersistingAccessSources,
                            ForPersistingLastServicesReached forPersistingLastServicesReached,
@@ -142,6 +147,7 @@ public class SecurityService implements RefreshTrustedNetworksUseCase, GetTruste
         this.forWritingCrowdSecWhitelist = forWritingCrowdSecWhitelist;
         this.forDetectingIntrusions = forDetectingIntrusions;
         this.forLiftingBlocks = forLiftingBlocks;
+        this.forAddingBlocks = forAddingBlocks;
         this.forPersistingTrustedAddresses = forPersistingTrustedAddresses;
         this.forPersistingAccessSources = forPersistingAccessSources;
         this.forPersistingLastServicesReached = forPersistingLastServicesReached;
@@ -247,6 +253,23 @@ public class SecurityService implements RefreshTrustedNetworksUseCase, GetTruste
         SourceAddress.of(sourceIp).liftBlock(forLiftingBlocks);
     }
 
+    // --- BlockAddressUseCase ---
+
+    /**
+     * Both refusals — the fleet's own trusted networks, and the requester's own current address — are
+     * {@link SourceAddress#block}'s decision, checked before {@link #forAddingBlocks} is ever called. This
+     * method only assembles what the domain needs to decide: the same {@link #getTrustedNetworks()} the
+     * whitelist file is rendered from, read fresh for the same reason {@link #trustAddress} does not cache
+     * it — a stale allowlist here could wrongly refuse, or wrongly allow, blocking an address.
+     */
+    @Override
+    public void blockAddress(String sourceIp, String duration, String adminEmail, String requesterIp) {
+        SourceAddress address = SourceAddress.of(sourceIp);
+        BlockDuration blockDuration = BlockDuration.of(duration);
+        address.block(blockDuration, adminEmail, getTrustedNetworks(), requesterIp, forAddingBlocks);
+        log.info("{} blocked {} for {}", adminEmail, sourceIp, blockDuration.label());
+    }
+
     // --- TrustAddressUseCase ---
 
     /**
@@ -279,8 +302,8 @@ public class SecurityService implements RefreshTrustedNetworksUseCase, GetTruste
     // --- UntrustAddressUseCase ---
 
     /**
-     * One effect, unlike its counterpart above: the decision is forgotten, and nobody is blocked. Vaier
-     * never blocks an address, so there is no second half here to mirror {@code trustAddress}'s unban.
+     * One effect, unlike its counterpart above: the decision is forgotten, and untrusting itself places no
+     * block. There is no second half here to mirror {@code trustAddress}'s unban.
      */
     @Override
     public void untrustAddress(String sourceIp) {

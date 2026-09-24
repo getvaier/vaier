@@ -211,6 +211,9 @@
                                          //   because this is the list the untrust verb hangs off (#348)
         trustedRead: false,              // whether that read has landed once
         trustedError: '',                // why it failed, when it did — never shown as "nothing trusted"
+        blockDraft: '',                  // the address typed into "Block an address" (#349), kept across a
+                                          //   repaint so a push mid-typing (the sweep fires every 5 minutes
+                                          //   whether or not anything changed) cannot silently clear it
         // GET /fleet-credentials — each with where it stands on every machine. Read when the entry is opened
         // and re-read after every action: the standings are the distributor's own in-memory observation, so
         // they start empty on a fresh boot and an empty `machines` is "not checked yet", never "nowhere".
@@ -6642,9 +6645,17 @@
     }
 
 
-    // Two sections, and the split is the whole of #348. The first is CrowdSec's answer to "who is knocking",
-    // which changes on its own every few minutes. The second is the operator's own standing decisions, which
-    // change only when they change them — and which, until now, they could neither see nor take back.
+    // The four choices #349 offers, in the wire value cscli/the domain expects and the words a person reads.
+    // No permanent option, on purpose: even the longest hand block expires and CrowdSec forgets it on its
+    // own, the same self-healing every other decision on this view already has.
+    const BLOCK_DURATIONS = [['1h', '1 hour'], ['4h', '4 hours'], ['24h', '24 hours'], ['7d', '7 days']];
+    const blockDurationLabel = (v) => (BLOCK_DURATIONS.find(([value]) => value === v) || [v, v])[1];
+
+    // Three sections now. The first two are #348's split: CrowdSec's answer to "who is knocking", which
+    // changes on its own every few minutes, and the operator's own standing trust decisions. The third is
+    // #349's addition — the one direction Vaier refused for a long time — and it sits below both, its own
+    // section with its own heading, never a button beside a row's "Trust this address": the two verbs point
+    // opposite ways, and that is precisely the misclick #349 exists to make impossible.
     function renderSecurity(pane) {
         const blocked = S.threats.length;
         pane.appendChild(paneHead('Security', false,
@@ -6657,6 +6668,8 @@
         renderBlocked(body);
         body.appendChild(section('Trusted addresses'));
         renderTrusted(body);
+        body.appendChild(section('Block an address'));
+        renderBlockForm(body);
         pane.appendChild(body);
     }
 
@@ -6707,6 +6720,37 @@
         body.appendChild(note('Your VPN, this server’s own container network, and every network Vaier '
             + 'reaches through one of your machines are trusted too. Those are not listed here and '
             + 'cannot be untrusted — they are what stops CrowdSec turning away your own traffic.', false));
+    }
+
+    // #349: a source CrowdSec's own scenarios have not caught, put out by hand. Its own section, its own
+    // heading, an address field and a duration select rather than a button — deliberately not one more verb
+    // on a threat row, where it would sit a click from "Trust this address" and invite exactly the
+    // opposite-direction misclick the issue was filed to prevent. The draft address survives a repaint
+    // (S.blockDraft) because the five-minute sweep publishes on its own clock, push or no change.
+    function renderBlockForm(body) {
+        const form = el('div', 'ex-form');
+
+        const addr = el('input', 'ex-input');
+        addr.type = 'text'; addr.placeholder = '203.0.113.9'; addr.autocomplete = 'off'; addr.spellcheck = false;
+        addr.value = S.blockDraft;
+        addr.oninput = () => { S.blockDraft = addr.value; };
+        form.appendChild(formField('Address', 'A single IPv4 address — never a range.', addr));
+
+        const dur = el('select', 'ex-input');
+        BLOCK_DURATIONS.forEach(([v, t]) => {
+            const o = el('option'); o.value = v; o.textContent = t;
+            if (v === '4h') o.selected = true;
+            dur.appendChild(o);
+        });
+        form.appendChild(formField('For how long', 'No permanent option: CrowdSec forgets the block on its '
+            + 'own once this elapses.', dur));
+
+        const go = el('button', 'ex-btn is-danger');
+        go.textContent = 'Block';
+        go.onclick = () => blockAddressByHand(addr, dur);
+        form.appendChild(go);
+
+        body.appendChild(form);
     }
 
     // The address and one verb. A trusted address has no scenario and no expiry: it is not a ban, it is a
@@ -6805,8 +6849,8 @@
     }
 
     // The mirror image, and it asks first for the same reason trusting does: this is a standing decision
-    // either way. What it is not is a ban — Vaier never blocks an address, so the worst an untrust can do is
-    // let CrowdSec judge this one like any other.
+    // either way. What it is not is a ban — untrusting places no block itself, so the worst it can do is
+    // let CrowdSec (or a hand block, #349) judge this one like any other.
     async function untrustAddress(a) {
         const ok = await confirmModal('Stop trusting ' + a.sourceIp + '?',
             'Vaier forgets the decision now, and this blocks nobody — CrowdSec simply judges ' + a.sourceIp
@@ -6818,6 +6862,26 @@
         if (!await securityAction('/security/trusted-addresses/' + encodeURIComponent(a.sourceIp), 'DELETE',
             null, 'Vaier could not untrust ' + a.sourceIp + '.')) return;
         toast('No longer trusting ' + a.sourceIp + '.');
+    }
+
+    // #349's one new mutation. Asks first, like trust/untrust above, and says both refusals up front rather
+    // than only after a 400 comes back: an admin about to lock themselves out should hear that before
+    // clicking, not read it off a toast. Validation and the two refusals (a trusted-network address, the
+    // admin's own current address) are the domain's; this only reports what the server said.
+    async function blockAddressByHand(addrInput, durInput) {
+        const sourceIp = addrInput.value.trim();
+        if (!sourceIp) { toast('Type an address to block.'); return; }
+        const duration = durInput.value;
+        const ok = await confirmModal('Block ' + sourceIp + '?',
+            'CrowdSec keeps ' + sourceIp + ' out for ' + blockDurationLabel(duration) + ', then forgets '
+            + 'the block on its own — there is no permanent option. Vaier refuses to block an address '
+            + 'inside your own trusted networks, or the one you are asking from right now.',
+            'Block');
+        if (!ok) return;
+        if (!await securityAction('/security/decisions', 'POST', { sourceIp: sourceIp, duration: duration },
+            'Vaier could not block ' + sourceIp + '.')) return;
+        S.blockDraft = '';
+        toast('Blocking ' + sourceIp + ' for ' + blockDurationLabel(duration) + '.');
     }
 
     // The server pushes the new list straight after a successful action, so this does not re-read — but a

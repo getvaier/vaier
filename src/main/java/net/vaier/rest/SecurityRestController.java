@@ -1,8 +1,10 @@
 package net.vaier.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.BlockAddressUseCase;
 import net.vaier.application.GetAccessSourcesUseCase;
 import net.vaier.application.GetBlockDecisionsUseCase;
 import net.vaier.application.GetTrustedAddressesUseCase;
@@ -11,9 +13,11 @@ import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UntrustAddressUseCase;
 import net.vaier.domain.AccessSource;
 import net.vaier.domain.BlockDecision;
+import net.vaier.domain.CallerIp;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSubscribingToEvents;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,6 +25,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -58,6 +63,7 @@ public class SecurityRestController {
 
     private final GetBlockDecisionsUseCase getBlockDecisionsUseCase;
     private final LiftBlockUseCase liftBlockUseCase;
+    private final BlockAddressUseCase blockAddressUseCase;
     private final TrustAddressUseCase trustAddressUseCase;
     private final GetTrustedAddressesUseCase getTrustedAddressesUseCase;
     private final UntrustAddressUseCase untrustAddressUseCase;
@@ -65,6 +71,13 @@ public class SecurityRestController {
     private final ForPublishingEvents forPublishingEvents;
     private final ForSubscribingToEvents forSubscribingToEvents;
     private final ObjectMapper objectMapper;
+
+    /**
+     * Which hop to believe is {@link CallerIp}'s decision, not this controller's — the launchpad and the
+     * forward-auth check ask the same question, and a second copy of the rule here is the copy that drifts.
+     */
+    @Value("${vaier.trusted-proxy-cidr:${launchpad.trusted-proxy-cidr:172.20.0.0/16}}")
+    private String trustedProxyCidr;
 
     /**
      * Who is blocked right now, so the view can paint on load or reconnect. A read that fails is a
@@ -96,6 +109,32 @@ public class SecurityRestController {
     }
 
     /**
+     * Block one address by hand, for the chosen duration (#349) — the one direction #329 originally
+     * refused Vaier. {@code adminEmail} is who oauth2-proxy says is signed in, carried in the reason marker
+     * the read side classifies by ({@link BlockDecision#handBlockReason}) and in the audit line below;
+     * {@code requesterIp} is resolved the same way {@link CallerIp} resolves it everywhere else, so the
+     * domain can refuse to block the admin's own current address. Both domain refusals — that address, and
+     * one inside the fleet's own trusted networks — surface as an ordinary {@code 400} through
+     * {@link GlobalExceptionHandler}, exactly like an address that fails {@link SourceAddress#of}.
+     */
+    @PostMapping("/decisions")
+    public ResponseEntity<Void> blockAddress(@RequestBody BlockAddressRequest request,
+            @RequestHeader(value = "X-Auth-Request-Email", required = false) String adminEmail,
+            HttpServletRequest httpRequest) {
+        log.info("{} is blocking {} for {}", LogSafe.forLog(adminEmail), LogSafe.forLog(request.sourceIp()),
+            LogSafe.forLog(request.duration()));
+        blockAddressUseCase.blockAddress(request.sourceIp(), request.duration(), adminEmail,
+            resolveCallerIp(httpRequest));
+        publishDecisions();
+        return ResponseEntity.ok().build();
+    }
+
+    private String resolveCallerIp(HttpServletRequest request) {
+        return CallerIp.of(request.getRemoteAddr(), request.getHeader("X-Forwarded-For"), trustedProxyCidr)
+            .value();
+    }
+
+    /**
      * Trust one address for good. It is unblocked now and joins the trusted networks; the whitelist itself
      * takes effect from CrowdSec's next restart, which Vaier deliberately does not trigger — see
      * {@link TrustAddressUseCase}.
@@ -123,8 +162,8 @@ public class SecurityRestController {
     }
 
     /**
-     * Stop trusting one address. It is not blocked by this — Vaier never blocks anyone — it simply goes back
-     * to being judged on its behaviour, and it leaves CrowdSec's whitelist at CrowdSec's next restart, which
+     * Stop trusting one address. Untrusting places no block itself — it simply goes back to being judged on
+     * its behaviour like any other, and it leaves CrowdSec's whitelist at CrowdSec's next restart, which
      * Vaier still does not trigger. Untrusting an address that is not in the list succeeds: see
      * {@link UntrustAddressUseCase}.
      */
@@ -200,6 +239,9 @@ public class SecurityRestController {
     /** Which address to trust. */
     record TrustAddressRequest(String sourceIp) {}
 
+    /** Which address to block, and for how long — one of {@code 1h}, {@code 4h}, {@code 24h}, {@code 7d}. */
+    record BlockAddressRequest(String sourceIp, String duration) {}
+
     /**
      * One address the operator trusts. A bare dotted quad, never the {@code /32} form the whitelist file
      * carries: the operator trusted an address, and that is what the list should say back to them.
@@ -216,16 +258,23 @@ public class SecurityRestController {
      * on one axis — the equator and the prime meridian both run through inhabited land. The raw
      * coordinates ride along because the map needs numbers to draw with; the <em>decision</em> whether to
      * draw at all is already made.
+     *
+     * <p>{@code handBlocked} and {@code blockedByAdmin} carry #349's distinguishability requirement: which
+     * of these rows is the operator's own hand block rather than one of CrowdSec's scenarios, and who
+     * placed it. Both are the domain's classification of {@link BlockDecision#scenario} — see
+     * {@link BlockDecision#handBlocked()} — never a marker text the browser would have to recognise itself.
      */
     record BlockDecisionResponse(Long id, String scenario, String sourceIp, String type, String duration,
                                  String country, String asnOrg, Double latitude, Double longitude,
-                                 boolean enriched, boolean locatable, String origin, String label) {
+                                 boolean enriched, boolean locatable, String origin, String label,
+                                 boolean handBlocked, String blockedByAdmin) {
 
         static BlockDecisionResponse from(BlockDecision decision) {
             return new BlockDecisionResponse(decision.id(), decision.scenario(), decision.sourceIp(),
                 decision.type(), decision.duration(), decision.country(), decision.asnOrg(),
                 decision.latitude(), decision.longitude(),
-                decision.enriched(), decision.locatable(), decision.origin(), decision.label());
+                decision.enriched(), decision.locatable(), decision.origin(), decision.label(),
+                decision.handBlocked(), decision.blockedByAdmin());
         }
     }
 

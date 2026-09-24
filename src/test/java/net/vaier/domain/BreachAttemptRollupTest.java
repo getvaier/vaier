@@ -63,6 +63,21 @@ class BreachAttemptRollupTest {
         assertThat(BreachAttemptRollup.from(List.of(ownNetwork), TRUSTED).decisions()).isEmpty();
     }
 
+    /**
+     * #349: an address the operator blocked themselves is not a breach attempt however its reason marker
+     * happens to read to {@link ThreatKind} — mailing "somebody is trying to break in" about a block the
+     * operator placed on purpose would be a straightforwardly false thing to send them, exactly like the
+     * lockout case above.
+     */
+    @Test
+    void from_neverClaimsTheOperatorsOwnHandBlockIsABreachAttempt() {
+        BlockDecision handBlock = BlockDecision.builder()
+            .id(6L).scenario(BlockDecision.handBlockReason("admin@example.com"))
+            .sourceIp("203.0.113.9").type("ban").duration("4h0m0s").build();
+
+        assertThat(BreachAttemptRollup.from(List.of(handBlock), TRUSTED).decisions()).isEmpty();
+    }
+
     @Test
     void worthSending_isFalseWhenEmpty() {
         assertThat(new BreachAttemptRollup(List.of()).worthSending()).isFalse();

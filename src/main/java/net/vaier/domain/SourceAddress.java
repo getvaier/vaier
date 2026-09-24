@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForAddingBlocks;
 import net.vaier.domain.port.ForLiftingBlocks;
 import net.vaier.domain.port.ForPersistingTrustedAddresses;
 
@@ -105,8 +106,10 @@ public record SourceAddress(String value) {
      * file is rewritten without the address within five minutes, but CrowdSec reads its parser files only at
      * startup, and Vaier deliberately does not restart it.
      *
-     * <p>It also blocks nobody. Vaier never blocks an address — CrowdSec's scenarios decide that — so an
-     * untrusted address is simply back to being judged on its behaviour.
+     * <p>It also places no block itself. Untrusting only forgets the operator's own earlier decision; who
+     * ends up kept out from there is CrowdSec's scenarios again, or {@link #block a hand block} the operator
+     * places separately (#349) — either way, an untrusted address is simply back to being judged like any
+     * other.
      *
      * <p>Untrusting can only ever reach an address, never a network. Two independent things make that true,
      * and the weaker one is the obvious one: nothing wider than a single host can become a
@@ -120,5 +123,36 @@ public record SourceAddress(String value) {
      */
     public void untrust(ForPersistingTrustedAddresses store) {
         store.delete(this);
+    }
+
+    /**
+     * Blocks this address by hand for {@code duration} (#349) — the one direction #329 originally refused
+     * Vaier, now offered deliberately narrow: an expiring decision only, never a permanent one, and never
+     * one that could starve the operator's own access.
+     *
+     * <p><b>Two refusals, both domain decisions and both checked before the port is ever called.</b> An
+     * address inside {@code trustedNetworks} — the VPN subnet, the Docker bridge, every relay LAN, every
+     * hand-trusted address — is refused for the same reason #329 already guards the automatic side: blocking
+     * the operator's own traffic is not a false positive to fix later, it is losing the console they would
+     * fix it from. An address equal to {@code requesterIp} — the admin's own current address, resolved by
+     * {@code domain.CallerIp} the same way the launchpad and the forward-auth check already do — is refused
+     * because nothing about the trusted networks catches an admin working from an ordinary, untrusted
+     * connection who is one misclick from locking themselves out right now.
+     *
+     * @param requesterIp the admin's own current source address, or null when it could not be resolved —
+     *                     in which case this refusal simply does not apply, the same "missing information
+     *                     blocks nothing" rule {@link BlockDecision#locksOut} follows for a null allowlist
+     */
+    public void block(BlockDuration duration, String adminEmail, TrustedNetworks trustedNetworks,
+                      String requesterIp, ForAddingBlocks forAddingBlocks) {
+        if (trustedNetworks != null && trustedNetworks.contains(value)) {
+            throw new IllegalArgumentException(
+                "Vaier will not block " + value + ": it is inside the fleet's own trusted networks.");
+        }
+        if (requesterIp != null && value.equals(requesterIp)) {
+            throw new IllegalArgumentException(
+                "Vaier will not block " + value + ": that is your own current address.");
+        }
+        forAddingBlocks.blockAddress(this, duration, BlockDecision.handBlockReason(adminEmail));
     }
 }

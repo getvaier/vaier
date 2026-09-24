@@ -5,6 +5,7 @@ import net.vaier.domain.AccessSource;
 import net.vaier.domain.AccessSources;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.BlockDecisionsUnreadableException;
+import net.vaier.domain.BlockDuration;
 import net.vaier.domain.GeoLocation;
 import net.vaier.domain.LastServiceReached;
 import net.vaier.domain.MachineId;
@@ -12,6 +13,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.SourceAddress;
 import net.vaier.domain.TestMachineIds;
 import net.vaier.domain.TrustedNetworks;
+import net.vaier.domain.port.ForAddingBlocks;
 import net.vaier.domain.port.ForDetectingIntrusions;
 import net.vaier.domain.port.ForGeolocatingIps;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
@@ -65,6 +67,7 @@ class SecurityServiceTest {
     @Mock ForWritingCrowdSecWhitelist forWritingCrowdSecWhitelist;
     @Mock ForDetectingIntrusions forDetectingIntrusions;
     @Mock ForLiftingBlocks forLiftingBlocks;
+    @Mock ForAddingBlocks forAddingBlocks;
     @Mock ForPersistingTrustedAddresses forPersistingTrustedAddresses;
     @Mock ForPersistingAccessSources forPersistingAccessSources;
     @Mock ForPersistingLastServicesReached forPersistingLastServicesReached;
@@ -86,7 +89,7 @@ class SecurityServiceTest {
 
     private SecurityService service(ForResolvingPublicHost publicHost) {
         SecurityService service = new SecurityService(peerConfigProvider, forWritingCrowdSecWhitelist,
-            forDetectingIntrusions, forLiftingBlocks, forPersistingTrustedAddresses,
+            forDetectingIntrusions, forLiftingBlocks, forAddingBlocks, forPersistingTrustedAddresses,
             forPersistingAccessSources, forPersistingLastServicesReached, forGeolocatingIps,
             publicHost, forResolvingDns, configResolver);
         ReflectionTestUtils.setField(service, "vpnSubnet", "10.13.13.0/24");
@@ -224,6 +227,53 @@ class SecurityServiceTest {
         verifyNoInteractions(forLiftingBlocks);
     }
 
+    // --- blocking an address by hand (#349) -------------------------------------------------------------
+
+    @Test
+    void blockAddress_blocksTheAddressForTheChosenDurationWithTheHandBlockReason() {
+        service().blockAddress("195.178.110.155", "4h", "admin@example.com", "9.9.9.9");
+
+        verify(forAddingBlocks).blockAddress(SourceAddress.of("195.178.110.155"),
+            BlockDuration.FOUR_HOURS, BlockDecision.handBlockReason("admin@example.com"));
+    }
+
+    @Test
+    void blockAddress_rejectsAnAddressThatIsNotAnIpv4Address() {
+        assertThatThrownBy(() -> service().blockAddress("1.2.3.4; rm -rf /", "4h", "admin@example.com",
+            "9.9.9.9"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(forAddingBlocks);
+    }
+
+    @Test
+    void blockAddress_rejectsADurationOutsideTheOfferedChoices() {
+        assertThatThrownBy(() -> service().blockAddress("195.178.110.155", "30d", "admin@example.com",
+            "9.9.9.9"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(forAddingBlocks);
+    }
+
+    /** The domain's own refusal, reached through the use case exactly as the fleet-lockout guard is. */
+    @Test
+    void blockAddress_refusesAnAddressInsideTheFleetsOwnTrustedNetworks() {
+        assertThatThrownBy(() -> service().blockAddress("10.13.13.6", "4h", "admin@example.com", "9.9.9.9"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(forAddingBlocks);
+    }
+
+    /** The second domain refusal: an admin cannot block the address they are asking from right now. */
+    @Test
+    void blockAddress_refusesTheRequestingAdminsOwnCurrentAddress() {
+        assertThatThrownBy(() -> service().blockAddress("203.0.113.9", "4h", "admin@example.com",
+            "203.0.113.9"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(forAddingBlocks);
+    }
+
     // --- reading and undoing the operator's own trust decisions (#348) --------------------------------
 
     /**
@@ -244,9 +294,9 @@ class SecurityServiceTest {
     }
 
     /**
-     * Untrusting removes the operator's decision and nothing else. In particular it does <em>not</em> block
-     * the address: Vaier never blocks anyone — CrowdSec's own scenarios decide that — so an untrusted
-     * address is simply back to being judged on its behaviour.
+     * Untrusting removes the operator's decision and nothing else. In particular it places <em>no</em>
+     * block itself — who is kept out from there is CrowdSec's own scenarios again, or a hand block, exactly
+     * as for any other address.
      */
     @Test
     void untrustAddress_removesTheAddressAndBlocksNobody() {

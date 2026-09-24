@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.BlockDecisionsUnreadableException;
 import net.vaier.domain.BlockNotLiftedException;
+import net.vaier.domain.BlockNotPlacedException;
 import net.vaier.domain.ClaudeSignInFailedException;
 import net.vaier.domain.ConflictException;
 import net.vaier.domain.DiskUnreadableException;
@@ -265,6 +266,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ResponseEntity<ApiError> handleBlockNotLifted(BlockNotLiftedException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiError.of("BLOCK_NOT_LIFTED", e.getMessage()));
+    }
+
+    /**
+     * The mirror of {@link #handleBlockNotLifted}: Vaier asked CrowdSec to block an address by hand and
+     * could not tell that it had (#349). Same status, same reasoning — the engine that owns the ban is on
+     * the far side of Vaier, and an operator who just clicked "Block" must never be told it worked when it
+     * did not.
+     */
+    @ExceptionHandler(BlockNotPlacedException.class)
+    public ResponseEntity<ApiError> handleBlockNotPlaced(BlockNotPlacedException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiError.of("BLOCK_NOT_PLACED", e.getMessage()));
     }
 
     /**

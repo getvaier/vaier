@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.BlockDecision;
 import net.vaier.domain.BlockDecisionsUnreadableException;
+import net.vaier.domain.BlockDuration;
 import net.vaier.domain.BlockNotLiftedException;
+import net.vaier.domain.BlockNotPlacedException;
 import net.vaier.domain.SourceAddress;
+import net.vaier.domain.port.ForAddingBlocks;
 import net.vaier.domain.port.ForDetectingIntrusions;
 import net.vaier.domain.port.ForExecutingInContainer;
 import net.vaier.domain.port.ForGeolocatingIps;
@@ -33,7 +36,9 @@ import org.springframework.beans.factory.annotation.Autowired;
  *
  * <p>It carries a second port, {@link ForLiftingBlocks} (#329 Slice 3c), rather than a second adapter:
  * this is the one place in Vaier that speaks {@code cscli}, and splitting the two directions across two
- * classes would only duplicate the container name and the exec idiom.
+ * classes would only duplicate the container name and the exec idiom. {@link ForAddingBlocks} (#349) joins
+ * it for the same reason — the operator's one hand-placed direction, alongside CrowdSec's own reads and
+ * Vaier's one hand-lifted direction.
  *
  * <p>This class is the only place in Vaier that knows what a CrowdSec failure looks like — a dead exec, an
  * error line where JSON was expected, the literal word {@code null} a quiet stack prints — and it is
@@ -47,7 +52,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  */
 @Component
 @Slf4j
-public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlocks {
+public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlocks, ForAddingBlocks {
 
     private static final String CROWDSEC_CONTAINER = "crowdsec";
 
@@ -170,6 +175,32 @@ public class CrowdSecCliAdapter implements ForDetectingIntrusions, ForLiftingBlo
         } catch (Exception e) {
             throw new BlockNotLiftedException(
                 "Vaier could not lift the block on " + address.value() + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@code cscli decisions add --ip <ip> --duration <d> --reason <marker>} (#349) — the mirror of
+     * {@link #liftBlock}, and issued exactly the same way: every argument its own array element, no shell,
+     * no string concatenation, so neither the address nor the reason text (which carries an operator-chosen
+     * email) can ever be read as anything but its own single argument.
+     *
+     * <p>Calling this on an address that is already blocked is not an error — {@code cscli} does not reject
+     * a duplicate decision, it adds a second one, and the source stays blocked until the later of the two
+     * expires. See {@link ForAddingBlocks} for why that is the right idempotency answer here.
+     */
+    @Override
+    public void blockAddress(SourceAddress address, BlockDuration duration, String reason) {
+        try {
+            String output = forExecutingInContainer.execute(
+                CROWDSEC_CONTAINER, "cscli", "decisions", "add",
+                "--ip", address.value(), "--duration", duration.cscliDuration(), "--reason", reason);
+            lastRead = null;
+            // Safe to log unescaped: SourceAddress admits nothing but a dotted quad, and the reason text is
+            // Vaier's own marker plus an admin email a signed-in session already vouches for.
+            log.info("Blocked {} for {}: {}", address.value(), duration.cscliDuration(), output.strip());
+        } catch (Exception e) {
+            throw new BlockNotPlacedException(
+                "Vaier could not block " + address.value() + ": " + e.getMessage(), e);
         }
     }
 

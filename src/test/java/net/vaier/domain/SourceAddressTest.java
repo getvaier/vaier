@@ -1,5 +1,6 @@
 package net.vaier.domain;
 
+import net.vaier.domain.port.ForAddingBlocks;
 import net.vaier.domain.port.ForLiftingBlocks;
 import net.vaier.domain.port.ForPersistingTrustedAddresses;
 import org.junit.jupiter.api.Test;
@@ -8,8 +9,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class SourceAddressTest {
 
@@ -203,5 +207,77 @@ class SourceAddressTest {
                 .as("a structural trusted network must not be nameable as a source address")
                 .isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    // --- blocking an address by hand (#349) -------------------------------------------------------------
+
+    private static final TrustedNetworks NOT_TRUSTED =
+        TrustedNetworks.of("10.13.13.0/24", "172.20.0.0/16", List.of());
+
+    @Test
+    void block_asksThePortToAddTheBlockWithTheHandBlockReasonMarker() {
+        ForAddingBlocks forAddingBlocks = mock(ForAddingBlocks.class);
+        SourceAddress address = SourceAddress.of("1.2.3.4");
+
+        address.block(BlockDuration.FOUR_HOURS, "admin@example.com", NOT_TRUSTED, "9.9.9.9", forAddingBlocks);
+
+        verify(forAddingBlocks).blockAddress(address, BlockDuration.FOUR_HOURS,
+            BlockDecision.handBlockReason("admin@example.com"));
+    }
+
+    /**
+     * The first of #349's two refusals: the fleet's own trusted networks (the VPN subnet, the Docker
+     * bridge, every relay LAN, every hand-trusted address) must never be handed a block that would starve
+     * the operator's own traffic — that is precisely the lockout risk #329 already guards against on the
+     * automatic side.
+     */
+    @Test
+    void block_refusesAnAddressInsideTheFleetsOwnTrustedNetworks() {
+        ForAddingBlocks forAddingBlocks = mock(ForAddingBlocks.class);
+        SourceAddress address = SourceAddress.of("10.13.13.6");
+
+        assertThatThrownBy(() -> address.block(BlockDuration.FOUR_HOURS, "admin@example.com", NOT_TRUSTED,
+            "9.9.9.9", forAddingBlocks))
+            .isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(forAddingBlocks);
+    }
+
+    /**
+     * The second refusal: an admin cannot block the address they are asking from right now. Nothing about
+     * the fleet's trusted networks catches this on its own — a home connection with no VPN and no trust
+     * entry is an ordinary stranger to {@link TrustedNetworks} — so it is its own check.
+     */
+    @Test
+    void block_refusesTheRequestingAdminsOwnCurrentAddress() {
+        ForAddingBlocks forAddingBlocks = mock(ForAddingBlocks.class);
+        SourceAddress address = SourceAddress.of("203.0.113.9");
+
+        assertThatThrownBy(() -> address.block(BlockDuration.FOUR_HOURS, "admin@example.com", NOT_TRUSTED,
+            "203.0.113.9", forAddingBlocks))
+            .isInstanceOf(IllegalArgumentException.class);
+        verify(forAddingBlocks, never()).blockAddress(any(), any(), any());
+    }
+
+    @Test
+    void block_allowsAnOrdinaryStrangerAddress() {
+        ForAddingBlocks forAddingBlocks = mock(ForAddingBlocks.class);
+        SourceAddress address = SourceAddress.of("203.0.113.9");
+
+        address.block(BlockDuration.ONE_HOUR, "admin@example.com", NOT_TRUSTED, "9.9.9.9", forAddingBlocks);
+
+        verify(forAddingBlocks).blockAddress(address, BlockDuration.ONE_HOUR,
+            BlockDecision.handBlockReason("admin@example.com"));
+    }
+
+    /** A null trusted-networks/requester, like {@link BlockDecision#locksOut}, blocks nothing on its own. */
+    @Test
+    void block_worksWithoutTrustedNetworksOrARequesterAddress() {
+        ForAddingBlocks forAddingBlocks = mock(ForAddingBlocks.class);
+        SourceAddress address = SourceAddress.of("203.0.113.9");
+
+        address.block(BlockDuration.ONE_HOUR, "admin@example.com", null, null, forAddingBlocks);
+
+        verify(forAddingBlocks).blockAddress(address, BlockDuration.ONE_HOUR,
+            BlockDecision.handBlockReason("admin@example.com"));
     }
 }
