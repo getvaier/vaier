@@ -3,7 +3,6 @@ package net.vaier.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.AddErrandUseCase;
 import net.vaier.application.CancelErrandUseCase;
 import net.vaier.application.ChatUseCase;
@@ -15,37 +14,24 @@ import net.vaier.application.GetConversationUseCase;
 import net.vaier.application.GetErrandsUseCase;
 import net.vaier.application.GetMemoryUseCase;
 import net.vaier.application.GetSpendUseCase;
-import net.vaier.application.GetBackupJobsUseCase;
-import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.IsChatAvailableUseCase;
-import net.vaier.application.LiftBlockUseCase;
-import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.OfferBundleUseCase;
 import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
-import net.vaier.application.RefuseEnrolmentUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
-import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
-import net.vaier.application.TrustAddressUseCase;
-import net.vaier.application.UpdateContainerImageUseCase;
 import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatCapability;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ChatAvailability;
 import net.vaier.domain.ChatUnavailableException;
-import net.vaier.domain.BackupJob;
-import net.vaier.domain.BackupRepository;
 import net.vaier.domain.Bundle;
-import net.vaier.domain.ConflictException;
 import net.vaier.domain.Conversation;
 import net.vaier.domain.ConversationTurn;
-import net.vaier.domain.EnrolmentRequest;
 import net.vaier.domain.Errand;
 import net.vaier.domain.Machine;
-import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineReference;
 import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.Memory;
@@ -127,17 +113,8 @@ public class ChatRestController {
     private final ChatUseCase chatUseCase;
     private final IsChatAvailableUseCase isChatAvailableUseCase;
     private final GetMachinesUseCase getMachinesUseCase;
-    private final ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase;
-    private final GetBackupJobsUseCase getBackupJobsUseCase;
     private final ProposeActionUseCase proposeActionUseCase;
     private final TakeActionProposalUseCase takeActionProposalUseCase;
-    private final ApproveEnrolmentUseCase approveEnrolmentUseCase;
-    private final RefuseEnrolmentUseCase refuseEnrolmentUseCase;
-    private final RunBackupJobUseCase runBackupJobUseCase;
-    private final GetBackupRepositoriesUseCase getBackupRepositoriesUseCase;
-    private final UpdateContainerImageUseCase updateContainerImageUseCase;
-    private final LiftBlockUseCase liftBlockUseCase;
-    private final TrustAddressUseCase trustAddressUseCase;
     private final GetConversationUseCase getConversationUseCase;
     private final ForgetConversationUseCase forgetConversationUseCase;
     private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
@@ -152,6 +129,7 @@ public class ChatRestController {
     private final GetErrandsUseCase getErrandsUseCase;
     private final ForSubscribingToEvents forSubscribingToEvents;
     private final ChatReads chatReads;
+    private final ChatActions chatActions;
     private final ObjectMapper objectMapper;
 
     /**
@@ -176,17 +154,8 @@ public class ChatRestController {
     public ChatRestController(ChatUseCase chatUseCase,
                              IsChatAvailableUseCase isChatAvailableUseCase,
                              GetMachinesUseCase getMachinesUseCase,
-                             ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase,
-                             GetBackupJobsUseCase getBackupJobsUseCase,
                              ProposeActionUseCase proposeActionUseCase,
                              TakeActionProposalUseCase takeActionProposalUseCase,
-                             ApproveEnrolmentUseCase approveEnrolmentUseCase,
-                             RefuseEnrolmentUseCase refuseEnrolmentUseCase,
-                             RunBackupJobUseCase runBackupJobUseCase,
-                             GetBackupRepositoriesUseCase getBackupRepositoriesUseCase,
-                             UpdateContainerImageUseCase updateContainerImageUseCase,
-                             LiftBlockUseCase liftBlockUseCase,
-                             TrustAddressUseCase trustAddressUseCase,
                              GetConversationUseCase getConversationUseCase,
                              ForgetConversationUseCase forgetConversationUseCase,
                              RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
@@ -201,21 +170,13 @@ public class ChatRestController {
                              GetErrandsUseCase getErrandsUseCase,
                              ForSubscribingToEvents forSubscribingToEvents,
                              ChatReads chatReads,
+                             ChatActions chatActions,
                              ObjectMapper objectMapper) {
         this.chatUseCase = chatUseCase;
         this.isChatAvailableUseCase = isChatAvailableUseCase;
         this.getMachinesUseCase = getMachinesUseCase;
-        this.listEnrolmentRequestsUseCase = listEnrolmentRequestsUseCase;
-        this.getBackupJobsUseCase = getBackupJobsUseCase;
         this.proposeActionUseCase = proposeActionUseCase;
         this.takeActionProposalUseCase = takeActionProposalUseCase;
-        this.approveEnrolmentUseCase = approveEnrolmentUseCase;
-        this.refuseEnrolmentUseCase = refuseEnrolmentUseCase;
-        this.runBackupJobUseCase = runBackupJobUseCase;
-        this.getBackupRepositoriesUseCase = getBackupRepositoriesUseCase;
-        this.updateContainerImageUseCase = updateContainerImageUseCase;
-        this.liftBlockUseCase = liftBlockUseCase;
-        this.trustAddressUseCase = trustAddressUseCase;
         this.getConversationUseCase = getConversationUseCase;
         this.forgetConversationUseCase = forgetConversationUseCase;
         this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
@@ -230,6 +191,7 @@ public class ChatRestController {
         this.getErrandsUseCase = getErrandsUseCase;
         this.forSubscribingToEvents = forSubscribingToEvents;
         this.chatReads = chatReads;
+        this.chatActions = chatActions;
         this.objectMapper = objectMapper;
     }
 
@@ -311,10 +273,9 @@ public class ChatRestController {
      * {@link GlobalExceptionHandler} never returns one.
      */
     /**
-     * The click. The card is taken once — gone or expired is refused, and nothing runs — then the same use
-     * case the Explorer's button calls runs, and the outcome is a sentence for the card. A refusal the
-     * domain worded is shown; an unexpected failure is answered in Vaier's words, for the reason
-     * {@link #messageFor} gives.
+     * The click. The card is taken once — gone or expired is refused, and nothing runs — then
+     * {@link ChatActions#run} runs the use case the Explorer's button calls, and the outcome is a sentence
+     * for the card.
      */
     @PostMapping("/actions/{id}")
     public ResponseEntity<ActionOutcome> confirm(
@@ -326,15 +287,8 @@ public class ChatRestController {
         } catch (NotFoundException | IllegalArgumentException refused) {
             return ResponseEntity.ok(new ActionOutcome(false, refused.getMessage()));
         }
-        ActionOutcome outcome;
-        try {
-            outcome = new ActionOutcome(true, carryOut(proposal));
-        } catch (IllegalArgumentException | ConflictException | NotFoundException | NoHostCredentialException refused) {
-            outcome = new ActionOutcome(false, refused.getMessage());
-        } catch (RuntimeException e) {
-            log.warn("Chat could not carry out '{}': {}", proposal.sentence(), e.toString());
-            outcome = new ActionOutcome(false, "Vaier could not do that.");
-        }
+        ChatActions.Outcome ran = chatActions.run(proposal);
+        ActionOutcome outcome = new ActionOutcome(ran.done(), ran.text());
         // Remembered either way, so the next question knows what was started — or what was not.
         rememberActionOutcomeUseCase.remember(Operator.of(email),
             proposal.outcomeSentence(outcome.done(), outcome.text()));
@@ -353,45 +307,6 @@ public class ChatRestController {
             // Already gone: nothing could run anyway, and there is nothing to remember about it.
         }
         return ResponseEntity.ok(new ActionOutcome(false, "Not done."));
-    }
-
-    /** One verb, one use case — the one the Explorer's own button calls. */
-    private String carryOut(ActionProposal proposal) {
-        Map<String, String> a = proposal.arguments();
-        return switch (proposal.action()) {
-            case LET_PHONE_IN -> {
-                approveEnrolmentUseCase.approve(a.get("code"));
-                yield "Let " + a.get("name") + " in.";
-            }
-            case REFUSE_PHONE -> {
-                refuseEnrolmentUseCase.refuse(a.get("code"));
-                yield "Refused " + a.get("name") + ".";
-            }
-            case RUN_BACKUP -> {
-                MachineId machineId = MachineId.of(a.get("machineId"));
-                BackupJob job = getBackupJobsUseCase.getBackupJobs().stream()
-                    .filter(j -> j.machineId().equals(machineId)).findFirst()
-                    .orElseThrow(() -> new NotFoundException(a.get("machine") + " has no backup job."));
-                BackupRepository repo = getBackupRepositoriesUseCase.getBackupRepositories().stream()
-                    .filter(r -> r.name().equals(job.repositoryName())).findFirst()
-                    .orElseThrow(() -> new NotFoundException(a.get("machine") + "'s backups have nowhere to go."));
-                runBackupJobUseCase.runJob(job, repo);
-                yield "Backing up " + a.get("machine") + " now. The Backups pane shows how it goes.";
-            }
-            case UPDATE_CONTAINER -> {
-                updateContainerImageUseCase.updateContainerImage(MachineId.of(a.get("machineId")), a.get("container"));
-                yield "Updating " + a.get("container") + " on " + a.get("machine")
-                    + ". It is down for a moment while it restarts.";
-            }
-            case LIFT_BLOCK -> {
-                liftBlockUseCase.liftBlock(a.get("address"));
-                yield "Lifted the block on " + a.get("address") + ".";
-            }
-            case TRUST_ADDRESS -> {
-                trustAddressUseCase.trustAddress(a.get("address"));
-                yield "Trusting " + a.get("address") + " from now on.";
-            }
-        };
     }
 
     private static String messageFor(Exception e) {
@@ -470,33 +385,12 @@ public class ChatRestController {
      */
     private String propose(ChatAction action, Map<String, String> arguments, SseEmitter emitter) {
         try {
-            ActionProposal proposal = proposeActionUseCase.propose(action, canonical(action, arguments));
+            ActionProposal proposal = proposeActionUseCase.propose(action, chatActions.canonical(action, arguments));
             send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.sentence())));
             return proposal.toolResult();
         } catch (IllegalArgumentException refused) {
             return refused.getMessage();
         }
-    }
-
-    private Map<String, String> canonical(ChatAction action, Map<String, String> arguments) {
-        Map<String, String> canonical = new HashMap<>();
-        arguments.forEach((name, value) -> canonical.put(name, value == null ? null : value.trim()));
-        switch (action) {
-            case LET_PHONE_IN, REFUSE_PHONE -> {
-                EnrolmentRequest waiting = EnrolmentRequest.byCode(listEnrolmentRequestsUseCase.pending(),
-                    canonical.get("code"));
-                canonical.put("code", waiting.code());
-                canonical.put("name", waiting.name());
-            }
-            case RUN_BACKUP, UPDATE_CONTAINER -> {
-                Machine machine = new MachineReference(canonical.get("machine"))
-                    .resolve(getMachinesUseCase.getAllMachines());
-                canonical.put("machine", machine.name());
-                canonical.put("machineId", machine.id().value());
-            }
-            case LIFT_BLOCK, TRUST_ADDRESS -> { }
-        }
-        return canonical;
     }
 
     /**

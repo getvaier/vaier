@@ -10,6 +10,8 @@ import net.vaier.domain.Conversation;
 import net.vaier.domain.Errand;
 import net.vaier.domain.ErrandReport;
 import net.vaier.domain.Errands;
+import net.vaier.domain.MailedConfirmation;
+import net.vaier.domain.MailedConfirmations;
 import net.vaier.domain.Operator;
 import net.vaier.domain.Rhythm;
 import net.vaier.domain.ConversationTurn;
@@ -26,6 +28,7 @@ import net.vaier.domain.WebSearchResults;
 import net.vaier.domain.port.ForConversing;
 import net.vaier.domain.port.ForPersistingConversations;
 import net.vaier.domain.port.ForPersistingErrands;
+import net.vaier.domain.port.ForPersistingMailedConfirmations;
 import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForSendingAdminNotification;
 import net.vaier.domain.port.ForPersistingMemory;
@@ -84,6 +87,7 @@ class ChatServiceTest {
     @Mock ForPersistingErrands forPersistingErrands;
     @Mock ForSendingAdminNotification forSendingAdminNotification;
     @Mock ForPublishingEvents forPublishingEvents;
+    @Mock ForPersistingMailedConfirmations forPersistingMailedConfirmations;
 
     /**
      * The clock is the service's, handed to the domain and never read there. Fixed here so "the next 08:00"
@@ -360,6 +364,55 @@ class ChatServiceTest {
         assertThatThrownBy(() -> service.take("p1"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("That card has expired; ask again.");
+    }
+
+    // --- mailed confirmations: an errand's actions, asked by mail -------------------------------------
+
+    /** Kept, then mailed to the operator it runs for, with the approval link on Vaier's own host. */
+    @Test
+    void mail_keepsTheConfirmation_andMailsItsLinkToTheOperator() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        when(forPersistingMailedConfirmations.load()).thenReturn(MailedConfirmations.empty());
+        when(forSendingAdminNotification.sendTo(anyString(), anyString(), anyString(), anyString())).thenReturn(true);
+
+        MailedConfirmation mailed = service.mail(GEIR, ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"));
+
+        ArgumentCaptor<MailedConfirmations> saved = ArgumentCaptor.forClass(MailedConfirmations.class);
+        verify(forPersistingMailedConfirmations).save(saved.capture());
+        assertThat(saved.getValue().held()).containsExactly(mailed);
+        assertThat(mailed.operator()).isEqualTo(GEIR);
+        assertThat(mailed.mailedAtEpochMs()).isEqualTo(NOW.toInstant().toEpochMilli());
+        verify(forSendingAdminNotification).sendTo(eq("geir@example.com"),
+            eq("Marvin asks: Lift the block on 203.0.113.9."),
+            contains("https://vaier.example.com/chat/approvals/"), anyString());
+    }
+
+    /** A link nobody was sent is never kept, and a refusal is said before any mail goes. */
+    @Test
+    void mail_thatCannotReachTheOperator_keepsNothing() {
+        when(configPersistence.load()).thenReturn(Optional.of(configuredWithAKey()));
+        when(forPersistingMailedConfirmations.load()).thenReturn(MailedConfirmations.empty());
+        when(forSendingAdminNotification.sendTo(anyString(), anyString(), anyString(), anyString())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.mail(GEIR, ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Mail is not set up, so the operator cannot be asked.");
+        verify(forPersistingMailedConfirmations, never()).save(any());
+    }
+
+    /** Opening only looks; taking removes it, so the link runs once. */
+    @Test
+    void open_looksWithoutTaking_andTakeRemovesIt() {
+        MailedConfirmation.Minted minted = MailedConfirmation.mint(ActionProposal.propose(ChatAction.LIFT_BLOCK,
+            Map.of("address", "203.0.113.9"), 0), GEIR, NOW.toInstant().toEpochMilli());
+        when(forPersistingMailedConfirmations.load()).thenReturn(
+            MailedConfirmations.empty().with(minted.confirmation(), NOW.toInstant().toEpochMilli()));
+
+        assertThat(service.open(minted.token(), GEIR)).isEqualTo(minted.confirmation());
+        verify(forPersistingMailedConfirmations, never()).save(any());
+
+        assertThat(service.take(minted.token(), GEIR)).isEqualTo(minted.confirmation());
+        verify(forPersistingMailedConfirmations).save(MailedConfirmations.empty());
     }
 
     // --- memory (#360) ------------------------------------------------------------------------------

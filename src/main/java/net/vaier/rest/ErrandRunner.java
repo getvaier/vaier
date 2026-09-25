@@ -4,13 +4,18 @@ import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.GetDueErrandsUseCase;
 import net.vaier.application.RunErrandUseCase;
 import net.vaier.domain.Errand;
+import net.vaier.domain.ToolOffer;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Runs each <b>errand</b> when its time comes, and nothing else.
+ *
+ * <p>Marvin is offered the reads he may make alone and the <b>Chat action</b>s, each of which mails the
+ * errand's operator a <b>Mailed confirmation</b> rather than running.
  *
  * <p>It is a driving adapter, exactly as {@link ImageUpdateWatcher} and {@link BackupRunner} are: the actor
  * driving it is a clock rather than a browser, so it lives in {@code rest/} and calls {@code *UseCase}s
@@ -33,12 +38,14 @@ public class ErrandRunner {
     private final GetDueErrandsUseCase getDueErrandsUseCase;
     private final RunErrandUseCase runErrandUseCase;
     private final ChatReads chatReads;
+    private final ChatActions chatActions;
 
     public ErrandRunner(GetDueErrandsUseCase getDueErrandsUseCase, RunErrandUseCase runErrandUseCase,
-                        ChatReads chatReads) {
+                        ChatReads chatReads, ChatActions chatActions) {
         this.getDueErrandsUseCase = getDueErrandsUseCase;
         this.runErrandUseCase = runErrandUseCase;
         this.chatReads = chatReads;
+        this.chatActions = chatActions;
     }
 
     @Scheduled(fixedDelay = EVERY_MINUTE_MS, initialDelay = EVERY_MINUTE_MS)
@@ -54,7 +61,10 @@ public class ErrandRunner {
         }
         for (Errand errand : due) {
             try {
-                runErrandUseCase.run(errand, chatReads.offers());
+                // The reads Marvin may make alone, then the actions, each mailed to this errand's operator.
+                List<ToolOffer> offers = new ArrayList<>(chatReads.offers());
+                offers.addAll(chatActions.mailedOffers(errand.operator()));
+                runErrandUseCase.run(errand, offers);
             } catch (Exception e) {
                 // A missing key, a dead API, an unreachable machine: none of them may stop the next errand,
                 // which belongs to somebody else.

@@ -2,6 +2,7 @@ package net.vaier.rest;
 
 import net.vaier.application.GetDueErrandsUseCase;
 import net.vaier.application.RunErrandUseCase;
+import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.Errand;
 import net.vaier.domain.Operator;
@@ -41,11 +42,13 @@ class ErrandRunnerTest {
     @Mock GetDueErrandsUseCase getDueErrandsUseCase;
     @Mock RunErrandUseCase runErrandUseCase;
     @Mock ChatReads chatReads;
+    @Mock ChatActions chatActions;
 
     @InjectMocks ErrandRunner runner;
 
-    private static final List<ToolOffer> OFFERS =
-        List.of(new ToolOffer(ChatTool.FLEET, () -> "colina27 connected"));
+    private static final ToolOffer FLEET_READ = new ToolOffer(ChatTool.FLEET, () -> "colina27 connected");
+    private static final ToolOffer MAILED_LIFT = new ToolOffer(ChatAction.LIFT_BLOCK, () -> "mailed");
+    private static final List<ToolOffer> OFFERS = List.of(FLEET_READ, MAILED_LIFT);
 
     private static Errand errand(String id) {
         ZonedDateTime now = ZonedDateTime.of(2026, 9, 10, 15, 59, 0, 0, ZoneId.of("Europe/Oslo"));
@@ -55,15 +58,21 @@ class ErrandRunnerTest {
             .createdAtEpochMs(now.toInstant().toEpochMilli()).build();
     }
 
+    /** The reads Marvin may make alone, then the actions — each mailed to that errand's own operator. */
     @Test
-    void itRunsEveryDueErrand_withTheReadsMarvinMayMakeAlone() {
+    void itRunsEveryDueErrand_withTheReadsMarvinMayMakeAlone_andTheActionsMailedToItsOperator() {
         when(getDueErrandsUseCase.due()).thenReturn(List.of(errand("aaa111"), errand("bbb222")));
-        when(chatReads.offers()).thenReturn(OFFERS);
+        stubOffers();
 
         runner.runDueErrands();
 
         verify(runErrandUseCase).run(eq(errand("aaa111")), eq(OFFERS));
         verify(runErrandUseCase).run(eq(errand("bbb222")), eq(OFFERS));
+    }
+
+    private void stubOffers() {
+        when(chatReads.offers()).thenReturn(List.of(FLEET_READ));
+        when(chatActions.mailedOffers(Operator.of("geir@example.com"))).thenReturn(List.of(MAILED_LIFT));
     }
 
     @Test
@@ -79,7 +88,7 @@ class ErrandRunnerTest {
     @Test
     void oneErrandThatThrowsDoesNotStopTheNextOne() {
         when(getDueErrandsUseCase.due()).thenReturn(List.of(errand("aaa111"), errand("bbb222")));
-        when(chatReads.offers()).thenReturn(OFFERS);
+        stubOffers();
         doThrow(new IllegalStateException("the API would not answer"))
             .when(runErrandUseCase).run(eq(errand("aaa111")), anyList());
 

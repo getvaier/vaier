@@ -12,6 +12,7 @@ import net.vaier.domain.port.ForSubscribingToEvents;
 import net.vaier.domain.port.ForTrackingPeerConfigRetrieval;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import net.vaier.domain.port.ForVendingSetupTokens;
+import net.vaier.rest.ChatActions;
 import net.vaier.rest.ChatReads;
 import net.vaier.rest.ImageUpdateAlerter;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -319,6 +320,16 @@ public abstract class VaierWebMvcIntegrationBase {
     // the Chat controller has nothing to wire without this.
     @MockBean
     protected ChatReads chatReads;
+
+    // The verbs' dispatch is rest/ChatActions, a @Component like ChatReads.
+    @MockBean
+    protected ChatActions chatActions;
+
+    @MockBean
+    protected OpenMailedConfirmationUseCase openMailedConfirmationUseCase;
+
+    @MockBean
+    protected TakeMailedConfirmationUseCase takeMailedConfirmationUseCase;
 
     // Implemented by rest/SurvivalKitWriter, which composes machines, the backup stores and SSH — mocked
     // here like the other rest-layer orchestrators (@WebMvcTest loads controllers only).

@@ -6,7 +6,8 @@ import java.util.Map;
 /**
  * The <b>Chat action</b> catalogue (#360 slice 2): what the model may propose. Each is a verb the Explorer
  * already has a button for, and none of them runs on the model's say-so — calling one puts a
- * <b>Confirmation</b> in front of the operator, and their click is what runs it.
+ * <b>Confirmation</b> in front of the operator (a <b>Mailed confirmation</b> during an errand), and their yes
+ * is what runs it.
  *
  * <p>There is no restart here, deliberately: Vaier has no button to start, stop or restart a container,
  * and an action Chat can propose must be one the Explorer can already do.
@@ -39,7 +40,7 @@ public enum ChatAction implements ChatCapability {
         new ToolParameter("address", "The address to trust, exactly as security gives it."));
 
     private static final String ONLY_PROPOSES =
-        " This only proposes it to the operator as a card; nothing happens until they click it.";
+        " This only proposes it to the operator; nothing happens until they say yes.";
 
     private final String toolName;
     private final String description;

@@ -283,13 +283,17 @@ class ChatPromptTest {
         return ChatPrompt.forErrand("example.com", NOW, Memory.empty(), errands.errands().get(0)).text();
     }
 
-    /** Nobody is watching: there is no pane to put a card on and no click to wait for. */
+    /** Nobody is watching: no card, but an action is mailed to the operator for a yes, and only when called for. */
     @Test
-    void theErrandPromptSaysNobodyIsWatchingAndNothingCanBeProposed() {
+    void theErrandPromptSaysNobodyIsWatching_andAnActionIsMailedForAYes() {
         assertThat(errandPrompt()).contains("You are Marvin");
         assertThat(errandPrompt()).contains("Nobody is watching");
-        assertThat(errandPrompt()).contains("nothing can be proposed or clicked");
-        assertThat(errandPrompt()).doesNotContain("The actions you can propose:");
+        assertThat(errandPrompt()).contains("mails the operator one link to say yes to");
+        assertThat(errandPrompt()).contains("only when what you found clearly calls for it");
+        assertThat(errandPrompt()).contains("The actions you can propose by mail:");
+        for (ChatAction action : ChatAction.values()) {
+            assertThat(errandPrompt()).contains("- " + action.toolName());
+        }
     }
 
     /** The answer is mailed exactly as written, so it has to stand on its own. */

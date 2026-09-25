@@ -49,7 +49,7 @@ class ChatActionTest {
     void everyDescriptionSaysItOnlyProposes() {
         assertThat(ChatAction.values()).allSatisfy(action -> {
             assertThat(action.description()).endsWith(".");
-            assertThat(action.description()).contains("nothing happens until they click");
+            assertThat(action.description()).contains("nothing happens until they say yes");
         });
     }
 

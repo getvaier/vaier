@@ -12,6 +12,8 @@ import net.vaier.application.GetErrandsUseCase;
 import net.vaier.application.GetMemoryUseCase;
 import net.vaier.application.GetSpendUseCase;
 import net.vaier.application.IsChatAvailableUseCase;
+import net.vaier.application.MailConfirmationUseCase;
+import net.vaier.application.OpenMailedConfirmationUseCase;
 import net.vaier.application.ProposeActionUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.ReadWebPageUseCase;
@@ -19,6 +21,7 @@ import net.vaier.application.RememberUseCase;
 import net.vaier.application.RunErrandUseCase;
 import net.vaier.application.SearchWebUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
+import net.vaier.application.TakeMailedConfirmationUseCase;
 import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatAvailability;
@@ -27,6 +30,8 @@ import net.vaier.domain.Conversation;
 import net.vaier.domain.Errand;
 import net.vaier.domain.ErrandReport;
 import net.vaier.domain.Errands;
+import net.vaier.domain.MailedConfirmation;
+import net.vaier.domain.MailedConfirmations;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ConversationTurn.Role;
 import net.vaier.domain.Memory;
@@ -46,6 +51,7 @@ import net.vaier.domain.port.ForHoldingActionProposals;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingConversations;
 import net.vaier.domain.port.ForPersistingErrands;
+import net.vaier.domain.port.ForPersistingMailedConfirmations;
 import net.vaier.domain.port.ForPersistingMemory;
 import net.vaier.domain.port.ForPersistingSpend;
 import net.vaier.domain.port.ForPublishingEvents;
@@ -84,7 +90,8 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     TakeActionProposalUseCase, GetConversationUseCase, ForgetConversationUseCase,
     RememberActionOutcomeUseCase, RememberUseCase, ForgetUseCase, GetMemoryUseCase, GetSpendUseCase,
     ReadWebPageUseCase, SearchWebUseCase, AddErrandUseCase, CancelErrandUseCase, GetErrandsUseCase,
-    GetDueErrandsUseCase, RunErrandUseCase {
+    GetDueErrandsUseCase, RunErrandUseCase, MailConfirmationUseCase, OpenMailedConfirmationUseCase,
+    TakeMailedConfirmationUseCase {
 
     /** The SSE topic and event the Chat pane listens on when an errand has reported while nobody asked. */
     static final String CHAT_TOPIC = "chat";
@@ -101,6 +108,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
     private final ForPersistingErrands forPersistingErrands;
     private final ForSendingAdminNotification forSendingAdminNotification;
     private final ForPublishingEvents forPublishingEvents;
+    private final ForPersistingMailedConfirmations forPersistingMailedConfirmations;
     private final Clock clock;
 
     public ChatService(ForPersistingAppConfiguration configPersistence, ForConversing forConversing,
@@ -113,6 +121,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
                       ForPersistingErrands forPersistingErrands,
                       ForSendingAdminNotification forSendingAdminNotification,
                       ForPublishingEvents forPublishingEvents,
+                      ForPersistingMailedConfirmations forPersistingMailedConfirmations,
                       Clock clock) {
         this.configPersistence = configPersistence;
         this.forConversing = forConversing;
@@ -125,6 +134,7 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         this.forPersistingErrands = forPersistingErrands;
         this.forSendingAdminNotification = forSendingAdminNotification;
         this.forPublishingEvents = forPublishingEvents;
+        this.forPersistingMailedConfirmations = forPersistingMailedConfirmations;
         this.clock = clock;
     }
 
@@ -340,6 +350,40 @@ public class ChatService implements ChatUseCase, IsChatAvailableUseCase, Propose
         ActionProposal proposal = ActionProposal.propose(action, arguments, System.currentTimeMillis());
         forHoldingActionProposals.hold(proposal);
         return proposal;
+    }
+
+    // --- mailed confirmations: an errand's actions, asked by mail -------------------------------------
+
+    /**
+     * Kept only once it is mailed: a link nobody received must not count against the roof. Whether it may
+     * wait at all is {@link MailedConfirmations}'s decision, taken before any mail goes.
+     */
+    @Override
+    public synchronized MailedConfirmation mail(Operator operator, ChatAction action, Map<String, String> arguments) {
+        long now = clock.instant().toEpochMilli();
+        MailedConfirmation.Minted minted = MailedConfirmation.mint(ActionProposal.propose(action, arguments, now),
+            operator, now);
+        MailedConfirmations waiting = forPersistingMailedConfirmations.load().with(minted.confirmation(), now);
+        String domain = configPersistence.load().map(VaierConfig::getDomain).orElse("");
+        if (!forSendingAdminNotification.sendTo(minted.recipient(), minted.subject(), minted.body(domain),
+                "mailed confirmation")) {
+            throw new IllegalArgumentException("Mail is not set up, so the operator cannot be asked.");
+        }
+        forPersistingMailedConfirmations.save(waiting);
+        return minted.confirmation();
+    }
+
+    @Override
+    public MailedConfirmation open(String token, Operator operator) {
+        return forPersistingMailedConfirmations.load().open(token, operator, clock.instant().toEpochMilli());
+    }
+
+    @Override
+    public synchronized MailedConfirmation take(String token, Operator operator) {
+        MailedConfirmations waiting = forPersistingMailedConfirmations.load();
+        MailedConfirmation taken = waiting.open(token, operator, clock.instant().toEpochMilli());
+        forPersistingMailedConfirmations.save(waiting.without(taken));
+        return taken;
     }
 
     /** The clicked card, once; gone or expired is refused before anything could run on it. */

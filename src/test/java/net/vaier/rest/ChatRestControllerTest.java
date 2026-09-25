@@ -20,6 +20,7 @@ import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.IsChatAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
+import net.vaier.application.MailConfirmationUseCase;
 import net.vaier.application.OfferBundleUseCase;
 import net.vaier.application.OpenBundleUseCase;
 import net.vaier.application.ProposeActionUseCase;
@@ -144,14 +145,16 @@ class ChatRestControllerTest {
 
     @BeforeEach
     void setUp() {
+        // The verbs' dispatch lives in ChatActions; built for real here, so a click is proven end to end.
+        ChatActions chatActions = new ChatActions(getMachinesUseCase, listEnrolmentRequestsUseCase,
+            getBackupJobsUseCase, getBackupRepositoriesUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase,
+            runBackupJobUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
+            mock(MailConfirmationUseCase.class));
         controller = new ChatRestController(chatUseCase, isChatAvailableUseCase, getMachinesUseCase,
-            listEnrolmentRequestsUseCase, getBackupJobsUseCase, proposeActionUseCase,
-            takeActionProposalUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase, runBackupJobUseCase,
-            getBackupRepositoriesUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
-            getConversationUseCase, forgetConversationUseCase, rememberActionOutcomeUseCase, offerBundleUseCase,
-            openBundleUseCase, forgetUseCase, getMemoryUseCase, getSpendUseCase, emailBundleUseCase,
-            addErrandUseCase, cancelErrandUseCase, getErrandsUseCase, forSubscribingToEvents, chatReads,
-            new ObjectMapper());
+            proposeActionUseCase, takeActionProposalUseCase, getConversationUseCase, forgetConversationUseCase,
+            rememberActionOutcomeUseCase, offerBundleUseCase, openBundleUseCase, forgetUseCase, getMemoryUseCase,
+            getSpendUseCase, emailBundleUseCase, addErrandUseCase, cancelErrandUseCase, getErrandsUseCase,
+            forSubscribingToEvents, chatReads, chatActions, new ObjectMapper());
     }
 
     // --- is Ask offered at all -------------------------------------------------------------------------

@@ -24,7 +24,7 @@ For what none of the fleet's own facts can answer — what changed in a new vers
 
 ## Acting, with your click
 
-Chat can also *act*, but never on its own say-so. It can propose letting a waiting phone in or refusing it, backing up a machine now, updating a container to a newer image, lifting a block, or trusting an address — each a verb the Explorer already has a button for, and none of them a restart, since Vaier has no restart button at all. Proposing one puts a one-sentence **Confirmation** card in the pane with a button that says exactly what it will do; nothing runs until you click it, and the card is gone in ten minutes either way.
+Chat can also *act*, but never on its own say-so. It can propose letting a waiting phone in or refusing it, backing up a machine now, updating a container to a newer image, lifting a block, or trusting an address — each a verb the Explorer already has a button for, and none of them a restart, since Vaier has no restart button at all. Proposing one puts a one-sentence **Confirmation** card in the pane with a button that says exactly what it will do; nothing runs until you click it, and the card is gone in ten minutes either way. During an errand the same proposal comes by mail instead — see [When an errand finds something to do](#when-an-errand-finds-something-to-do).
 
 ## Files, as a bundle
 
@@ -33,6 +33,13 @@ Say "give me the pictures from last year today in a zip" and Chat finds them its
 ## Errands
 
 Send Marvin off to do something later instead of asking him every time. Say *"every morning, check whether the disk on Apalveien 5 is filling up, and only tell me if it is"* and he writes himself an **errand**: a task, and a **rhythm** for when to run it — once at a stated moment, or daily, weekly or monthly at a stated time, in the fleet's own time zone. When it comes round, Marvin runs it alone, with the same reads he has in conversation, and mails you what he found. A watch that finds nothing worth saying says nothing at all — no mail, no noise — because a report that says "all fine" every morning is one you'd filter within a week, and the morning it mattered would be skimmed with the rest. An errand starts a new session: before Marvin sets off, your conversation thread is forgotten, and what he finds opens a fresh one, so the pane shows this morning's report rather than a week of them stacked up, and your next question already knows it. The **Marvin** menu's "Marvin's errands (N)" lists every one — its rhythm, its instruction, when it next runs, how the last run went — with a cancel button on each.
+
+
+### When an errand finds something to do
+
+An errand can propose the same actions a card can — let a phone in or refuse it, back up a machine, update a container, lift a block, trust an address — but nobody is there to click, so the proposal is mailed instead: a **mailed confirmation**. You get one mail saying exactly what would happen, with an **approval link** to `https://vaier.<domain>/chat/approvals/…`. The link sits behind the same sign-in as the rest of Vaier: opening it signs you in if needed and shows the sentence with **Do it** and **No**. Opening it never runs anything, because mail scanners follow links; only **Do it** does, through exactly the same path as the card's click, and what became of it lands in your Chat thread.
+
+The link works once, for 24 hours, and only for the operator it was mailed to; used, expired or somebody else's, it says so and nothing more. It carries 32 random bytes, and Vaier keeps only their SHA-256 digest in `vaier/config/mailed-confirmations.yml`, so the link survives a redeploy while the file itself opens nothing. At most three wait per operator at once — a watch that finds ten containers to update mails three, not ten — and one is never kept unless its mail went, so a Vaier without mail set up proposes nothing by mail at all. Marvin is told to propose only when what he found clearly calls for it; a watch that finds nothing still sends nothing.
 
 ## Memory
 

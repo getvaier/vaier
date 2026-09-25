@@ -22,8 +22,8 @@ import java.util.Locale;
  *
  * <p>Since the <b>errand</b> it also knows about time and about being alone: {@link #forFleet} says what the
  * clock says and which errands are already standing, and {@link #forErrand} is the prompt for a run with
- * nobody watching — no card to propose, no click to wait for, and an answer that will be mailed exactly as
- * it is written.
+ * nobody watching — no card to click, an action mailed for a yes instead, and an answer that will be mailed
+ * exactly as it is written.
  */
 public record ChatPrompt(String text) {
 
@@ -117,8 +117,8 @@ public record ChatPrompt(String text) {
 
     /**
      * What Marvin is told when an <b>errand</b> comes round and nobody is watching (#360). The differences
-     * from {@link #forFleet} are the whole of the errand: there is no pane, so nothing can be proposed and
-     * nothing clicked; there is no follow-up question, so the answer has to stand alone; and there is one
+     * from {@link #forFleet} are the whole of the errand: there is no pane, so an action is mailed to the
+     * operator as a <b>Mailed confirmation</b> rather than put on a card; there is no follow-up question, so the answer has to stand alone; and there is one
      * word — {@link ErrandReport#NOTHING_TO_REPORT} — that means "say nothing at all", because a watch that
      * mails every morning to say all is well is a watch that gets filtered.
      */
@@ -132,8 +132,12 @@ public record ChatPrompt(String text) {
         prompt.append(". ").append(saysTheClock(now)).append("\n\n");
 
         prompt.append("Nobody is watching. This is an errand the operator sent you on earlier, and it is "
-            + "running on its own: there is no pane in front of them, nothing can be proposed or clicked, and "
-            + "there is nobody to ask a follow-up question of.\n");
+            + "running on its own: there is no pane in front of them and nobody to ask a follow-up question "
+            + "of.\n");
+        prompt.append("An action tool here mails the operator one link to say yes to; nothing happens unless "
+            + "they do. Propose only when what you found clearly calls for it and the errand is about it, one "
+            + "thing at a time, and say in your report that it is waiting for their yes, never that it is "
+            + "done.\n");
         prompt.append("The errand: ").append(errand.rhythm().describe()).append(" — ")
             .append(errand.instruction()).append("\n");
         prompt.append("What you write is mailed to the operator exactly as you write it, so it has to stand "
@@ -162,6 +166,10 @@ public record ChatPrompt(String text) {
         prompt.append("\nThe reads you can make:\n");
         for (ChatTool tool : ChatTool.whileNobodyIsWatching()) {
             list(prompt, tool);
+        }
+        prompt.append("\nThe actions you can propose by mail:\n");
+        for (ChatAction action : ChatAction.values()) {
+            list(prompt, action);
         }
         return new ChatPrompt(prompt.toString());
     }
