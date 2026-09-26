@@ -8,6 +8,7 @@ import lombok.ToString;
 import net.vaier.config.ServiceNames;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForCallingServices;
 import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerIds;
@@ -779,6 +780,18 @@ public class ReverseProxyRoute {
         Optional<ServiceProbeAnswer> answer = prober.probe(first);
         Optional<ServiceProbeAnswer> landed = OwnSignIn.followOnce(first, answer).map(prober::probe).orElse(answer);
         return OwnSignIn.classify(landed, now);
+    }
+
+    /**
+     * A <b>Service call</b> to this route's backend, at the address the route points at, with the
+     * {@code credential} Vaier would hand the service. A stream speaks no HTTP, so it has no API to call.
+     */
+    public ServiceCallAnswer call(ForCallingServices caller, ServiceCall call, Optional<ServiceCredential> credential) {
+        if (stream) {
+            throw new IllegalArgumentException(domainName + " is a stream, not a website, so it has no HTTP API.");
+        }
+        return caller.call(originUrl() + call.path(), call,
+            credential.map(ServiceCredential::authorizationHeader).orElse(null));
     }
 
     /** Where a visitor lands: the path prefix, else the root redirect, else the root. */

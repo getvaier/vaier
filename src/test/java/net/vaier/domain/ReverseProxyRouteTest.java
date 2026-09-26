@@ -5,6 +5,7 @@ import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.ReverseProxyRoute.RouteSetting;
 import net.vaier.domain.Server.State;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForCallingServices;
 import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForProbingServiceVersion;
 import net.vaier.domain.port.ForResolvingPeerIds;
@@ -1037,6 +1038,29 @@ class ReverseProxyRouteTest {
             assertThat(asked).as(row.firstUrl()).containsExactly(row.firstUrl(), "http://192.168.3.50:9000/admin/");
             assertThat(signIn.kind()).isEqualTo(OwnSignIn.Kind.SIGN_IN_PAGE);
         }
+    }
+
+    /** A <b>Service call</b> goes to the backend itself, with the credential Vaier would hand it; a stream has no API. */
+    @Test
+    void call_asksTheBackendAtItsOwnAddress_withTheCredentialVaierHolds_andAStreamIsRefused() {
+        List<String> seen = new ArrayList<>();
+        ForCallingServices caller = (url, call, authorization) -> {
+            seen.add(call.method() + " " + url + " " + authorization);
+            return new ServiceCallAnswer(200, null, new byte[0], false);
+        };
+        ServiceCredential credential = new ServiceCredential("vaier", "s3cret");
+
+        versionRoute(null, null).call(caller, ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON"),
+            Optional.of(credential));
+        versionRoute(null, null).call(caller, ServiceCall.read("/rest/items"), Optional.empty());
+
+        assertThat(seen).containsExactly(
+            "POST http://192.168.3.50:9000/rest/items/PoolPump " + credential.authorizationHeader(),
+            "GET http://192.168.3.50:9000/rest/items null");
+        ReverseProxyRoute stream = versionRoute(null, null).toBuilder().stream(true).build();
+        assertThatThrownBy(() -> stream.call(caller, ServiceCall.read("/rest"), Optional.empty()))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("stream");
+        assertThat(seen).hasSize(2);
     }
 
     private static ReverseProxyRoute versionRoute(String endpoint, String property) {

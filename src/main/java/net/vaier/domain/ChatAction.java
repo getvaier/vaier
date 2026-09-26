@@ -10,7 +10,9 @@ import java.util.Map;
  * is what runs it.
  *
  * <p>There is no restart here, deliberately: Vaier has no button to start, stop or restart a container,
- * and an action Chat can propose must be one the Explorer can already do.
+ * and an action Chat can propose must be one the Explorer can already do. {@link #CALL_SERVICE} is the one
+ * deliberate exception: a write to a published service's own API has no Explorer button, because the
+ * service's own UI is its button.
  */
 public enum ChatAction implements ChatCapability {
 
@@ -41,7 +43,18 @@ public enum ChatAction implements ChatCapability {
 
     UPGRADE_OS("upgrade_os",
         "Install the pending OS package updates on a machine - apt or dnf, a plain upgrade, never a reboot.",
-        new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id."));
+        new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id.")),
+
+    CALL_SERVICE("call_service",
+        "Call a published service's own API - POST, PUT, PATCH or DELETE one path on it, or a GET that "
+            + "read_service refused - at its backend, with the service credential Vaier holds for the operator.",
+        new ToolParameter("service", "The published service: its name and machine as published_services "
+            + "gives them (openhab on Colina 27), or its address."),
+        new ToolParameter("method", "GET, POST, PUT, PATCH or DELETE."),
+        new ToolParameter("path", "The path inside the service, with any query, for example "
+            + "/rest/items/PoolPump. Never a scheme or a host."),
+        ToolParameter.optional("body", "What to send: plain text (ON) or JSON. Leave it out when there is "
+            + "nothing to send, and always for a GET."));
 
     private static final String ONLY_PROPOSES =
         " This only proposes it to the operator; nothing happens until they say yes.";
@@ -85,6 +98,8 @@ public enum ChatAction implements ChatCapability {
             case LIFT_BLOCK -> "Lift the block on " + arguments.get("address") + ".";
             case TRUST_ADDRESS -> "Trust " + arguments.get("address") + " from now on.";
             case UPGRADE_OS -> "Install the pending OS updates on " + arguments.get("machine") + ".";
+            case CALL_SERVICE -> ServiceCall.proposed(arguments.get("method"), arguments.get("path"),
+                arguments.get("body")).sentence(arguments.get("service"));
         };
     }
 }

@@ -26,7 +26,10 @@ class MailedConfirmationFileAdapterTest {
         return new MailedConfirmationFileAdapter(configDir.toString());
     }
 
-    /** Round trip, and the token itself is never written: only its digest is. */
+    /**
+     * Round trip, and the token itself is never written: only its digest is. A service call's body comes
+     * back whole, even one YAML would read as something other than text.
+     */
     @Test
     void aConfirmationComesBackExactlyAsSaved_andTheTokenIsNeverWritten() throws Exception {
         assertThat(adapter().load().held()).isEmpty();
@@ -34,7 +37,16 @@ class MailedConfirmationFileAdapterTest {
         MailedConfirmation.Minted minted = MailedConfirmation.mint(ActionProposal.propose(ChatAction.RUN_BACKUP,
             Map.of("machine", "Colina 27", "machineId", "c0355605-e5a0-419a-8943-fdc5ec209958"), NOW),
             Operator.of("geir@example.com"), NOW);
-        MailedConfirmations saved = MailedConfirmations.empty().with(minted.confirmation(), NOW);
+        MailedConfirmation.Minted withBody = MailedConfirmation.mint(ActionProposal.propose(ChatAction.CALL_SERVICE,
+            Map.of("service", "opensprinkler on Colina 27", "host", "opensprinkler.colina27.example.com",
+                "method", "PUT", "path", "/cp?pw=x", "body", "{\n  \"en\": true,\n  \"t\": [1, 2]\n}"), NOW),
+            Operator.of("geir@example.com"), NOW);
+        MailedConfirmation.Minted yamlish = MailedConfirmation.mint(ActionProposal.propose(ChatAction.CALL_SERVICE,
+            Map.of("service", "openhab on Colina 27", "host", "openhab.colina27.example.com",
+                "method", "POST", "path", "/rest/items/Dimmer", "body", "true"), NOW),
+            Operator.of("geir@example.com"), NOW);
+        MailedConfirmations saved = MailedConfirmations.empty().with(minted.confirmation(), NOW)
+            .with(withBody.confirmation(), NOW).with(yamlish.confirmation(), NOW);
         adapter().save(saved);
 
         assertThat(adapter().load()).isEqualTo(saved);

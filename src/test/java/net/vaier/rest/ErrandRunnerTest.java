@@ -71,7 +71,7 @@ class ErrandRunnerTest {
     }
 
     private void stubOffers() {
-        when(chatReads.offers()).thenReturn(List.of(FLEET_READ));
+        when(chatReads.offers(Operator.of("geir@example.com"))).thenReturn(List.of(FLEET_READ));
         when(chatActions.mailedOffers(Operator.of("geir@example.com"))).thenReturn(List.of(MAILED_LIFT));
     }
 

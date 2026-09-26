@@ -233,7 +233,8 @@ public class SpringAiConversationAdapter implements ForConversing {
                 property.putObject("items").put("type", "string");
             }
         }
-        tool.parameters().forEach(parameter -> schema.withArray("required").add(parameter.name()));
+        tool.parameters().stream().filter(parameter -> !parameter.optional())
+            .forEach(parameter -> schema.withArray("required").add(parameter.name()));
         schema.put("additionalProperties", false);
         return schema.toString();
     }

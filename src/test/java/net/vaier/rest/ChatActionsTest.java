@@ -1,6 +1,9 @@
 package net.vaier.rest;
 
+import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetPublishedServicesUseCase;
+import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.MailConfirmationUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.RunBackupJobUseCase;
@@ -15,6 +18,10 @@ import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.Operator;
 import net.vaier.domain.OsUpgrade;
+import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
+import net.vaier.domain.Server.State;
+import net.vaier.domain.ServiceCall;
+import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.ToolOffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +31,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -31,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -51,6 +60,8 @@ class ChatActionsTest {
     @Mock MailConfirmationUseCase mailConfirmationUseCase;
     @Mock UpgradeOsUseCase upgradeOsUseCase;
     @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
+    @Mock GetPublishedServicesUseCase getPublishedServicesUseCase;
+    @Mock CallServiceUseCase callServiceUseCase;
 
     @InjectMocks ChatActions chatActions;
 
@@ -128,5 +139,35 @@ class ChatActionsTest {
 
         settling.complete(new OsUpgrade.Settlement(true, "Colina 27 installed 4 package updates.", null));
         verify(rememberActionOutcomeUseCase).remember(GEIR, "Colina 27 installed 4 package updates.");
+    }
+
+    /**
+     * A write to a published service's own API: the card names the service as the operator knows it, the
+     * proposal keeps its address and the whole body, and the yes is done only when the service said so.
+     */
+    @Test
+    void callingAService_resolvesItByName_carriesTheWholeBody_andIsDoneOnlyOnSuccess() {
+        when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(new PublishedServiceUco(
+            "openhab @ Colina 27", "openhab", COLINA.value(), "Colina 27", null, ServiceLocation.PEER_SERVER, true,
+            "openhab.colina27.example.com", "10.13.13.3", 8080, State.OK, true, null, false, false, null, false,
+            null, null, null, null, null, "social", false, null)));
+        Map<String, String> canonical = chatActions.canonical(ChatAction.CALL_SERVICE, Map.of(
+            "service", "openHAB Colina 27", "method", "post", "path", "rest/items/PoolPump", "body", "ON"));
+        assertThat(canonical).isEqualTo(Map.of("service", "openhab on Colina 27",
+            "host", "openhab.colina27.example.com", "method", "POST", "path", "/rest/items/PoolPump", "body", "ON"));
+        ActionProposal proposal = ActionProposal.propose(ChatAction.CALL_SERVICE, canonical, 0);
+        assertThat(proposal.sentence()).isEqualTo("POST to openhab on Colina 27 /rest/items/PoolPump with body \"ON\".");
+        ServiceCall call = ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON");
+
+        when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
+            .thenReturn(new ServiceCallAnswer(200, null, new byte[0], false));
+        assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
+            new ChatActions.Outcome(true, "openhab on Colina 27 answered 200."));
+
+        when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
+            .thenReturn(new ServiceCallAnswer(404, "application/json",
+                "{\"error\":\"Item PoolPump does not exist\"}".getBytes(StandardCharsets.UTF_8), false));
+        assertThat(chatActions.run(proposal, GEIR)).isEqualTo(new ChatActions.Outcome(false,
+            "openhab on Colina 27 answered 404: {\"error\":\"Item PoolPump does not exist\"}"));
     }
 }

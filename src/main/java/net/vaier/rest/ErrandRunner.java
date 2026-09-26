@@ -62,7 +62,7 @@ public class ErrandRunner {
         for (Errand errand : due) {
             try {
                 // The reads Marvin may make alone, then the actions, each mailed to this errand's operator.
-                List<ToolOffer> offers = new ArrayList<>(chatReads.offers());
+                List<ToolOffer> offers = new ArrayList<>(chatReads.offers(errand.operator()));
                 offers.addAll(chatActions.mailedOffers(errand.operator()));
                 runErrandUseCase.run(errand, offers);
             } catch (Exception e) {

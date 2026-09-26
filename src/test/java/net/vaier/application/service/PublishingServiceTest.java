@@ -19,6 +19,7 @@ import net.vaier.config.ServiceNames;
 import net.vaier.domain.*;
 import net.vaier.domain.DockerService.PortMapping;
 import net.vaier.domain.Server.State;
+import net.vaier.domain.port.ForCallingServices;
 import net.vaier.domain.port.ForCheckingLanReachability;
 import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
@@ -131,6 +132,9 @@ class PublishingServiceTest {
 
     @Mock
     ForPersistingOpenServiceState forPersistingOpenServiceState;
+
+    @Mock
+    ForCallingServices forCallingServices;
 
     @Mock
     Clock clock;
@@ -693,6 +697,35 @@ class PublishingServiceTest {
     private static ReverseProxyRoute httpRoute(String name, String host) {
         return ReverseProxyRoute.builder().name(name).domainName(host).address("192.168.1.40").port(8080)
             .protocol("http").build();
+    }
+
+    /**
+     * A <b>Service call</b> reaches the route's backend carrying what {@code /authz/verify} would hand the
+     * service for this operator: their personal credential, else the shared one.
+     */
+    @Test
+    void aServiceCall_carriesTheOperatorsOwnCredentialElseTheSharedOne_andNamesOnlyAPublishedService() {
+        String host = "openhab.colina27.example.com";
+        when(forPersistingReverseProxyRoutes.getReverseProxyRoutes()).thenReturn(List.of(ReverseProxyRoute.builder()
+            .name("openhab").domainName(host).address("10.13.13.3").port(8080).service("svc").protocol("http")
+            .build()));
+        ServiceCredential mine = new ServiceCredential("geir", "mine");
+        ServiceCredential shared = new ServiceCredential("vaier", "shared");
+        when(forPersistingServiceCredentials.read()).thenReturn(ServiceCredentials.of(Map.of(host,
+            new ServiceCredentials.Entry(shared, Map.of("geir@example.com", mine)))));
+        ServiceCallAnswer answered = new ServiceCallAnswer(200, null, new byte[0], false);
+        when(forCallingServices.call(any(), any(), any())).thenReturn(answered);
+        ServiceCall write = ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON");
+
+        assertThat(service.readService(Operator.of("geir@example.com"), host, null, "/rest/items")).isSameAs(answered);
+        assertThat(service.callService(Operator.of("anna@example.com"), host, null, write)).isSameAs(answered);
+
+        verify(forCallingServices).call("http://10.13.13.3:8080/rest/items", ServiceCall.read("/rest/items"),
+            mine.authorizationHeader());
+        verify(forCallingServices).call("http://10.13.13.3:8080/rest/items/PoolPump", write,
+            shared.authorizationHeader());
+        assertThrows(NotFoundException.class,
+            () -> service.readService(Operator.of("geir@example.com"), "other.example.com", null, "/rest"));
     }
 
     @Test

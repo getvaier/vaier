@@ -19,6 +19,9 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
 
     public static ActionProposal propose(ChatAction action, Map<String, String> arguments, long nowEpochMs) {
         for (ToolParameter parameter : action.parameters()) {
+            if (parameter.optional()) {
+                continue;
+            }
             String value = arguments.get(parameter.name());
             if (value == null || value.isBlank()) {
                 throw new IllegalArgumentException("Say which " + parameter.name() + ".");

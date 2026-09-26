@@ -33,15 +33,16 @@ class ChatToolTest {
         assertThat(ChatTool.READ_WEB_PAGE.toolName()).isEqualTo("read_web_page");
         assertThat(ChatTool.ADD_ERRAND.toolName()).isEqualTo("add_errand");
         assertThat(ChatTool.CANCEL_ERRAND.toolName()).isEqualTo("cancel_errand");
+        assertThat(ChatTool.READ_SERVICE.toolName()).isEqualTo("read_service");
     }
 
     /**
      * Seven whole-fleet reads, the command run, the bundle and its mail, the two memory verbs, the two
-     * halves of the <b>web read</b>, and the two <b>errand</b> verbs.
+     * halves of the <b>web read</b>, the two <b>errand</b> verbs, and a published service's own API read.
      */
     @Test
-    void theCatalogueIsExactlySixteenTools() {
-        assertThat(ChatTool.values()).hasSize(16);
+    void theCatalogueIsExactlySeventeenTools() {
+        assertThat(ChatTool.values()).hasSize(17);
     }
 
     // --- the errand verbs (#360 slice 2) -------------------------------------------------------------
@@ -87,7 +88,7 @@ class ChatToolTest {
         assertThat(ChatTool.whileNobodyIsWatching()).containsExactly(
             ChatTool.FLEET, ChatTool.WAITING_TO_JOIN, ChatTool.PUBLISHED_SERVICES, ChatTool.BACKUPS,
             ChatTool.DISKS, ChatTool.CONTAINER_UPDATES, ChatTool.SECURITY, ChatTool.RUN_ON_MACHINE,
-            ChatTool.SEARCH_WEB, ChatTool.READ_WEB_PAGE, ChatTool.REMEMBER, ChatTool.FORGET);
+            ChatTool.SEARCH_WEB, ChatTool.READ_WEB_PAGE, ChatTool.READ_SERVICE, ChatTool.REMEMBER, ChatTool.FORGET);
         assertThat(ChatTool.whileNobodyIsWatching()).doesNotContain(
             ChatTool.BUNDLE_FILES, ChatTool.EMAIL_BUNDLE, ChatTool.ADD_ERRAND, ChatTool.CANCEL_ERRAND);
     }
@@ -99,6 +100,14 @@ class ChatToolTest {
             .containsExactly(tuple("query", false));
         assertThat(ChatTool.READ_WEB_PAGE.parameters()).extracting(ToolParameter::name, ToolParameter::many)
             .containsExactly(tuple("url", false));
+    }
+
+    /** A published service's own API is read by naming the service and a path inside it, and only ever read. */
+    @Test
+    void readingAServiceTakesTheServiceAndAPath_andSaysItOnlyReads() {
+        assertThat(ChatTool.READ_SERVICE.parameters()).extracting(ToolParameter::name)
+            .containsExactly("service", "path");
+        assertThat(ChatTool.READ_SERVICE.description()).contains("GET").contains("call_service");
     }
 
     /**

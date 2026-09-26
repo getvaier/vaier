@@ -338,7 +338,7 @@ public class ChatRestController {
         // click, a bundle to mail, and the two errand verbs. Merged by tool so the model is offered the
         // catalogue in the catalogue's own order, reads first.
         Map<ChatCapability, Function<Map<String, String>, String>> reads = new HashMap<>();
-        for (ToolOffer offer : chatReads.offers()) {
+        for (ToolOffer offer : chatReads.offers(operator)) {
             reads.put(offer.tool(), offer.read());
         }
         reads.put(ChatTool.BUNDLE_FILES, arguments -> offerBundle(arguments, emitter));

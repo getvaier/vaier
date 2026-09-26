@@ -70,10 +70,15 @@ public record WebPage(String url, String title, String text, boolean cut) {
             throw new IllegalArgumentException(
                 "That address did not say what it answered with, so Marvin did not read it.");
         }
-        if (!type.startsWith("text/") && !READABLE.contains(type)) {
+        if (!isReadable(type)) {
             throw new IllegalArgumentException("That address answered with " + type
                 + ", which is not text Marvin can read.");
         }
+    }
+
+    /** Whether a content type, without its parameters, is words. */
+    static boolean isReadable(String type) {
+        return type.startsWith("text/") || READABLE.contains(type);
     }
 
     /** What the model reads: which page this is, where it is, and then the page. */

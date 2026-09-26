@@ -15,6 +15,7 @@ import net.vaier.application.GetPublishedServicesUseCase.PublishedServiceUco;
 import net.vaier.application.GetVpnPeersUseCase;
 import net.vaier.application.GetVpnPeersUseCase.VpnPeerView;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
+import net.vaier.application.ReadServiceUseCase;
 import net.vaier.application.ReadWebPageUseCase;
 import net.vaier.application.RememberUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
@@ -35,9 +36,11 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.Memory;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.Operator;
 import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyRoute.ServiceLocation;
 import net.vaier.domain.Server.State;
+import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.SshConnectException;
 import net.vaier.domain.ToolOffer;
 import net.vaier.domain.UpdateAvailability;
@@ -52,6 +55,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +65,8 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -93,6 +99,7 @@ class ChatReadsTest {
     @Mock RunReadOnlyCommandUseCase runReadOnlyCommandUseCase;
     @Mock SearchWebUseCase searchWebUseCase;
     @Mock ReadWebPageUseCase readWebPageUseCase;
+    @Mock ReadServiceUseCase readServiceUseCase;
     @Mock RememberUseCase rememberUseCase;
     @Mock ForgetUseCase forgetUseCase;
 
@@ -101,11 +108,13 @@ class ChatReadsTest {
             listEnrolmentRequestsUseCase, getPublishedServicesUseCase, getBackupJobsUseCase,
             getBackupRunsUseCase, getMachineDiskStandingsUseCase, discoverPeerContainersUseCase,
             discoverVaierServerContainersUseCase, getBlockDecisionsUseCase, runReadOnlyCommandUseCase,
-            searchWebUseCase, readWebPageUseCase, rememberUseCase, forgetUseCase, new ObjectMapper());
+            searchWebUseCase, readWebPageUseCase, readServiceUseCase, rememberUseCase, forgetUseCase,
+            new ObjectMapper());
     }
 
     private static final MachineId COLINA = MachineId.of("c0355605-e5a0-419a-8943-fdc5ec209958");
     private static final long NOW = 1_700_000_000_000L;
+    private static final Operator GEIR = Operator.of("geir@example.com");
 
     /**
      * Exactly the reads Marvin may make alone, in the catalogue's own order — the domain's list, so an errand
@@ -113,7 +122,7 @@ class ChatReadsTest {
      */
     @Test
     void itOffersExactlyTheReadsMarvinMayMakeAlone() {
-        assertThat(chatReads().offers()).extracting(ToolOffer::tool)
+        assertThat(chatReads().offers(GEIR)).extracting(ToolOffer::tool)
             .containsExactlyElementsOf(ChatTool.whileNobodyIsWatching());
     }
 
@@ -422,6 +431,53 @@ class ChatReadsTest {
         assertThat(fact).doesNotContain("10.13.13.6");
     }
 
+    // --- a published service's own API ---------------------------------------------------------------
+
+    /** Named as the published services read names it; read as the operator asking, whose credential it carries. */
+    @Test
+    void readService_resolvesTheServiceByItsNameAndMachine_andReadsAsTheOperator() {
+        openHabsAtBothHouses();
+        when(readServiceUseCase.readService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(),
+            eq("/rest/items/PoolPump/state"))).thenReturn(
+            new ServiceCallAnswer(200, "text/plain", "ON".getBytes(StandardCharsets.UTF_8), false));
+
+        String fact = read(ChatTool.READ_SERVICE, Map.of("service", "openhab on Colina 27",
+            "path", "/rest/items/PoolPump/state"));
+
+        assertThat(fact).isEqualTo("openhab on Colina 27 answered 200 (text/plain).\n\nON");
+    }
+
+    @Test
+    void readService_saysARefusalInTheDomainsWords_andNeverAnUnexpectedFailuresOwn() {
+        openHabsAtBothHouses();
+        assertThat(read(ChatTool.READ_SERVICE, Map.of("service", "openhab", "path", "/rest")))
+            .startsWith("2 published services are called \"openhab\"");
+
+        record Row(RuntimeException thrown, String said) {}
+        for (Row row : new Row[] {
+            new Row(new IllegalArgumentException("A path stays inside the service: no . or .. segments."),
+                "A path stays inside the service: no . or .. segments."),
+            new Row(new IllegalStateException("connect timed out to 10.13.13.3:8080"),
+                "Vaier could not reach openhab on Colina 27."),
+        }) {
+            doThrow(row.thrown()).when(readServiceUseCase).readService(any(), any(), any(), any());
+            assertThat(read(ChatTool.READ_SERVICE, Map.of("service", "openhab.colina27.example.com", "path", "/x")))
+                .as(row.said()).isEqualTo(row.said());
+        }
+    }
+
+    private void openHabsAtBothHouses() {
+        when(getPublishedServicesUseCase.getPublishedServices()).thenReturn(List.of(
+            publishedService("openhab", "Colina 27", "openhab.colina27.example.com"),
+            publishedService("openhab", "Apalveien 5", "openhab.apalveien5.example.com")));
+    }
+
+    private static PublishedServiceUco publishedService(String name, String machine, String address) {
+        return new PublishedServiceUco(name + " @ " + machine, name, null, machine, null,
+            ServiceLocation.PEER_SERVER, true, address, "10.13.13.3", 8080, State.OK, true,
+            null, false, false, null, false, null, null, null, null, null, "social", false, null);
+    }
+
     // --- memory: what Vaier keeps across conversations (#360) --------------------------------------------
 
     @Test
@@ -471,7 +527,7 @@ class ChatReadsTest {
     }
 
     private String read(ChatTool tool, Map<String, String> arguments) {
-        return chatReads().offers().stream()
+        return chatReads().offers(GEIR).stream()
             .filter(offer -> offer.tool() == tool)
             .findFirst().orElseThrow()
             .read().apply(arguments);

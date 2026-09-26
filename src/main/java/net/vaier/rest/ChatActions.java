@@ -2,9 +2,11 @@ package net.vaier.rest;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.application.ApproveEnrolmentUseCase;
+import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.MailConfirmationUseCase;
@@ -27,6 +29,9 @@ import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.NoHostCredentialException;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
+import net.vaier.domain.PublishedServiceReference;
+import net.vaier.domain.PublishedServiceReference.Candidate;
+import net.vaier.domain.ServiceCall;
 import net.vaier.domain.ToolOffer;
 import org.springframework.stereotype.Component;
 
@@ -57,6 +62,8 @@ public class ChatActions {
     private final MailConfirmationUseCase mailConfirmationUseCase;
     private final UpgradeOsUseCase upgradeOsUseCase;
     private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
+    private final GetPublishedServicesUseCase getPublishedServicesUseCase;
+    private final CallServiceUseCase callServiceUseCase;
 
     public ChatActions(GetMachinesUseCase getMachinesUseCase,
                        ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase,
@@ -70,7 +77,9 @@ public class ChatActions {
                        TrustAddressUseCase trustAddressUseCase,
                        MailConfirmationUseCase mailConfirmationUseCase,
                        UpgradeOsUseCase upgradeOsUseCase,
-                       RememberActionOutcomeUseCase rememberActionOutcomeUseCase) {
+                       RememberActionOutcomeUseCase rememberActionOutcomeUseCase,
+                       GetPublishedServicesUseCase getPublishedServicesUseCase,
+                       CallServiceUseCase callServiceUseCase) {
         this.getMachinesUseCase = getMachinesUseCase;
         this.listEnrolmentRequestsUseCase = listEnrolmentRequestsUseCase;
         this.getBackupJobsUseCase = getBackupJobsUseCase;
@@ -84,6 +93,8 @@ public class ChatActions {
         this.mailConfirmationUseCase = mailConfirmationUseCase;
         this.upgradeOsUseCase = upgradeOsUseCase;
         this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
+        this.getPublishedServicesUseCase = getPublishedServicesUseCase;
+        this.callServiceUseCase = callServiceUseCase;
     }
 
     /** What became of a yes: whether it ran, and the sentence to show either way. */
@@ -109,9 +120,29 @@ public class ChatActions {
                 canonical.put("machine", machine.name());
                 canonical.put("machineId", machine.id().value());
             }
+            case CALL_SERVICE -> {
+                Candidate service = new PublishedServiceReference(canonical.get("service"))
+                    .resolve(ChatReads.candidates(getPublishedServicesUseCase.getPublishedServices()));
+                // Judged now, so a path that would never be sent is refused before it is proposed.
+                ServiceCall call = ServiceCall.proposed(canonical.get("method"), canonical.get("path"),
+                    arguments.get("body"));
+                canonical.put("service", service.label());
+                canonical.put("host", service.host());
+                putIfPresent(canonical, "pathPrefix", service.pathPrefix());
+                canonical.put("method", call.method());
+                canonical.put("path", call.path());
+                canonical.remove("body");
+                putIfPresent(canonical, "body", call.body());
+            }
             case LIFT_BLOCK, TRUST_ADDRESS -> { }
         }
         return canonical;
+    }
+
+    private static void putIfPresent(Map<String, String> arguments, String name, String value) {
+        if (value != null) {
+            arguments.put(name, value);
+        }
     }
 
     /**
@@ -172,6 +203,9 @@ public class ChatActions {
                 yield "Installing the pending OS updates on " + a.get("machine")
                     + ". Vaier says how it went when it is done.";
             }
+            case CALL_SERVICE -> callServiceUseCase.callService(operator, a.get("host"), a.get("pathPrefix"),
+                    ServiceCall.proposed(a.get("method"), a.get("path"), a.get("body")))
+                .outcome(a.get("service"));
         };
     }
 

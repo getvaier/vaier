@@ -1,5 +1,6 @@
 package net.vaier.adapter.driven;
 
+import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatTool;
 import net.vaier.domain.ConversationTurn;
 import net.vaier.domain.ConversationTurn.Role;
@@ -180,6 +181,16 @@ class SpringAiConversationAdapterTest {
         assertThat(schema).contains("\"machine\"").contains("\"command\"").contains("\"required\"");
         assertThat(run.call("{\"machine\":\"Colina 27\",\"command\":\"uptime\"}")).contains("up 3 days");
         assertThat(seen).containsExactly(Map.of("machine", "Colina 27", "command", "uptime"));
+    }
+
+    /** An optional parameter is offered but not required, so a call may leave it out. */
+    @Test
+    void anOptionalParameterIsNotRequired() {
+        converse(List.of(), List.of(new ToolOffer(ChatAction.CALL_SERVICE, args -> "proposed")));
+
+        ToolCallback call = ((ToolCallingChatOptions) model.prompt.getOptions()).getToolCallbacks().get(0);
+        assertThat(call.getToolDefinition().inputSchema()).contains("\"body\"")
+            .contains("\"required\":[\"service\",\"method\",\"path\"]");
     }
 
     /** A parameter that takes many values is offered as an array, and arrives one per line. */

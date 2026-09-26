@@ -46,6 +46,15 @@ class ActionProposalTest {
             .hasMessage("Say which code.");
     }
 
+    /** A body is optional: a DELETE has none, and the card says so rather than refusing. */
+    @Test
+    void anOptionalArgumentMayBeLeftOut() {
+        ActionProposal proposal = ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service",
+            "paperless on Apalveien 5", "method", "DELETE", "path", "/api/tags/7", "host", "paperless.example.com"), NOW);
+
+        assertThat(proposal.sentence()).isEqualTo("DELETE to paperless on Apalveien 5 /api/tags/7.");
+    }
+
     @Test
     void aProposalLivesTenMinutes() {
         ActionProposal proposal = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);

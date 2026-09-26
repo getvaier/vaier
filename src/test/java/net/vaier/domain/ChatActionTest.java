@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * The <b>Chat action</b> catalogue (#360 slice 2): what the model may propose. Each is a verb the Explorer
@@ -26,12 +27,16 @@ class ChatActionTest {
         assertThat(ChatAction.LIFT_BLOCK.toolName()).isEqualTo("lift_block");
         assertThat(ChatAction.TRUST_ADDRESS.toolName()).isEqualTo("trust_address");
         assertThat(ChatAction.UPGRADE_OS.toolName()).isEqualTo("upgrade_os");
+        assertThat(ChatAction.CALL_SERVICE.toolName()).isEqualTo("call_service");
     }
 
-    /** Seven verbs the Explorer already has a button for. No restart: Vaier has no such button, on purpose. */
+    /**
+     * Seven verbs the Explorer already has a button for, and a write to a published service's own API, whose
+     * button is the service's own UI. No restart: Vaier has no such button, on purpose.
+     */
     @Test
-    void theCatalogueIsExactlyTheSevenVerbsTheExplorerAlreadyHas() {
-        assertThat(ChatAction.values()).hasSize(7);
+    void theCatalogueIsExactlyTheSevenExplorerVerbsAndAServiceCall() {
+        assertThat(ChatAction.values()).hasSize(8);
     }
 
     /** An action and a read sharing a name is a request Vaier cannot tell apart. */
@@ -64,6 +69,9 @@ class ChatActionTest {
         assertThat(ChatAction.LIFT_BLOCK.parameters()).extracting(ToolParameter::name).containsExactly("address");
         assertThat(ChatAction.TRUST_ADDRESS.parameters()).extracting(ToolParameter::name).containsExactly("address");
         assertThat(ChatAction.UPGRADE_OS.parameters()).extracting(ToolParameter::name).containsExactly("machine");
+        assertThat(ChatAction.CALL_SERVICE.parameters()).extracting(ToolParameter::name, ToolParameter::optional)
+            .containsExactly(tuple("service", false), tuple("method", false), tuple("path", false),
+                tuple("body", true));
         assertThat(ChatAction.values()).allSatisfy(action ->
             assertThat(action.parameters()).allSatisfy(p -> assertThat(p.description()).isNotBlank()));
     }
@@ -85,6 +93,9 @@ class ChatActionTest {
             .isEqualTo("Trust 203.0.113.9 from now on.");
         assertThat(ChatAction.UPGRADE_OS.sentence(Map.of("machine", "Colina 27")))
             .isEqualTo("Install the pending OS updates on Colina 27.");
+        assertThat(ChatAction.CALL_SERVICE.sentence(Map.of("service", "openhab on Colina 27", "method", "POST",
+            "path", "/rest/items/PoolPump", "body", "ON")))
+            .isEqualTo(ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON").sentence("openhab on Colina 27"));
     }
 
     /** Both catalogues are offered to the model through the one shape the adapter knows. */

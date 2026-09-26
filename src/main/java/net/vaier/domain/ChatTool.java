@@ -100,6 +100,18 @@ public enum ChatTool implements ChatCapability {
         new ToolParameter("url", "The page's full address, beginning http:// or https://, exactly as a "
             + "search result or the operator gave it.")),
 
+    READ_SERVICE("read_service",
+        "Read a published service's own API: one GET of a path on it, at its backend, with the service "
+            + "credential Vaier holds for the operator, and read back its status and body - text and JSON as "
+            + "they came, a long body cut, anything binary only measured. Use it to learn a service's state: "
+            + "an openHAB item, a sprinkler's programs. Only reads Vaier knows change nothing are allowed "
+            + "(openHAB's /rest, OpenSprinkler's /jc /jo /js /jp /jn); any other path, and anything that "
+            + "changes something, is proposed with call_service.",
+        new ToolParameter("service", "The published service: its name and machine as published_services "
+            + "gives them (openhab on Colina 27), or its address."),
+        new ToolParameter("path", "The path inside the service, with any query, for example "
+            + "/rest/items/PoolPump. Never a scheme or a host.")),
+
     ADD_ERRAND("add_errand",
         "Send yourself on an errand: something to do later, once or on a rhythm, while nobody is watching. "
             + "You run it alone, with the same reads you have here, and Vaier mails the operator what you "
@@ -126,7 +138,7 @@ public enum ChatTool implements ChatCapability {
      */
     public static List<ChatTool> whileNobodyIsWatching() {
         return List.of(FLEET, WAITING_TO_JOIN, PUBLISHED_SERVICES, BACKUPS, DISKS, CONTAINER_UPDATES,
-            SECURITY, RUN_ON_MACHINE, SEARCH_WEB, READ_WEB_PAGE, REMEMBER, FORGET);
+            SECURITY, RUN_ON_MACHINE, SEARCH_WEB, READ_WEB_PAGE, READ_SERVICE, REMEMBER, FORGET);
     }
 
     private final String toolName;

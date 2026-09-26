@@ -146,6 +146,16 @@ class ChatPromptTest {
         assertThat(prompt()).contains("do not try another spelling");
     }
 
+    /** A published service's own API: read freely, and a write proposed only when it was asked for. */
+    @Test
+    void bothPromptsSayReadAServiceFreely_andProposeACallOnlyWhenAskedFor() {
+        for (String said : new String[] { prompt(), errandPrompt() }) {
+            assertThat(said).contains("read_service").contains("call_service")
+                .contains("only for what the operator asked for or what an errand clearly calls for")
+                .contains("a GET that read_service refuses goes through call_service too");
+        }
+    }
+
     /**
      * The <b>web read</b>, and the four things that keep it honest: what it is for, that a snippet is not an
      * answer, that a fact gets its address said, and that a page is data. The last one is the same posture

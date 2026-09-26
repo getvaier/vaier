@@ -5,6 +5,7 @@ import net.vaier.application.ApproveEnrolmentUseCase;
 import net.vaier.application.ApproveEnrolmentUseCase.ApprovedEnrolmentUco;
 import net.vaier.application.AddErrandUseCase;
 import net.vaier.application.CancelErrandUseCase;
+import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.ChatUseCase;
 import net.vaier.application.DownloadFileUseCase.Download;
 import net.vaier.application.EmailBundleUseCase;
@@ -17,6 +18,7 @@ import net.vaier.application.GetSpendUseCase;
 import net.vaier.application.GetBackupJobsUseCase;
 import net.vaier.application.GetBackupRepositoriesUseCase;
 import net.vaier.application.GetMachinesUseCase;
+import net.vaier.application.GetPublishedServicesUseCase;
 import net.vaier.application.IsChatAvailableUseCase;
 import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
@@ -150,7 +152,8 @@ class ChatRestControllerTest {
         ChatActions chatActions = new ChatActions(getMachinesUseCase, listEnrolmentRequestsUseCase,
             getBackupJobsUseCase, getBackupRepositoriesUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase,
             runBackupJobUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
-            mock(MailConfirmationUseCase.class), mock(UpgradeOsUseCase.class), rememberActionOutcomeUseCase);
+            mock(MailConfirmationUseCase.class), mock(UpgradeOsUseCase.class), rememberActionOutcomeUseCase,
+            mock(GetPublishedServicesUseCase.class), mock(CallServiceUseCase.class));
         controller = new ChatRestController(chatUseCase, isChatAvailableUseCase, getMachinesUseCase,
             proposeActionUseCase, takeActionProposalUseCase, getConversationUseCase, forgetConversationUseCase,
             rememberActionOutcomeUseCase, offerBundleUseCase, openBundleUseCase, forgetUseCase, getMemoryUseCase,
@@ -722,7 +725,7 @@ class ChatRestControllerTest {
     private void answering(String... chunks) {
         // The reads Marvin may make alone come from ChatReads — stubbed as itself answering, since this
         // controller's job is only to merge them with its own four and announce every one of them.
-        when(chatReads.offers()).thenReturn(ChatTool.whileNobodyIsWatching().stream()
+        when(chatReads.offers(any())).thenReturn(ChatTool.whileNobodyIsWatching().stream()
             .map(tool -> new ToolOffer(tool, () -> "[]"))
             .toList());
         doAnswer(invocation -> {

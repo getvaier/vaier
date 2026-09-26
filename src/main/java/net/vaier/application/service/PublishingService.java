@@ -1,6 +1,7 @@
 package net.vaier.application.service;
 
 import lombok.extern.slf4j.Slf4j;
+import net.vaier.application.CallServiceUseCase;
 import net.vaier.application.DeletePublishedServiceUseCase;
 import net.vaier.application.DetectOwnSignInsUseCase;
 import net.vaier.application.GetLaunchpadServicesUseCase;
@@ -14,6 +15,7 @@ import net.vaier.application.PublishLanServiceUseCase;
 import net.vaier.application.PublishPeerServiceUseCase;
 import net.vaier.application.PublishedServicesCacheInvalidator;
 import net.vaier.application.PublishingConstants;
+import net.vaier.application.ReadServiceUseCase;
 import net.vaier.application.RefreshLaunchpadVersionsUseCase;
 import net.vaier.application.UnignorePublishableServiceUseCase;
 import net.vaier.application.UpdatePublishedServiceUseCase;
@@ -25,9 +27,11 @@ import net.vaier.domain.DockerService;
 import net.vaier.domain.LanAnchor;
 import net.vaier.domain.LanServer;
 import net.vaier.domain.MachineId;
+import net.vaier.domain.NotFoundException;
 import net.vaier.domain.OpenService;
 import net.vaier.domain.OpenServiceState;
 import net.vaier.domain.OpenServiceTracker;
+import net.vaier.domain.Operator;
 import net.vaier.domain.OwnSignIn;
 import net.vaier.domain.LaunchpadVisibility;
 import net.vaier.domain.PublishableService;
@@ -36,10 +40,13 @@ import net.vaier.domain.Reachability;
 import net.vaier.domain.ReverseProxyRoute;
 import net.vaier.domain.ReverseProxyRoute.RouteSetting;
 import net.vaier.domain.Server;
+import net.vaier.domain.ServiceCall;
+import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.ServiceCredentials;
 import net.vaier.domain.ServiceOwnSignIn;
 import net.vaier.domain.VpnClient;
 import net.vaier.domain.port.ForCheckingLanReachability;
+import net.vaier.domain.port.ForCallingServices;
 import net.vaier.domain.port.ForPersistingServiceCredentials;
 import net.vaier.domain.port.ForProbingServiceSignIn;
 import net.vaier.domain.port.ForPersistingOpenServiceState;
@@ -90,7 +97,9 @@ public class PublishingService implements
     DetectOwnSignInsUseCase,
     GetOwnSignInsUseCase,
     JudgeOpenServicesUseCase,
-    MarkMeantToBePublicUseCase {
+    MarkMeantToBePublicUseCase,
+    ReadServiceUseCase,
+    CallServiceUseCase {
 
     private final ForPersistingReverseProxyRoutes forPersistingReverseProxyRoutes;
     private final ForGettingServerInfo forGettingServerInfo;
@@ -116,6 +125,7 @@ public class PublishingService implements
     private final ForPersistingServiceCredentials forPersistingServiceCredentials;
     private final ForProbingServiceSignIn forProbingServiceSignIn;
     private final ForPersistingOpenServiceState forPersistingOpenServiceState;
+    private final ForCallingServices forCallingServices;
     private final OpenServiceTracker openServiceTracker;
     private final Clock clock;
     // Route name -> what its backend asked for at the last look. In memory: a restart simply looks again.
@@ -152,6 +162,7 @@ public class PublishingService implements
                              ForPersistingServiceCredentials forPersistingServiceCredentials,
                              ForProbingServiceSignIn forProbingServiceSignIn,
                              ForPersistingOpenServiceState forPersistingOpenServiceState,
+                             ForCallingServices forCallingServices,
                              Clock clock) {
         this.forPersistingReverseProxyRoutes = forPersistingReverseProxyRoutes;
         this.forGettingServerInfo = forGettingServerInfo;
@@ -175,6 +186,7 @@ public class PublishingService implements
         this.forPersistingServiceCredentials = forPersistingServiceCredentials;
         this.forProbingServiceSignIn = forProbingServiceSignIn;
         this.forPersistingOpenServiceState = forPersistingOpenServiceState;
+        this.forCallingServices = forCallingServices;
         // The domain owns the port call; on disk, so a redeploy never mails about the same hole twice.
         this.openServiceTracker = new OpenServiceTracker(forPersistingOpenServiceState);
         this.clock = clock;
@@ -353,6 +365,23 @@ public class PublishingService implements
                     OpenService.isOpen(r, seen), openServices.isMeantToBePublic(r.getName()));
             })
             .toList();
+    }
+
+    // --- ReadServiceUseCase / CallServiceUseCase ---
+
+    @Override
+    public ServiceCallAnswer readService(Operator operator, String host, String pathPrefix, String path) {
+        return callService(operator, host, pathPrefix, ServiceCall.read(path));
+    }
+
+    /** With the credential {@code /authz/verify} would hand the service for this operator. */
+    @Override
+    public ServiceCallAnswer callService(Operator operator, String host, String pathPrefix, ServiceCall call) {
+        ReverseProxyRoute route = ReverseProxyRoute.findByFqdnAndPath(
+                forPersistingReverseProxyRoutes.getReverseProxyRoutes(), host, pathPrefix)
+            .orElseThrow(() -> new NotFoundException("Vaier publishes nothing at " + host + "."));
+        return route.call(forCallingServices, call,
+            forPersistingServiceCredentials.read().credentialFor(host, operator.email().orElse(null)));
     }
 
     // --- JudgeOpenServicesUseCase / MarkMeantToBePublicUseCase ---
