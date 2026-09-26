@@ -37,7 +37,11 @@ public enum ChatAction implements ChatCapability {
 
     TRUST_ADDRESS("trust_address",
         "Trust an address from now on, so it is never kept out again.",
-        new ToolParameter("address", "The address to trust, exactly as security gives it."));
+        new ToolParameter("address", "The address to trust, exactly as security gives it.")),
+
+    UPGRADE_OS("upgrade_os",
+        "Install the pending OS package updates on a machine - apt or dnf, a plain upgrade, never a reboot.",
+        new ToolParameter("machine", "The machine, named exactly as the fleet read names it, or its id."));
 
     private static final String ONLY_PROPOSES =
         " This only proposes it to the operator; nothing happens until they say yes.";
@@ -80,6 +84,7 @@ public enum ChatAction implements ChatCapability {
                 + " to its newer image.";
             case LIFT_BLOCK -> "Lift the block on " + arguments.get("address") + ".";
             case TRUST_ADDRESS -> "Trust " + arguments.get("address") + " from now on.";
+            case UPGRADE_OS -> "Install the pending OS updates on " + arguments.get("machine") + ".";
         };
     }
 }

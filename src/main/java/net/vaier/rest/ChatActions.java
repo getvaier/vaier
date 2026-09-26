@@ -9,9 +9,11 @@ import net.vaier.application.LiftBlockUseCase;
 import net.vaier.application.ListEnrolmentRequestsUseCase;
 import net.vaier.application.MailConfirmationUseCase;
 import net.vaier.application.RefuseEnrolmentUseCase;
+import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
+import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.ActionProposal;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
@@ -53,6 +55,8 @@ public class ChatActions {
     private final LiftBlockUseCase liftBlockUseCase;
     private final TrustAddressUseCase trustAddressUseCase;
     private final MailConfirmationUseCase mailConfirmationUseCase;
+    private final UpgradeOsUseCase upgradeOsUseCase;
+    private final RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
 
     public ChatActions(GetMachinesUseCase getMachinesUseCase,
                        ListEnrolmentRequestsUseCase listEnrolmentRequestsUseCase,
@@ -64,7 +68,9 @@ public class ChatActions {
                        UpdateContainerImageUseCase updateContainerImageUseCase,
                        LiftBlockUseCase liftBlockUseCase,
                        TrustAddressUseCase trustAddressUseCase,
-                       MailConfirmationUseCase mailConfirmationUseCase) {
+                       MailConfirmationUseCase mailConfirmationUseCase,
+                       UpgradeOsUseCase upgradeOsUseCase,
+                       RememberActionOutcomeUseCase rememberActionOutcomeUseCase) {
         this.getMachinesUseCase = getMachinesUseCase;
         this.listEnrolmentRequestsUseCase = listEnrolmentRequestsUseCase;
         this.getBackupJobsUseCase = getBackupJobsUseCase;
@@ -76,6 +82,8 @@ public class ChatActions {
         this.liftBlockUseCase = liftBlockUseCase;
         this.trustAddressUseCase = trustAddressUseCase;
         this.mailConfirmationUseCase = mailConfirmationUseCase;
+        this.upgradeOsUseCase = upgradeOsUseCase;
+        this.rememberActionOutcomeUseCase = rememberActionOutcomeUseCase;
     }
 
     /** What became of a yes: whether it ran, and the sentence to show either way. */
@@ -95,7 +103,7 @@ public class ChatActions {
                 canonical.put("code", waiting.code());
                 canonical.put("name", waiting.name());
             }
-            case RUN_BACKUP, UPDATE_CONTAINER -> {
+            case RUN_BACKUP, UPDATE_CONTAINER, UPGRADE_OS -> {
                 Machine machine = new MachineReference(canonical.get("machine"))
                     .resolve(getMachinesUseCase.getAllMachines());
                 canonical.put("machine", machine.name());
@@ -107,12 +115,13 @@ public class ChatActions {
     }
 
     /**
-     * Run a proposal the operator said yes to. A refusal the domain worded is shown; an unexpected failure is
-     * answered in Vaier's words, because its own message can carry a host, a path or a credential.
+     * Run a proposal {@code operator} said yes to. A refusal the domain worded is shown; an unexpected failure is
+     * answered in Vaier's words, because its own message can carry a host, a path or a credential. Work that
+     * settles later joins that operator's thread when it does.
      */
-    public Outcome run(ActionProposal proposal) {
+    public Outcome run(ActionProposal proposal, Operator operator) {
         try {
-            return new Outcome(true, carryOut(proposal));
+            return new Outcome(true, carryOut(proposal, operator));
         } catch (IllegalArgumentException | ConflictException | NotFoundException | NoHostCredentialException refused) {
             return new Outcome(false, refused.getMessage());
         } catch (RuntimeException e) {
@@ -122,7 +131,7 @@ public class ChatActions {
     }
 
     /** One verb, one use case — the one the Explorer's own button calls. */
-    private String carryOut(ActionProposal proposal) {
+    private String carryOut(ActionProposal proposal, Operator operator) {
         Map<String, String> a = proposal.arguments();
         return switch (proposal.action()) {
             case LET_PHONE_IN -> {
@@ -156,6 +165,12 @@ public class ChatActions {
             case TRUST_ADDRESS -> {
                 trustAddressUseCase.trustAddress(a.get("address"));
                 yield "Trusting " + a.get("address") + " from now on.";
+            }
+            case UPGRADE_OS -> {
+                upgradeOsUseCase.upgradeOs(MachineId.of(a.get("machineId")))
+                    .thenAccept(settled -> rememberActionOutcomeUseCase.remember(operator, settled.sentence()));
+                yield "Installing the pending OS updates on " + a.get("machine")
+                    + ". Vaier says how it went when it is done.";
             }
         };
     }

@@ -95,7 +95,7 @@ class ChatApprovalRestControllerTest {
     void yesRunsItThroughTheCardsDispatch_andNoRunsNothing_andBothAreRemembered() {
         MailedConfirmation confirmation = lift("203.0.113.9");
         when(takeMailedConfirmationUseCase.take(TOKEN, GEIR)).thenReturn(confirmation);
-        when(chatActions.run(confirmation.proposal()))
+        when(chatActions.run(confirmation.proposal(), GEIR))
             .thenReturn(new ChatActions.Outcome(true, "Lifted the block on 203.0.113.9."));
 
         assertThat(controller.approve(EMAIL, TOKEN).getBody()).contains("Lifted the block on 203.0.113.9.");

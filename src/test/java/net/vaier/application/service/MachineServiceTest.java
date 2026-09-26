@@ -3,55 +3,61 @@ package net.vaier.application.service;
 import net.vaier.application.GetMachineDiskUsageUseCase.MachineFilesystemUco;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.AuthMethod;
-import net.vaier.domain.CommandOutcome;
-import net.vaier.domain.CommandResult;
-import net.vaier.domain.DiskUnreadableException;
-import net.vaier.domain.DiskWatch;
-import net.vaier.domain.LanServer;
-import net.vaier.domain.Machine;
 import net.vaier.domain.ClaudeAccount;
 import net.vaier.domain.ClaudeSignInState;
 import net.vaier.domain.ClaudeSignInStatus;
+import net.vaier.domain.CommandOutcome;
+import net.vaier.domain.CommandResult;
+import net.vaier.domain.ConflictException;
+import net.vaier.domain.DiskUnreadableException;
+import net.vaier.domain.DiskWatch;
 import net.vaier.domain.EffectiveUser;
+import net.vaier.domain.LanAnchor;
+import net.vaier.domain.LanServer;
+import net.vaier.domain.Machine;
 import net.vaier.domain.MachineDiskStanding;
 import net.vaier.domain.MachineId;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.MachineType;
+import net.vaier.domain.NotFoundException;
+import net.vaier.domain.OsUpgrade;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.TestMachineIds;
+import net.vaier.domain.VaierConfig;
 import net.vaier.domain.VpnClient;
-import net.vaier.domain.port.ForGettingLanServers;
-import net.vaier.domain.port.ForGettingLanServers.LanServerView;
-import net.vaier.domain.port.ForGettingPeerConfigurations;
-import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
 import net.vaier.domain.port.ForCachingMachineNetworks;
+import net.vaier.domain.port.ForGettingLanServers.LanServerView;
+import net.vaier.domain.port.ForGettingLanServers;
+import net.vaier.domain.port.ForGettingPeerConfigurations.PeerConfiguration;
+import net.vaier.domain.port.ForGettingPeerConfigurations;
 import net.vaier.domain.port.ForGettingVpnClients;
 import net.vaier.domain.port.ForHoldingClaudeSignInStandings;
 import net.vaier.domain.port.ForHoldingMachineDiskStandings;
-import net.vaier.domain.port.ForReadingMachineNetworks;
 import net.vaier.domain.port.ForPersistingAppConfiguration;
 import net.vaier.domain.port.ForPersistingDiskWatches;
 import net.vaier.domain.port.ForPersistingLanServers;
 import net.vaier.domain.port.ForPublishingEvents;
-import net.vaier.domain.port.ForResolvingVaierServerIdentity;
+import net.vaier.domain.port.ForReadingMachineNetworks;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingSshTargets;
+import net.vaier.domain.port.ForResolvingVaierServerIdentity;
+import net.vaier.domain.port.ForRunningInBackground;
 import net.vaier.domain.port.ForRunningSshCommands;
+import net.vaier.domain.port.ForSendingAdminNotification;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
-import net.vaier.domain.LanAnchor;
-import net.vaier.domain.NotFoundException;
-import net.vaier.domain.VaierConfig;
-import org.mockito.ArgumentCaptor;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -95,6 +101,8 @@ class MachineServiceTest {
     @Mock ForHoldingMachineDiskStandings forHoldingMachineDiskStandings;
     @Mock ForHoldingClaudeSignInStandings forHoldingClaudeSignInStandings;
     @Mock ForPublishingEvents forPublishingEvents;
+    @Mock ForRunningInBackground forRunningInBackground;
+    @Mock ForSendingAdminNotification forSendingAdminNotification;
 
     MachineService service;
 
@@ -111,7 +119,7 @@ class MachineServiceTest {
             forTrackingHostKeys, forPersistingDiskWatches,
             forResolvingVaierServerIdentity, forReadingMachineNetworks, forCachingMachineNetworks,
             forHoldingMachineDiskStandings, forHoldingClaudeSignInStandings, forPublishingEvents,
-            configResolver);
+            forRunningInBackground, forSendingAdminNotification, configResolver);
         lenient().when(forGettingPeerConfigurations.getAllPeerConfigs()).thenReturn(List.of());
         lenient().when(forGettingVpnClients.getClients()).thenReturn(List.of());
         lenient().when(forGettingLanServers.getAll()).thenReturn(List.of());
@@ -794,5 +802,37 @@ class MachineServiceTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("can look, never change");
         verifyNoInteractions(forResolvingSshTargets, forRunningSshCommands);
+    }
+
+    /**
+     * Judged on the caller's thread — a refusal is a 409 before anything runs — then the minutes-long upgrade
+     * goes to the background, settles on the stream, mails only a failure, and completes what was returned.
+     */
+    @Test
+    void upgradeOs_judgesFirst_thenRunsInTheBackground_andSettlesEveryWay() {
+        MachineId id = MachineId.of("c0355605-e5a0-419a-8943-fdc5ec209958");
+        SshTarget target = mock(SshTarget.class);
+        when(forResolvingSshTargets.resolve(id)).thenReturn(target);
+        when(forRunningSshCommands.run(target, OsUpgrade.PROBE_COMMAND))
+            .thenReturn(new CommandResult(0, "user=geir uid=1000\npm=apt\n", "", false, "SHA256:x"));
+
+        assertThatThrownBy(() -> service.upgradeOs(id)).isInstanceOf(ConflictException.class);
+        verifyNoInteractions(forRunningInBackground);
+
+        when(forRunningSshCommands.run(target, OsUpgrade.PROBE_COMMAND))
+            .thenReturn(new CommandResult(0, "user=root uid=0\npm=apt\n", "", false, "SHA256:x"));
+        when(forRunningSshCommands.run(eq(target), anyString(), eq(OsUpgrade.UPGRADE_TIMEOUT)))
+            .thenReturn(new CommandResult(100, "", "E: dpkg was interrupted", false, "SHA256:x"));
+        CompletionStage<OsUpgrade.Settlement> settling = service.upgradeOs(id);
+        assertThat(settling.toCompletableFuture()).isNotDone();
+
+        ArgumentCaptor<Runnable> work = ArgumentCaptor.forClass(Runnable.class);
+        verify(forRunningInBackground).run(work.capture());
+        work.getValue().run();
+
+        OsUpgrade.Settlement settled = settling.toCompletableFuture().join();
+        assertThat(settled.upgraded()).isFalse();
+        verify(forPublishingEvents).publish(eq("vpn-peers"), eq("os-upgrade-settled"), anyString());
+        verify(forSendingAdminNotification).sendToAdmins(anyString(), eq(settled.sentence()), anyString());
     }
 }

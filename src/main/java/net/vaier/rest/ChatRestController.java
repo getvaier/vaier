@@ -287,7 +287,7 @@ public class ChatRestController {
         } catch (NotFoundException | IllegalArgumentException refused) {
             return ResponseEntity.ok(new ActionOutcome(false, refused.getMessage()));
         }
-        ChatActions.Outcome ran = chatActions.run(proposal);
+        ChatActions.Outcome ran = chatActions.run(proposal, Operator.of(email));
         ActionOutcome outcome = new ActionOutcome(ran.done(), ran.text());
         // Remembered either way, so the next question knows what was started — or what was not.
         rememberActionOutcomeUseCase.remember(Operator.of(email),

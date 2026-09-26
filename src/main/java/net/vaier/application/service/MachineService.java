@@ -13,6 +13,7 @@ import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.RunReadOnlyCommandUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.config.ConfigResolver;
 import net.vaier.domain.ClaudeSignInStatus;
 import net.vaier.domain.CommandOutcome;
@@ -28,6 +29,7 @@ import net.vaier.domain.MachineId;
 import net.vaier.domain.ReadOnlyCommand;
 import net.vaier.domain.MachineNetworks;
 import net.vaier.domain.NotFoundException;
+import net.vaier.domain.OsUpgrade;
 import net.vaier.domain.RemoteDiskUsage;
 import net.vaier.domain.SshTarget;
 import net.vaier.domain.VaierConfig;
@@ -48,7 +50,9 @@ import net.vaier.domain.port.ForPublishingEvents;
 import net.vaier.domain.port.ForReadingMachineNetworks;
 import net.vaier.domain.port.ForResolvingServerLanCidr;
 import net.vaier.domain.port.ForResolvingSshTargets;
+import net.vaier.domain.port.ForRunningInBackground;
 import net.vaier.domain.port.ForRunningSshCommands;
+import net.vaier.domain.port.ForSendingAdminNotification;
 import net.vaier.domain.port.ForTrackingHostKeys;
 import net.vaier.domain.port.ForUpdatingPeerConfigurations;
 import org.springframework.stereotype.Service;
@@ -58,6 +62,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.stream.Collectors;
 
 @Service
@@ -66,7 +72,7 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     SetMachineSshAccessUseCase, GetMachineDiskUsageUseCase, GetMachineDiskStandingsUseCase,
     GetClaudeSignInStandingsUseCase, GetDiskWatchesUseCase, SetDiskWatchUseCase,
     DetectMachineNetworksUseCase, GetMachineNetworksUseCase, ForgetMachineNetworksUseCase,
-    RunReadOnlyCommandUseCase {
+    RunReadOnlyCommandUseCase, UpgradeOsUseCase {
 
     private final ForGettingPeerConfigurations forGettingPeerConfigurations;
     private final ForGettingVpnClients forGettingVpnClients;
@@ -85,6 +91,8 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     private final ForHoldingMachineDiskStandings forHoldingMachineDiskStandings;
     private final ForHoldingClaudeSignInStandings forHoldingClaudeSignInStandings;
     private final ForPublishingEvents forPublishingEvents;
+    private final ForRunningInBackground forRunningInBackground;
+    private final ForSendingAdminNotification forSendingAdminNotification;
     private final ConfigResolver configResolver;
 
     public MachineService(ForGettingPeerConfigurations forGettingPeerConfigurations,
@@ -104,6 +112,8 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
                           ForHoldingMachineDiskStandings forHoldingMachineDiskStandings,
                           ForHoldingClaudeSignInStandings forHoldingClaudeSignInStandings,
                           ForPublishingEvents forPublishingEvents,
+                          ForRunningInBackground forRunningInBackground,
+                          ForSendingAdminNotification forSendingAdminNotification,
                           ConfigResolver configResolver) {
         this.forGettingPeerConfigurations = forGettingPeerConfigurations;
         this.forGettingVpnClients = forGettingVpnClients;
@@ -122,6 +132,8 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
         this.forHoldingMachineDiskStandings = forHoldingMachineDiskStandings;
         this.forHoldingClaudeSignInStandings = forHoldingClaudeSignInStandings;
         this.forPublishingEvents = forPublishingEvents;
+        this.forRunningInBackground = forRunningInBackground;
+        this.forSendingAdminNotification = forSendingAdminNotification;
         this.configResolver = configResolver;
     }
 
@@ -309,6 +321,36 @@ public class MachineService implements GetMachinesUseCase, GetVaierServerUseCase
     public CommandOutcome runReadOnly(MachineId machineId, String command) {
         ReadOnlyCommand read = ReadOnlyCommand.of(command);
         return read.runOn(forResolvingSshTargets.resolve(machineId), forRunningSshCommands, forTrackingHostKeys);
+    }
+
+    /**
+     * An <b>OS upgrade</b>. Orchestration only: the domain probes and judges on the caller's thread, so a
+     * refusal is said at once; only the upgrade itself crosses into the background.
+     */
+    @Override
+    public CompletionStage<OsUpgrade.Settlement> upgradeOs(MachineId machineId) {
+        SshTarget target = forResolvingSshTargets.resolve(machineId);
+        OsUpgrade upgrade = OsUpgrade.of(machineId, labelFor(machineId), target, forRunningSshCommands,
+            forTrackingHostKeys);
+        CompletableFuture<OsUpgrade.Settlement> settled = new CompletableFuture<>();
+        forRunningInBackground.run(() -> {
+            try {
+                settled.complete(settle(upgrade, target));
+            } catch (RuntimeException e) {
+                settled.completeExceptionally(e);
+                throw e;
+            }
+        });
+        return settled;
+    }
+
+    private OsUpgrade.Settlement settle(OsUpgrade upgrade, SshTarget target) {
+        OsUpgrade.Settlement settlement = upgrade.carryOut(target, forRunningSshCommands);
+        log.info("OS upgrade on machine {} settled: {}{}", upgrade.machineId().value(), settlement.sentence(),
+            settlement.diagnostic() == null ? "" : " (" + settlement.diagnostic() + ")");
+        upgrade.announce(settlement, forPublishingEvents);
+        upgrade.mailIfFailed(settlement, forSendingAdminNotification);
+        return settlement;
     }
 
     private String labelFor(MachineId machineId) {

@@ -23,6 +23,7 @@ import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.AuthMethod;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
@@ -92,6 +93,7 @@ class MachineRestControllerTest {
     @Mock GetSshServerPresenceUseCase getSshServerPresenceUseCase;
     @Mock GetMachineNetworksUseCase getMachineNetworksUseCase;
     @Mock GetContainerStandingsUseCase getContainerStandingsUseCase;
+    @Mock UpgradeOsUseCase upgradeOsUseCase;
 
     @Mock Clock clock;
     @InjectMocks MachineRestController controller;
@@ -761,6 +763,16 @@ class MachineRestControllerTest {
         assertThat(response.mountPoint()).isEqualTo("/volume1");
         assertThat(response.watched()).isTrue();
         assertThat(response.thresholdPercent()).isEqualTo(90);
+    }
+
+    /** Accepted, not performed: the settlement arrives on the fleet stream. */
+    @Test
+    void upgradeOs_isAcceptedAt202_andHandsTheMachineToTheUseCase() {
+        var response = controller.upgradeOs(mid("Colina 27").value());
+
+        verify(upgradeOsUseCase).upgradeOs(mid("Colina 27"));
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        assertThat(response.getBody().machineId()).isEqualTo(mid("Colina 27").value());
     }
 
     @Test

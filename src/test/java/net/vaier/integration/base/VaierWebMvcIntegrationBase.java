@@ -369,6 +369,9 @@ public abstract class VaierWebMvcIntegrationBase {
     @MockBean
     protected UpdateContainerImageUseCase updateContainerImageUseCase;
 
+    @MockBean
+    protected UpgradeOsUseCase upgradeOsUseCase;
+
     // --- LAN server use cases ---
     @MockBean
     protected RegisterLanServerUseCase registerLanServerUseCase;

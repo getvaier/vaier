@@ -72,7 +72,7 @@ public class ChatApprovalRestController {
         } catch (NotFoundException gone) {
             return page(HttpStatus.NOT_FOUND, gone.getMessage(), "");
         }
-        ChatActions.Outcome outcome = chatActions.run(confirmation.proposal());
+        ChatActions.Outcome outcome = chatActions.run(confirmation.proposal(), operator);
         rememberActionOutcomeUseCase.remember(operator,
             confirmation.proposal().outcomeSentence(outcome.done(), outcome.text()));
         return page(HttpStatus.OK, outcome.text(), "");

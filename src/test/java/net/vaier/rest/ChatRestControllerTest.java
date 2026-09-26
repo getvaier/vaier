@@ -30,6 +30,7 @@ import net.vaier.application.RunBackupJobUseCase;
 import net.vaier.application.TakeActionProposalUseCase;
 import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
+import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatCapability;
@@ -149,7 +150,7 @@ class ChatRestControllerTest {
         ChatActions chatActions = new ChatActions(getMachinesUseCase, listEnrolmentRequestsUseCase,
             getBackupJobsUseCase, getBackupRepositoriesUseCase, approveEnrolmentUseCase, refuseEnrolmentUseCase,
             runBackupJobUseCase, updateContainerImageUseCase, liftBlockUseCase, trustAddressUseCase,
-            mock(MailConfirmationUseCase.class));
+            mock(MailConfirmationUseCase.class), mock(UpgradeOsUseCase.class), rememberActionOutcomeUseCase);
         controller = new ChatRestController(chatUseCase, isChatAvailableUseCase, getMachinesUseCase,
             proposeActionUseCase, takeActionProposalUseCase, getConversationUseCase, forgetConversationUseCase,
             rememberActionOutcomeUseCase, offerBundleUseCase, openBundleUseCase, forgetUseCase, getMemoryUseCase,

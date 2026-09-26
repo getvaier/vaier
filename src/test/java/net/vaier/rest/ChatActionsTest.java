@@ -2,7 +2,9 @@ package net.vaier.rest;
 
 import net.vaier.application.GetMachinesUseCase;
 import net.vaier.application.MailConfirmationUseCase;
+import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.RunBackupJobUseCase;
+import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.ActionProposal;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.DeviceCategory;
@@ -12,6 +14,7 @@ import net.vaier.domain.MachineType;
 import net.vaier.domain.MailNotSentException;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.Operator;
+import net.vaier.domain.OsUpgrade;
 import net.vaier.domain.ToolOffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +26,7 @@ import org.mockito.quality.Strictness;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -45,6 +49,8 @@ class ChatActionsTest {
     @Mock GetMachinesUseCase getMachinesUseCase;
     @Mock RunBackupJobUseCase runBackupJobUseCase;
     @Mock MailConfirmationUseCase mailConfirmationUseCase;
+    @Mock UpgradeOsUseCase upgradeOsUseCase;
+    @Mock RememberActionOutcomeUseCase rememberActionOutcomeUseCase;
 
     @InjectMocks ChatActions chatActions;
 
@@ -99,5 +105,28 @@ class ChatActionsTest {
             assertThat(propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"))).as(row.said())
                 .isEqualTo(row.said());
         }
+    }
+
+    /**
+     * An OS upgrade takes minutes, so the yes answers at once and the settlement joins the operator's thread
+     * when it lands — the thread is where Marvin will look next time.
+     */
+    @Test
+    void upgradingTheOs_answersAtOnce_andTheSettlementJoinsTheOperatorsThread() {
+        fleetOf();
+        Map<String, String> canonical = chatActions.canonical(ChatAction.UPGRADE_OS, Map.of("machine", "colina 27"));
+        assertThat(canonical).containsEntry("machine", "Colina 27").containsEntry("machineId", COLINA.value());
+        CompletableFuture<OsUpgrade.Settlement> settling = new CompletableFuture<>();
+        when(upgradeOsUseCase.upgradeOs(COLINA)).thenReturn(settling);
+
+        ChatActions.Outcome now = chatActions.run(ActionProposal.propose(ChatAction.UPGRADE_OS, canonical, 0), GEIR);
+
+        assertThat(now.done()).isTrue();
+        assertThat(now.text()).isEqualTo("Installing the pending OS updates on Colina 27. Vaier says how it went "
+            + "when it is done.");
+        verifyNoInteractions(rememberActionOutcomeUseCase);
+
+        settling.complete(new OsUpgrade.Settlement(true, "Colina 27 installed 4 package updates.", null));
+        verify(rememberActionOutcomeUseCase).remember(GEIR, "Colina 27 installed 4 package updates.");
     }
 }

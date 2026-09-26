@@ -19,6 +19,7 @@ import net.vaier.application.GetSshServerPresenceUseCase;
 import net.vaier.application.GetVaierServerUseCase;
 import net.vaier.application.SetDiskWatchUseCase;
 import net.vaier.application.SetMachineSshAccessUseCase;
+import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.BackupFleet;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRun;
@@ -38,6 +39,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -72,6 +74,7 @@ public class MachineRestController {
     private final GetSshServerPresenceUseCase getSshServerPresenceUseCase;
     private final GetMachineNetworksUseCase getMachineNetworksUseCase;
     private final GetContainerStandingsUseCase getContainerStandingsUseCase;
+    private final UpgradeOsUseCase upgradeOsUseCase;
     // Read for its zone alone: the one a machine's cards write their times in, so the domain never has to
     // ask the environment where the operator is.
     private final Clock clock;
@@ -457,6 +460,19 @@ public class MachineRestController {
                               String size, String available,
                               int usedPercent, int thresholdPercent, boolean watched,
                               boolean aboveThreshold) {}
+
+    /**
+     * Install the machine's pending OS updates. 202 once judged; the minutes of apt or dnf settle on the
+     * {@code vpn-peers} stream as {@code os-upgrade-settled}. A refusal is a 409 naming why.
+     */
+    @PostMapping("/{machineId}/os-upgrade")
+    public ResponseEntity<OsUpgradeAcceptedResponse> upgradeOs(@PathVariable String machineId) {
+        MachineId id = MachineId.of(machineId);
+        upgradeOsUseCase.upgradeOs(id);
+        return ResponseEntity.accepted().body(new OsUpgradeAcceptedResponse(id.value()));
+    }
+
+    record OsUpgradeAcceptedResponse(String machineId) {}
 
     /** @param thresholdPercent this filesystem's own threshold (1–100), or null to use the global one. */
     record DiskWatchRequest(String mountPoint, boolean watched, Integer thresholdPercent) {}

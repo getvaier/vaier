@@ -1858,8 +1858,15 @@
         // head's one action group, hugging the right. Editing details is common, and a LAN server's setup
         // command is the whole of onboarding it — neither had earned a section heading of its own halfway
         // down the body. The Vaier server is this machine: it is never edited or removed here.
+        // Vaier's last-known belief about whether this machine has an SSH server at all — pushed live by the
+        // same 5-minute sweep that already reaches every SSH-accessible, credentialed machine
+        // (RemoteDiskWatcher), never a fresh probe from here. Transient and self-healing: the next sweep that
+        // reaches the machine lifts every greying below without a reload.
+        const noSshServer = m.sshServerPresence === 'ABSENT';
+        const reachable = reachesInside(m);
+
+        const acts = el('div', 'ex-pane-actions');
         if (!isVaierServer) {
-            const acts = el('div', 'ex-pane-actions');
             acts.appendChild(selVerb('gear', 'Edit details', 'ex-btn', () => editMachine(m)));
             // Whether a setup script can be run on the machine is the server's reading of it — an
             // appliance has no shell for one, however it is anchored — so the verb is not offered
@@ -1867,19 +1874,15 @@
             if (m.acceptsSetupScript) {
                 acts.appendChild(selVerb('shell', 'Setup command', 'ex-btn', () => lanSetupScript(m.id)));
             }
-            head.appendChild(acts);
         }
+        // Rides on SSH like the shell does, so it is offered only where a session could open at all. Whether
+        // Vaier can get root there is the server's to judge on the click, and its refusal says why.
+        if (reachable && m.sshAccess && m.hasCredential && !noSshServer) acts.appendChild(osUpgradeVerb(m));
+        if (acts.childNodes.length) head.appendChild(acts);
         pane.appendChild(head);
 
         const body = document.createElement('div');
         body.className = 'ex-pane-body';
-
-        // Vaier's last-known belief about whether this machine has an SSH server at all — pushed live by the
-        // same 5-minute sweep that already reaches every SSH-accessible, credentialed machine
-        // (RemoteDiskWatcher), never a fresh probe from here. Transient and self-healing: the next sweep that
-        // reaches the machine lifts every greying below without a reload.
-        const noSshServer = m.sshServerPresence === 'ABSENT';
-        const reachable = reachesInside(m);
 
         // Whether Vaier may open a session at all. It appears in one of two places depending on the answer:
         // while it is off it is the next step and stands in the open, because granting it is what gives this
@@ -5211,6 +5214,62 @@
     // How it ended, in the words the domain wrote. The shell shows the sentence it was handed rather than
     // turning the enum back into English of its own: "the old container is still running on the image it had"
     // is the whole point of a failed recreate, and it must not be lost between the two.
+    // --- installing a machine's OS updates (OS upgrade) -------------------------------------------------
+    //
+    // Minutes of apt or dnf, so the request returns 202 once the machine is judged and the outcome arrives on
+    // the fleet stream as os-upgrade-settled — the same shape as a container update. The sentence is the
+    // domain's; the browser only shows it.
+    const _upgradingOs = new Set();
+
+    function osUpgradeVerb(m) {
+        const busy = _upgradingOs.has(m.id);
+        const b = selVerb('arrowup', busy ? 'Installing OS updates…' : 'Install OS updates', 'ex-btn',
+            () => upgradeOs(m));
+        b.disabled = busy;
+        if (busy) b.title = 'Vaier says how it went when ' + m.name + ' is done';
+        return b;
+    }
+
+    async function upgradeOs(m) {
+        if (_upgradingOs.has(m.id)) return;
+        const sure = await confirmModal('Install OS updates on ' + m.name + '?',
+            'Vaier will install the pending package updates on ' + m.name + ' with its own package manager, '
+            + 'as root. It is a plain upgrade: nothing is removed, and config files you changed are kept. It can '
+            + 'take several minutes. Vaier never reboots the machine; it says when a reboot is due.', 'Install');
+        if (!sure) return;
+
+        _upgradingOs.add(m.id);
+        render();
+        try {
+            const res = await fetch('/machines/' + encodeURIComponent(m.id) + '/os-upgrade', { method: 'POST' });
+            if (!res.ok) {
+                _upgradingOs.delete(m.id);
+                toast(await osUpgradeRefusal(res, m));
+                render();
+            }
+        } catch (e) {
+            _upgradingOs.delete(m.id);
+            toast('Vaier could not ask ' + m.name + ' to install its OS updates.');
+            render();
+        }
+    }
+
+    // A refusal names why — no root, no apt or dnf, no login — so its own words are the toast.
+    async function osUpgradeRefusal(res, m) {
+        if (res.status === 424) return 'Vaier holds no SSH login for ' + m.name + ', so it cannot install its '
+            + 'OS updates. Store one under the machine first.';
+        try {
+            const body = await res.json();
+            if (body && body.message) return body.message;
+        } catch (e) { /* a refusal without a body is still a refusal */ }
+        return 'Vaier would not install OS updates on ' + m.name + '.';
+    }
+
+    function onOsUpgradeSettled(payload) {
+        _upgradingOs.delete(payload.machineId);
+        toast(payload.message);
+    }
+
     function onUpdateSettled(payload) {
         _updating.delete(updateKey(payload.machineId, payload.containerName));
         toast(payload.message);
@@ -10299,6 +10358,14 @@
         // one of its own for the same reason everything else here does — the fleet already holds it open — and
         // it is what ends the wait: a pull is minutes, so the request returned 202 and nothing has been asking
         // since. The payload carries the sentence the domain wrote, so both browsers say the same thing.
+        events.addEventListener('os-upgrade-settled', (e) => {
+            try {
+                onOsUpgradeSettled(JSON.parse(e.data));
+                render();
+            } catch (err) {
+                console.error('Failed to apply os-upgrade-settled:', err);
+            }
+        });
         events.addEventListener('container-update-settled', (e) => {
             try {
                 onUpdateSettled(JSON.parse(e.data)).then(render);

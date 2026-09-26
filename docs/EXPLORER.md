@@ -174,6 +174,14 @@ Store the one SSH login Vaier holds for each machine — a username plus a passw
 
 Each machine states which **user** Vaier acts as on it. Machines where that user is `root` are tagged in the fleet, and a delete there says so before it runs. Have no key for a machine? Vaier generates an ed25519 keypair for it — the private half never leaves the server — and shows you the one line to add to that machine's `authorized_keys`. Paste your own key instead (ed25519, ECDSA or RSA) and Vaier tells you at the form if it isn't private-key material, rather than saving a `.pub` or a PuTTY `.ppk` that then fails at every connect.
 
+### OS updates
+
+A machine Vaier can open a session to carries **Install OS updates** in its pane's head. After a confirm, Vaier asks the machine who it is there and which package manager it has, then installs the pending updates as root: on apt, `apt-get update` then `apt-get -y upgrade` with `DEBIAN_FRONTEND=noninteractive` and the options that keep any config file you changed; on dnf, `dnf -y upgrade`. It is a plain upgrade, never `dist-upgrade`, `full-upgrade` or `autoremove`, so nothing is removed. Vaier never reboots the machine; the outcome says when one is due (`/var/run/reboot-required` on Debian and Ubuntu, `dnf needs-restarting -r` on dnf).
+
+Root comes from logging in as root, or from passwordless `sudo` for Vaier's login user; Vaier never types a password. The borg-only grant that **Prepare client** installs does not count. A machine where Vaier has neither, or that has neither apt nor dnf (a Synology NAS, say), is refused on the click, and the refusal names why.
+
+The run can take many minutes, so the click returns as soon as the machine is judged and the button reads *Installing OS updates…*. The outcome arrives on the fleet's live stream as a toast — how many packages changed, and whether a reboot is due — and a failure is also mailed to the admins, since you may have closed the tab by then. Vaier stops waiting after 30 minutes and says the machine may still be working. Marvin can propose the same thing, as a card or, during an errand, by mail — see [Chat](CHAT.md#acting-with-your-click).
+
 ---
 
 ## Credentials

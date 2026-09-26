@@ -25,12 +25,13 @@ class ChatActionTest {
         assertThat(ChatAction.UPDATE_CONTAINER.toolName()).isEqualTo("update_container");
         assertThat(ChatAction.LIFT_BLOCK.toolName()).isEqualTo("lift_block");
         assertThat(ChatAction.TRUST_ADDRESS.toolName()).isEqualTo("trust_address");
+        assertThat(ChatAction.UPGRADE_OS.toolName()).isEqualTo("upgrade_os");
     }
 
-    /** Six verbs the Explorer already has a button for. No restart: Vaier has no such button, on purpose. */
+    /** Seven verbs the Explorer already has a button for. No restart: Vaier has no such button, on purpose. */
     @Test
-    void theCatalogueIsExactlyTheSixVerbsTheExplorerAlreadyHas() {
-        assertThat(ChatAction.values()).hasSize(6);
+    void theCatalogueIsExactlyTheSevenVerbsTheExplorerAlreadyHas() {
+        assertThat(ChatAction.values()).hasSize(7);
     }
 
     /** An action and a read sharing a name is a request Vaier cannot tell apart. */
@@ -62,6 +63,7 @@ class ChatActionTest {
             .containsExactly("machine", "container");
         assertThat(ChatAction.LIFT_BLOCK.parameters()).extracting(ToolParameter::name).containsExactly("address");
         assertThat(ChatAction.TRUST_ADDRESS.parameters()).extracting(ToolParameter::name).containsExactly("address");
+        assertThat(ChatAction.UPGRADE_OS.parameters()).extracting(ToolParameter::name).containsExactly("machine");
         assertThat(ChatAction.values()).allSatisfy(action ->
             assertThat(action.parameters()).allSatisfy(p -> assertThat(p.description()).isNotBlank()));
     }
@@ -81,6 +83,8 @@ class ChatActionTest {
             .isEqualTo("Lift the block on 203.0.113.9.");
         assertThat(ChatAction.TRUST_ADDRESS.sentence(Map.of("address", "203.0.113.9")))
             .isEqualTo("Trust 203.0.113.9 from now on.");
+        assertThat(ChatAction.UPGRADE_OS.sentence(Map.of("machine", "Colina 27")))
+            .isEqualTo("Install the pending OS updates on Colina 27.");
     }
 
     /** Both catalogues are offered to the model through the one shape the adapter knows. */
