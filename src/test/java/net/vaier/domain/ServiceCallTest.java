@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A <b>Service call</b>: one request to a published service's own API. The path stays inside the service,
- * a read is a GET and a write is anything else, and the sentence is what the operator says yes to.
+ * a read is a GET and a write is anything else, and the details are what the operator says yes to.
  */
 class ServiceCallTest {
 
@@ -60,8 +60,8 @@ class ServiceCallTest {
         }
         assertThatThrownBy(() -> ServiceCall.proposed("GET", "/cm?sid=1", "ON"))
             .isInstanceOf(IllegalArgumentException.class);
-        assertThat(ServiceCall.proposed("GET", "/cm?sid=1&en=1", null).sentence("irrigation on Colina 27"))
-            .isEqualTo("GET to irrigation on Colina 27 /cm?sid=1&en=1.");
+        assertThat(ServiceCall.proposed("GET", "/cm?sid=1&en=1", null).details("irrigation on Colina 27"))
+            .isEqualTo("Sends GET /cm?sid=1&en=1 to irrigation on Colina 27.");
     }
 
     /** openHAB takes a command as plain text and most APIs take JSON; the body's shape says which. */
@@ -84,20 +84,23 @@ class ServiceCallTest {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
-    /** The whole of what the operator reads before saying yes; a long body is cut there, never in the call. */
+    /**
+     * The exact call under the card's plain headline, and what the operator really says yes to; a long body is
+     * cut there, never in the call.
+     */
     @Test
-    void theSentenceSaysTheMethodTheServiceThePathAndTheBody() {
-        assertThat(ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON").sentence("openhab on Colina 27"))
-            .isEqualTo("POST to openhab on Colina 27 /rest/items/PoolPump with body \"ON\".");
-        assertThat(ServiceCall.proposed("DELETE", "/api/tags/7", null).sentence("paperless on Apalveien 5"))
-            .isEqualTo("DELETE to paperless on Apalveien 5 /api/tags/7.");
+    void theDetailsSayTheMethodThePathTheServiceAndTheBody() {
+        assertThat(ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON").details("openhab on Colina 27"))
+            .isEqualTo("Sends POST /rest/items/PoolPump to openhab on Colina 27, with \"ON\".");
+        assertThat(ServiceCall.proposed("DELETE", "/api/tags/7", null).details("paperless on Apalveien 5"))
+            .isEqualTo("Sends DELETE /api/tags/7 to paperless on Apalveien 5.");
 
         String longBody = "{\"program\": \"" + "z".repeat(1000) + "\"}";
         ServiceCall call = ServiceCall.proposed("PUT", "/p", longBody);
         assertThat(call.body()).isEqualTo(longBody);
-        assertThat(call.sentence("opensprinkler on Colina 27"))
-            .startsWith("PUT to opensprinkler on Colina 27 /p with body \"{\"program\"")
+        assertThat(call.details("opensprinkler on Colina 27"))
+            .startsWith("Sends PUT /p to opensprinkler on Colina 27, with \"{\"program\"")
             .contains("… (" + longBody.length() + " characters)")
-            .hasSizeLessThan(ServiceCall.SENTENCE_BODY_CHARS + 120);
+            .hasSizeLessThan(ServiceCall.DETAILS_BODY_CHARS + 120);
     }
 }

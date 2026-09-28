@@ -3,6 +3,7 @@ package net.vaier.rest;
 import net.vaier.application.OpenMailedConfirmationUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.TakeMailedConfirmationUseCase;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.NotFoundException;
 import net.vaier.domain.Operator;
@@ -52,10 +53,10 @@ public class ChatApprovalRestController {
         try {
             confirmation = openMailedConfirmationUseCase.open(token, Operator.of(email));
         } catch (NotFoundException gone) {
-            return page(HttpStatus.NOT_FOUND, gone.getMessage(), "");
+            return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
         String action = "/chat/approvals/" + HtmlUtils.htmlEscape(token);
-        return page(HttpStatus.OK, confirmation.proposal().sentence(),
+        return page(HttpStatus.OK, confirmation.proposal().wording(),
             "<div class=\"answers\">"
                 + "<form method=\"post\" action=\"" + action + "\"><button class=\"yes\">Do it</button></form>"
                 + "<form method=\"post\" action=\"" + action + "/decline\"><button>No</button></form>"
@@ -70,12 +71,12 @@ public class ChatApprovalRestController {
         try {
             confirmation = takeMailedConfirmationUseCase.take(token, operator);
         } catch (NotFoundException gone) {
-            return page(HttpStatus.NOT_FOUND, gone.getMessage(), "");
+            return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
         ChatActions.Outcome outcome = chatActions.run(confirmation.proposal(), operator);
         rememberActionOutcomeUseCase.remember(operator,
-            confirmation.proposal().outcomeSentence(outcome.done(), outcome.text()));
-        return page(HttpStatus.OK, outcome.text(), "");
+            confirmation.proposal().outcomeSentence(outcome.done(), outcome.wording()));
+        return page(HttpStatus.OK, outcome.wording(), "");
     }
 
     @PostMapping("/{token}/decline")
@@ -86,14 +87,16 @@ public class ChatApprovalRestController {
         try {
             confirmation = takeMailedConfirmationUseCase.take(token, operator);
         } catch (NotFoundException gone) {
-            return page(HttpStatus.NOT_FOUND, gone.getMessage(), "");
+            return page(HttpStatus.NOT_FOUND, new ActionWording(gone.getMessage(), null), "");
         }
         rememberActionOutcomeUseCase.remember(operator, confirmation.proposal().declinedSentence());
-        return page(HttpStatus.OK, "Not done.", "");
+        return page(HttpStatus.OK, new ActionWording("Not done.", null), "");
     }
 
     /** A tiny self-contained page; the token rides the URL, so it is never cached or sent on as a referrer. */
-    private static ResponseEntity<String> page(HttpStatus status, String sentence, String answers) {
+    private static ResponseEntity<String> page(HttpStatus status, ActionWording wording, String answers) {
+        String details = wording.details() == null ? ""
+            : "<p class=\"details\">" + HtmlUtils.htmlEscape(wording.details()) + "</p>";
         String html = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
             + "<title>Marvin asks</title><style>"
@@ -102,13 +105,14 @@ public class ChatApprovalRestController {
             + "main{box-sizing:border-box;width:100%;max-width:28rem;margin:16px;padding:24px;"
             + "background:#22262d;border-radius:14px}"
             + "h1{margin:0 0 8px;font-size:.85rem;font-weight:600;color:#8f959e;text-transform:uppercase;"
-            + "letter-spacing:.06em}p{margin:0;font-size:1.15rem}"
+            + "letter-spacing:.06em}p{margin:0}.headline{font-size:1.15rem}"
+            + ".details{margin-top:6px;font-size:.9rem;line-height:1.45;color:#aeb3ba;overflow-wrap:anywhere}"
             + ".answers{display:flex;gap:8px;margin-top:20px}form{margin:0}"
             + "button{font:inherit;padding:8px 18px;border-radius:8px;border:1px solid #3a4049;"
             + "background:transparent;color:#e9eaec;cursor:pointer}"
             + "button.yes{background:#4cc9e6;border-color:#4cc9e6;color:#15171b;font-weight:600}"
-            + "</style></head><body><main><h1>Marvin asks</h1><p>" + HtmlUtils.htmlEscape(sentence) + "</p>"
-            + answers + "</main></body></html>";
+            + "</style></head><body><main><h1>Marvin asks</h1><p class=\"headline\">"
+            + HtmlUtils.htmlEscape(wording.headline()) + "</p>" + details + answers + "</main></body></html>";
         return ResponseEntity.status(status)
             .contentType(MediaType.TEXT_HTML)
             .header(HttpHeaders.CACHE_CONTROL, "no-store")

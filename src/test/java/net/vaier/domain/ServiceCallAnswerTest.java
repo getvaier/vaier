@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * What a published service answered a <b>Service call</b>: its status and its words, never its headers. Text
@@ -52,26 +51,29 @@ class ServiceCallAnswerTest {
             .forModel(OPENHAB)).endsWith("(The body was cut; the rest was not read.)");
     }
 
-    /** A yes is done only when the service said so; otherwise the operator reads why, in the service's words. */
+    /**
+     * A yes is done only when the service said so. The headline says so in plain words; the status, and on a
+     * failure the start of what the service said, are the details.
+     */
     @Test
-    void theOutcomeIsTheStatus_andAnythingButSuccessIsRefusedWithAShortSnippet() {
-        assertThat(answer(200, "application/json", "{\"a\":1}").outcome(OPENHAB))
-            .isEqualTo("openhab on Colina 27 answered 200.");
-        assertThat(answer(202, null, "").outcome(OPENHAB)).isEqualTo("openhab on Colina 27 answered 202.");
+    void theOutcomeSaysPlainlyWhetherItWorked_withTheStatusAndAShortSnippetInTheDetails() {
+        ActionWording done = answer(200, "application/json", "{\"a\":1}").outcome(OPENHAB);
+        assertThat(done).isEqualTo(new ActionWording("Done — openhab on Colina 27 accepted it.", "It answered 200."));
+        assertThat(answer(200, null, "").succeeded()).isTrue();
 
-        record Row(ServiceCallAnswer answer, String said) {}
+        record Row(ServiceCallAnswer answer, String details) {}
         for (Row row : new Row[] {
             new Row(answer(404, "application/json", "{\"error\":\n  \"Item PoolPump does not exist\"}"),
-                "openhab on Colina 27 answered 404: {\"error\": \"Item PoolPump does not exist\"}"),
-            new Row(answer(401, "text/html", ""), "openhab on Colina 27 answered 401."),
-            new Row(answer(302, null, ""), "openhab on Colina 27 answered 302."),
-            new Row(new ServiceCallAnswer(500, "image/png", new byte[] { 0 }, false),
-                "openhab on Colina 27 answered 500."),
+                "It answered 404: {\"error\": \"Item PoolPump does not exist\"}"),
+            new Row(answer(401, "text/html", ""), "It answered 401."),
+            new Row(answer(302, null, ""), "It answered 302."),
+            new Row(new ServiceCallAnswer(500, "image/png", new byte[] { 0 }, false), "It answered 500."),
         }) {
-            assertThatThrownBy(() -> row.answer().outcome(OPENHAB)).as(row.said())
-                .isInstanceOf(IllegalArgumentException.class).hasMessage(row.said());
+            assertThat(row.answer().succeeded()).as(row.details()).isFalse();
+            assertThat(row.answer().outcome(OPENHAB)).as(row.details()).isEqualTo(
+                new ActionWording("That did not work — openhab on Colina 27 did not accept it.", row.details()));
         }
-        assertThatThrownBy(() -> answer(500, "text/plain", "e".repeat(2000)).outcome(OPENHAB))
-            .hasMessageEndingWith("…").message().hasSizeLessThan(ServiceCallAnswer.SNIPPET_CHARS + 60);
+        assertThat(answer(500, "text/plain", "e".repeat(2000)).outcome(OPENHAB).details())
+            .endsWith("…").hasSizeLessThan(ServiceCallAnswer.SNIPPET_CHARS + 60);
     }
 }

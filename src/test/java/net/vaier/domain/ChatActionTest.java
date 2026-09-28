@@ -3,12 +3,14 @@ package net.vaier.domain;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 /**
@@ -71,31 +73,85 @@ class ChatActionTest {
         assertThat(ChatAction.UPGRADE_OS.parameters()).extracting(ToolParameter::name).containsExactly("machine");
         assertThat(ChatAction.CALL_SERVICE.parameters()).extracting(ToolParameter::name, ToolParameter::optional)
             .containsExactly(tuple("service", false), tuple("method", false), tuple("path", false),
-                tuple("body", true));
+                tuple("body", true), tuple("headline", false));
         assertThat(ChatAction.values()).allSatisfy(action ->
             assertThat(action.parameters()).allSatisfy(p -> assertThat(p.description()).isNotBlank()));
     }
 
-    /** The card's sentence is the whole of what the operator reads before clicking, so it is the domain's. */
+    /**
+     * The card's wording is the domain's: a plain headline a novice can read, and under it the exact facts an
+     * expert checks. Neither part may be dropped.
+     */
     @Test
-    void theSentenceSaysExactlyWhatTheClickWillDo() {
-        assertThat(ChatAction.LET_PHONE_IN.sentence(Map.of("code", "4417", "name", "Ruten")))
-            .isEqualTo("Let Ruten in (join code 4417).");
-        assertThat(ChatAction.REFUSE_PHONE.sentence(Map.of("code", "4417", "name", "Ruten")))
-            .isEqualTo("Refuse Ruten (join code 4417).");
-        assertThat(ChatAction.RUN_BACKUP.sentence(Map.of("machine", "Colina 27")))
-            .isEqualTo("Back up Colina 27 now.");
-        assertThat(ChatAction.UPDATE_CONTAINER.sentence(Map.of("machine", "Colina 27", "container", "mosquitto")))
-            .isEqualTo("Update mosquitto on Colina 27 to its newer image.");
-        assertThat(ChatAction.LIFT_BLOCK.sentence(Map.of("address", "203.0.113.9")))
-            .isEqualTo("Lift the block on 203.0.113.9.");
-        assertThat(ChatAction.TRUST_ADDRESS.sentence(Map.of("address", "203.0.113.9")))
-            .isEqualTo("Trust 203.0.113.9 from now on.");
-        assertThat(ChatAction.UPGRADE_OS.sentence(Map.of("machine", "Colina 27")))
-            .isEqualTo("Install the pending OS updates on Colina 27.");
-        assertThat(ChatAction.CALL_SERVICE.sentence(Map.of("service", "openhab on Colina 27", "method", "POST",
-            "path", "/rest/items/PoolPump", "body", "ON")))
-            .isEqualTo(ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON").sentence("openhab on Colina 27"));
+    void theWordingIsAPlainHeadlineOverTheExactDetails() {
+        record Row(ChatAction action, Map<String, String> arguments, String headline, String details) {}
+        Map<String, String> phone = Map.of("code", "4417", "name", "Ruten");
+        Map<String, String> colina = Map.of("machine", "Colina 27");
+        Map<String, String> address = Map.of("address", "203.0.113.9");
+        for (Row row : new Row[] {
+            new Row(ChatAction.LET_PHONE_IN, phone, "Let Ruten join your network.", "Join code 4417."),
+            new Row(ChatAction.REFUSE_PHONE, phone, "Turn Ruten away.",
+                "Join code 4417. Its request to join disappears."),
+            new Row(ChatAction.RUN_BACKUP, colina, "Back up Colina 27 now.", "With the backup job it already has."),
+            new Row(ChatAction.UPDATE_CONTAINER, Map.of("machine", "Colina 27", "container", "mosquitto"),
+                "Update mosquitto on Colina 27 to its latest version.",
+                "Container mosquitto gets the newer image its registry serves, and is down for a moment while it "
+                    + "restarts."),
+            new Row(ChatAction.LIFT_BLOCK, address, "Let 203.0.113.9 reach your services again.",
+                "It is blocked right now. This lifts the block once; it can still be blocked again later."),
+            new Row(ChatAction.TRUST_ADDRESS, address, "Always let 203.0.113.9 in, and never block it.",
+                "It becomes a trusted address."),
+            new Row(ChatAction.UPGRADE_OS, colina, "Install the system updates on Colina 27.",
+                "The pending OS package updates, installed with apt or dnf. Vaier does not restart it."),
+            new Row(ChatAction.CALL_SERVICE, Map.of("service", "openhab on Colina 27", "method", "POST",
+                "path", "/rest/items/PoolPump", "body", "ON", "headline", " Turn on the pool pump at Colina 27. "),
+                "Turn on the pool pump at Colina 27.",
+                ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON").details("openhab on Colina 27")),
+        }) {
+            assertThat(row.action().wording(row.arguments())).as(row.action().name())
+                .isEqualTo(new ActionWording(row.headline(), row.details()));
+        }
+    }
+
+    /**
+     * A service call's headline is the model's own words, so it is judged: it must say something, and briefly.
+     * The details under it are what catch a headline that misleads.
+     */
+    @Test
+    void aServiceCallsHeadlineMustBeSaid_andShort() {
+        for (String headline : new String[] { null, "  ", "x".repeat(ActionWording.MAX_HEADLINE_CHARS + 1) }) {
+            Map<String, String> arguments = new HashMap<>(Map.of("service", "openhab on Colina 27",
+                "method", "DELETE", "path", "/rest/items/PoolPump"));
+            arguments.put("headline", headline);
+            assertThatThrownBy(() -> ChatAction.CALL_SERVICE.wording(arguments)).as(String.valueOf(headline))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("everyday words");
+        }
+    }
+
+    /** What the pane says once a yes is under way, in the same two parts. */
+    @Test
+    void theStartedWordingSaysWhatIsUnderway() {
+        record Row(ChatAction action, Map<String, String> arguments, ActionWording said) {}
+        Map<String, String> colina = Map.of("machine", "Colina 27");
+        for (Row row : new Row[] {
+            new Row(ChatAction.LET_PHONE_IN, Map.of("code", "4417", "name", "Ruten"),
+                new ActionWording("Ruten can join your network now.", null)),
+            new Row(ChatAction.REFUSE_PHONE, Map.of("code", "4417", "name", "Ruten"),
+                new ActionWording("Turned Ruten away.", null)),
+            new Row(ChatAction.RUN_BACKUP, colina,
+                new ActionWording("Backing up Colina 27 now.", "The Backups pane shows how it goes.")),
+            new Row(ChatAction.UPDATE_CONTAINER, Map.of("machine", "Colina 27", "container", "mosquitto"),
+                new ActionWording("Updating mosquitto on Colina 27.", "It is down for a moment while it restarts.")),
+            new Row(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"),
+                new ActionWording("203.0.113.9 can reach your services again.", null)),
+            new Row(ChatAction.TRUST_ADDRESS, Map.of("address", "203.0.113.9"),
+                new ActionWording("203.0.113.9 is always let in from now on.", null)),
+            new Row(ChatAction.UPGRADE_OS, colina, new ActionWording("Installing the system updates on Colina 27.",
+                "Vaier says how it went when it is done.")),
+        }) {
+            assertThat(row.action().started(row.arguments())).as(row.action().name()).isEqualTo(row.said());
+        }
     }
 
     /** Both catalogues are offered to the model through the one shape the adapter knows. */

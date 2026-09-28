@@ -16,13 +16,14 @@ class ActionProposalTest {
     private static final long NOW = 1_700_000_000_000L;
 
     @Test
-    void aProposalCarriesAnIdTheActionAndTheSentenceTheOperatorWillRead() {
-        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27",
-            "machineId", "c0355605-e5a0-419a-8943-fdc5ec209958"), NOW);
+    void aProposalCarriesAnIdTheActionAndTheWordingTheOperatorWillRead() {
+        Map<String, String> arguments = Map.of("machine", "Colina 27",
+            "machineId", "c0355605-e5a0-419a-8943-fdc5ec209958");
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, arguments, NOW);
 
         assertThat(proposal.id()).isNotBlank();
         assertThat(proposal.action()).isEqualTo(ChatAction.RUN_BACKUP);
-        assertThat(proposal.sentence()).isEqualTo("Back up Colina 27 now.");
+        assertThat(proposal.wording()).isEqualTo(ChatAction.RUN_BACKUP.wording(arguments));
         assertThat(proposal.arguments()).containsEntry("machineId", "c0355605-e5a0-419a-8943-fdc5ec209958");
         assertThat(proposal.proposedAtEpochMs()).isEqualTo(NOW);
     }
@@ -50,9 +51,11 @@ class ActionProposalTest {
     @Test
     void anOptionalArgumentMayBeLeftOut() {
         ActionProposal proposal = ActionProposal.propose(ChatAction.CALL_SERVICE, Map.of("service",
-            "paperless on Apalveien 5", "method", "DELETE", "path", "/api/tags/7", "host", "paperless.example.com"), NOW);
+            "paperless on Apalveien 5", "method", "DELETE", "path", "/api/tags/7", "host", "paperless.example.com",
+            "headline", "Delete tag 7 in paperless."), NOW);
 
-        assertThat(proposal.sentence()).isEqualTo("DELETE to paperless on Apalveien 5 /api/tags/7.");
+        assertThat(proposal.wording().details())
+            .isEqualTo(ServiceCall.proposed("DELETE", "/api/tags/7", null).details("paperless on Apalveien 5"));
     }
 
     @Test
@@ -67,17 +70,18 @@ class ActionProposalTest {
             .hasMessage("That card has expired; ask again.");
     }
 
-    /** What Vaier remembers of a card, in the words the next question will read back. */
+    /** What Vaier remembers of a card, both parts of each wording, in the words the next question reads back. */
     @Test
     void whatBecameOfTheCardIsSaidInOneShape() {
-        ActionProposal proposal = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        ActionProposal proposal = ActionProposal.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"), NOW);
+        String proposed = proposal.wording().headline() + " " + proposal.wording().details();
 
-        assertThat(proposal.outcomeSentence(true, "Lifted the block on 203.0.113.9."))
-            .isEqualTo("Proposed: Lift the block on 203.0.113.9. (done: Lifted the block on 203.0.113.9.)");
-        assertThat(proposal.outcomeSentence(false, "Vaier could not do that."))
-            .isEqualTo("Proposed: Lift the block on 203.0.113.9. (could not be done: Vaier could not do that.)");
+        assertThat(proposal.outcomeSentence(true, new ActionWording("Backing up.", "See the Backups pane.")))
+            .isEqualTo("Card from an action tool: " + proposed + " (done: Backing up. See the Backups pane.)");
+        assertThat(proposal.outcomeSentence(false, new ActionWording("Vaier could not do that.", null)))
+            .isEqualTo("Card from an action tool: " + proposed + " (could not be done: Vaier could not do that.)");
         assertThat(proposal.declinedSentence())
-            .isEqualTo("Proposed: Lift the block on 203.0.113.9. (the operator declined)");
+            .isEqualTo("Card from an action tool: " + proposed + " (the operator declined)");
     }
 
     /** What the model is told: it proposed, and nothing happened. The one lie this must prevent is "done". */

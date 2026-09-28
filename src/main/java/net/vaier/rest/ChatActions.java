@@ -17,6 +17,7 @@ import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.BackupJob;
 import net.vaier.domain.BackupRepository;
 import net.vaier.domain.ChatAction;
@@ -32,6 +33,7 @@ import net.vaier.domain.Operator;
 import net.vaier.domain.PublishedServiceReference;
 import net.vaier.domain.PublishedServiceReference.Candidate;
 import net.vaier.domain.ServiceCall;
+import net.vaier.domain.ServiceCallAnswer;
 import net.vaier.domain.ToolOffer;
 import org.springframework.stereotype.Component;
 
@@ -97,8 +99,8 @@ public class ChatActions {
         this.callServiceUseCase = callServiceUseCase;
     }
 
-    /** What became of a yes: whether it ran, and the sentence to show either way. */
-    public record Outcome(boolean done, String text) {}
+    /** What became of a yes: whether it ran, and the wording to show either way. */
+    public record Outcome(boolean done, ActionWording wording) {}
 
     /**
      * Resolve what the model named to what the confirmation must say and the yes must run — the machine's id
@@ -152,27 +154,21 @@ public class ChatActions {
      */
     public Outcome run(ActionProposal proposal, Operator operator) {
         try {
-            return new Outcome(true, carryOut(proposal, operator));
+            return carryOut(proposal, operator);
         } catch (IllegalArgumentException | ConflictException | NotFoundException | NoHostCredentialException refused) {
-            return new Outcome(false, refused.getMessage());
+            return new Outcome(false, new ActionWording(refused.getMessage(), null));
         } catch (RuntimeException e) {
-            log.warn("Chat could not carry out '{}': {}", proposal.sentence(), e.toString());
-            return new Outcome(false, "Vaier could not do that.");
+            log.warn("Chat could not carry out '{}': {}", proposal.wording().sentence(), e.toString());
+            return new Outcome(false, new ActionWording("Vaier could not do that.", null));
         }
     }
 
     /** One verb, one use case — the one the Explorer's own button calls. */
-    private String carryOut(ActionProposal proposal, Operator operator) {
+    private Outcome carryOut(ActionProposal proposal, Operator operator) {
         Map<String, String> a = proposal.arguments();
-        return switch (proposal.action()) {
-            case LET_PHONE_IN -> {
-                approveEnrolmentUseCase.approve(a.get("code"));
-                yield "Let " + a.get("name") + " in.";
-            }
-            case REFUSE_PHONE -> {
-                refuseEnrolmentUseCase.refuse(a.get("code"));
-                yield "Refused " + a.get("name") + ".";
-            }
+        switch (proposal.action()) {
+            case LET_PHONE_IN -> approveEnrolmentUseCase.approve(a.get("code"));
+            case REFUSE_PHONE -> refuseEnrolmentUseCase.refuse(a.get("code"));
             case RUN_BACKUP -> {
                 MachineId machineId = MachineId.of(a.get("machineId"));
                 BackupJob job = getBackupJobsUseCase.getBackupJobs().stream()
@@ -182,31 +178,20 @@ public class ChatActions {
                     .filter(r -> r.name().equals(job.repositoryName())).findFirst()
                     .orElseThrow(() -> new NotFoundException(a.get("machine") + "'s backups have nowhere to go."));
                 runBackupJobUseCase.runJob(job, repo);
-                yield "Backing up " + a.get("machine") + " now. The Backups pane shows how it goes.";
             }
-            case UPDATE_CONTAINER -> {
+            case UPDATE_CONTAINER ->
                 updateContainerImageUseCase.updateContainerImage(MachineId.of(a.get("machineId")), a.get("container"));
-                yield "Updating " + a.get("container") + " on " + a.get("machine")
-                    + ". It is down for a moment while it restarts.";
+            case LIFT_BLOCK -> liftBlockUseCase.liftBlock(a.get("address"));
+            case TRUST_ADDRESS -> trustAddressUseCase.trustAddress(a.get("address"));
+            case UPGRADE_OS -> upgradeOsUseCase.upgradeOs(MachineId.of(a.get("machineId")))
+                .thenAccept(settled -> rememberActionOutcomeUseCase.remember(operator, settled.sentence()));
+            case CALL_SERVICE -> {
+                ServiceCallAnswer answer = callServiceUseCase.callService(operator, a.get("host"), a.get("pathPrefix"),
+                    ServiceCall.proposed(a.get("method"), a.get("path"), a.get("body")));
+                return new Outcome(answer.succeeded(), answer.outcome(a.get("service")));
             }
-            case LIFT_BLOCK -> {
-                liftBlockUseCase.liftBlock(a.get("address"));
-                yield "Lifted the block on " + a.get("address") + ".";
-            }
-            case TRUST_ADDRESS -> {
-                trustAddressUseCase.trustAddress(a.get("address"));
-                yield "Trusting " + a.get("address") + " from now on.";
-            }
-            case UPGRADE_OS -> {
-                upgradeOsUseCase.upgradeOs(MachineId.of(a.get("machineId")))
-                    .thenAccept(settled -> rememberActionOutcomeUseCase.remember(operator, settled.sentence()));
-                yield "Installing the pending OS updates on " + a.get("machine")
-                    + ". Vaier says how it went when it is done.";
-            }
-            case CALL_SERVICE -> callServiceUseCase.callService(operator, a.get("host"), a.get("pathPrefix"),
-                    ServiceCall.proposed(a.get("method"), a.get("path"), a.get("body")))
-                .outcome(a.get("service"));
-        };
+        }
+        return new Outcome(true, proposal.action().started(a));
     }
 
     /**

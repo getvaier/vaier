@@ -123,6 +123,8 @@ class ChatPromptTest {
         assertThat(prompt()).contains("nothing happens until they click it");
         assertThat(prompt()).contains("Never say something is done when you only proposed it");
         assertThat(prompt()).contains("Propose only what the operator asked for");
+        // Marvin twice said "the card is up" without calling the tool; a card exists only as a tool call.
+        assertThat(prompt()).contains("A card exists only when you call an action tool in this same answer");
         assertThat(prompt()).doesNotContain("Chat can look, never change.");
     }
 
@@ -146,13 +148,18 @@ class ChatPromptTest {
         assertThat(prompt()).contains("do not try another spelling");
     }
 
-    /** A published service's own API: read freely, and a write proposed only when it was asked for. */
+    /**
+     * A published service's own API: read freely, and a write proposed only when it was asked for, under a
+     * plain headline that says honestly what it does.
+     */
     @Test
     void bothPromptsSayReadAServiceFreely_andProposeACallOnlyWhenAskedFor() {
         for (String said : new String[] { prompt(), errandPrompt() }) {
             assertThat(said).contains("read_service").contains("call_service")
                 .contains("only for what the operator asked for or what an errand clearly calls for")
-                .contains("a GET that read_service refuses goes through call_service too");
+                .contains("a GET that read_service refuses goes through call_service too")
+                .contains("say in its headline, in everyday words, what the call really does")
+                .contains("never make it sound gentler than it is");
         }
     }
 

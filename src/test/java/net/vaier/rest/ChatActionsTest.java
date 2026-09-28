@@ -92,7 +92,8 @@ class ChatActionsTest {
 
         verify(mailConfirmationUseCase).mail(eq(GEIR), eq(ChatAction.RUN_BACKUP),
             eq(Map.of("machine", "Colina 27", "machineId", COLINA.value())));
-        assertThat(told).contains("Back up Colina 27 now.").contains("Nothing has happened yet");
+        assertThat(told).contains(ChatAction.RUN_BACKUP.wording(Map.of("machine", "Colina 27")).headline())
+            .contains("Nothing has happened yet");
         verifyNoInteractions(runBackupJobUseCase);
     }
 
@@ -132,9 +133,7 @@ class ChatActionsTest {
 
         ChatActions.Outcome now = chatActions.run(ActionProposal.propose(ChatAction.UPGRADE_OS, canonical, 0), GEIR);
 
-        assertThat(now.done()).isTrue();
-        assertThat(now.text()).isEqualTo("Installing the pending OS updates on Colina 27. Vaier says how it went "
-            + "when it is done.");
+        assertThat(now).isEqualTo(new ChatActions.Outcome(true, ChatAction.UPGRADE_OS.started(canonical)));
         verifyNoInteractions(rememberActionOutcomeUseCase);
 
         settling.complete(new OsUpgrade.Settlement(true, "Colina 27 installed 4 package updates.", null));
@@ -152,22 +151,26 @@ class ChatActionsTest {
             "openhab.colina27.example.com", "10.13.13.3", 8080, State.OK, true, null, false, false, null, false,
             null, null, null, null, null, "social", false, null)));
         Map<String, String> canonical = chatActions.canonical(ChatAction.CALL_SERVICE, Map.of(
-            "service", "openHAB Colina 27", "method", "post", "path", "rest/items/PoolPump", "body", "ON"));
+            "service", "openHAB Colina 27", "method", "post", "path", "rest/items/PoolPump", "body", "ON",
+            "headline", "Turn on the pool pump at Colina 27."));
         assertThat(canonical).isEqualTo(Map.of("service", "openhab on Colina 27",
-            "host", "openhab.colina27.example.com", "method", "POST", "path", "/rest/items/PoolPump", "body", "ON"));
+            "host", "openhab.colina27.example.com", "method", "POST", "path", "/rest/items/PoolPump", "body", "ON",
+            "headline", "Turn on the pool pump at Colina 27."));
         ActionProposal proposal = ActionProposal.propose(ChatAction.CALL_SERVICE, canonical, 0);
-        assertThat(proposal.sentence()).isEqualTo("POST to openhab on Colina 27 /rest/items/PoolPump with body \"ON\".");
         ServiceCall call = ServiceCall.proposed("POST", "/rest/items/PoolPump", "ON");
+        ServiceCallAnswer ok = new ServiceCallAnswer(200, null, new byte[0], false);
+        ServiceCallAnswer missing = new ServiceCallAnswer(404, "application/json",
+            "{\"error\":\"Item PoolPump does not exist\"}".getBytes(StandardCharsets.UTF_8), false);
+        assertThat(proposal.wording().details()).isEqualTo(call.details("openhab on Colina 27"));
 
         when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
-            .thenReturn(new ServiceCallAnswer(200, null, new byte[0], false));
+            .thenReturn(ok);
         assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
-            new ChatActions.Outcome(true, "openhab on Colina 27 answered 200."));
+            new ChatActions.Outcome(true, ok.outcome("openhab on Colina 27")));
 
         when(callServiceUseCase.callService(eq(GEIR), eq("openhab.colina27.example.com"), isNull(), eq(call)))
-            .thenReturn(new ServiceCallAnswer(404, "application/json",
-                "{\"error\":\"Item PoolPump does not exist\"}".getBytes(StandardCharsets.UTF_8), false));
-        assertThat(chatActions.run(proposal, GEIR)).isEqualTo(new ChatActions.Outcome(false,
-            "openhab on Colina 27 answered 404: {\"error\":\"Item PoolPump does not exist\"}"));
+            .thenReturn(missing);
+        assertThat(chatActions.run(proposal, GEIR)).isEqualTo(
+            new ChatActions.Outcome(false, missing.outcome("openhab on Colina 27")));
     }
 }

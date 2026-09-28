@@ -190,7 +190,7 @@ class SpringAiConversationAdapterTest {
 
         ToolCallback call = ((ToolCallingChatOptions) model.prompt.getOptions()).getToolCallbacks().get(0);
         assertThat(call.getToolDefinition().inputSchema()).contains("\"body\"")
-            .contains("\"required\":[\"service\",\"method\",\"path\"]");
+            .contains("\"required\":[\"service\",\"method\",\"path\",\"headline\"]");
     }
 
     /** A parameter that takes many values is offered as an array, and arrives one per line. */

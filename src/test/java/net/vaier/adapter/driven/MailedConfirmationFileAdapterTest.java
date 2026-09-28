@@ -1,6 +1,7 @@
 package net.vaier.adapter.driven;
 
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.MailedConfirmations;
@@ -39,11 +40,12 @@ class MailedConfirmationFileAdapterTest {
             Operator.of("geir@example.com"), NOW);
         MailedConfirmation.Minted withBody = MailedConfirmation.mint(ActionProposal.propose(ChatAction.CALL_SERVICE,
             Map.of("service", "opensprinkler on Colina 27", "host", "opensprinkler.colina27.example.com",
-                "method", "PUT", "path", "/cp?pw=x", "body", "{\n  \"en\": true,\n  \"t\": [1, 2]\n}"), NOW),
+                "method", "PUT", "path", "/cp?pw=x", "body", "{\n  \"en\": true,\n  \"t\": [1, 2]\n}",
+                "headline", "Switch on stations 1 and 2."), NOW),
             Operator.of("geir@example.com"), NOW);
         MailedConfirmation.Minted yamlish = MailedConfirmation.mint(ActionProposal.propose(ChatAction.CALL_SERVICE,
             Map.of("service", "openhab on Colina 27", "host", "openhab.colina27.example.com",
-                "method", "POST", "path", "/rest/items/Dimmer", "body", "true"), NOW),
+                "method", "POST", "path", "/rest/items/Dimmer", "body", "true", "headline", "Turn the dimmer on."), NOW),
             Operator.of("geir@example.com"), NOW);
         MailedConfirmations saved = MailedConfirmations.empty().with(minted.confirmation(), NOW)
             .with(withBody.confirmation(), NOW).with(yamlish.confirmation(), NOW);
@@ -51,6 +53,29 @@ class MailedConfirmationFileAdapterTest {
 
         assertThat(adapter().load()).isEqualTo(saved);
         assertThat(Files.readString(configDir.resolve("mailed-confirmations.yml"))).doesNotContain(minted.token());
+    }
+
+    /**
+     * Kept before a card's wording had two parts: the one sentence it was mailed with, which already named
+     * the exact call, reads back as the headline, so the link still opens.
+     */
+    @Test
+    void anEntryKeptWithOneSentence_readsItAsTheHeadline() throws Exception {
+        Files.writeString(configDir.resolve("mailed-confirmations.yml"), """
+            confirmations:
+            - tokenDigest: abc
+              operator: geir@example.com
+              id: p1
+              action: CALL_SERVICE
+              arguments: {service: openhab on Colina 27, method: POST, path: /rest/items/PoolPump, body: 'ON'}
+              sentence: POST to openhab on Colina 27 /rest/items/PoolPump with body "ON".
+              proposedAt: 1
+              mailedAt: 2
+            """);
+
+        assertThat(adapter().load().held()).singleElement()
+            .extracting(confirmation -> confirmation.proposal().wording())
+            .isEqualTo(new ActionWording("POST to openhab on Colina 27 /rest/items/PoolPump with body \"ON\".", null));
     }
 
     /** A file that cannot be read is nothing waiting, never a Vaier that will not start. */

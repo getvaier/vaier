@@ -34,6 +34,7 @@ import net.vaier.application.TrustAddressUseCase;
 import net.vaier.application.UpdateContainerImageUseCase;
 import net.vaier.application.UpgradeOsUseCase;
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.ChatCapability;
 import net.vaier.domain.ChatTool;
@@ -321,7 +322,9 @@ class ChatRestControllerTest {
         assertThat(arguments.getValue()).containsEntry("machine", "Colina 27")
             .containsEntry("machineId", COLINA.value());
         assertThat(sentEvents(emitter)).anySatisfy(event ->
-            assertThat(event).startsWith("event:confirm\ndata:").contains("Back up Colina 27 now."));
+            assertThat(event).startsWith("event:confirm\ndata:")
+                .contains("\"headline\":\"Back up Colina 27 now.\"")
+                .contains("\"details\":\"With the backup job it already has.\""));
         assertThat(told).contains("Nothing has happened yet");
         verifyNoInteractions(runBackupJobUseCase);
     }
@@ -350,9 +353,15 @@ class ChatRestControllerTest {
 
         String told = read(ChatAction.LET_PHONE_IN, Map.of("code", "4417"));
 
-        assertThat(told).contains("Let Ruten in (join code 4417).").doesNotContain("TICKET-SECRET");
+        assertThat(told).contains("Ruten").contains("4417").doesNotContain("TICKET-SECRET");
         assertThat(read(ChatAction.LET_PHONE_IN, Map.of("code", "9999")))
             .isEqualTo("No phone is waiting with join code 9999.");
+    }
+
+    /** The pane is handed the domain's own wording of what is now under way. */
+    private static ChatRestController.ActionOutcome started(ActionProposal proposal) {
+        ActionWording wording = proposal.action().started(proposal.arguments());
+        return new ChatRestController.ActionOutcome(true, wording.headline(), wording.details());
     }
 
     @Test
@@ -371,37 +380,36 @@ class ChatRestControllerTest {
         ChatRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
 
         verify(runBackupJobUseCase).runJob(job, repo);
-        assertThat(outcome.done()).isTrue();
-        assertThat(outcome.text()).isEqualTo("Backing up Colina 27 now. The Backups pane shows how it goes.");
+        assertThat(outcome).isEqualTo(started(proposal));
     }
 
     @Test
     void confirming_runsEachOfTheOtherVerbsThroughItsOwnUseCase() {
-        when(takeActionProposalUseCase.take("in")).thenReturn(ActionProposal.propose(ChatAction.LET_PHONE_IN,
-            Map.of("code", "4417", "name", "Ruten"), NOW));
+        ActionProposal in = ActionProposal.propose(ChatAction.LET_PHONE_IN, Map.of("code", "4417", "name", "Ruten"), NOW);
+        when(takeActionProposalUseCase.take("in")).thenReturn(in);
         when(approveEnrolmentUseCase.approve("4417")).thenReturn(mock(ApprovedEnrolmentUco.class));
-        assertThat(controller.confirm(EMAIL, "in").getBody().text()).isEqualTo("Let Ruten in.");
+        assertThat(controller.confirm(EMAIL, "in").getBody()).isEqualTo(started(in));
         verify(approveEnrolmentUseCase).approve("4417");
 
-        when(takeActionProposalUseCase.take("out")).thenReturn(ActionProposal.propose(ChatAction.REFUSE_PHONE,
-            Map.of("code", "4417", "name", "Ruten"), NOW));
-        assertThat(controller.confirm(EMAIL, "out").getBody().text()).isEqualTo("Refused Ruten.");
+        ActionProposal out = ActionProposal.propose(ChatAction.REFUSE_PHONE, Map.of("code", "4417", "name", "Ruten"), NOW);
+        when(takeActionProposalUseCase.take("out")).thenReturn(out);
+        assertThat(controller.confirm(EMAIL, "out").getBody()).isEqualTo(started(out));
         verify(refuseEnrolmentUseCase).refuse("4417");
 
-        when(takeActionProposalUseCase.take("up")).thenReturn(ActionProposal.propose(ChatAction.UPDATE_CONTAINER,
-            Map.of("machine", "Colina 27", "machineId", COLINA.value(), "container", "mosquitto"), NOW));
-        assertThat(controller.confirm(EMAIL, "up").getBody().text())
-            .isEqualTo("Updating mosquitto on Colina 27. It is down for a moment while it restarts.");
+        ActionProposal up = ActionProposal.propose(ChatAction.UPDATE_CONTAINER,
+            Map.of("machine", "Colina 27", "machineId", COLINA.value(), "container", "mosquitto"), NOW);
+        when(takeActionProposalUseCase.take("up")).thenReturn(up);
+        assertThat(controller.confirm(EMAIL, "up").getBody()).isEqualTo(started(up));
         verify(updateContainerImageUseCase).updateContainerImage(COLINA, "mosquitto");
 
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
-            Map.of("address", "203.0.113.9"), NOW));
-        assertThat(controller.confirm(EMAIL, "lift").getBody().text()).isEqualTo("Lifted the block on 203.0.113.9.");
+        ActionProposal lift = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        when(takeActionProposalUseCase.take("lift")).thenReturn(lift);
+        assertThat(controller.confirm(EMAIL, "lift").getBody()).isEqualTo(started(lift));
         verify(liftBlockUseCase).liftBlock("203.0.113.9");
 
-        when(takeActionProposalUseCase.take("trust")).thenReturn(ActionProposal.propose(ChatAction.TRUST_ADDRESS,
-            Map.of("address", "203.0.113.9"), NOW));
-        assertThat(controller.confirm(EMAIL, "trust").getBody().text()).isEqualTo("Trusting 203.0.113.9 from now on.");
+        ActionProposal trust = ActionProposal.propose(ChatAction.TRUST_ADDRESS, Map.of("address", "203.0.113.9"), NOW);
+        when(takeActionProposalUseCase.take("trust")).thenReturn(trust);
+        assertThat(controller.confirm(EMAIL, "trust").getBody()).isEqualTo(started(trust));
         verify(trustAddressUseCase).trustAddress("203.0.113.9");
     }
 
@@ -412,8 +420,7 @@ class ChatRestControllerTest {
 
         ChatRestController.ActionOutcome outcome = controller.confirm(EMAIL, "p1").getBody();
 
-        assertThat(outcome.done()).isFalse();
-        assertThat(outcome.text()).isEqualTo("That card is gone; ask again.");
+        assertThat(outcome).isEqualTo(new ChatRestController.ActionOutcome(false, "That card is gone; ask again.", null));
         verifyNoInteractions(runBackupJobUseCase, approveEnrolmentUseCase, liftBlockUseCase);
     }
 
@@ -425,16 +432,15 @@ class ChatRestControllerTest {
         doThrow(new ConflictException("mosquitto is already on the newest image."))
             .when(updateContainerImageUseCase).updateContainerImage(any(), anyString());
         ChatRestController.ActionOutcome refused = controller.confirm(EMAIL, "up").getBody();
-        assertThat(refused.done()).isFalse();
-        assertThat(refused.text()).isEqualTo("mosquitto is already on the newest image.");
+        assertThat(refused).isEqualTo(
+            new ChatRestController.ActionOutcome(false, "mosquitto is already on the newest image.", null));
 
         when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
             Map.of("address", "203.0.113.9"), NOW));
         doThrow(new IllegalStateException("cscli at /usr/local/bin failed as root"))
             .when(liftBlockUseCase).liftBlock(anyString());
         ChatRestController.ActionOutcome failed = controller.confirm(EMAIL, "lift").getBody();
-        assertThat(failed.done()).isFalse();
-        assertThat(failed.text()).isEqualTo("Vaier could not do that.");
+        assertThat(failed).isEqualTo(new ChatRestController.ActionOutcome(false, "Vaier could not do that.", null));
     }
 
     // --- the kept conversation (#360 slice 3) --------------------------------------------------------
@@ -462,35 +468,33 @@ class ChatRestControllerTest {
     /** What became of a card is remembered, so the next question knows the backup was started. */
     @Test
     void confirming_remembersWhatBecameOfTheCard() {
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
-            Map.of("address", "203.0.113.9"), NOW));
+        ActionProposal lift = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        when(takeActionProposalUseCase.take("lift")).thenReturn(lift);
 
         controller.confirm(EMAIL, "lift");
 
         verify(rememberActionOutcomeUseCase).remember(GEIR,
-            "Proposed: Lift the block on 203.0.113.9. (done: Lifted the block on 203.0.113.9.)");
+            lift.outcomeSentence(true, ChatAction.LIFT_BLOCK.started(lift.arguments())));
     }
 
     /** "Not now" takes the card too — it can never run afterwards — and is remembered as declined. */
     @Test
     void declining_takesTheCardSoItCannotRun_andIsRemembered() {
-        when(takeActionProposalUseCase.take("lift")).thenReturn(ActionProposal.propose(ChatAction.LIFT_BLOCK,
-            Map.of("address", "203.0.113.9"), NOW));
+        ActionProposal lift = ActionProposal.propose(ChatAction.LIFT_BLOCK, Map.of("address", "203.0.113.9"), NOW);
+        when(takeActionProposalUseCase.take("lift")).thenReturn(lift);
 
         ChatRestController.ActionOutcome outcome = controller.decline(EMAIL, "lift").getBody();
 
-        assertThat(outcome.done()).isFalse();
-        assertThat(outcome.text()).isEqualTo("Not done.");
+        assertThat(outcome).isEqualTo(new ChatRestController.ActionOutcome(false, "Not done.", null));
         verifyNoInteractions(liftBlockUseCase);
-        verify(rememberActionOutcomeUseCase).remember(GEIR,
-            "Proposed: Lift the block on 203.0.113.9. (the operator declined)");
+        verify(rememberActionOutcomeUseCase).remember(GEIR, lift.declinedSentence());
     }
 
     @Test
     void declining_aCardThatIsAlreadyGone_isStillNotDone() {
         when(takeActionProposalUseCase.take("gone")).thenThrow(new NotFoundException("That card is gone; ask again."));
 
-        assertThat(controller.decline(EMAIL, "gone").getBody().text()).isEqualTo("Not done.");
+        assertThat(controller.decline(EMAIL, "gone").getBody().headline()).isEqualTo("Not done.");
         verifyNoInteractions(rememberActionOutcomeUseCase);
     }
 

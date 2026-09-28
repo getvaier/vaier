@@ -52,7 +52,7 @@ public record MailedConfirmation(String tokenDigest, Operator operator, ActionPr
 
     /** What Marvin is told. The one lie this must prevent is "done". */
     public String toolResult() {
-        return "Mailed to the operator for a yes: \"" + proposal.sentence() + "\" Nothing has happened yet, and "
+        return "Mailed to the operator for a yes: \"" + proposal.wording().sentence() + "\" Nothing has happened yet, and "
             + "nothing will unless they say yes from the mail. Say in your report that it is waiting for their "
             + "yes, and do not say it is done.";
     }
@@ -74,13 +74,16 @@ public record MailedConfirmation(String tokenDigest, Operator operator, ActionPr
         }
 
         public String subject() {
-            return "Marvin asks: " + confirmation.proposal().sentence();
+            return "Marvin asks: " + confirmation.proposal().wording().headline();
         }
 
         public String body(String domain) {
+            ActionWording wording = confirmation.proposal().wording();
             String link = "https://vaier." + (domain == null ? "" : domain.trim()) + "/chat/approvals/" + token;
             return "While you were away, Marvin would like to do this:\n\n"
-                + "  " + confirmation.proposal().sentence() + "\n\n"
+                + "  " + wording.headline() + "\n"
+                + (wording.details() == null ? "" : "  " + wording.details() + "\n")
+                + "\n"
                 + "Say yes or no here: " + link + "\n\n"
                 + "Nothing happens unless you say yes. The link works once, for a day, while you are signed in "
                 + "to Vaier.\n\n"

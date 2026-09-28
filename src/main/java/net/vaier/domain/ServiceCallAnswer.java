@@ -38,14 +38,15 @@ public record ServiceCallAnswer(int status, String contentType, byte[] body, boo
         return head + ".\n\n" + text + (more ? "\n\n(The body was cut; the rest was not read.)" : "");
     }
 
-    /** The outcome of a yes. Anything but success is refused, with the start of what the service said. */
-    public String outcome(String service) {
-        String said = service + " answered " + status;
+    /** The outcome of a yes, in plain words; the status, and the start of what a failure said, are the details. */
+    public ActionWording outcome(String service) {
+        String answered = "It answered " + status;
         if (succeeded()) {
-            return said + ".";
+            return new ActionWording("Done — " + service + " accepted it.", answered + ".");
         }
         String snippet = isText() ? snippet() : "";
-        throw new IllegalArgumentException(snippet.isEmpty() ? said + "." : said + ": " + snippet);
+        return new ActionWording("That did not work — " + service + " did not accept it.",
+            snippet.isEmpty() ? answered + "." : answered + ": " + snippet);
     }
 
     private String snippet() {

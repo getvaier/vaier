@@ -274,7 +274,7 @@ public class ChatRestController {
      */
     /**
      * The click. The card is taken once — gone or expired is refused, and nothing runs — then
-     * {@link ChatActions#run} runs the use case the Explorer's button calls, and the outcome is a sentence
+     * {@link ChatActions#run} runs the use case the Explorer's button calls, and the outcome is the wording
      * for the card.
      */
     @PostMapping("/actions/{id}")
@@ -285,14 +285,12 @@ public class ChatRestController {
         try {
             proposal = takeActionProposalUseCase.take(id);
         } catch (NotFoundException | IllegalArgumentException refused) {
-            return ResponseEntity.ok(new ActionOutcome(false, refused.getMessage()));
+            return ResponseEntity.ok(new ActionOutcome(false, refused.getMessage(), null));
         }
         ChatActions.Outcome ran = chatActions.run(proposal, Operator.of(email));
-        ActionOutcome outcome = new ActionOutcome(ran.done(), ran.text());
         // Remembered either way, so the next question knows what was started — or what was not.
-        rememberActionOutcomeUseCase.remember(Operator.of(email),
-            proposal.outcomeSentence(outcome.done(), outcome.text()));
-        return ResponseEntity.ok(outcome);
+        rememberActionOutcomeUseCase.remember(Operator.of(email), proposal.outcomeSentence(ran.done(), ran.wording()));
+        return ResponseEntity.ok(new ActionOutcome(ran.done(), ran.wording().headline(), ran.wording().details()));
     }
 
     /** "Not now": the card is taken, so it can never run, and the refusal is remembered. */
@@ -306,7 +304,7 @@ public class ChatRestController {
         } catch (NotFoundException | IllegalArgumentException gone) {
             // Already gone: nothing could run anyway, and there is nothing to remember about it.
         }
-        return ResponseEntity.ok(new ActionOutcome(false, "Not done."));
+        return ResponseEntity.ok(new ActionOutcome(false, "Not done.", null));
     }
 
     private static String messageFor(Exception e) {
@@ -386,7 +384,8 @@ public class ChatRestController {
     private String propose(ChatAction action, Map<String, String> arguments, SseEmitter emitter) {
         try {
             ActionProposal proposal = proposeActionUseCase.propose(action, chatActions.canonical(action, arguments));
-            send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.sentence())));
+            send(emitter, "confirm", asJson(new ConfirmationEvent(proposal.id(), proposal.wording().headline(),
+                proposal.wording().details())));
             return proposal.toolResult();
         } catch (IllegalArgumentException refused) {
             return refused.getMessage();
@@ -533,7 +532,7 @@ public class ChatRestController {
     record AvailabilityResponse(boolean available) {}
 
     /** The card, as the answer stream carries it: enough to draw it and to click it. */
-    record ConfirmationEvent(String id, String sentence) {}
+    record ConfirmationEvent(String id, String headline, String details) {}
 
     /** The download card: the zip's name, what it holds, and where the click goes. */
     record BundleEvent(String id, String name, String size, String url) {
@@ -542,8 +541,8 @@ public class ChatRestController {
         }
     }
 
-    /** What became of a click: whether it ran, and the sentence for the card either way. */
-    record ActionOutcome(boolean done, String text) {}
+    /** What became of a click: whether it ran, and the wording for the card either way. */
+    record ActionOutcome(boolean done, String headline, String details) {}
 
     record AskRequest(String question) {}
 

@@ -4,6 +4,7 @@ import net.vaier.application.OpenMailedConfirmationUseCase;
 import net.vaier.application.RememberActionOutcomeUseCase;
 import net.vaier.application.TakeMailedConfirmationUseCase;
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.MailedConfirmations;
@@ -53,7 +54,7 @@ class ChatApprovalRestControllerTest {
             GEIR, 0).confirmation();
     }
 
-    /** The sentence, escaped, and two forms that post back; nothing is taken or run by looking. */
+    /** The headline and its details, escaped, and two forms that post back; nothing is taken or run by looking. */
     @Test
     void looking_showsTheSentenceAndBothAnswers_andRunsNothing() {
         when(openMailedConfirmationUseCase.open(TOKEN, GEIR)).thenReturn(lift("<b>203.0.113.9</b>"));
@@ -65,7 +66,8 @@ class ChatApprovalRestControllerTest {
         assertThat(page.getHeaders().getFirst("Referrer-Policy")).isEqualTo("no-referrer");
         assertThat(page.getHeaders().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
         assertThat(page.getBody())
-            .contains("Lift the block on &lt;b&gt;203.0.113.9&lt;/b&gt;.")
+            .contains("<p class=\"headline\">Let &lt;b&gt;203.0.113.9&lt;/b&gt; reach your services again.</p>")
+            .contains("<p class=\"details\">It is blocked right now.")
             .doesNotContain("<b>203.0.113.9</b>")
             .contains("<form method=\"post\" action=\"/chat/approvals/" + TOKEN + "\">")
             .contains("<form method=\"post\" action=\"/chat/approvals/" + TOKEN + "/decline\">");
@@ -95,17 +97,16 @@ class ChatApprovalRestControllerTest {
     void yesRunsItThroughTheCardsDispatch_andNoRunsNothing_andBothAreRemembered() {
         MailedConfirmation confirmation = lift("203.0.113.9");
         when(takeMailedConfirmationUseCase.take(TOKEN, GEIR)).thenReturn(confirmation);
-        when(chatActions.run(confirmation.proposal(), GEIR))
-            .thenReturn(new ChatActions.Outcome(true, "Lifted the block on 203.0.113.9."));
+        ActionWording lifted = new ActionWording("Lifted.", "Once.");
+        when(chatActions.run(confirmation.proposal(), GEIR)).thenReturn(new ChatActions.Outcome(true, lifted));
 
-        assertThat(controller.approve(EMAIL, TOKEN).getBody()).contains("Lifted the block on 203.0.113.9.");
-        verify(rememberActionOutcomeUseCase).remember(GEIR,
-            "Proposed: Lift the block on 203.0.113.9. (done: Lifted the block on 203.0.113.9.)");
+        assertThat(controller.approve(EMAIL, TOKEN).getBody())
+            .contains("<p class=\"headline\">Lifted.</p>").contains("<p class=\"details\">Once.</p>");
+        verify(rememberActionOutcomeUseCase).remember(GEIR, confirmation.proposal().outcomeSentence(true, lifted));
 
         reset(chatActions, rememberActionOutcomeUseCase);
         assertThat(controller.decline(EMAIL, TOKEN).getBody()).contains("Not done.");
         verifyNoInteractions(chatActions);
-        verify(rememberActionOutcomeUseCase).remember(GEIR,
-            "Proposed: Lift the block on 203.0.113.9. (the operator declined)");
+        verify(rememberActionOutcomeUseCase).remember(GEIR, confirmation.proposal().declinedSentence());
     }
 }

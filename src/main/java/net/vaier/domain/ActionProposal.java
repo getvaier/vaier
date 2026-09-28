@@ -12,8 +12,10 @@ import java.util.UUID;
  * <p>The arguments are the canonical ones — the machine's id as well as its name, the phone's name as well
  * as its code — so the click runs against an identity and the card reads in names.
  */
-public record ActionProposal(String id, ChatAction action, Map<String, String> arguments, String sentence,
+public record ActionProposal(String id, ChatAction action, Map<String, String> arguments, ActionWording wording,
                              long proposedAtEpochMs) {
+
+    private static final String RECORD = "Card from an action tool: ";
 
     public static final Duration TTL = Duration.ofMinutes(10);
 
@@ -28,7 +30,7 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
             }
         }
         return new ActionProposal(UUID.randomUUID().toString(), action, Map.copyOf(arguments),
-            action.sentence(arguments), nowEpochMs);
+            action.wording(arguments), nowEpochMs);
     }
 
     public boolean expired(long nowEpochMs) {
@@ -42,18 +44,22 @@ public record ActionProposal(String id, ChatAction action, Map<String, String> a
         return this;
     }
 
-    /** What Vaier remembers of the card once clicked, in the words the next question reads back. */
-    public String outcomeSentence(boolean done, String text) {
-        return "Proposed: " + sentence + " (" + (done ? "done: " : "could not be done: ") + text + ")";
+    /**
+     * What Vaier remembers of the card once clicked. Named as Vaier's record, not as prose, because the model
+     * copied a bare "Proposed: …" line as text instead of calling the tool.
+     */
+    public String outcomeSentence(boolean done, ActionWording outcome) {
+        return RECORD + wording.sentence() + " (" + (done ? "done: " : "could not be done: ")
+            + outcome.sentence() + ")";
     }
 
     public String declinedSentence() {
-        return "Proposed: " + sentence + " (the operator declined)";
+        return RECORD + wording.sentence() + " (the operator declined)";
     }
 
     /** What the model is told. The one lie this must prevent is "done". */
     public String toolResult() {
-        return "Proposed to the operator as a card: \"" + sentence + "\" Nothing has happened yet, and nothing "
+        return "Proposed to the operator as a card: \"" + wording.sentence() + "\" Nothing has happened yet, and nothing "
             + "will until they click it. Tell them it is waiting for their click, and do not say it is done.";
     }
 }

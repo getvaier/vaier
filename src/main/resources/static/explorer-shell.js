@@ -42,6 +42,8 @@
         check:   '<path d="M2.8 8.4l3.1 3.4L13.2 4.6"/>',
         warn:    '<path d="M8 2.4l6.1 11.1H1.9z"/><path d="M8 6.4v3.3"/><circle cx="8" cy="11.4" r=".5" fill="currentColor" stroke="none"/>',
         cross:   '<path d="M4 4l8 8M12 4l-8 8"/>',
+        // Marvin: an oversized head on narrow shoulders, eyes angled down. Gloom, drawn in five strokes.
+        marvin:  '<circle cx="8" cy="6.2" r="4.3"/><path d="M5.8 5.6l1.4.6M10.2 5.6l-1.4.6M6.9 8.4h2.2"/><path d="M4.2 14.5c.5-1.7 1.9-2.7 3.8-2.7s3.3 1 3.8 2.7"/>',
         refresh: '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/><path d="M13.6 2.4v3.1h-3.1"/>',
         clock:   '<circle cx="8" cy="8" r="5.75"/><path d="M8 4.6V8.2l2.5 1.5"/>',
         // A newer image exists. Deliberately not the bare `download` arrow and not `refresh`: both of those
@@ -1236,6 +1238,9 @@
         // standing in THIS view is put back; only a real move to another view starts at its top.
         const view = paneViewKey();
         const resume = view === _paneView ? pane.scrollTop : 0;
+        // Chat reads from the bottom, as a messenger does: entering it, or a repaint while already at the
+        // bottom, lands on the newest turn; only an operator who scrolled up to read back stays put.
+        const atBottom = view !== _paneView || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
         _paneView = view;
 
         pane.className = 'ex-pane';
@@ -1251,7 +1256,8 @@
         if (kind !== 'credentials' && S.credentials.state === 'ready') S.credentials.state = 'idle';
         drawPane(pane, kind);
         // After the drawing, because the offset can only be restored against the height the drawing gives it.
-        pane.scrollTop = resume;
+        if (kind === 'chat' && atBottom) pane.scrollTop = pane.scrollHeight;
+        else pane.scrollTop = resume;
     }
 
     function drawPane(pane, kind) {
@@ -7335,6 +7341,7 @@
         head.appendChild(acts);
         pane.appendChild(head);
         const body = el('div', 'ex-pane-body ex-chat');
+        pane.classList.add('is-chat');
         pane.appendChild(body);
 
         if (!S.chatAvailable) {
@@ -7358,14 +7365,6 @@
         }
         S.chat.turns.forEach((t) => thread.appendChild(chatTurn(t)));
         if (S.chat.error) thread.appendChild(note(S.chat.error, true));
-        if (S.chat.turns.length || S.chat.summary) {
-            const over = el('div', 'ex-chat-over');
-            const forget = el('button', 'ex-btn'); forget.textContent = 'Start over';
-            forget.disabled = S.chat.busy;
-            forget.onclick = startOver;
-            over.appendChild(forget);
-            thread.appendChild(over);
-        }
         body.appendChild(thread);
 
         // The pane is rebuilt on every render, and the shell renders whenever a stream event lands. A fresh
@@ -7393,14 +7392,15 @@
             box.focus();
             if (caret) box.setSelectionRange(caret[0], caret[1]);
         }
-        pane.scrollTop = pane.scrollHeight;
     }
 
     function chatTurn(t) {
         if (t.kind === 'card') return chatCard(t);
         if (t.kind === 'bundle') return chatBundleCard(t);
         const turn = el('div', 'ex-chat-turn ' + (t.role === 'OPERATOR' ? 'is-you' : 'is-vaier'));
-        const who = el('div', 'ex-chat-who'); who.textContent = t.role === 'OPERATOR' ? 'You' : 'Marvin';
+        const who = el('div', 'ex-chat-who');
+        if (t.role !== 'OPERATOR') who.innerHTML = svg('marvin', 'ex-ico ex-chat-avatar');
+        who.appendChild(document.createTextNode(t.role === 'OPERATOR' ? 'You' : 'Marvin'));
         const text = el('div', 'ex-chat-text'); text.textContent = t.text || (t.role === 'VAIER' ? '…' : '');
         turn.append(who, text);
         return turn;
@@ -7460,6 +7460,16 @@
         spend.appendChild(sl);
         spend.onclick = () => { close(); openSpendDialog(); };
         menu.append(memory, errands, spend);
+        // Forgetting is a different kind of act from looking, so it sits apart, under a rule.
+        if (S.chat.turns.length || S.chat.summary) {
+            const fresh = el('button', 'ex-vmenu-item ex-chat-menu-fresh'); fresh.setAttribute('role', 'menuitem');
+            fresh.innerHTML = svg('refresh', 'ex-ico');
+            const fl = el('span'); fl.textContent = 'Start a new conversation';
+            fresh.appendChild(fl);
+            fresh.disabled = S.chat.busy;
+            fresh.onclick = () => { close(); startOver(); };
+            menu.appendChild(fresh);
+        }
         wrap.append(btn, menu);
         return wrap;
     }
@@ -7619,6 +7629,10 @@
     // Start over: the one way to forget, and it is Vaier that forgets — a reload would bring it all back.
     async function startOver() {
         if (S.chat.busy) return;
+        const sure = await confirmModal('Start a new conversation?',
+            'Marvin forgets this conversation. What he remembers about your fleet, and his errands, stay.',
+            'Start new');
+        if (!sure) return;
         try {
             const res = await fetch('/chat/conversation', { method: 'DELETE' });
             if (!res.ok) { toast('Vaier could not forget that conversation.'); return; }
@@ -7627,28 +7641,40 @@
         render();
     }
 
-    // A proposed action, as a card. The sentence is what the operator reads; the button says the same
+    // The domain's two-part wording: the plain headline, and the exact facts under it, small. The details
+    // are never dropped — they are what the yes really covers.
+    function chatWording(cls, headline, details) {
+        const words = el('div', cls);
+        const head = el('div', 'ex-chat-card-headline'); head.textContent = headline || '';
+        words.appendChild(head);
+        if (details) {
+            const small = el('div', 'ex-chat-card-details'); small.textContent = details;
+            words.appendChild(small);
+        }
+        return words;
+    }
+
+    // A proposed action, as a card. The headline is what the operator reads; the button says the same
     // thing, because it is what will happen. Nothing runs until it is clicked, and a card that was declined
     // says so and runs nothing. A card is never the answer the stream paints into, so it carries none of
     // the answer's classes.
     function chatCard(t) {
         const card = el('div', 'ex-chat-card' + (t.state === 'proposed' ? '' : ' is-' + t.state));
-        const sentence = el('div', 'ex-chat-card-sentence');
-        sentence.textContent = t.state === 'proposed' ? 'Marvin proposes: ' + t.sentence : t.sentence;
-        card.appendChild(sentence);
+        card.appendChild(chatWording('ex-chat-card-sentence',
+            t.state === 'proposed' ? 'Marvin proposes: ' + t.headline : t.headline, t.details));
         if (t.state === 'proposed') {
             const row = el('div', 'ex-chat-card-row');
             const yes = el('button', 'ex-btn is-accent');
-            yes.textContent = t.sentence.replace(/\.$/, '');
+            yes.textContent = t.headline.replace(/\.$/, '');
             yes.onclick = () => confirmAction(t);
             const no = el('button', 'ex-btn'); no.textContent = 'Not now';
             no.onclick = () => declineAction(t);
             row.append(yes, no);
             card.appendChild(row);
         } else {
-            const outcome = el('div', 'ex-chat-card-outcome');
-            outcome.textContent = t.state === 'working' ? 'Doing it…' : (t.outcome || '');
-            card.appendChild(outcome);
+            card.appendChild(t.state === 'working'
+                ? chatWording('ex-chat-card-outcome', 'Doing it…')
+                : chatWording('ex-chat-card-outcome', t.outcome, t.outcomeDetails));
         }
         return card;
     }
@@ -7662,7 +7688,8 @@
             const res = await fetch(`/chat/actions/${encodeURIComponent(t.id)}`, { method: 'POST' });
             const body = await res.json().catch(() => ({}));
             t.state = res.ok && body.done ? 'done' : 'failed';
-            t.outcome = body.text || 'Vaier could not do that.';
+            t.outcome = body.headline || 'Vaier could not do that.';
+            t.outcomeDetails = body.headline ? body.details : null;
         } catch (e) {
             t.state = 'failed'; t.outcome = 'Vaier could not do that.';
         }
@@ -7732,7 +7759,8 @@
                     // turn and the streaming painter keeps writing into the right element.
                     const c = JSON.parse(data);
                     S.chat.turns.splice(S.chat.turns.length - 1, 0,
-                        { role: 'VAIER', kind: 'card', id: c.id, sentence: c.sentence, state: 'proposed' });
+                        { role: 'VAIER', kind: 'card', id: c.id, headline: c.headline, details: c.details,
+                          state: 'proposed' });
                     render();
                 }
                 else if (name === 'error') throw new Error(data || 'Vaier could not answer.');

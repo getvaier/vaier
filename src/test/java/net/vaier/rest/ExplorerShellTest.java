@@ -4362,7 +4362,7 @@ class ExplorerShellTest {
         int card = js.indexOf("function chatCard(");
         assertThat(card).isPositive();
         String cardBody = js.substring(card, js.indexOf("\n    }", card));
-        assertThat(cardBody).as("the button says what will happen").contains("yes.textContent = t.sentence");
+        assertThat(cardBody).as("the button says what will happen").contains("yes.textContent = t.headline");
         assertThat(cardBody).contains("'Not now'");
         assertThat(cardBody).as("a card is never the answer the stream paints into").doesNotContain("ex-chat-text");
 
@@ -4398,7 +4398,7 @@ class ExplorerShellTest {
         assertThat(forget).isPositive();
         String forgetBody = js.substring(forget, js.indexOf("\n    }", forget));
         assertThat(forgetBody).contains("fetch('/chat/conversation', { method: 'DELETE' })");
-        assertThat(js).contains("'Start over'");
+        assertThat(js).contains("'Start a new conversation'");
     }
 
     @Test

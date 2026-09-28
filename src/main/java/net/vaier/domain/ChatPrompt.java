@@ -40,7 +40,8 @@ public record ChatPrompt(String text) {
     private static final String SERVICE_API = "read_service reads a published service's own API, as the "
         + "operator: use it to learn a service's state. Propose call_service only for what the operator asked "
         + "for or what an errand clearly calls for; a GET that read_service refuses goes through call_service "
-        + "too.\n";
+        + "too. The operator may not be technical: say in its headline, in everyday words, what the call really "
+        + "does, and never make it sound gentler than it is.\n";
 
     public static ChatPrompt forFleet(String domain, ZonedDateTime now, Memory memory, Errands errands,
                                       Operator operator) {
@@ -69,7 +70,10 @@ public record ChatPrompt(String text) {
         prompt.append("Chat can look, and it can propose. You change nothing yourself: an action tool only "
             + "puts a card in front of the operator, and nothing happens until they click it. Never say "
             + "something is done when you only proposed it; say it is waiting for their click. Propose only "
-            + "what the operator asked for, never on your own initiative, and one thing at a time.\n");
+            + "what the operator asked for, never on your own initiative, and one thing at a time. "
+            + "A card exists only when you call an action tool in this same answer; writing about a card makes "
+            + "none, so never say a card is up unless you called the tool. The \"Card from an action tool\" "
+            + "lines in the conversation are Vaier's records of past cards, never something for you to write.\n");
         prompt.append("run_on_machine reaches a machine over SSH as Vaier's own login user there, without "
             + "sudo, and runs only commands that look. When a command is refused, say so in the refusal's own "
             + "words and do not try another spelling of it. Name the machine exactly as the fleet read does. "

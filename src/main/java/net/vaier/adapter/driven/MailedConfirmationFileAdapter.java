@@ -2,6 +2,7 @@ package net.vaier.adapter.driven;
 
 import lombok.extern.slf4j.Slf4j;
 import net.vaier.domain.ActionProposal;
+import net.vaier.domain.ActionWording;
 import net.vaier.domain.ChatAction;
 import net.vaier.domain.MailedConfirmation;
 import net.vaier.domain.MailedConfirmations;
@@ -72,13 +73,22 @@ public class MailedConfirmationFileAdapter implements ForPersistingMailedConfirm
                 .operator(Operator.of(String.valueOf(kept.get("operator"))))
                 .proposal(new ActionProposal(String.valueOf(kept.get("id")),
                     ChatAction.valueOf(String.valueOf(kept.get("action"))), Map.copyOf(arguments),
-                    String.valueOf(kept.get("sentence")), ((Number) kept.get("proposedAt")).longValue()))
+                    wordingOf(kept), ((Number) kept.get("proposedAt")).longValue()))
                 .mailedAtEpochMs(((Number) kept.get("mailedAt")).longValue())
                 .build());
         } catch (RuntimeException e) {
             log.warn("A mailed confirmation in {} could not be read and was left out: {}", file, e.toString());
             return Optional.empty();
         }
+    }
+
+    /** An entry kept before the wording had two parts holds one sentence, which already named the exact call. */
+    private static ActionWording wordingOf(Map<?, ?> kept) {
+        if (kept.get("headline") == null) {
+            return new ActionWording(String.valueOf(kept.get("sentence")), null);
+        }
+        Object details = kept.get("details");
+        return new ActionWording(String.valueOf(kept.get("headline")), details == null ? null : String.valueOf(details));
     }
 
     @Override
@@ -97,7 +107,8 @@ public class MailedConfirmationFileAdapter implements ForPersistingMailedConfirm
             entry.put("id", confirmation.proposal().id());
             entry.put("action", confirmation.proposal().action().name());
             entry.put("arguments", new LinkedHashMap<>(confirmation.proposal().arguments()));
-            entry.put("sentence", confirmation.proposal().sentence());
+            entry.put("headline", confirmation.proposal().wording().headline());
+            entry.put("details", confirmation.proposal().wording().details());
             entry.put("proposedAt", confirmation.proposal().proposedAtEpochMs());
             entry.put("mailedAt", confirmation.mailedAtEpochMs());
             kept.add(entry);

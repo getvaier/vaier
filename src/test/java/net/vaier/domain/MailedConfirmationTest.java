@@ -39,13 +39,14 @@ class MailedConfirmationTest {
         MailedConfirmation.Minted minted = MailedConfirmation.mint(lift(), GEIR, NOW);
 
         assertThat(minted.recipient()).isEqualTo("geir@example.com");
-        assertThat(minted.subject()).isEqualTo("Marvin asks: Lift the block on 203.0.113.9.");
+        ActionWording wording = minted.confirmation().proposal().wording();
+        assertThat(minted.subject()).isEqualTo("Marvin asks: " + wording.headline());
         assertThat(minted.body(" example.com "))
-            .contains("Lift the block on 203.0.113.9.")
+            .contains("  " + wording.headline() + "\n  " + wording.details() + "\n")
             .contains("https://vaier.example.com/chat/approvals/" + minted.token())
             .contains("Nothing happens unless you say yes");
         assertThat(minted.confirmation().toolResult())
-            .contains("Lift the block on 203.0.113.9.")
+            .contains(wording.headline())
             .contains("Nothing has happened yet");
     }
 

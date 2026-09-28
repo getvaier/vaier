@@ -17,8 +17,8 @@ public record ServiceCall(String method, String path, String body) {
     public static final int MAX_PATH_CHARS = 2_000;
     /** More than any API command needs; a bigger body is not something to approve from one sentence. */
     public static final int MAX_BODY_CHARS = 64_000;
-    /** How much of the body the operator's sentence shows; the call itself always carries all of it. */
-    public static final int SENTENCE_BODY_CHARS = 200;
+    /** How much of the body the card's details show; the call itself always carries all of it. */
+    public static final int DETAILS_BODY_CHARS = 200;
 
     private static final Set<String> METHODS = Set.of("GET", "POST", "PUT", "PATCH", "DELETE");
     /**
@@ -71,15 +71,15 @@ public record ServiceCall(String method, String path, String body) {
         return json ? "application/json" : "text/plain; charset=utf-8";
     }
 
-    /** What the operator says yes to. A long body is cut here and only here. */
-    public String sentence(String service) {
-        String said = method + " to " + service + " " + path;
+    /** The exact call under the card's plain headline: what the yes covers. A long body is cut here and only here. */
+    public String details(String service) {
+        String said = "Sends " + method + " " + path + " to " + service;
         if (body == null) {
             return said + ".";
         }
-        String shown = body.length() <= SENTENCE_BODY_CHARS ? body
-            : body.substring(0, SENTENCE_BODY_CHARS) + "… (" + body.length() + " characters)";
-        return said + " with body \"" + shown + "\".";
+        String shown = body.length() <= DETAILS_BODY_CHARS ? body
+            : body.substring(0, DETAILS_BODY_CHARS) + "… (" + body.length() + " characters)";
+        return said + ", with \"" + shown + "\".";
     }
 
     private static String requireInside(String said) {

@@ -333,7 +333,7 @@ class ChatServiceTest {
     void propose_buildsTheProposalAndHoldsIt() {
         ActionProposal proposal = service.propose(ChatAction.RUN_BACKUP, Map.of("machine", "Colina 27"));
 
-        assertThat(proposal.sentence()).isEqualTo("Back up Colina 27 now.");
+        assertThat(proposal.wording()).isEqualTo(ChatAction.RUN_BACKUP.wording(Map.of("machine", "Colina 27")));
         verify(forHoldingActionProposals).hold(proposal);
     }
 
@@ -383,7 +383,7 @@ class ChatServiceTest {
         assertThat(mailed.operator()).isEqualTo(GEIR);
         assertThat(mailed.mailedAtEpochMs()).isEqualTo(NOW.toInstant().toEpochMilli());
         verify(forSendingAdminNotification).sendTo(eq("geir@example.com"),
-            eq("Marvin asks: Lift the block on 203.0.113.9."),
+            eq("Marvin asks: " + mailed.proposal().wording().headline()),
             contains("https://vaier.example.com/chat/approvals/"), anyString());
     }
 
